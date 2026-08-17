@@ -1,0 +1,102 @@
+name: Sync UEP update manifest
+
+on:
+  release:
+    types: [published, edited]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to sync (example: v0.80.59)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  sync-manifest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Resolve release tag
+        id: tag
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${{ github.event.release.tag_name }}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Download UEP update asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/uep-release
+          gh release download "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "UEP-update.zip" \
+            --dir /tmp/uep-release
+          test -f /tmp/uep-release/UEP-update.zip
+
+      - name: Read release metadata and calculate SHA-256
+        id: meta
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SHA256="$(sha256sum /tmp/uep-release/UEP-update.zip | awk '{print $1}')"
+          DOWNLOAD_URL="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[] | select(.name=="UEP-update.zip") | .url')"
+          NOTES="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq '.body // ""' | head -c 1000)"
+          if [ -z "$NOTES" ]; then
+            NOTES="UEP ${TAG#v} 업데이트"
+          fi
+          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+          echo "download_url=$DOWNLOAD_URL" >> "$GITHUB_OUTPUT"
+          {
+            echo 'notes<<EOF'
+            echo "$NOTES"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Write uep-update.json
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+          DOWNLOAD_URL: ${{ steps.meta.outputs.download_url }}
+          SHA256: ${{ steps.meta.outputs.sha256 }}
+          NOTES: ${{ steps.meta.outputs.notes }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg version "$VERSION" \
+            --arg channel "stable" \
+            --arg downloadUrl "$DOWNLOAD_URL" \
+            --arg sha256 "$SHA256" \
+            --arg notes "$NOTES" \
+            '{version:$version, channel:$channel, downloadUrl:$downloadUrl, sha256:$sha256, notes:$notes}' \
+            > uep-update.json
+          cat uep-update.json
+
+      - name: Commit manifest when changed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- uep-update.json; then
+            echo "Manifest already up to date."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add uep-update.json
+          git commit -m "Sync update manifest for ${{ steps.tag.outputs.tag }}"
+          git push
