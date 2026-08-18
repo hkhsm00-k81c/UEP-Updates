@@ -51,29 +51,13 @@ jobs:
           $main='app/resources/app/electron/main.cjs'
           $gyo='app/resources/app/gyomuon.js'
           $pkg='app/resources/app/package.json'
-
           $text=Get-Content $main -Raw -Encoding UTF8
-          $old=@'
-          try {
-            const curriculumRanges = await readSheetBatch(
-              token,
-              "1fevlAWQZqWQkiYl-eGRCdzidBj59Z8NqOxfCrGvwlHI",
-              [
-                "'09_수강신청결과'!A1:AF1000",
-                "'05_오류검토'!A11:K1000",
-                "'02_학생마스터'!A1:AA1000"
-              ]
-            );
-            matrices["__CURRICULUM_09"] = curriculumRanges?.[0]?.values || [];
-            matrices["__CURRICULUM_ERRORS"] = curriculumRanges?.[1]?.values || [];
-            matrices["__CURRICULUM_STUDENTS"] = curriculumRanges?.[2]?.values || [];
-          } catch (error) {
-            matrices["__CURRICULUM_09"] = [];
-            matrices["__CURRICULUM_ERRORS"] = [];
-            matrices["__CURRICULUM_STUDENTS"] = [];
-          }
-          '@
-          $new=@'
+
+          if($text -match 'const curriculumSpreadsheetId = "1fevlAWQZqWQkiYl-eGRCdzidBj59Z8NqOxfCrGvwlHI"') {
+            Write-Host 'Selection-source fix is already present in the verified base. Keeping it.'
+          } else {
+            $pattern='(?s)try\s*\{\s*const curriculumRanges = await readSheetBatch\(.*?matrices\["__CURRICULUM_STUDENTS"\] = \[\];\s*\}'
+            $new=@'
           // 선택과목 원본은 보조 탭 오류와 무관하게 각각 독립 조회합니다.
           const curriculumSpreadsheetId = "1fevlAWQZqWQkiYl-eGRCdzidBj59Z8NqOxfCrGvwlHI";
           const curriculumReads = [
@@ -93,9 +77,11 @@ jobs:
             }
           }
           '@
-          if(-not $text.Contains($old.Trim())){ throw 'Expected 0.80.61 curriculum block not found' }
-          $text=$text.Replace($old.Trim(),$new.Trim())
-          Set-Content $main $text -Encoding UTF8 -NoNewline
+            $patched=[regex]::Replace($text,$pattern,$new.Trim(),1)
+            if($patched -eq $text){ throw 'Curriculum block not found and selection-source fix is not present' }
+            $text=$patched
+            Set-Content $main $text -Encoding UTF8 -NoNewline
+          }
 
           $text=Get-Content $gyo -Raw -Encoding UTF8
           $text=$text.Replace('const APP_VERSION = "0.80.61";','const APP_VERSION = "0.80.62";')
