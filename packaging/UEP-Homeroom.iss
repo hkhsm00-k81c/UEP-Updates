@@ -20,7 +20,8 @@ RestartApplications=no
 
 [Files]
 Source: "..\app\*"; DestDir: "{app}\app-current"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "..\launcher-dist\UEP-Launcher.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\launcher-dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\installed-version.json"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autodesktop}\UEP"; Filename: "{app}\{#MyLauncherExeName}"; WorkingDir: "{app}"
