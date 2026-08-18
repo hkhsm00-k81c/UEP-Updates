@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       source_tag:
-        description: "Release tag containing UEP-homeroom-source.zip"
+        description: "Release tag containing the homeroom source ZIP"
         required: true
         default: "v0.80.60-homeroom"
         type: string
@@ -25,10 +25,40 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.source_tag }}
         run: |
+          $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force -Path source | Out-Null
-          gh release download $env:TAG --repo $env:GITHUB_REPOSITORY --pattern "UEP-homeroom-source.zip" --dir source
-          Expand-Archive -Path source/UEP-homeroom-source.zip -DestinationPath app -Force
-          if (-not (Test-Path app/UEP.exe)) { throw "UEP.exe not found in source package" }
+
+          $assetsJson = gh release view $env:TAG --repo $env:GITHUB_REPOSITORY --json assets
+          if ($LASTEXITCODE -ne 0) { throw "Release $env:TAG not found" }
+          $assets = ($assetsJson | ConvertFrom-Json).assets
+          $asset = $assets | Where-Object { $_.name -match '(?i)(homeroom|UEP).*(source|update).*\.zip$|(?i)UEP-homeroom-source\.zip$' } | Select-Object -First 1
+          if (-not $asset) {
+            Write-Host 'Available release assets:'
+            $assets | ForEach-Object { Write-Host " - $($_.name)" }
+            throw 'No usable UEP source ZIP asset found in the selected release.'
+          }
+
+          Write-Host "Using source asset: $($asset.name)"
+          gh release download $env:TAG --repo $env:GITHUB_REPOSITORY --pattern $asset.name --dir source
+          if ($LASTEXITCODE -ne 0) { throw "Failed to download $($asset.name)" }
+
+          $zip = Join-Path 'source' $asset.name
+          if (-not (Test-Path $zip)) { throw "Downloaded ZIP not found: $zip" }
+          Expand-Archive -LiteralPath $zip -DestinationPath app -Force
+
+          $uepExe = Get-ChildItem -Path app -Filter UEP.exe -File -Recurse | Select-Object -First 1
+          if (-not $uepExe) { throw 'UEP.exe not found anywhere in source package' }
+          if ($uepExe.DirectoryName -ne (Resolve-Path app).Path) {
+            $root = $uepExe.Directory.FullName
+            Write-Host "Flattening packaged app from: $root"
+            $temp = Join-Path $env:RUNNER_TEMP 'uep-app-flat'
+            New-Item -ItemType Directory -Force -Path $temp | Out-Null
+            Copy-Item -Path (Join-Path $root '*') -Destination $temp -Recurse -Force
+            Remove-Item app -Recurse -Force
+            New-Item -ItemType Directory -Force -Path app | Out-Null
+            Copy-Item -Path (Join-Path $temp '*') -Destination app -Recurse -Force
+          }
+          if (-not (Test-Path app/UEP.exe)) { throw 'UEP.exe not found at app/UEP.exe after normalization' }
 
       - name: Install Inno Setup
         shell: pwsh
