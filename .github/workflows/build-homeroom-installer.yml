@@ -1,29 +1,49 @@
 name: Build UEP Homeroom Installer
 
 on:
+  release:
+    types: [published, edited]
   workflow_dispatch:
     inputs:
       source_tag:
-        description: "Release tag containing the homeroom source ZIP"
+        description: "Homeroom release tag"
         required: true
         default: "v0.80.60-homeroom"
         type: string
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: uep-homeroom-installer
+  cancel-in-progress: false
 
 jobs:
   build-installer:
+    if: ${{ github.event_name == 'workflow_dispatch' || endsWith(github.event.release.tag_name, '-homeroom') }}
     runs-on: windows-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Resolve source tag
+        id: tag
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $tag = "${{ inputs.source_tag }}"
+          } else {
+            $tag = "${{ github.event.release.tag_name }}"
+          }
+          if ([string]::IsNullOrWhiteSpace($tag)) { throw 'Source tag is empty' }
+          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "Source tag: $tag"
+
       - name: Download stable UEP source
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.source_tag }}
+          TAG: ${{ steps.tag.outputs.tag }}
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force -Path source | Out-Null
@@ -31,11 +51,15 @@ jobs:
           $assetsJson = gh release view $env:TAG --repo $env:GITHUB_REPOSITORY --json assets
           if ($LASTEXITCODE -ne 0) { throw "Release $env:TAG not found" }
           $assets = ($assetsJson | ConvertFrom-Json).assets
-          $asset = $assets | Where-Object { $_.name -match '(?i)(homeroom|UEP).*(source|update).*\.zip$|(?i)UEP-homeroom-source\.zip$' } | Select-Object -First 1
+          $asset = $assets | Where-Object {
+            $_.name -match '(?i)^UEP-homeroom-source\.zip$' -or
+            $_.name -match '(?i).*homeroom.*\.zip$' -or
+            $_.name -match '(?i)^UEP.*source.*\.zip$'
+          } | Select-Object -First 1
           if (-not $asset) {
             Write-Host 'Available release assets:'
             $assets | ForEach-Object { Write-Host " - $($_.name)" }
-            throw 'No usable UEP source ZIP asset found in the selected release.'
+            throw 'No usable homeroom UEP source ZIP asset found in the selected release.'
           }
 
           Write-Host "Using source asset: $($asset.name)"
@@ -48,10 +72,12 @@ jobs:
 
           $uepExe = Get-ChildItem -Path app -Filter UEP.exe -File -Recurse | Select-Object -First 1
           if (-not $uepExe) { throw 'UEP.exe not found anywhere in source package' }
-          if ($uepExe.DirectoryName -ne (Resolve-Path app).Path) {
+          $appRoot = (Resolve-Path app).Path
+          if ($uepExe.DirectoryName -ne $appRoot) {
             $root = $uepExe.Directory.FullName
             Write-Host "Flattening packaged app from: $root"
             $temp = Join-Path $env:RUNNER_TEMP 'uep-app-flat'
+            Remove-Item $temp -Recurse -Force -ErrorAction SilentlyContinue
             New-Item -ItemType Directory -Force -Path $temp | Out-Null
             Copy-Item -Path (Join-Path $root '*') -Destination $temp -Recurse -Force
             Remove-Item app -Recurse -Force
@@ -68,7 +94,7 @@ jobs:
         shell: pwsh
         run: |
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" packaging/UEP-Homeroom.iss
-          if (-not (Test-Path dist/UEP-Setup.exe)) { throw "Installer build failed" }
+          if (-not (Test-Path dist/UEP-Setup.exe)) { throw 'Installer build failed' }
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
@@ -76,3 +102,12 @@ jobs:
           name: UEP-Homeroom-Setup
           path: dist/UEP-Setup.exe
           if-no-files-found: error
+
+      - name: Attach installer to homeroom release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          gh release upload $env:TAG dist/UEP-Setup.exe --repo $env:GITHUB_REPOSITORY --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to attach UEP-Setup.exe to release' }
