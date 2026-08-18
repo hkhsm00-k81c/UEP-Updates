@@ -3,7 +3,7 @@ name: Publish UEP Update
 on:
   push:
     paths:
-      - 'publish-update.trigger'
+      - publish-update.trigger
   workflow_dispatch:
 
 permissions:
@@ -15,113 +15,53 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download verified 0.80.61 base
+      - name: Download verified base
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: v0.80.61-homeroom
         run: |
-          $ErrorActionPreference='Stop'
-          New-Item -ItemType Directory -Force source,app | Out-Null
-          $assets=(gh release view $env:TAG --repo $env:GITHUB_REPOSITORY --json assets | ConvertFrom-Json).assets
-          $asset=$assets | Where-Object { $_.name -match '(?i).*homeroom.*source.*\.zip$|(?i).*selection.*fix.*\.zip$' } | Select-Object -First 1
-          if(-not $asset){ throw 'Verified source ZIP not found' }
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force source, app | Out-Null
+          $assets = (gh release view $env:TAG --repo $env:GITHUB_REPOSITORY --json assets | ConvertFrom-Json).assets
+          $asset = $assets | Where-Object { $_.name -match '(?i).*homeroom.*source.*\.zip$|(?i).*selection.*fix.*\.zip$' } | Select-Object -First 1
+          if (-not $asset) { throw 'Verified source ZIP not found' }
           gh release download $env:TAG --repo $env:GITHUB_REPOSITORY --pattern $asset.name --dir source
           Expand-Archive -LiteralPath (Join-Path source $asset.name) -DestinationPath app -Force
-          $exe=Get-ChildItem app -Filter UEP.exe -File -Recurse | Select-Object -First 1
-          if(-not $exe){throw 'UEP.exe not found'}
-          if($exe.Directory.FullName -ne (Resolve-Path app).Path){
-            $tmp=Join-Path $env:RUNNER_TEMP 'uep-flat'; New-Item -ItemType Directory -Force $tmp|Out-Null
+          $exe = Get-ChildItem app -Filter UEP.exe -File -Recurse | Select-Object -First 1
+          if (-not $exe) { throw 'UEP.exe not found' }
+          if ($exe.Directory.FullName -ne (Resolve-Path app).Path) {
+            $tmp = Join-Path $env:RUNNER_TEMP 'uep-flat'
+            Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+            New-Item -ItemType Directory -Force $tmp | Out-Null
             Copy-Item (Join-Path $exe.Directory.FullName '*') $tmp -Recurse -Force
-            Remove-Item app -Recurse -Force; New-Item -ItemType Directory app|Out-Null; Copy-Item (Join-Path $tmp '*') app -Recurse -Force
+            Remove-Item app -Recurse -Force
+            New-Item -ItemType Directory app | Out-Null
+            Copy-Item (Join-Path $tmp '*') app -Recurse -Force
           }
 
-      - name: Apply selection source and student matching fixes
+      - name: Apply 0.80.63 fixes
         shell: pwsh
-        run: |
-          $ErrorActionPreference='Stop'
-          $main='app/resources/app/electron/main.cjs'
-          $gyo='app/resources/app/gyomuon.js'
-          $pkg='app/resources/app/package.json'
+        run: ./scripts/build-update-0.80.63.ps1
 
-          $m=Get-Content $main -Raw -Encoding UTF8
-          if($m -notmatch 'const curriculumSpreadsheetId = "1fevlAWQZqWQkiYl-eGRCdzidBj59Z8NqOxfCrGvwlHI"'){
-            $pattern='(?s)try\s*\{\s*const curriculumRanges = await readSheetBatch\(.*?matrices\["__CURRICULUM_STUDENTS"\] = \[\];\s*\}'
-            $replacement=@'
-          const curriculumSpreadsheetId = "1fevlAWQZqWQkiYl-eGRCdzidBj59Z8NqOxfCrGvwlHI";
-          const curriculumReads = [
-            ["__CURRICULUM_09", "'09_수강신청결과'!A1:AG1200"],
-            ["__CURRICULUM_ERRORS", "'05_오류검토'!A11:Z1200"],
-            ["__CURRICULUM_STUDENTS", "'02_학생마스터'!A1:AA1200"]
-          ];
-          for (const [logicalName, range] of curriculumReads) {
-            try {
-              const one = await readSheetBatch(token, curriculumSpreadsheetId, [range]);
-              matrices[logicalName] = one?.[0]?.values || [];
-            } catch (error) {
-              matrices[logicalName] = [];
-              console.warn(`[UEP] 선택과목 원본 조회 실패: ${logicalName}`, error?.message || error);
-            }
-          }
-'@
-            $patched=[regex]::Replace($m,$pattern,$replacement.Trim(),1)
-            if($patched -eq $m){throw 'Curriculum source-read block patch failed'}
-            Set-Content $main $patched -Encoding UTF8 -NoNewline
-          }
-
-          $g=Get-Content $gyo -Raw -Encoding UTF8
-          $old=@'
-function studentMatches(item, student) {
-  const studentId=String(student?.id||"").trim();
-  const itemStudentId=String(item?.studentId||item?.학생ID||"").trim();
-  if(itemStudentId)return Boolean(studentId)&&itemStudentId===studentId;
-  if(/전입/.test(String(student?.status||student?.enrollmentStatus||"")))return false;
-  const no=String(student?.studentNo||"").trim();
-  return Boolean(no)&&String(item?.studentNo||item?.학번||item?.number||"").trim()===no;
-}
-'@
-          $new=@'
-function studentMatches(item, student) {
-  const studentId=String(student?.id||"").trim();
-  const itemStudentId=String(item?.studentId||item?.학생ID||"").trim();
-  if(studentId && itemStudentId && itemStudentId===studentId)return true;
-  // 외부 선택과목 시트의 학생ID가 학번형식인 경우가 있어 ID 불일치 시 학번으로 안전하게 재매칭합니다.
-  const no=String(student?.studentNo||"").replace(/\.0$/,"" ).trim();
-  const itemNo=String(item?.studentNo||item?.학번||item?.number||"").replace(/\.0$/,"" ).trim();
-  if(no && itemNo && no===itemNo)return true;
-  return false;
-}
-'@
-          if(-not $g.Contains($old.Trim())){throw 'studentMatches block not found'}
-          $g=$g.Replace($old.Trim(),$new.Trim())
-          $g=$g.Replace('const APP_VERSION = "0.80.61";','const APP_VERSION = "0.80.63";')
-          $g=$g.Replace('const APP_VERSION = "0.80.62";','const APP_VERSION = "0.80.63";')
-          Set-Content $gyo $g -Encoding UTF8 -NoNewline
-
-          $p=Get-Content $pkg -Raw -Encoding UTF8
-          $p=[regex]::Replace($p,'"version"\s*:\s*"0\.80\.(61|62)"','"version": "0.80.63"',1)
-          Set-Content $pkg $p -Encoding UTF8 -NoNewline
-          node --check $main
-          node --check $gyo
-
-      - name: Build update ZIP
+      - name: Build update package
         id: package
         shell: pwsh
         run: |
-          if(Test-Path UEP-update.zip){Remove-Item UEP-update.zip -Force}
+          if (Test-Path UEP-update.zip) { Remove-Item UEP-update.zip -Force }
           Compress-Archive -Path app/* -DestinationPath UEP-update.zip -CompressionLevel Optimal
-          if(-not (Test-Path UEP-update.zip)){throw 'UEP-update.zip build failed'}
-          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          if (-not (Test-Path UEP-update.zip)) { throw 'UEP-update.zip build failed' }
+          $sha = (Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
           "sha=$sha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-      - name: Create or update v0.80.63 release
+      - name: Publish v0.80.63 release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag='v0.80.63'
+          $tag = 'v0.80.63'
           gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
-          if($LASTEXITCODE -ne 0){
+          if ($LASTEXITCODE -ne 0) {
             gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.80.63 자동업데이트 - 선택과목 학생매칭 보완' --notes '생활기록부 선택과목에서 외부 교육과정 시트의 학생ID와 UEP 내부 학생ID가 달라도 학번으로 재매칭하도록 보완했습니다.'
           }
           gh release upload $tag UEP-update.zip --repo $env:GITHUB_REPOSITORY --clobber
@@ -132,24 +72,24 @@ function studentMatches(item, student) {
           GH_TOKEN: ${{ github.token }}
           SHA256: ${{ steps.package.outputs.sha }}
         run: |
-          $tag='v0.80.63'
-          $download=(gh release view $tag --repo $env:GITHUB_REPOSITORY --json assets | ConvertFrom-Json).assets | Where-Object {$_.name -eq 'UEP-update.zip'} | Select-Object -ExpandProperty url -First 1
-          if(-not $download){throw 'Release download URL not found'}
-          $policy=@{
-            channel='homeroom-stable'
-            latestVersion='0.80.63'
-            minimumAllowedVersion='0.80.62'
-            blockedVersions=@()
-            forceUpdate=$true
-            updateEnabled=$true
-            downloadUrl=$download
-            sha256=$env:SHA256
-            message='UEP 0.80.63 선택과목 학생매칭 보완'
-            offlineGraceHours=72
+          $tag = 'v0.80.63'
+          $asset = (gh release view $tag --repo $env:GITHUB_REPOSITORY --json assets | ConvertFrom-Json).assets | Where-Object { $_.name -eq 'UEP-update.zip' } | Select-Object -First 1
+          if (-not $asset) { throw 'Release asset not found' }
+          $policy = [ordered]@{
+            channel = 'homeroom-stable'
+            latestVersion = '0.80.63'
+            minimumAllowedVersion = '0.80.62'
+            blockedVersions = @()
+            forceUpdate = $true
+            updateEnabled = $true
+            downloadUrl = $asset.url
+            sha256 = $env:SHA256
+            message = 'UEP 0.80.63 선택과목 학생매칭 보완'
+            offlineGraceHours = 72
           } | ConvertTo-Json -Depth 4
-          $info=gh api "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json?ref=main" | ConvertFrom-Json
-          $encoded=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($policy))
-          $body=@{message='Enable UEP 0.80.63 automatic update';content=$encoded;sha=$info.sha;branch='main'} | ConvertTo-Json
+          $info = gh api "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json?ref=main" | ConvertFrom-Json
+          $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($policy))
+          $body = @{ message = 'Enable UEP 0.80.63 automatic update'; content = $encoded; sha = $info.sha; branch = 'main' } | ConvertTo-Json
           $body | gh api --method PUT -H 'Accept: application/vnd.github+json' "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json" --input -
 
       - uses: actions/upload-artifact@v4
