@@ -1,5 +1,5 @@
 #define MyAppName "UEP"
-#define MyAppVersion "0.80.62"
+#define MyAppVersion "0.80.63"
 #define MyLauncherExeName "UEP-Launcher.exe"
 
 [Setup]
