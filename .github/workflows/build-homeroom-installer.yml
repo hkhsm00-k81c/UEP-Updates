@@ -1,113 +1,63 @@
 name: Build UEP Homeroom Installer
 
 on:
-  release:
-    types: [published, edited]
   workflow_dispatch:
     inputs:
       source_tag:
-        description: "Homeroom release tag"
+        description: "Homeroom release tag containing UEP source ZIP"
         required: true
-        default: "v0.80.60-homeroom"
+        default: "v0.80.62-homeroom"
         type: string
 
 permissions:
   contents: write
 
-concurrency:
-  group: uep-homeroom-installer
-  cancel-in-progress: false
-
 jobs:
   build-installer:
-    if: ${{ github.event_name == 'workflow_dispatch' || endsWith(github.event.release.tag_name, '-homeroom') }}
     runs-on: windows-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Resolve source tag
-        id: tag
-        shell: pwsh
-        run: |
-          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
-            $tag = "${{ inputs.source_tag }}"
-          } else {
-            $tag = "${{ github.event.release.tag_name }}"
-          }
-          if ([string]::IsNullOrWhiteSpace($tag)) { throw 'Source tag is empty' }
-          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          Write-Host "Source tag: $tag"
-
-      - name: Download stable UEP source
+      - uses: actions/checkout@v4
+      - name: Download UEP source
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.tag.outputs.tag }}
+          TAG: ${{ inputs.source_tag }}
         run: |
-          $ErrorActionPreference = 'Stop'
-          New-Item -ItemType Directory -Force -Path source | Out-Null
-
-          $assetsJson = gh release view $env:TAG --repo $env:GITHUB_REPOSITORY --json assets
-          if ($LASTEXITCODE -ne 0) { throw "Release $env:TAG not found" }
-          $assets = ($assetsJson | ConvertFrom-Json).assets
-          $asset = $assets | Where-Object {
-            $_.name -match '(?i)^UEP-homeroom-source\.zip$' -or
-            $_.name -match '(?i).*homeroom.*\.zip$' -or
-            $_.name -match '(?i)^UEP.*source.*\.zip$'
-          } | Select-Object -First 1
-          if (-not $asset) {
-            Write-Host 'Available release assets:'
-            $assets | ForEach-Object { Write-Host " - $($_.name)" }
-            throw 'No usable homeroom UEP source ZIP asset found in the selected release.'
-          }
-
-          Write-Host "Using source asset: $($asset.name)"
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          $assets=(gh release view $env:TAG --repo $env:GITHUB_REPOSITORY --json assets | ConvertFrom-Json).assets
+          $asset=$assets | Where-Object { $_.name -match '(?i).*homeroom.*\.zip$|(?i)^UEP.*source.*\.zip$' } | Select-Object -First 1
+          if(-not $asset){ throw 'UEP source ZIP not found in release' }
           gh release download $env:TAG --repo $env:GITHUB_REPOSITORY --pattern $asset.name --dir source
-          if ($LASTEXITCODE -ne 0) { throw "Failed to download $($asset.name)" }
-
-          $zip = Join-Path 'source' $asset.name
-          if (-not (Test-Path $zip)) { throw "Downloaded ZIP not found: $zip" }
-          Expand-Archive -LiteralPath $zip -DestinationPath app -Force
-
-          $uepExe = Get-ChildItem -Path app -Filter UEP.exe -File -Recurse | Select-Object -First 1
-          if (-not $uepExe) { throw 'UEP.exe not found anywhere in source package' }
-          $appRoot = (Resolve-Path app).Path
-          if ($uepExe.DirectoryName -ne $appRoot) {
-            $root = $uepExe.Directory.FullName
-            Write-Host "Flattening packaged app from: $root"
-            $temp = Join-Path $env:RUNNER_TEMP 'uep-app-flat'
-            Remove-Item $temp -Recurse -Force -ErrorAction SilentlyContinue
-            New-Item -ItemType Directory -Force -Path $temp | Out-Null
-            Copy-Item -Path (Join-Path $root '*') -Destination $temp -Recurse -Force
-            Remove-Item app -Recurse -Force
-            New-Item -ItemType Directory -Force -Path app | Out-Null
-            Copy-Item -Path (Join-Path $temp '*') -Destination app -Recurse -Force
+          Expand-Archive -LiteralPath (Join-Path source $asset.name) -DestinationPath app -Force
+          $exe=Get-ChildItem app -Filter UEP.exe -File -Recurse | Select-Object -First 1
+          if(-not $exe){throw 'UEP.exe not found'}
+          if($exe.Directory.FullName -ne (Resolve-Path app).Path){
+            $tmp=Join-Path $env:RUNNER_TEMP 'uep-flat'; New-Item -ItemType Directory -Force $tmp|Out-Null
+            Copy-Item (Join-Path $exe.Directory.FullName '*') $tmp -Recurse -Force
+            Remove-Item app -Recurse -Force; New-Item -ItemType Directory app|Out-Null; Copy-Item (Join-Path $tmp '*') app -Recurse -Force
           }
-          if (-not (Test-Path app/UEP.exe)) { throw 'UEP.exe not found at app/UEP.exe after normalization' }
-
+      - name: Build independent launcher
+        shell: pwsh
+        run: |
+          npm install --global electron-packager
+          electron-packager launcher "UEP Launcher" --platform=win32 --arch=x64 --electron-version=39.2.7 --out=launcher-build --overwrite --asar
+          New-Item -ItemType Directory -Force launcher-dist | Out-Null
+          Copy-Item "launcher-build/UEP Launcher-win32-x64/UEP Launcher.exe" "launcher-dist/UEP-Launcher.exe"
+          Copy-Item "launcher-build/UEP Launcher-win32-x64/resources" "launcher-dist/resources" -Recurse
+          Copy-Item "launcher-build/UEP Launcher-win32-x64/*.dll" "launcher-dist/" -ErrorAction SilentlyContinue
+          Copy-Item "launcher-build/UEP Launcher-win32-x64/*.pak" "launcher-dist/" -ErrorAction SilentlyContinue
+          Copy-Item "launcher-build/UEP Launcher-win32-x64/*.bin" "launcher-dist/" -ErrorAction SilentlyContinue
+          Copy-Item "launcher-build/UEP Launcher-win32-x64/*.dat" "launcher-dist/" -ErrorAction SilentlyContinue
       - name: Install Inno Setup
         shell: pwsh
         run: choco install innosetup --yes --no-progress
-
-      - name: Build setup
+      - name: Build transition setup
         shell: pwsh
         run: |
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" packaging/UEP-Homeroom.iss
-          if (-not (Test-Path dist/UEP-Setup.exe)) { throw 'Installer build failed' }
-
-      - name: Upload installer artifact
+      - name: Upload transition installer
         uses: actions/upload-artifact@v4
         with:
-          name: UEP-Homeroom-Setup
-          path: dist/UEP-Setup.exe
-          if-no-files-found: error
-
-      - name: Attach installer to homeroom release
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.tag.outputs.tag }}
-        run: |
-          gh release upload $env:TAG dist/UEP-Setup.exe --repo $env:GITHUB_REPOSITORY --clobber
-          if ($LASTEXITCODE -ne 0) { throw 'Failed to attach UEP-Setup.exe to release' }
+          name: UEP-AutoUpdater-Transition-Setup
+          path: dist/UEP-Setup-With-AutoUpdater.exe
