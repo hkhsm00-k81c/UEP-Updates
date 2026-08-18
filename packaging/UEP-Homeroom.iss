@@ -3,7 +3,7 @@
 #define MyAppExeName "UEP.exe"
 
 [Setup]
-AppId={{9D5137CB-03B9-4D89-82D2-UEP08060A001}
+AppId={{9D5137CB-03B9-4D89-82D2-AE08060A0001}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 DefaultDirName={localappdata}\Programs\UEP
