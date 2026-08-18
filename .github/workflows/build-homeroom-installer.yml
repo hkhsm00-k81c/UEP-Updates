@@ -15,91 +15,37 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download last verified homeroom base
+      - name: Download verified UEP 0.80.63 update as initial app
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: v0.80.61-homeroom
+          TAG: v0.80.63
         run: |
           $ErrorActionPreference='Stop'
           New-Item -ItemType Directory -Force source,app | Out-Null
-          $assets=(gh release view $env:TAG --repo $env:GITHUB_REPOSITORY --json assets | ConvertFrom-Json).assets
-          $asset=$assets | Where-Object { $_.name -match '(?i).*homeroom.*source.*\.zip$|(?i).*selection.*fix.*\.zip$' } | Select-Object -First 1
-          if(-not $asset){
-            $assets | ForEach-Object { Write-Host " - $($_.name)" }
-            throw 'v0.80.61 homeroom source ZIP not found'
-          }
-          Write-Host "Using base source: $($asset.name)"
-          gh release download $env:TAG --repo $env:GITHUB_REPOSITORY --pattern $asset.name --dir source
-          Expand-Archive -LiteralPath (Join-Path source $asset.name) -DestinationPath app -Force
-          $exe=Get-ChildItem app -Filter UEP.exe -File -Recurse | Select-Object -First 1
-          if(-not $exe){throw 'UEP.exe not found'}
-          if($exe.Directory.FullName -ne (Resolve-Path app).Path){
-            $tmp=Join-Path $env:RUNNER_TEMP 'uep-flat'
-            Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
-            New-Item -ItemType Directory -Force $tmp|Out-Null
-            Copy-Item (Join-Path $exe.Directory.FullName '*') $tmp -Recurse -Force
-            Remove-Item app -Recurse -Force
-            New-Item -ItemType Directory app|Out-Null
-            Copy-Item (Join-Path $tmp '*') app -Recurse -Force
-          }
+          gh release download $env:TAG --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          if(-not (Test-Path 'source/UEP-update.zip')){throw 'UEP 0.80.63 update ZIP not found'}
+          Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
+          if(-not (Test-Path 'app/UEP.exe')){throw 'UEP.exe not found in 0.80.63 update'}
+          @{version='0.80.63';installedAt='initial-distribution-final'} | ConvertTo-Json | Set-Content installed-version.json -Encoding UTF8
 
-      - name: Apply 0.80.62 selection-source fix
+      - name: Extract existing UEP icon for launcher
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          $main='app/resources/app/electron/main.cjs'
-          $gyo='app/resources/app/gyomuon.js'
-          $pkg='app/resources/app/package.json'
-          $text=Get-Content $main -Raw -Encoding UTF8
+          Add-Type -AssemblyName System.Drawing
+          $icon=[System.Drawing.Icon]::ExtractAssociatedIcon((Resolve-Path 'app/UEP.exe').Path)
+          if(-not $icon){throw 'Could not extract UEP icon'}
+          $stream=[System.IO.File]::Create((Join-Path (Resolve-Path launcher).Path 'uep.ico'))
+          try { $icon.Save($stream) } finally { $stream.Dispose(); $icon.Dispose() }
+          if(-not (Test-Path 'launcher/uep.ico')){throw 'UEP icon extraction failed'}
 
-          if($text -match 'const curriculumSpreadsheetId = "1fevlAWQZqWQkiYl-eGRCdzidBj59Z8NqOxfCrGvwlHI"') {
-            Write-Host 'Selection-source fix is already present in the verified base. Keeping it.'
-          } else {
-            $pattern='(?s)try\s*\{\s*const curriculumRanges = await readSheetBatch\(.*?matrices\["__CURRICULUM_STUDENTS"\] = \[\];\s*\}'
-            $new=@'
-          // 선택과목 원본은 보조 탭 오류와 무관하게 각각 독립 조회합니다.
-          const curriculumSpreadsheetId = "1fevlAWQZqWQkiYl-eGRCdzidBj59Z8NqOxfCrGvwlHI";
-          const curriculumReads = [
-            ["__CURRICULUM_09", "'09_수강신청결과'!A1:AG1200"],
-            ["__CURRICULUM_ERRORS", "'05_오류검토'!A11:Z1200"],
-            ["__CURRICULUM_STUDENTS", "'02_학생마스터'!A1:AA1200"]
-          ];
-          for (const [logicalName, range] of curriculumReads) {
-            try {
-              const one = await readSheetBatch(token, curriculumSpreadsheetId, [range]);
-              const values = one?.[0]?.values || [];
-              matrices[logicalName] = values;
-              console.log(`[UEP] 선택과목 원본 조회 성공: ${logicalName} · ${range} · ${Math.max(0, values.length)}행`);
-            } catch (error) {
-              matrices[logicalName] = [];
-              console.warn(`[UEP] 선택과목 원본 조회 실패: ${logicalName} · ${range}`, error?.message || error);
-            }
-          }
-          '@
-            $patched=[regex]::Replace($text,$pattern,$new.Trim(),1)
-            if($patched -eq $text){ throw 'Curriculum block not found and selection-source fix is not present' }
-            $text=$patched
-            Set-Content $main $text -Encoding UTF8 -NoNewline
-          }
-
-          $text=Get-Content $gyo -Raw -Encoding UTF8
-          $text=$text.Replace('const APP_VERSION = "0.80.61";','const APP_VERSION = "0.80.62";')
-          Set-Content $gyo $text -Encoding UTF8 -NoNewline
-
-          $text=Get-Content $pkg -Raw -Encoding UTF8
-          $text=$text.Replace('"version": "0.80.61"','"version": "0.80.62"')
-          Set-Content $pkg $text -Encoding UTF8 -NoNewline
-
-          node --check $main
-          node --check $gyo
-          @{version='0.80.62';installedAt='initial-distribution'} | ConvertTo-Json | Set-Content installed-version.json -Encoding UTF8
-
-      - name: Build independent UEP Launcher
+      - name: Build visible independent UEP Launcher
         shell: pwsh
         run: |
+          $ErrorActionPreference='Stop'
           npm install --global electron-packager
-          electron-packager launcher "UEP Launcher" --platform=win32 --arch=x64 --electron-version=39.2.7 --out=launcher-build --overwrite --asar
+          electron-packager launcher "UEP Launcher" --platform=win32 --arch=x64 --electron-version=39.2.7 --out=launcher-build --overwrite --asar --icon=launcher/uep.ico
           $built='launcher-build/UEP Launcher-win32-x64'
           New-Item -ItemType Directory -Force launcher-dist | Out-Null
           Copy-Item "$built/*" launcher-dist -Recurse -Force
@@ -110,15 +56,15 @@ jobs:
         shell: pwsh
         run: choco install innosetup --yes --no-progress
 
-      - name: Build first distribution installer
+      - name: Build final first distribution installer
         shell: pwsh
         run: |
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" packaging/UEP-Homeroom.iss
           if(-not (Test-Path 'dist/UEP-Setup-With-AutoUpdater.exe')){throw 'Installer build failed'}
 
-      - name: Upload first distribution installer
+      - name: Upload final first distribution installer
         uses: actions/upload-artifact@v4
         with:
-          name: UEP-0.80.62-First-Distribution-With-AutoUpdater
+          name: UEP-0.80.63-Final-First-Distribution
           path: dist/UEP-Setup-With-AutoUpdater.exe
           if-no-files-found: error
