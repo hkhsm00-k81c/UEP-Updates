@@ -1,63 +1,138 @@
-name: Build UEP Homeroom Installer
+name: Build First UEP Auto-Updating Installer
 
 on:
   workflow_dispatch:
-    inputs:
-      source_tag:
-        description: "Homeroom release tag containing UEP source ZIP"
-        required: true
-        default: "v0.80.62-homeroom"
-        type: string
+  push:
+    paths:
+      - 'build-first-distribution.trigger'
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-installer:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Download UEP source
+
+      - name: Download last verified homeroom base
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.source_tag }}
+          TAG: v0.80.61-homeroom
         run: |
           $ErrorActionPreference='Stop'
           New-Item -ItemType Directory -Force source,app | Out-Null
           $assets=(gh release view $env:TAG --repo $env:GITHUB_REPOSITORY --json assets | ConvertFrom-Json).assets
-          $asset=$assets | Where-Object { $_.name -match '(?i).*homeroom.*\.zip$|(?i)^UEP.*source.*\.zip$' } | Select-Object -First 1
-          if(-not $asset){ throw 'UEP source ZIP not found in release' }
+          $asset=$assets | Where-Object { $_.name -match '(?i).*homeroom.*source.*\.zip$|(?i).*selection.*fix.*\.zip$' } | Select-Object -First 1
+          if(-not $asset){
+            $assets | ForEach-Object { Write-Host " - $($_.name)" }
+            throw 'v0.80.61 homeroom source ZIP not found'
+          }
+          Write-Host "Using base source: $($asset.name)"
           gh release download $env:TAG --repo $env:GITHUB_REPOSITORY --pattern $asset.name --dir source
           Expand-Archive -LiteralPath (Join-Path source $asset.name) -DestinationPath app -Force
           $exe=Get-ChildItem app -Filter UEP.exe -File -Recurse | Select-Object -First 1
           if(-not $exe){throw 'UEP.exe not found'}
           if($exe.Directory.FullName -ne (Resolve-Path app).Path){
-            $tmp=Join-Path $env:RUNNER_TEMP 'uep-flat'; New-Item -ItemType Directory -Force $tmp|Out-Null
+            $tmp=Join-Path $env:RUNNER_TEMP 'uep-flat'
+            Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+            New-Item -ItemType Directory -Force $tmp|Out-Null
             Copy-Item (Join-Path $exe.Directory.FullName '*') $tmp -Recurse -Force
-            Remove-Item app -Recurse -Force; New-Item -ItemType Directory app|Out-Null; Copy-Item (Join-Path $tmp '*') app -Recurse -Force
+            Remove-Item app -Recurse -Force
+            New-Item -ItemType Directory app|Out-Null
+            Copy-Item (Join-Path $tmp '*') app -Recurse -Force
           }
-      - name: Build independent launcher
+
+      - name: Apply 0.80.62 selection-source fix
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $main='app/resources/app/electron/main.cjs'
+          $gyo='app/resources/app/gyomuon.js'
+          $pkg='app/resources/app/package.json'
+
+          $text=Get-Content $main -Raw -Encoding UTF8
+          $old=@'
+          try {
+            const curriculumRanges = await readSheetBatch(
+              token,
+              "1fevlAWQZqWQkiYl-eGRCdzidBj59Z8NqOxfCrGvwlHI",
+              [
+                "'09_수강신청결과'!A1:AF1000",
+                "'05_오류검토'!A11:K1000",
+                "'02_학생마스터'!A1:AA1000"
+              ]
+            );
+            matrices["__CURRICULUM_09"] = curriculumRanges?.[0]?.values || [];
+            matrices["__CURRICULUM_ERRORS"] = curriculumRanges?.[1]?.values || [];
+            matrices["__CURRICULUM_STUDENTS"] = curriculumRanges?.[2]?.values || [];
+          } catch (error) {
+            matrices["__CURRICULUM_09"] = [];
+            matrices["__CURRICULUM_ERRORS"] = [];
+            matrices["__CURRICULUM_STUDENTS"] = [];
+          }
+          '@
+          $new=@'
+          // 선택과목 원본은 보조 탭 오류와 무관하게 각각 독립 조회합니다.
+          const curriculumSpreadsheetId = "1fevlAWQZqWQkiYl-eGRCdzidBj59Z8NqOxfCrGvwlHI";
+          const curriculumReads = [
+            ["__CURRICULUM_09", "'09_수강신청결과'!A1:AG1200"],
+            ["__CURRICULUM_ERRORS", "'05_오류검토'!A11:Z1200"],
+            ["__CURRICULUM_STUDENTS", "'02_학생마스터'!A1:AA1200"]
+          ];
+          for (const [logicalName, range] of curriculumReads) {
+            try {
+              const one = await readSheetBatch(token, curriculumSpreadsheetId, [range]);
+              const values = one?.[0]?.values || [];
+              matrices[logicalName] = values;
+              console.log(`[UEP] 선택과목 원본 조회 성공: ${logicalName} · ${range} · ${Math.max(0, values.length)}행`);
+            } catch (error) {
+              matrices[logicalName] = [];
+              console.warn(`[UEP] 선택과목 원본 조회 실패: ${logicalName} · ${range}`, error?.message || error);
+            }
+          }
+          '@
+          if(-not $text.Contains($old.Trim())){ throw 'Expected 0.80.61 curriculum block not found' }
+          $text=$text.Replace($old.Trim(),$new.Trim())
+          Set-Content $main $text -Encoding UTF8 -NoNewline
+
+          $text=Get-Content $gyo -Raw -Encoding UTF8
+          $text=$text.Replace('const APP_VERSION = "0.80.61";','const APP_VERSION = "0.80.62";')
+          Set-Content $gyo $text -Encoding UTF8 -NoNewline
+
+          $text=Get-Content $pkg -Raw -Encoding UTF8
+          $text=$text.Replace('"version": "0.80.61"','"version": "0.80.62"')
+          Set-Content $pkg $text -Encoding UTF8 -NoNewline
+
+          node --check $main
+          node --check $gyo
+          @{version='0.80.62';installedAt='initial-distribution'} | ConvertTo-Json | Set-Content installed-version.json -Encoding UTF8
+
+      - name: Build independent UEP Launcher
         shell: pwsh
         run: |
           npm install --global electron-packager
           electron-packager launcher "UEP Launcher" --platform=win32 --arch=x64 --electron-version=39.2.7 --out=launcher-build --overwrite --asar
+          $built='launcher-build/UEP Launcher-win32-x64'
           New-Item -ItemType Directory -Force launcher-dist | Out-Null
-          Copy-Item "launcher-build/UEP Launcher-win32-x64/UEP Launcher.exe" "launcher-dist/UEP-Launcher.exe"
-          Copy-Item "launcher-build/UEP Launcher-win32-x64/resources" "launcher-dist/resources" -Recurse
-          Copy-Item "launcher-build/UEP Launcher-win32-x64/*.dll" "launcher-dist/" -ErrorAction SilentlyContinue
-          Copy-Item "launcher-build/UEP Launcher-win32-x64/*.pak" "launcher-dist/" -ErrorAction SilentlyContinue
-          Copy-Item "launcher-build/UEP Launcher-win32-x64/*.bin" "launcher-dist/" -ErrorAction SilentlyContinue
-          Copy-Item "launcher-build/UEP Launcher-win32-x64/*.dat" "launcher-dist/" -ErrorAction SilentlyContinue
+          Copy-Item "$built/*" launcher-dist -Recurse -Force
+          Rename-Item 'launcher-dist/UEP Launcher.exe' 'UEP-Launcher.exe'
+          if(-not (Test-Path 'launcher-dist/UEP-Launcher.exe')){throw 'Launcher build failed'}
+
       - name: Install Inno Setup
         shell: pwsh
         run: choco install innosetup --yes --no-progress
-      - name: Build transition setup
+
+      - name: Build first distribution installer
         shell: pwsh
         run: |
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" packaging/UEP-Homeroom.iss
-      - name: Upload transition installer
+          if(-not (Test-Path 'dist/UEP-Setup-With-AutoUpdater.exe')){throw 'Installer build failed'}
+
+      - name: Upload first distribution installer
         uses: actions/upload-artifact@v4
         with:
-          name: UEP-AutoUpdater-Transition-Setup
+          name: UEP-0.80.62-First-Distribution-With-AutoUpdater
           path: dist/UEP-Setup-With-AutoUpdater.exe
+          if-no-files-found: error
