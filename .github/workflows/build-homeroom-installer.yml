@@ -1,0 +1,48 @@
+name: Build UEP Homeroom Installer
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_tag:
+        description: "Release tag containing UEP-homeroom-source.zip"
+        required: true
+        default: "v0.80.60-homeroom"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build-installer:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download stable UEP source
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.source_tag }}
+        run: |
+          New-Item -ItemType Directory -Force -Path source | Out-Null
+          gh release download $env:TAG --repo $env:GITHUB_REPOSITORY --pattern "UEP-homeroom-source.zip" --dir source
+          Expand-Archive -Path source/UEP-homeroom-source.zip -DestinationPath app -Force
+          if (-not (Test-Path app/UEP.exe)) { throw "UEP.exe not found in source package" }
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --yes --no-progress
+
+      - name: Build setup
+        shell: pwsh
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" packaging/UEP-Homeroom.iss
+          if (-not (Test-Path dist/UEP-Setup.exe)) { throw "Installer build failed" }
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: UEP-Homeroom-Setup
+          path: dist/UEP-Setup.exe
+          if-no-files-found: error
