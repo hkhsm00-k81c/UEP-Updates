@@ -6,26 +6,21 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to sync (example: v0.80.61)"
+        description: "Release tag to sync (example: v0.80.65)"
         required: true
         type: string
-  push:
-    paths:
-      - "release-tag.txt"
 
 permissions:
   contents: write
+
+concurrency:
+  group: uep-update-manifest
+  cancel-in-progress: false
 
 jobs:
   sync-manifest:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
-
       - name: Resolve release tag
         id: tag
         shell: bash
@@ -33,8 +28,6 @@ jobs:
           set -euo pipefail
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             TAG="${{ inputs.tag }}"
-          elif [ "${{ github.event_name }}" = "push" ]; then
-            TAG="$(tr -d '[:space:]' < release-tag.txt)"
           else
             TAG="${{ github.event.release.tag_name }}"
           fi
@@ -56,11 +49,12 @@ jobs:
             --dir /tmp/uep-release
           test -f /tmp/uep-release/UEP-update.zip
 
-      - name: Read release metadata and calculate SHA-256
+      - name: Build manifest
         id: meta
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.tag.outputs.tag }}
+          VERSION: ${{ steps.tag.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
@@ -70,23 +64,6 @@ jobs:
           if [ -z "$NOTES" ]; then
             NOTES="UEP ${TAG#v} 업데이트"
           fi
-          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
-          echo "download_url=$DOWNLOAD_URL" >> "$GITHUB_OUTPUT"
-          {
-            echo 'notes<<EOF'
-            echo "$NOTES"
-            echo 'EOF'
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Write uep-update.json
-        env:
-          VERSION: ${{ steps.tag.outputs.version }}
-          DOWNLOAD_URL: ${{ steps.meta.outputs.download_url }}
-          SHA256: ${{ steps.meta.outputs.sha256 }}
-          NOTES: ${{ steps.meta.outputs.notes }}
-        shell: bash
-        run: |
-          set -euo pipefail
           jq -n \
             --arg version "$VERSION" \
             --arg channel "stable" \
@@ -94,19 +71,29 @@ jobs:
             --arg sha256 "$SHA256" \
             --arg notes "$NOTES" \
             '{version:$version, channel:$channel, downloadUrl:$downloadUrl, sha256:$sha256, notes:$notes}' \
-            > uep-update.json
-          cat uep-update.json
+            > /tmp/uep-update.json
+          cat /tmp/uep-update.json
 
-      - name: Commit manifest when changed
+      - name: Update uep-update.json via GitHub API
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
         shell: bash
         run: |
           set -euo pipefail
-          if git diff --quiet -- uep-update.json; then
+          CURRENT_SHA="$(gh api "repos/$GITHUB_REPOSITORY/contents/uep-update.json?ref=main" --jq '.sha')"
+          CURRENT_CONTENT="$(gh api "repos/$GITHUB_REPOSITORY/contents/uep-update.json?ref=main" --jq '.content' | tr -d '\n' | base64 -d)"
+          NEW_CONTENT="$(cat /tmp/uep-update.json)"
+          if [ "$CURRENT_CONTENT" = "$NEW_CONTENT" ]; then
             echo "Manifest already up to date."
             exit 0
           fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add uep-update.json
-          git commit -m "Sync update manifest for ${{ steps.tag.outputs.tag }}"
-          git push origin HEAD:main
+          ENCODED="$(base64 -w 0 /tmp/uep-update.json)"
+          gh api \
+            --method PUT \
+            -H "Accept: application/vnd.github+json" \
+            "repos/$GITHUB_REPOSITORY/contents/uep-update.json" \
+            -f message="Sync update manifest for $TAG" \
+            -f content="$ENCODED" \
+            -f sha="$CURRENT_SHA" \
+            -f branch="main"
