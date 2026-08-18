@@ -1,6 +1,6 @@
 #define MyAppName "UEP"
-#define MyAppVersion "0.80.60"
-#define MyAppExeName "UEP.exe"
+#define MyAppVersion "0.80.62"
+#define MyLauncherExeName "UEP-Launcher.exe"
 
 [Setup]
 AppId={{9D5137CB-03B9-4D89-82D2-AE08060A0001}
@@ -10,20 +10,21 @@ DefaultDirName={localappdata}\Programs\UEP
 DefaultGroupName=UEP
 PrivilegesRequired=lowest
 OutputDir=..\dist
-OutputBaseFilename=UEP-Setup
+OutputBaseFilename=UEP-Setup-With-AutoUpdater
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
-UninstallDisplayIcon={app}\{#MyAppExeName}
+UninstallDisplayIcon={app}\{#MyLauncherExeName}
 CloseApplications=yes
 RestartApplications=no
 
 [Files]
-Source: "..\app\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\app\*"; DestDir: "{app}\app-current"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\launcher-dist\UEP-Launcher.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{autodesktop}\UEP"; Filename: "{app}\UEP.exe"; WorkingDir: "{app}"
-Name: "{group}\UEP"; Filename: "{app}\UEP.exe"; WorkingDir: "{app}"
+Name: "{autodesktop}\UEP"; Filename: "{app}\{#MyLauncherExeName}"; WorkingDir: "{app}"
+Name: "{group}\UEP"; Filename: "{app}\{#MyLauncherExeName}"; WorkingDir: "{app}"
 
 [Run]
-Filename: "{app}\UEP.exe"; Description: "UEP 실행"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyLauncherExeName}"; Description: "UEP 실행"; Flags: nowait postinstall skipifsilent
