@@ -1,11 +1,7 @@
-Publish requested: UEP 0.80.88 growth profile visual refinement - syntax-fixed retry
+Publish requested: UEP 0.80.89 integrated selection and SDGs release
 Requested at: 2026-08-20 KST
 Base: v0.80.87 stable renderer recovery
-Retry reason: first #41 build injected raw CSS as JavaScript text and node --check correctly stopped publication at gyomuon.js line 11805. Fixed by JSON-encoding the CSS string before injection and making syntax-check failure explicit.
-Scope: UI-only refinement. Preserve launcher, automatic update, dashboard recovery, Google/NEIS/shared-sheet startup paths.
-Fix 1: compress and visually unify the growth-profile introduction, core student story and lens explanation.
-Fix 2: reduce oversized intermediate cards into compact summary metrics beneath the story.
-Fix 3: SDGs evidence hierarchy - confirmed prominent, possible secondary, no-evidence quiet; compact evidence detail cards.
-Data logic: unchanged.
-Next session: verify homeroom-teacher launcher/install/Google connection first.
-Visible version: v0.80.88
+Selection: synthesize pre↔main comparison from available selection cache sources when backend comparison rows are absent; treat missing 3rd-grade main application as 재검증 대기 rather than a confirmed cross-semester error; track prior error history as 해결/지속/신규/재검증 대기; compact comparison/history into two summary cards with expandable detail.
+SDGs: merge university-talent/UNESCO explanation into the growth intro, keep student core story first, compress four growth axes, rank confirmed evidence before possible links, fold no-evidence goals, compact detail evidence. Preserve existing evidence engine across reports, volunteering, curriculum, selected activities and programs.
+Safety: do not modify launcher, automatic updater, renderer recovery, Google/NEIS/shared-sheet startup path.
+Visible version: v0.80.89
