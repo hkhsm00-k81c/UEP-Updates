@@ -1,4 +1,4 @@
-name: Build First UEP Auto-Updating Installer
+name: Build Final UEP Launcher V2 Installer
 
 on:
   workflow_dispatch:
@@ -15,21 +15,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download verified UEP 0.80.76 update as initial app
+      - name: Resolve current stable UEP from policy
+        id: policy
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $p=Get-Content uep-policy.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          if([string]::IsNullOrWhiteSpace([string]$p.latestVersion)){throw 'latestVersion missing'}
+          "version=$($p.latestVersion)" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "tag=v$($p.latestVersion)" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Download current stable UEP as initial app
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: v0.80.76
+          TAG: ${{ steps.policy.outputs.tag }}
+          VERSION: ${{ steps.policy.outputs.version }}
         run: |
           $ErrorActionPreference='Stop'
           New-Item -ItemType Directory -Force source,app | Out-Null
           gh release download $env:TAG --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
-          if(-not (Test-Path 'source/UEP-update.zip')){throw 'UEP 0.80.76 update ZIP not found'}
+          if(-not (Test-Path 'source/UEP-update.zip')){throw "UEP $env:VERSION update ZIP not found"}
           Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
-          if(-not (Test-Path 'app/UEP.exe')){throw 'UEP.exe not found in 0.80.76 update'}
-          @{version='0.80.76';installedAt='launcher-lock-fix-distribution'} | ConvertTo-Json | Set-Content installed-version.json -Encoding UTF8
+          if(-not (Test-Path 'app/UEP.exe')){throw 'UEP.exe not found in stable update'}
+          @{version=$env:VERSION;installedAt='launcher-v2-distribution';launcherVersion='2.0.0'} | ConvertTo-Json | Set-Content installed-version.json -Encoding UTF8
 
-      - name: Extract existing UEP icon for launcher
+      - name: Extract UEP icon for launcher
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
@@ -37,14 +48,21 @@ jobs:
           $icon=[System.Drawing.Icon]::ExtractAssociatedIcon((Resolve-Path 'app/UEP.exe').Path)
           if(-not $icon){throw 'Could not extract UEP icon'}
           $stream=[System.IO.File]::Create((Join-Path (Resolve-Path launcher).Path 'uep.ico'))
-          try { $icon.Save($stream) } finally { $stream.Dispose(); $icon.Dispose() }
-          if(-not (Test-Path 'launcher/uep.ico')){throw 'UEP icon extraction failed'}
+          try{$icon.Save($stream)}finally{$stream.Dispose();$icon.Dispose()}
 
-      - name: Build visible independent UEP Launcher
+      - name: Validate Launcher V2
+        shell: pwsh
+        run: |
+          node --check launcher/launcher.cjs
+          $src=Get-Content launcher/launcher.cjs -Raw -Encoding UTF8
+          foreach($required in @("LAUNCHER_VERSION='2.0.0'",'recoverInterruptedSwap','stopUEP','app-next','SHA-256','app-previous')){
+            if(-not $src.Contains($required)){throw "Launcher invariant missing: $required"}
+          }
+
+      - name: Build independent UEP Launcher V2
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          node --check launcher/launcher.cjs
           npm install --global electron-packager
           electron-packager launcher "UEP Launcher" --platform=win32 --arch=x64 --electron-version=39.2.7 --out=launcher-build --overwrite --asar --icon=launcher/uep.ico
           $built='launcher-build/UEP Launcher-win32-x64'
@@ -57,15 +75,15 @@ jobs:
         shell: pwsh
         run: choco install innosetup --yes --no-progress
 
-      - name: Build final first distribution installer
+      - name: Build final Launcher V2 installer
         shell: pwsh
         run: |
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" packaging/UEP-Homeroom.iss
           if(-not (Test-Path 'dist/UEP-Setup-With-AutoUpdater.exe')){throw 'Installer build failed'}
 
-      - name: Upload final first distribution installer
+      - name: Upload final Launcher V2 installer
         uses: actions/upload-artifact@v4
         with:
-          name: UEP-0.80.76-Launcher-Lock-Fix-Installer
+          name: UEP-Launcher-V2-Final-Installer
           path: dist/UEP-Setup-With-AutoUpdater.exe
           if-no-files-found: error
