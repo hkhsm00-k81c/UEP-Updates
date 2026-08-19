@@ -1,4 +1,4 @@
-Publish requested: UEP 0.80.75 corrected OAuth loopback/token diagnostics rebuild
-Requested at: 2026-08-19 15:06 KST
+Publish requested: UEP 0.80.75 callback syntax hotfix rebuild
+Requested at: 2026-08-19 16:28 KST
 Base: v0.80.74
-Goal: rebuild current 0.80.75 from 0.80.74 using corrected JavaScript patch; use Google Desktop OAuth loopback root redirect URI, preserve PKCE verifier, expose exact token error/error_description, and show v0.80.75 in the app header.
+Goal: rebuild 0.80.75 after fixing PowerShell expansion that corrupted JavaScript && in OAuth callback guard; retain loopback root redirect, PKCE token exchange diagnostics, and visible v0.80.75 header.
