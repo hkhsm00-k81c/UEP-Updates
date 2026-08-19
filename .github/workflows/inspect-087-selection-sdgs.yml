@@ -1,0 +1,43 @@
+name: Inspect UEP 0.80.87 Selection SDGs
+
+on:
+  push:
+    paths:
+      - inspect-087-selection-sdgs.trigger
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download 0.80.87 package
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force source,app,diagnostics | Out-Null
+          gh release download v0.80.87 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+      - name: Capture selection and SDGs code
+        shell: pwsh
+        run: |
+          $g='app/resources/app/gyomuon.js'; $out='diagnostics/selection-sdgs-087.txt'
+          'UEP 0.80.87 selection + SDGs inspection' | Set-Content $out -Encoding UTF8
+          $patterns=@('사전상담','본신청','재검증','선택과목 오류검토','selectionPre','selectionMain','selectionComparison','selectionSubjectErrors','selectionSubjects','studentSubjects','SDGs 근거 지도','성장 프로파일','왜 대학 인재상','sdgs','growth profile','evidence')
+          foreach($p in $patterns){
+            Add-Content $out "`n===== $p =====" -Encoding UTF8
+            Select-String -Path $g -SimpleMatch -Pattern $p -Context 8,30 | Select-Object -First 25 | ForEach-Object {Add-Content $out $_.ToString() -Encoding UTF8}
+          }
+      - name: Commit diagnostics
+        shell: pwsh
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add diagnostics/selection-sdgs-087.txt
+          git commit -m 'Inspect UEP 0.80.87 selection and SDGs' || exit 0
+          git pull --rebase origin main
+          git push origin HEAD:main
