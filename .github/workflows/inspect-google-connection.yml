@@ -1,0 +1,50 @@
+name: Inspect UEP Google Connection
+
+on:
+  push:
+    paths:
+      - inspect-google.trigger
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  inspect-google:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download current 0.80.68 package
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v0.80.68
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download $env:TAG --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
+      - name: Extract connection snippets
+        shell: pwsh
+        run: |
+          $out='UEP Google connection source snippets`r`n'
+          $files=@('app/resources/app/electron/main.cjs','app/resources/app/gyomuon.js')
+          foreach($f in $files){
+            $out += "`r`n===== $f =====`r`n"
+            if(Test-Path $f){
+              $matches=Select-String -Path $f -Pattern 'google-service-account|service-account|safeStorage|credential|readReadonlyCache|GoogleAuth|googleapis|sheets|readonlyCache|connectionStatus' -Context 8,18 | Select-Object -First 180
+              $out += (($matches | ForEach-Object {$_.ToString()}) -join "`r`n")
+            }
+          }
+          Set-Content inspect-google-output.txt $out -Encoding UTF8
+      - name: Save inspection result
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $content=[Convert]::ToBase64String([IO.File]::ReadAllBytes('inspect-google-output.txt'))
+          $existing=$null
+          try{$existing=gh api "repos/$env:GITHUB_REPOSITORY/contents/inspect-google-output.txt?ref=main" | ConvertFrom-Json}catch{}
+          $body=@{message='Inspect UEP 0.80.68 Google connection code';content=$content;branch='main'}
+          if($existing){$body.sha=$existing.sha}
+          $body | ConvertTo-Json | gh api --method PUT -H 'Accept: application/vnd.github+json' "repos/$env:GITHUB_REPOSITORY/contents/inspect-google-output.txt" --input -
