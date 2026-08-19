@@ -1,0 +1,50 @@
+name: Inspect UEP 0.80.86 Runtime Boot
+
+on:
+  push:
+    paths:
+      - inspect-086-runtime.trigger
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  inspect-runtime:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download 0.80.86 package
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v0.80.86
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,diagnostics | Out-Null
+          gh release download $env:TAG --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
+      - name: Capture runtime boot path
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $g='app/resources/app/gyomuon.js'
+          $h='app/resources/app/index.html'
+          $out='diagnostics/runtime-086.txt'
+          'UEP 0.80.86 runtime boot inspection' | Set-Content $out -Encoding UTF8
+          Add-Content $out "`n===== INDEX SCRIPT TAGS =====" -Encoding UTF8
+          Select-String -Path $h -Pattern '<script|gyomuon|userAuthGate|pageContent|UEP 시작 중' -Context 3,6 | ForEach-Object {Add-Content $out $_.ToString() -Encoding UTF8}
+          Add-Content $out "`n===== GYOMUON FIRST 520 LINES =====" -Encoding UTF8
+          Get-Content $g -Encoding UTF8 | Select-Object -First 520 | ForEach-Object {Add-Content $out $_ -Encoding UTF8}
+          Add-Content $out "`n===== BOOT INVOCATIONS / TOP LEVEL =====" -Encoding UTF8
+          Select-String -Path $g -Pattern 'loadState\(|DOMContentLoaded|window\.onload|initialize|restoreRememberedSessionImmediately|normalizeSavedState|withStartupTimeout|navigate\(|render\(|loadWeather\(|setInterval\(|setTimeout\(' -Context 2,7 | Select-Object -First 260 | ForEach-Object {Add-Content $out $_.ToString() -Encoding UTF8}
+          node --check $g | Add-Content $out -Encoding UTF8
+      - name: Commit diagnostics
+        shell: pwsh
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add diagnostics/runtime-086.txt
+          git commit -m 'Inspect UEP 0.80.86 runtime boot path' || exit 0
+          git pull --rebase origin main
+          git push origin HEAD:main
