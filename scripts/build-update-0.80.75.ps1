@@ -7,10 +7,10 @@ $pkg='app/resources/app/package.json'
 $m=Get-Content $main -Raw -Encoding UTF8
 
 # 0.80.75: use Google's documented loopback root URI form and expose exact token error details.
-$m=$m.Replace("if(u.pathname!=='/oauth2callback'){res.writeHead(404);res.end('Not found');return;}","if(u.pathname!=='/' -and u.pathname!=='/oauth2callback'){res.writeHead(404);res.end('Not found');return;}")
+# IMPORTANT: replacement text is JavaScript, so use JS || rather than PowerShell -and.
+$m=$m.Replace("if(u.pathname!=='/oauth2callback'){res.writeHead(404);res.end('Not found');return;}","if(u.pathname!=='/' && u.pathname!=='/oauth2callback'){res.writeHead(404);res.end('Not found');return;}")
 $m=$m.Replace('const redirectUri=`http://127.0.0.1:${port}/oauth2callback`;','const redirectUri=`http://127.0.0.1:${port}/`;')
 
-# Ensure the token request always contains the PKCE verifier and emit Google's exact error payload.
 $old=@'
     const body=new URLSearchParams({client_id:clientId,code,code_verifier:verifier,redirect_uri:redirectUri,grant_type:'authorization_code'});
     const response=await net.fetch('https://oauth2.googleapis.com/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body});
@@ -36,7 +36,6 @@ $m=$m.Replace($old,$new)
 
 Set-Content $main $m -Encoding UTF8 -NoNewline
 
-# Visible version: aggressively update stale badges in renderer for the demo build.
 $g=Get-Content $gyo -Raw -Encoding UTF8
 $g=$g.Replace('const APP_VERSION = "0.80.74";','const APP_VERSION = "0.80.75";')
 $g=$g.Replace('v0.80.70','v0.80.75')
