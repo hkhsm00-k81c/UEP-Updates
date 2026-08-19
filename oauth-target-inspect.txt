@@ -1,0 +1,825 @@
+===== app/resources/app/electron/main.cjs lines 250-430 =====
+250:   const vr=await readSheetBatch(token,UEP_PROCESSING_SPREADSHEET_ID,["'41_학교캘린더'!A1:W3000"]);
+251:   const values=vr?.[0]?.values||[]; const header=(values[0]||[]).map(String);
+252:   return values.slice(1).filter(r=>r.some(v=>String(v||"").trim())).map(r=>Object.fromEntries(header.map((h,i)=>[h,r[i]??""])));
+253: }
+254: function calendarObjectToRow(row){
+255:   const start=String(row["시작일"]||row["일자"]||"");
+256:   return [row["일정ID"],row["학년도"]||start.slice(0,4),start,row["종료일"]||row["종료일자"]||start,row["시작시각"],row["종료시각"],row["종일"]||(!row["시작시각"]?"Y":"N"),row["일정명"]||row["프로그램명"],row["상세내용"]||row["비고"],row["일정구분"]||"업무",row["대상"],row["장소"],row["부서"],row["담당자"],row["상태"]||"확정",row["검증상태"]||"정상",row["출처"]||"UEP 직접입력",row["원본시작셀"],row["원본끝셀"],row["원본일정ID"],row["이관방식"]||"직접기록",row["수정일시"],row["비고"]];
+257: }
+258: 
+259: 
+260: function validateServiceAccount(value) {
+261:   return Boolean(
+262:     value && value.type === "service_account" &&
+263:     typeof value.client_email === "string" &&
+264:     typeof value.private_key === "string" &&
+265:     value.private_key.startsWith("-----BEGIN PRIVATE KEY-----") &&
+266:     value.token_uri === "https://oauth2.googleapis.com/token"
+267:   );
+268: }
+269: 
+270: function recoveryKey(salt) {
+271:   // safeStorage가 Windows/Chromium 키 문제로 복호화에 실패할 때만 사용하는 로컬 복구키입니다.
+272:   // 동일 Windows 사용자/PC에서 재부팅 후에도 안정적으로 재생성됩니다.
+273:   const identity = `${os.hostname()}|${os.userInfo().username}|UEP-CREDENTIAL-RECOVERY-v1`;
+274:   return crypto.scryptSync(identity, salt, 32);
+275: }
+276: 
+277: async function writeCredentialRecovery(value) {
+278:   const salt = crypto.randomBytes(16), iv = crypto.randomBytes(12);
+279:   const key = recoveryKey(salt);
+280:   const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+281:   const encrypted = Buffer.concat([cipher.update(JSON.stringify(value), "utf8"), cipher.final()]);
+282:   const payload = {
+283:     version: 1, algorithm: "aes-256-gcm",
+284:     salt: salt.toString("base64"), iv: iv.toString("base64"),
+285:     tag: cipher.getAuthTag().toString("base64"), data: encrypted.toString("base64")
+286:   };
+287:   await fs.mkdir(path.dirname(credentialRecoveryPath()), { recursive: true });
+288:   await fs.writeFile(credentialRecoveryPath(), JSON.stringify(payload), "utf8");
+289: }
+290: 
+291: async function readCredentialRecovery() {
+292:   const payload = JSON.parse(await fs.readFile(credentialRecoveryPath(), "utf8"));
+293:   if (!payload || payload.version !== 1 || payload.algorithm !== "aes-256-gcm") throw new Error("invalid recovery credential");
+294:   const salt=Buffer.from(payload.salt,"base64"), iv=Buffer.from(payload.iv,"base64"), tag=Buffer.from(payload.tag,"base64"), data=Buffer.from(payload.data,"base64");
+295:   const decipher = crypto.createDecipheriv("aes-256-gcm", recoveryKey(salt), iv);
+296:   decipher.setAuthTag(tag);
+297:   return JSON.parse(Buffer.concat([decipher.update(data), decipher.final()]).toString("utf8"));
+298: }
+299: 
+300: async function saveEncrypted(filePath, value) {
+301:   await fs.mkdir(path.dirname(filePath), { recursive: true });
+302:   if (safeStorage.isEncryptionAvailable()) {
+303:     await fs.writeFile(filePath, safeStorage.encryptString(JSON.stringify(value)));
+304:   } else {
+305:     // 인증정보는 아래 복구 저장소가 있으므로, 다른 보안값은 기존처럼 실패시킵니다.
+306:     if (path.resolve(filePath) !== path.resolve(credentialPath())) throw new Error("Windows 보안 저장소를 사용할 수 없습니다.");
+307:   }
+308:   if (path.resolve(filePath) === path.resolve(credentialPath())) await writeCredentialRecovery(value);
+309: }
+310: 
+311: // __UEP_GOOGLE_MISSING_CREDENTIAL_08069__
+312: async function readEncrypted(filePath) {
+313:   let encrypted = null;
+314:   try { encrypted = await fs.readFile(filePath); } catch (readError) {
+315:     if (path.resolve(filePath) === path.resolve(credentialPath())) {
+316:       try { return await readCredentialRecovery(); } catch {}
+317:     }
+318:     if (path.resolve(filePath) === path.resolve(credentialPath()) && (readError?.code === "ENOENT" || /no such file/i.test(String(readError?.message||"")))) {
+319:       const friendly = new Error("담임 배포 PC의 Google 시트 연결 승인이 아직 준비되지 않았습니다.");
+320:       friendly.code = "UEP_GOOGLE_CREDENTIAL_MISSING";
+321:       friendly.setupRequired = true;
+322:       throw friendly;
+323:     }
+324:     throw readError;
+325:   }
+326:   if (safeStorage.isEncryptionAvailable()) {
+327:     try { return JSON.parse(safeStorage.decryptString(encrypted)); } catch {}
+328:   }
+329:   // 일부 구버전/수동 이관 파일이 평문 JSON인 경우 현재 형식으로 재저장합니다.
+330:   try {
+331:     const legacy = JSON.parse(encrypted.toString("utf8"));
+332:     if (legacy && typeof legacy === "object") { await saveEncrypted(filePath, legacy); return legacy; }
+333:   } catch {}
+334:   // Google 서비스 계정은 safeStorage가 깨져도 동일 PC/사용자용 AES-GCM 복구본으로 자동 복원합니다.
+335:   if (path.resolve(filePath) === path.resolve(credentialPath())) {
+336:     try {
+337:       const recovered = await readCredentialRecovery();
+338:       if (validateServiceAccount(recovered)) {
+339:         try { if (safeStorage.isEncryptionAvailable()) await fs.writeFile(filePath, safeStorage.encryptString(JSON.stringify(recovered))); } catch {}
+340:         return recovered;
+341:       }
+342:     } catch {}
+343:   }
+344:   const backup = `${filePath}.unreadable-${Date.now()}.bak`;
+345:   try { await fs.rename(filePath, backup); } catch {}
+346:   const error = new Error("저장된 보안 인증정보를 복호화할 수 없습니다. 서비스 계정 JSON을 다시 등록해 주세요.");
+347:   error.code = "UEP_SAFE_STORAGE_DECRYPT_FAILED";
+348:   throw error;
+349: }
+350: 
+351: function base64url(value) { return Buffer.from(value).toString("base64url"); }
+352: 
+353: async function getSheetsToken(credentials) {
+354:   const now = Math.floor(Date.now() / 1000);
+355:   const header = base64url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
+356:   const claims = base64url(JSON.stringify({
+357:     iss: credentials.client_email,
+358:     scope: "https://www.googleapis.com/auth/spreadsheets",
+359:     aud: credentials.token_uri,
+360:     iat: now,
+361:     exp: now + 3600,
+362:   }));
+363:   const unsigned = `${header}.${claims}`;
+364:   const signature = crypto.sign("RSA-SHA256", Buffer.from(unsigned), credentials.private_key).toString("base64url");
+365:   const body = new URLSearchParams({
+366:     grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+367:     assertion: `${unsigned}.${signature}`,
+368:   });
+369:   const response = await fetch(credentials.token_uri, {
+370:     method: "POST",
+371:     headers: { "content-type": "application/x-www-form-urlencoded" },
+372:     body,
+373:   });
+374:   if (!response.ok) throw new Error(`Google 인증 실패 (${response.status})`);
+375:   const payload = await response.json();
+376:   if (!payload.access_token) throw new Error("Google 인증 토큰을 받지 못했습니다.");
+377:   return payload.access_token;
+378: }
+379: 
+380: async function readSheetBatch(token, spreadsheetId, ranges, attempt = 0) {
+381:   const url = new URL(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchGet`);
+382:   url.searchParams.set("majorDimension", "ROWS");
+383:   url.searchParams.set("valueRenderOption", "UNFORMATTED_VALUE");
+384:   url.searchParams.set("dateTimeRenderOption", "SERIAL_NUMBER");
+385:   ranges.forEach((range) => url.searchParams.append("ranges", range));
+386:   const response = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
+387:   if (!response.ok) {
+388:     let detail = "";
+389:     try { detail = (await response.json())?.error?.message || ""; } catch {}
+390:     if ((response.status === 429 || response.status >= 500) && attempt < 3) {
+391:       const retryAfter = Number(response.headers.get("retry-after") || 0);
+392:       const waitMs = retryAfter > 0 ? retryAfter * 1000 : 900 * Math.pow(2, attempt);
+393:       await new Promise(resolve => setTimeout(resolve, waitMs));
+394:       return readSheetBatch(token, spreadsheetId, ranges, attempt + 1);
+395:     }
+396:     throw new Error(`UEP 구글시트 읽기 실패 (${response.status})${detail ? `: ${detail}` : ""}`);
+397:   }
+398:   return (await response.json()).valueRanges || [];
+399: }
+400: 
+401: function sheetNameFromRange(range) {
+402:   const text = String(range || "");
+403:   const beforeBang = text.split("!")[0];
+404:   return beforeBang.replace(/^'/, "").replace(/'$/, "").replace(/''/g, "'");
+405: }
+406: 
+407: async function updateSheetValues(token, spreadsheetId, range, values, attempt=0) {
+408:   const url = new URL(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`);
+409:   url.searchParams.set("valueInputOption", "USER_ENTERED");
+410:   const response = await fetch(url, {
+411:     method: "PUT",
+412:     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+413:     body: JSON.stringify({ majorDimension: "ROWS", values }),
+414:   });
+415:   if (!response.ok) {
+416:     let detail=""; try{ detail=(await response.json())?.error?.message||""; }catch{}
+417:     if ((response.status===429 || response.status>=500) && attempt<4) {
+418:       const retryAfter=Number(response.headers.get("retry-after")||0);
+419:       const waitMs=retryAfter>0?retryAfter*1000:1000*Math.pow(2,attempt);
+420:       await new Promise(resolve=>setTimeout(resolve,waitMs));
+421:       return updateSheetValues(token,spreadsheetId,range,values,attempt+1);
+422:     }
+423:     throw new Error(`구글시트 저장 실패 (${response.status})${detail?`: ${detail}`:""}`);
+424:   }
+425:   return response.json();
+426: }
+427: 
+428: async function batchUpdateSheetValues(token, spreadsheetId, data, attempt=0) {
+429:   const items=(Array.isArray(data)?data:[]).filter(x=>x&&x.range&&Array.isArray(x.values));
+430:   if(!items.length)return {totalUpdatedRows:0};
+===== app/resources/app/electron/main.cjs lines 1120-1215 =====
+1120:     const r=raw[ri]||[];if(!r.some(v=>String(v??'').trim()))continue;
+1121:     let studentNo=String(r[1]??'').replace(/\.0$/,'').trim(), name=String(r[2]||'').trim();
+1122:     let student=byNo.get(studentNo);
+1123:     if(!student&&name){const matches=byName.get(name)||[];if(matches.length===1){student=matches[0];studentNo=student.no;}}
+1124:     const studentId=student?.id||'';
+1125:     const schoolYear=String(r[3]??'2026').replace(/\.0$/,'').trim()||'2026', semester=String(r[4]||'1학기').trim()||'1학기';
+1126:     const rawProgram=String(r[5]||'').trim(), candidates=byProgramName.get(normalizeSelectedReportProgramName(rawProgram))||[];
+1127:     const program=candidates.find(p=>p.semester===semester)||candidates[0]||null;
+1128:     if(!program)unmatchedPrograms++;
+1129:     const programId=program?.id||'', programName=program?.name||rawProgram;
+1130:     const answers=Array.from({length:6},(_,i)=>String(r[6+i]||'').trim());
+1131:     const content=answers.map((value,i)=>value?`[${sectionLabels[i]}]\n${value}`:'').filter(Boolean).join('\n\n');
+1132:     if(!content)continue;
+1133:     const originalPairs=answers.map((value,i)=>value?{label:rawHeader[6+i]||sectionLabels[i],value}:null).filter(Boolean);
+1134:     const submittedAt=reportDateTimeText(r[0]);
+1135:     const consent=String(r[12]||'').trim();
+1136:     const reportId=`SR-${String(reportNo++).padStart(5,'0')}`;
+1137:     const sourceId=`GF-LEGACY-${reportId}`;
+1138:     const studentKey=studentId||studentNo;
+1139:     if(!studentId&&!(studentNo==='1905'&&name==='박주완'))unmatchedStudents++;
+1140:     const matchStatus=studentId?'정상':(studentNo==='1905'&&name==='박주완'?'학적변동':'확인필요');
+1141:     const logicalKey=`${schoolYear}|${semester}|${studentKey}|${programId}`;
+1142:     const contentHash=crypto.createHash('sha256').update([studentKey,programId,content].map(v=>String(v||'').trim()).join('\n'),'utf8').digest('hex');
+1143:     rows.push([reportId,'선택활동',studentId,studentNo,name,schoolYear,semester,programId,programName,submittedAt,'Y',/동의/.test(consent)?'동의함':consent,content,JSON.stringify(originalPairs),'REPORT_TEXT_V2',String(ri+1),matchStatus,'GOOGLE_FORM',sourceId,'',logicalKey,submittedAt,'정상',contentHash]);
+1144:   }
+1145:   if(unmatchedPrograms)throw new Error(`선택보고서 프로그램 매칭 실패 ${unmatchedPrograms}건이 있어 자동 복구를 중단했습니다.`);
+1146:   await clearSheetValues(token,UEP_PROCESSING_SPREADSHEET_ID,`'${target}'!A3:X5000`);
+1147:   await updateSheetValues(token,UEP_PROCESSING_SPREADSHEET_ID,`'${target}'!A3:X${rows.length+3}`,[required,...rows]);
+1148:   console.log(`[UEP] 선택보고서 정규화 자동 복구 완료: ${rows.length}건 · 학생확인 ${unmatchedStudents}건`);
+1149:   return {ok:true,repaired:true,count:rows.length,unmatchedStudents};
+1150: }
+1151: 
+1152: async function fetchLiveData({ force = false, credentials = null } = {}) {
+1153:   if (!force && liveDataCache && Date.now() - liveDataFetchedAt < 120000) return liveDataCache;
+1154:   const account = credentials || await readEncrypted(credentialPath());
+1155:   if (!validateServiceAccount(account)) throw new Error("저장된 Google 서비스 계정 인증정보가 올바르지 않습니다.");
+1156:   const token = await getSheetsToken(account);
+1157:   const entries = Object.entries(SHEET_RANGES);
+1158:   const matrices = {};
+1159:   // 기본정보 연결시트를 가장 먼저, 작은 묶음으로 읽습니다.
+1160:   // 탭 추가로 URL이 길어지거나 특정 탭이 잠시 실패해도 전체 연결이 끊기지 않도록 합니다.
+1161:   const chunkSize = 12;
+1162:   const chunks = [];
+1163:   for (let offset = 0; offset < entries.length; offset += chunkSize) {
+1164:     chunks.push({ offset, chunk: entries.slice(offset, offset + chunkSize) });
+1165:   }
+1166:   await mapWithConcurrency(chunks, 1, async ({ offset, chunk }) => {
+1167:     try {
+1168:       const valueRanges = await readSheetBatch(token, UEP_SPREADSHEET_ID, chunk.map(([, range]) => range));
+1169:       valueRanges.forEach((item, index) => {
+1170:         const fallbackName = chunk[index]?.[0];
+1171:         matrices[fallbackName] = item.values || [];
+1172:       });
+1173:     } catch (chunkError) {
+1174:       console.warn(`[UEP] 기본정보 묶음 조회 실패(${offset + 1}~${offset + chunk.length}), 개별 재시도`, chunkError?.message || chunkError);
+1175:       await mapWithConcurrency(chunk, 1, async ([logicalName, range]) => {
+1176:         try {
+1177:           const one = await readSheetBatch(token, UEP_SPREADSHEET_ID, [range]);
+1178:           matrices[logicalName] = one?.[0]?.values || [];
+1179:         } catch (sheetError) {
+1180:           matrices[logicalName] = [];
+1181:           console.warn(`[UEP] 기본정보 탭 조회 실패: ${logicalName}`, sheetError?.message || sheetError);
+1182:         }
+1183:       });
+1184:     }
+1185:   });
+1186:   entries.forEach(([name]) => { if (!matrices[name]) matrices[name] = []; });
+1187: 
+1188:   // 선택보고서 정규화 탭의 구조가 손상된 경우 구글폼 원본으로 복구한 뒤 읽습니다.
+1189:   await ensureSelectedReportNormalization(token);
+1190: 
+1191:   // 학생응답 가공 결과: 현재 실제 존재하는 데이터 처리 탭만 직접 읽습니다.
+1192:   // 선택과목은 응답수집 06_선택과목응답을 별도 읽고 기존 fallback 로직으로 구성합니다.
+1193:   const processingRanges = [
+1194:     ["02_학사외출_일자별", "'02_학사외출_일자별'!A1:AD10000"],
+1195:     ["20_공통보고서_정규화", "'20_공통보고서_정규화'!A1:X5000"],
+1196:     ["21_선택보고서_정규화", "'21_선택보고서_정규화'!A1:X5000"],
+1197:     ["30_야자출결_정규화", "'30_야자출결_정규화'!A1:P70000"],
+1198:     // 학교캘린더는 기본정보 연결시트가 아니라 데이터 처리시트의 직접 이관값만 사용합니다.
+1199:     ["41_학교캘린더", "'41_학교캘린더'!A1:W3000"],
+1200:   ];
+1201:   try {
+1202:     const result = await readSheetBatch(token, UEP_PROCESSING_SPREADSHEET_ID, processingRanges.map(([,range])=>range));
+1203:     processingRanges.forEach(([logicalName],index)=>{matrices[logicalName]=result?.[index]?.values||[];});
+1204:   } catch(error) {
+1205:     // 한 탭의 일시 오류가 보고서·학사외출·선택과목 등 정상 탭까지 모두 비우지 않도록
+1206:     // 묶음 조회 실패 시 각 탭을 독립적으로 재시도합니다. 평상시에는 1회 batchGet으로 quota를 보호합니다.
+1207:     console.warn("[UEP] 처리시트 묶음 조회 실패 - 개별 복구 시도",error?.message||error);
+1208:     await mapWithConcurrency(processingRanges,1,async([logicalName,range])=>{
+1209:       try{const one=await readSheetBatch(token,UEP_PROCESSING_SPREADSHEET_ID,[range]);matrices[logicalName]=one?.[0]?.values||[];}
+1210:       catch(sheetError){matrices[logicalName]=[];console.warn(`[UEP] 처리시트 개별 조회 실패: ${logicalName}`,sheetError?.message||sheetError);}
+1211:     });
+1212:   }
+1213: 
+1214:   // 학사외출은 데이터 처리시트의 02_학사외출_일자별만 조회합니다.
+1215:   // 응답 원본이나 기본정보 연결시트, 별도 운영 시트를 직접 참조하지 않습니다.
+===== app/resources/app/electron/main.cjs lines 1685-1775 =====
+1685:   });
+1686:   mainWindow = win;
+1687:   win.setMenuBarVisibility(false);
+1688:   win.on("close", () => {
+1689:     // A hidden Comcigan BrowserWindow used to keep Electron alive after the main
+1690:     // UI disappeared. Destroy auxiliary windows before the last visible window closes.
+1691:     destroyAuxiliaryWindows("main-window-close");
+1692:   });
+1693:   win.on("closed", () => {
+1694:     mainWindow = null;
+1695:     beginCleanShutdown("main-window-closed");
+1696:   });
+1697:   win.loadFile(path.join(__dirname, "..", "index.html"));
+1698: }
+1699: 
+1700: app.whenReady().then(async () => {
+1701:   await migrateStableUserData();
+1702:   ipcMain.handle("state:load", async () => readState());
+1703:   ipcMain.handle("state:save", async (_event, value) => writeState(value));
+1704:   ipcMain.handle("program:selectPhotos", async (event, programId) => {
+1705:     const win = BrowserWindow.fromWebContents(event.sender);
+1706:     const selected = await dialog.showOpenDialog(win, {title:"프로그램 사진 등록",properties:["openFile","multiSelections"],filters:[{name:"사진",extensions:["jpg","jpeg","png","webp","heic"]}]});
+1707:     if (selected.canceled || !selected.filePaths.length) return {ok:false,canceled:true,files:[]};
+1708:     const target = programEvidencePath(programId); await fs.mkdir(target,{recursive:true});
+1709:     const files=[];
+1710:     for (const source of selected.filePaths) {
+1711:       const ext=path.extname(source); const base=path.basename(source,ext).replace(/[^a-zA-Z0-9가-힣_-]/g,"_");
+1712:       let destination=path.join(target,`${Date.now()}-${base}${ext}`); await fs.copyFile(source,destination);
+1713:       files.push({name:path.basename(source),path:destination,addedAt:new Date().toISOString()});
+1714:     }
+1715:     return {ok:true,files,folder:target};
+1716:   });
+1717:   ipcMain.handle("program:openEvidenceFolder", async (_event, programId) => {const target=programEvidencePath(programId);await fs.mkdir(target,{recursive:true});return {ok:!(await shell.openPath(target)),folder:target};});
+1718:   ipcMain.handle("google:credentialStatus", async () => {
+1719:   try {
+1720:     const credentials = await readEncrypted(credentialPath());
+1721:     if (!validateServiceAccount(credentials)) throw new Error("invalid");
+1722:     return { ok:true, encryption:safeStorage.isEncryptionAvailable(), local:false, account:credentials.client_email || "" };
+1723:   } catch (error) {
+1724:     const missing = error?.code === "UEP_GOOGLE_CREDENTIAL_MISSING" || error?.code === "ENOENT" || /no such file/i.test(String(error?.message||""));
+1725:     return {
+1726:       ok:false,
+1727:       setupRequired:true,
+1728:       missing,
+1729:       reason: missing
+1730:         ? "담임용 Google 시트 연결 승인이 필요합니다. UEP는 로그인과 NEIS 기능을 계속 사용할 수 있습니다."
+1731:         : (error?.message || String(error))
+1732:     };
+1733:   }
+1734: });
+1735:   ipcMain.handle("google:selectCredential", async (event) => {
+1736:     const win = BrowserWindow.fromWebContents(event.sender);
+1737:     const selected = await dialog.showOpenDialog(win, {
+1738:       title: "Google 서비스 계정 JSON 선택",
+1739:       properties: ["openFile"],
+1740:       filters: [{ name: "Google 서비스 계정", extensions: ["json"] }],
+1741:     });
+1742:     if (selected.canceled || !selected.filePaths[0]) return { ok: false, canceled: true };
+1743:     try {
+1744:       const credentials = JSON.parse(await fs.readFile(selected.filePaths[0], "utf8"));
+1745:       if (!validateServiceAccount(credentials)) return { ok: false, reason: "Google 서비스 계정 JSON 형식이 아닙니다." };
+1746:       const data = await fetchLiveData({ force: true, credentials });
+1747:       await saveEncrypted(credentialPath(), credentials);
+1748:       return {
+1749:         ok: true,
+1750:         account: credentials.client_email,
+1751:         sourceName: UEP_SPREADSHEET_NAME,
+1752:         preview: data.summary,
+1753:       };
+1754:     } catch (error) {
+1755:       liveDataCache = null;
+1756:       liveDataFetchedAt = 0;
+1757:       return { ok: false, reason: `${error.message || "구글시트 연결 실패"} 서비스 계정 이메일에 UEP 구글시트 보기 권한이 있는지 확인하세요.` };
+1758:     }
+1759:   });
+1760:   ipcMain.handle("google:previewReadonlySync", async () => {
+1761:     try {
+1762:       const data = await fetchLiveData({ force: true });
+1763:       return { ok: true, syncedAt: data.syncedAt, preview: data.summary, nightPreview: data.summary, sourceName: data.sourceName };
+1764:     } catch (error) {
+1765:       liveDataCache = null;
+1766:       liveDataFetchedAt = 0;
+1767:       return { ok: false, reason: error.message || "UEP 구글시트 새로고침 실패" };
+1768:     }
+1769:   });
+1770:   ipcMain.handle("google:readReadonlyCache", async () => {
+1771:     try { return { ok: true, data: await fetchLiveData() }; }
+1772:     catch (error) { return { ok: false, reason: error.message || "UEP 구글시트를 읽지 못했습니다." }; }
+1773:   });
+1774:   
+1775: 
+===== app/resources/app/electron/preload.cjs lines 1-260 =====
+1: const { contextBridge, ipcRenderer } = require("electron");
+2: 
+3: contextBridge.exposeInMainWorld("schoolBoard", {
+4:   loadState: () => ipcRenderer.invoke("state:load"),
+5:   saveState: (state) => ipcRenderer.invoke("state:save", state),
+6:   minimize: () => ipcRenderer.invoke("window:minimize"),
+7:   maximize: () => ipcRenderer.invoke("window:maximize"),
+8:   close: () => ipcRenderer.invoke("window:close"),
+9:   setAlwaysOnTop: (value) => ipcRenderer.invoke("window:alwaysOnTop", value),
+10:   toggleCompact: () => ipcRenderer.invoke("window:compact"),
+11:   openChrome: (url) => ipcRenderer.invoke("external:openChrome", url),
+12:   selectExecutable: () => ipcRenderer.invoke("external:selectExecutable"),
+13:   launchExecutable: (filePath) => ipcRenderer.invoke("external:launchExecutable", filePath),
+14:   googleCredentialStatus: () => ipcRenderer.invoke("google:credentialStatus"),
+15:   selectGoogleCredential: () => ipcRenderer.invoke("google:selectCredential"),
+16:   previewReadonlySync: () => ipcRenderer.invoke("google:previewReadonlySync"),
+17:   readReadonlyCache: () => ipcRenderer.invoke("google:readReadonlyCache"),
+18:   syncSchoolCalendar: (payload) => ipcRenderer.invoke("calendar:syncSchool", typeof payload==="string"?{date:payload}:payload||{}),
+19:   savePersonalCalendar: (payload) => ipcRenderer.invoke("calendar:savePersonal", payload),
+20:   saveNotice: (payload) => ipcRenderer.invoke("notice:save", payload),
+21:   deleteNotice: (id) => ipcRenderer.invoke("notice:delete", id),
+22:   saveNoticeReceipt: (payload) => ipcRenderer.invoke("notice:receiptSave", payload),
+23:   updateUserAccount: (payload) => ipcRenderer.invoke("userAccount:update", payload),
+24:   saveStudentContact: (payload) => ipcRenderer.invoke("student:contactSave", payload),
+25:   saveProgramOperation: (payload) => ipcRenderer.invoke("program:operationSave", payload),
+26:   saveOfficialAttendance: (payload) => ipcRenderer.invoke("attendance:officialSave", payload),
+27:   deleteOfficialAttendance: (id) => ipcRenderer.invoke("attendance:officialDelete", id),
+28:   saveLateAttendance: (payload) => ipcRenderer.invoke("attendance:lateSave", payload),
+29:   deleteLateAttendance: (id) => ipcRenderer.invoke("attendance:lateDelete", id),
+30:   saveCounselRecord: (payload) => ipcRenderer.invoke("counsel:save", payload),
+31:   saveStudentGuidanceRecord: (payload) => ipcRenderer.invoke("studentGuidance:save", payload),
+32:   saveDormRule: (payload) => ipcRenderer.invoke("dormRule:save", payload),
+33:   deleteDormRule: (id) => ipcRenderer.invoke("dormRule:delete", id),
+34:   saveNightSupervisor: (payload) => ipcRenderer.invoke("nightDuty:save", payload),
+35:   saveLunchDuty: (payload) => ipcRenderer.invoke("lunchDuty:save", payload),
+36:   updateCalendar: (payload) => ipcRenderer.invoke("calendar:update", payload),
+37:   loadNeisDashboard: (options) => ipcRenderer.invoke("neis:loadDashboard", options),
+38:   testComcigan: (options) => ipcRenderer.invoke("comcigan:test", options),
+39:   clearNeisCache: () => ipcRenderer.invoke("neis:clearCache"),
+40:   saveNeisApiKey: (key) => ipcRenderer.invoke("neis:saveApiKey", key),
+41:   neisApiKeyStatus: () => ipcRenderer.invoke("neis:apiKeyStatus"),
+42:   selectInputFiles: () => ipcRenderer.invoke("inputCenter:selectFiles"),
+43:   saveInputRecords: (payload) => ipcRenderer.invoke("inputCenter:save", payload),
+44:   classifyInputBatch: (payload) => ipcRenderer.invoke("inputCenter:classifyBatch", payload),
+45:   normalizeInputBatch: (payload) => ipcRenderer.invoke("inputCenter:normalizeBatch", payload),
+46:   openInputFolder: () => ipcRenderer.invoke("inputCenter:openFolder"),
+47:   readInputAsset: (filePath) => ipcRenderer.invoke("inputCenter:readAsset", filePath),
+48:   openInputAsset: (filePath) => ipcRenderer.invoke("inputCenter:openAsset", filePath),
+49:   runInputOCR: (payload) => ipcRenderer.invoke("inputCenter:ocrBatch", payload),
+50:   selectProgramPhotos: (programId) => ipcRenderer.invoke("program:selectPhotos", programId),
+51:   openProgramEvidenceFolder: (programId) => ipcRenderer.invoke("program:openEvidenceFolder", programId),
+52:   checkUpdate: (url, currentVersion) => ipcRenderer.invoke("app:checkUpdate", { url, currentVersion }),
+53:   applyUpdate: (payload) => ipcRenderer.invoke("app:applyUpdate", payload),
+54:   aiStatus: () => ipcRenderer.invoke("ai:status"),
+55:   generateRecordAI: (payload) => ipcRenderer.invoke("ai:generateRecord", payload),
+56:   platform: process.platform,
+57: });
+===== app/resources/app/gyomuon.js lines 330-470 =====
+330:   state.settings.referenceData = {
+331:     ...baseState.settings.referenceData,
+332:     ...(state.settings.referenceData && typeof state.settings.referenceData === "object" ? state.settings.referenceData : {}),
+333:   };
+334:   for (const key of Object.keys(baseState.settings.referenceData)) {
+335:     if (!Array.isArray(state.settings.referenceData[key])) state.settings.referenceData[key] = structuredClone(baseState.settings.referenceData[key]);
+336:   }
+337:   state.settings.widgetSettings = {
+338:     ...structuredClone(baseState.settings.widgetSettings),
+339:     ...(state.settings.widgetSettings && typeof state.settings.widgetSettings === "object" ? state.settings.widgetSettings : {}),
+340:   };
+341:   for (const [key, fallback] of Object.entries(baseState.settings.widgetSettings)) {
+342:     const current = state.settings.widgetSettings[key];
+343:     state.settings.widgetSettings[key] = current && typeof current === "object" ? { ...fallback, ...current } : structuredClone(fallback);
+344:   }
+345: }
+346: 
+347: async function withStartupTimeout(promise, milliseconds, fallback = null) {
+348:   let timer;
+349:   try {
+350:     return await Promise.race([
+351:       Promise.resolve(promise),
+352:       new Promise((resolve) => { timer = setTimeout(() => resolve(fallback), milliseconds); }),
+353:     ]);
+354:   } finally {
+355:     if (timer) clearTimeout(timer);
+356:   }
+357: }
+358: 
+359: let initialStateLoaded = false;
+360: let pendingStateSave = false;
+361: 
+362: function applySavedState(saved) {
+363:   if (!saved || typeof saved !== "object") return;
+364:   state = {
+365:     ...baseState,
+366:     ...saved,
+367:     auth: { ...baseState.auth, ...(saved.auth || {}) },
+368:     settings: {
+369:       ...baseState.settings,
+370:       ...(saved.settings || {}),
+371:       links: { ...baseState.settings.links, ...((saved.settings || {}).links || {}) },
+372:       widgetSettings: { ...baseState.settings.widgetSettings, ...((saved.settings || {}).widgetSettings || {}) },
+373:       neis: { ...baseState.settings.neis, ...((saved.settings || {}).neis || {}) },
+374:       userProfile: { ...baseState.settings.userProfile, ...((saved.settings || {}).userProfile || {}) },
+375:       dataConnections: { ...baseState.settings.dataConnections, ...((saved.settings || {}).dataConnections || {}) },
+376:       referenceData: { ...baseState.settings.referenceData, ...((saved.settings || {}).referenceData || {}) },
+377:     },
+378:   };
+379: }
+380: 
+381: async function load() {
+382:   // 영속 상태를 읽기 전에는 화면 렌더/이벤트가 기본값을 저장하지 못하도록 부팅 장벽을 둡니다.
+383:   // 로컬 IPC 파일 읽기는 외부 네트워크와 무관하므로 반드시 먼저 완료시킵니다.
+384:   try {
+385:     const saved = window.schoolBoard?.loadState
+386:       ? await window.schoolBoard.loadState()
+387:       : JSON.parse(localStorage.getItem("gyomuon-state") || "null");
+388:     applySavedState(saved);
+389:   } catch (error) {
+390:     console.warn("[UEP] 로컬 상태 불러오기 실패", error);
+391:   }
+392:   initialStateLoaded = true;
+393: 
+394:   normalizeSavedState();
+395:   // 자동로그인을 선택한 사용자는 네트워크/Google Sheet 확인을 기다리지 않고
+396:   // 마지막 정상 로컬 사용자 세션으로 즉시 UI를 연다. 계정 유효성은 백그라운드 동기화 후 재검증한다.
+397:   const resumedRememberedSession = await restoreRememberedSessionImmediately();
+398:   // 과거 개발용 샘플은 실제 학교 자료처럼 남지 않도록 자동 정리한다.
+399:   state.programs = (state.programs || []).filter(program => String(program?.title || "").trim() !== "진로 탐색 특강");
+400:   const allowedPages = new Set(["dashboard","students","dorm","timetable","attendance","scores","admissions","records","programs","alerts","calendar","work","duties","forms","outputs","settings","help"]);
+401:   if (!allowedPages.has(state.activePage)) state.activePage = "dashboard";
+402:   navigate(state.activePage || "dashboard");
+403:   refreshHeaderRoleBadge();
+404: 
+405:   // 외부 연결은 UI 초기화와 분리하고 서로 독립적인 작업은 병렬로 시작한다.
+406:   // NEIS가 Google 캐시 완료를 기다리지 않도록 먼저 예약한다.
+407:   setTimeout(() => loadNeisDashboard(false), 0);
+408:   const credentialTask = window.schoolBoard?.googleCredentialStatus
+409:     ? withStartupTimeout(window.schoolBoard.googleCredentialStatus(), 5000, null)
+410:         .then((status) => { if (status) googleConnectionStatus = status; })
+411:         .catch((error) => console.warn("[UEP] Google 인증상태 확인 실패", error))
+412:     : Promise.resolve();
+413:   const cacheTask = window.schoolBoard?.readReadonlyCache
+414:     ? withStartupTimeout(window.schoolBoard.readReadonlyCache(), 8000, null)
+415:         .then((cached) => {
+416:           if (cached?.ok) { readonlyCache = cached.data; googleConnectionError = ""; }
+417:           else if (cached) googleConnectionError = cached.reason || "UEP 구글시트 연결을 확인하세요.";
+418:         })
+419:         .catch((error) => {
+420:           console.warn("[UEP] 읽기 캐시 불러오기 실패", error);
+421:           googleConnectionError = error?.message || "UEP 구글시트 연결을 확인하세요.";
+422:         })
+423:     : Promise.resolve();
+424:   await Promise.all([credentialTask, cacheTask]);
+425:   // 화면은 로컬/메모리 캐시로 먼저 표시한 뒤, 실행당 한 번만 백그라운드 원격 동기화한다.
+426:   // 사용자는 기다리지 않고 UEP를 사용하며, 최신 Google Sheet가 도착하면 현재 화면만 갱신한다.
+427:   if(googleConnectionStatus?.ok){
+428:     setTimeout(async()=>{
+429:       const ok=await refreshReadonlyCacheSilently({force:true,rerender:true});
+430:       if(ok){
+431:         updateTopSyncStatus();
+432:         if(currentRoleId()==='admin') migrateAdminProgramOverridesToSheetOnce().catch(()=>{});
+433:       }
+434:     },900);
+435:   }
+436:   if(googleConnectionStatus?.ok && readonlyCache) await migrateAdminProgramOverridesToSheetOnce();
+437:   updateDormOutingCount();
+438:   updateTopSyncStatus();
+439:   startReadonlyAutoRefresh();
+440:   // 여기서는 백그라운드에서 최신 계정 유효성을 재검증한다.
+441:   // 자동로그인 세션은 이미 화면을 열었으므로 네트워크 지연이 시작 화면을 막지 않는다.
+442:   await initializeUserSessionGate();
+443:   if(authSessionReady && !resumedRememberedSession) navigate(state.activePage || "dashboard");
+444:   if(!googleConnectionStatus?.ok){
+445:     // 인증정보가 없거나 복호화/유효성 검증에 실패한 경우에는 기존 setupCompleted 값과 무관하게
+446:     // 데이터 연결 단계에서 멈춘다. 학생정보 화면을 먼저 열어 권한부여를 건너뛰지 않는다.
+447:     setTimeout(()=>openSetupWizard(3),50);
+448:   }else if(!state.settings.setupCompleted){
+449:     setTimeout(()=>openSetupWizard(0),50);
+450:   }else{
+451:     setSetupWizardLock(false);
+452:   }
+453: }
+454: 
+455: async function migrateAdminProgramOverridesToSheetOnce(){
+456:   if(currentRoleId()!=="admin" || state.settings?.programSheetMigrationV07662 || !window.schoolBoard?.saveProgramOperation) return;
+457:   const overrides=state.programOverrides&&typeof state.programOverrides==="object"?state.programOverrides:{};
+458:   const programs=Array.isArray(readonlyCache?.programs)?readonlyCache.programs:[];
+459:   let changed=false, failed=false;
+460:   for(const [id,override] of Object.entries(overrides)){
+461:     if(!override || !["date","time","place","teacher"].some(key=>String(override[key]??"").trim())) continue;
+462:     const program=programs.find(item=>String(item.id||"")===String(id));
+463:     if(!program?.source) continue;
+464:     try{
+465:       const result=await window.schoolBoard.saveProgramOperation({role:"admin",source:program.source,programId:program.programId||program.courseId||"",sessionId:program.sessionId||"",date:override.date??program.date??"",time:override.time??program.time??"",place:override.place??program.place??"",teacher:override.teacher??program.teacher??""});
+466:       if(!result?.ok) throw new Error(result?.reason||"시트 저장 실패");
+467:       if(result.data) readonlyCache=result.data;
+468:       const kept={...override}; ["date","time","place","teacher"].forEach(key=>delete kept[key]);
+469:       if(Object.keys(kept).length) state.programOverrides[id]=kept; else delete state.programOverrides[id];
+470:       changed=true;
+===== app/resources/app/gyomuon.js lines 3400-3555 =====
+3400:   a.click();
+3401:   setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+3402: }
+3403: 
+3404: function emptyModule(title, desc) {
+3405:   return `<div class="module-page">${toolbar("학생·항목 검색", "자료 연결")}<div class="data-card empty-state"><span>◇</span><h3>${title}</h3><p>${desc}</p><button class="btn primary">연결 설정 보기</button></div></div>`;
+3406: }
+3407: 
+3408: const UEP_ROLES=[
+3409:   {id:"admin",name:"관리자",scope:"전체 설정·자료연결·권한·업데이트·감사로그"},
+3410:   {id:"grade_head",name:"학년부장",scope:"해당 학년 전체 학생·프로그램·출결·성적·생활기록부"},
+3411:   {id:"grade_manager",name:"학년총무",scope:"해당 학년 업무공지·프로그램·출결·자료정리"},
+3412:   {id:"homeroom",name:"담임교사",scope:"학년 학생자료 조회 · 담임반 업무수정 · 타반 개인정보 보호"},
+3413:   {id:"subject",name:"교과담당",scope:"담당 교과·수업·선택과목·프로그램 출석"},
+3414:   {id:"vice_principal",name:"교감",scope:"학교 전체 현황 열람·승인·감사 확인"},
+3415:   {id:"principal",name:"교장",scope:"학교 전체 요약 현황·통계·최종 승인 열람"}
+3416: ];
+3417: 
+3418: function currentUserProfile(){
+3419:   const raw=state?.settings?.userProfile||{}, session=state?.auth?.user||{};
+3420:   return {
+3421:     id:String(session.id||raw.id||""),
+3422:     email:String(session.email||raw.email||""),
+3423:     name:String(session.name||raw.name||state?.settings?.loginUserName||state?.settings?.teacherName||"").trim(),
+3424:     primaryRole:String(session.primaryRole||raw.primaryRole||state?.settings?.currentRole||"admin"),
+3425:     secondaryRole:String(session.secondaryRole||raw.secondaryRole||""),
+3426:     grade:String(session.grade||raw.grade||state?.settings?.neis?.grade||"1"),
+3427:     classNo:String(session.classNo||raw.classNo||""),
+3428:     department:String(session.department||raw.department||"1학년부")
+3429:   };
+3430: }
+3431: function currentRoleId(){return currentUserProfile().primaryRole||"admin";}
+3432: function roleName(id){return UEP_ROLES.find(role=>role.id===id)?.name||"관리자";}
+3433: function currentRoleDisplay(){
+3434:   const p=currentUserProfile();
+3435:   if(p.primaryRole==="admin"&&p.secondaryRole==="grade_head") return "관리자 · 학년부장";
+3436:   return roleName(p.primaryRole);
+3437: }
+3438: function refreshHeaderRoleBadge(){
+3439:   const roleChip=document.getElementById("headerRoleChip");
+3440:   const versionChip=document.getElementById("headerVersionChip");
+3441:   const profileName=document.querySelector(".profile b");
+3442:   const profileMeta=document.querySelector(".profile small");
+3443:   const profileAvatar=document.querySelector(".profile > div");
+3444:   const p=currentUserProfile();
+3445:   const role=currentRoleId();
+3446:   if(roleChip){
+3447:     roleChip.textContent=currentRoleDisplay();
+3448:     roleChip.dataset.role=role;
+3449:   }
+3450:   if(versionChip)versionChip.textContent=`v${APP_VERSION}`;
+3451:   if(profileName&&p.name) profileName.textContent=p.name;
+3452:   if(profileMeta) profileMeta.textContent=[p.department,currentRoleDisplay()].filter(Boolean).join(" · ");
+3453:   if(profileAvatar&&p.name) profileAvatar.textContent=p.name.slice(0,1);
+3454:   const profileBox=document.querySelector('.profile');
+3455:   if(profileBox){profileBox.setAttribute('role','button');profileBox.setAttribute('tabindex','0');profileBox.title='계정 메뉴';}
+3456: }
+3457: 
+3458: let authSessionReady=false;
+3459: function roleFromAccount(account){
+3460:   const role=String(account?.role||'').trim(), admin=String(account?.admin||'').toUpperCase()==='Y';
+3461:   if(admin)return {primaryRole:'admin',secondaryRole:/학년부장/.test(role)?'grade_head':''};
+3462:   if(/학년부장/.test(role))return {primaryRole:'grade_head',secondaryRole:''};
+3463:   if(/학년총무/.test(role))return {primaryRole:'grade_manager',secondaryRole:'homeroom'};
+3464:   if(/담임/.test(role))return {primaryRole:'homeroom',secondaryRole:''};
+3465:   if(/교감/.test(role))return {primaryRole:'vice_principal',secondaryRole:''};
+3466:   if(/교장/.test(role))return {primaryRole:'principal',secondaryRole:''};
+3467:   return {primaryRole:'subject',secondaryRole:''};
+3468: }
+3469: function accountToSession(account){
+3470:   const roles=roleFromAccount(account);
+3471:   return {id:String(account.id||''),email:String(account.email||'').trim(),name:String(account.name||'').trim(),grade:String(account.grade||'1'),classNo:String(account.classNo||''),department:String(account.department||(`${account.grade||1}학년부`)),...roles};
+3472: }
+3473: // UEP 0.80.68 - 배포 PC 초기 로그인 fallback
+3474: const UEP_DISTRIBUTION_USER_FALLBACK = [
+3475:   {id:'U001',email:'hkhsm00@gmail.com',name:'홍석민',role:'학년부장',admin:'Y',grade:'1',classNo:'',department:'1학년부',active:true,activeRaw:'Y'},
+3476:   {id:'U002',email:'wan9730@gmail.com',name:'천부성',role:'담임교사',admin:'N',grade:'1',classNo:'1',department:'1학년부',active:true,activeRaw:'Y'},
+3477:   {id:'U003',email:'chemileet@naver.com',name:'이은경',role:'담임교사',admin:'N',grade:'1',classNo:'2',department:'1학년부',active:true,activeRaw:'Y'},
+3478:   {id:'U004',email:'kht9153@gmail.com',name:'김현태',role:'담임교사',admin:'N',grade:'1',classNo:'3',department:'1학년부',active:true,activeRaw:'Y'},
+3479:   {id:'U005',email:'choie0820@gmail.com',name:'최혜선',role:'담임교사',admin:'N',grade:'1',classNo:'4',department:'1학년부',active:true,activeRaw:'Y'},
+3480:   {id:'U006',email:'lkkwww2@gmail.com',name:'이태연',role:'학년총무',admin:'N',grade:'1',classNo:'5',department:'1학년부',active:true,activeRaw:'Y'},
+3481:   {id:'U007',email:'wsseo0317@gmail.com',name:'서월산',role:'담임교사',admin:'N',grade:'1',classNo:'6',department:'1학년부',active:true,activeRaw:'Y'},
+3482:   {id:'U008',email:'99vivi77@gmail.com',name:'우순정',role:'담임교사',admin:'N',grade:'1',classNo:'7',department:'1학년부',active:true,activeRaw:'Y'},
+3483:   {id:'U009',email:'seo.ai.edu@gmail.com',name:'서진미',role:'담임교사',admin:'N',grade:'1',classNo:'8',department:'1학년부',active:true,activeRaw:'Y'},
+3484:   {id:'U010',email:'shoutkey1@gmail.com',name:'박은규',role:'담임교사',admin:'N',grade:'1',classNo:'9',department:'1학년부',active:true,activeRaw:'Y'},
+3485:   {id:'U011',email:'joonsikcha@gmail.com',name:'차준식',role:'교감',admin:'N',grade:'1',classNo:'',department:'교무실',active:true,activeRaw:'Y'},
+3486:   {id:'U012',email:'a01063913260@gmail.com',name:'설덕종',role:'교장',admin:'N',grade:'1',classNo:'',department:'교장실',active:true,activeRaw:'Y'}
+3487: ];
+3488: function activeUserAccounts(){
+3489:   const sheetAccounts=(readonlyCache?.userAccounts||[]).filter(a=>a.active!==false&&String(a.activeRaw||'Y').toUpperCase()!=='N');
+3490:   // 정상 동기화된 계정표가 있으면 반드시 시트 값을 우선합니다.
+3491:   if(sheetAccounts.length) return sheetAccounts;
+3492:   // 신규 PC/초기 동기화 지연 때 로그인 화면이 막히지 않도록 배포 당시 승인 계정만 fallback으로 사용합니다.
+3493:   return UEP_DISTRIBUTION_USER_FALLBACK.filter(a=>a.active!==false&&String(a.activeRaw||'Y').toUpperCase()!=='N');
+3494: }
+3495: const UEP_BOOTSTRAP_ADMIN_NAME='홍석민';
+3496: function bootstrapAdminAccount(name,email){
+3497:   const n=String(name||'').trim(),e=String(email||'').trim().toLowerCase();
+3498:   if(n!==UEP_BOOTSTRAP_ADMIN_NAME||!e||!e.includes('@'))return null;
+3499:   const known=(readonlyCache?.userAccounts||[]).find(a=>String(a.name||'').trim()===UEP_BOOTSTRAP_ADMIN_NAME);
+3500:   return {id:String(known?.id||'bootstrap-admin'),name:UEP_BOOTSTRAP_ADMIN_NAME,email:e,grade:String(known?.grade||'1'),classNo:String(known?.classNo||''),department:String(known?.department||'1학년부'),role:String(known?.role||'학년부장'),admin:'Y',active:true,activeRaw:'Y',bootstrap:true};
+3501: }
+3502: function findUserAccount(name,email){
+3503:   const n=String(name||'').trim(),e=String(email||'').trim().toLowerCase();
+3504:   const active=activeUserAccounts();
+3505:   const byEmail=active.find(a=>String(a.email||'').trim().toLowerCase()===e);
+3506:   if(byEmail)return byEmail;
+3507:   const exact=active.find(a=>String(a.name||'').trim()===n&&String(a.email||'').trim().toLowerCase()===e);
+3508:   if(exact)return exact;
+3509:   return bootstrapAdminAccount(n,e);
+3510: }
+3511: function userAuthFailureMessage(name,email){
+3512:   const n=String(name||'').trim(),e=String(email||'').trim().toLowerCase();
+3513:   const all=readonlyCache?.userAccounts||[];
+3514:   const byEmail=all.find(a=>String(a.email||'').trim().toLowerCase()===e);
+3515:   if(byEmail&&(byEmail.active===false||String(byEmail.activeRaw||'Y').toUpperCase()==='N'))return '사용 중지된 계정입니다. 관리자에게 사용 승인을 요청해 주세요.';
+3516:   if(!all.length)return '사용자계정 정보를 불러오지 못했습니다. 데이터 연결 상태를 확인해 주세요.';
+3517:   if(n===UEP_BOOTSTRAP_ADMIN_NAME)return '최고관리자 확인에 실패했습니다. 이메일 형식을 확인한 뒤 다시 시도해 주세요.';
+3518:   return '등록되거나 승인된 교사 이메일을 확인해 주세요.';
+3519: }
+3520: function maskEmail(email){const [local,domain='']=String(email||'').split('@');if(!local)return '';return `${local.slice(0,1)}${'*'.repeat(Math.max(3,local.length-1))}${domain?'@'+domain:''}`;}
+3521: function hideUserAuthGate(){document.getElementById('userAuthGate')?.classList.add('hidden');document.body.classList.remove('uep-auth-locked');authSessionReady=true;state.auth.locked=false;refreshHeaderRoleBadge();}
+3522: function authGateMessage(text){const node=document.getElementById('userAuthMessage');if(node)node.textContent=text||'';}
+3523: function renderUserAuthGate({locked=false,switchUser=false}={}){
+3524:   const gate=document.getElementById('userAuthGate');if(!gate)return;document.body.classList.add('uep-auth-locked');gate.classList.remove('hidden');authSessionReady=false;
+3525:   const remembered=state?.auth?.rememberedUser||state?.auth?.user;const canContinue=remembered&&remembered.name&&remembered.email&&!switchUser;
+3526:   gate.innerHTML=`<section class="user-auth-card"><div class="user-auth-brand"><span>U</span><div><small>UNHO EDUCATION PLATFORM</small><h2>${locked?'UEP 화면 잠금':'사용자 확인'}</h2><p>${locked?'학생정보 보호를 위해 현재 화면을 잠갔습니다.':'학교에 등록된 이메일을 기준으로 사용자를 확인합니다. 최고관리자는 신규 PC에서도 안전하게 진입할 수 있습니다.'}</p></div></div>${canContinue?`<button class="user-auth-remembered" id="rememberedUserContinue"><b>${escapeHtml(remembered.name)}</b><span>${escapeHtml(maskEmail(remembered.email))}</span><small>${locked?'계속 사용':'자동 로그인 사용자'}</small></button><button class="user-auth-text" id="useDifferentUser">다른 사용자로 로그인</button>`:`<form id="userAuthForm"><label>교사 이름<input id="userAuthName" autocomplete="name" required placeholder="예: 홍석민"></label><label>교사 이메일<input id="userAuthEmail" type="email" autocomplete="email" required placeholder="학교에 등록된 이메일"></label><label class="user-auth-check"><input id="userAuthRemember" type="checkbox"> 이 PC에서 자동 로그인</label><p id="userAuthMessage" class="user-auth-message"></p><button class="btn primary" type="submit">UEP 시작</button></form>`}<div class="user-auth-exit-row"><button type="button" class="user-auth-text danger" id="userAuthExit">UEP 종료</button></div><footer>PC 인증과 사용자 확인은 별도입니다. 상담 메모와 개인 권한은 현재 로그인 교사를 기준으로 표시됩니다.</footer></section>`;
+3527:   document.getElementById('useDifferentUser')?.addEventListener('click',()=>renderUserAuthGate({locked:false,switchUser:true}));
+3528:   document.getElementById('userAuthExit')?.addEventListener('click',async()=>{if(confirm('UEP를 종료할까요?'))await window.schoolBoard?.close?.();});
+3529:   document.getElementById('rememberedUserContinue')?.addEventListener('click',async()=>{const account=findUserAccount(remembered.name,remembered.email);if(!account)return renderUserAuthGate({switchUser:true});state.auth.user=accountToSession(account);await save();hideUserAuthGate();navigate(state.activePage||'dashboard');});
+3530:   document.getElementById('userAuthForm')?.addEventListener('submit',async event=>{event.preventDefault();const name=document.getElementById('userAuthName')?.value,email=document.getElementById('userAuthEmail')?.value;const account=findUserAccount(name,email);if(!account){authGateMessage(userAuthFailureMessage(name,email));return;}const user=accountToSession(account),remember=Boolean(document.getElementById('userAuthRemember')?.checked);state.auth.user=user;state.auth.rememberUser=remember;state.auth.rememberedUser=remember?{id:user.id,name:user.name,email:user.email}:null;state.settings.userProfile={...state.settings.userProfile,...user};state.settings.loginUserName=user.name;await save();hideUserAuthGate();navigate(state.activePage||'dashboard');});
+3531: }
+3532: async function restoreRememberedSessionImmediately(){
+3533:   const remembered=state?.auth?.rememberUser?state?.auth?.rememberedUser:null;
+3534:   const savedUser=state?.auth?.user;
+3535:   if(!remembered?.name||!remembered?.email||!savedUser?.name||!savedUser?.email)return false;
+3536:   const sameName=String(savedUser.name).trim()===String(remembered.name).trim();
+3537:   const sameEmail=String(savedUser.email).trim().toLowerCase()===String(remembered.email).trim().toLowerCase();
+3538:   if(!sameName||!sameEmail)return false;
+3539:   const gate=document.getElementById('userAuthGate');
+3540:   if(gate){
+3541:     document.body.classList.add('uep-auth-locked');gate.classList.remove('hidden');
+3542:     gate.innerHTML=`<section class="user-auth-card auto-login-transition"><div class="user-auth-brand"><span>U</span><div><small>UNHO EDUCATION PLATFORM</small><h2>자동 로그인 중…</h2><p>${escapeHtml(savedUser.name)} · ${escapeHtml(maskEmail(savedUser.email))}</p></div></div><div class="auto-login-progress"><i></i></div><footer>저장된 사용자로 UEP를 시작합니다.</footer></section>`;
+3543:     await new Promise(resolve=>setTimeout(resolve,650));
+3544:   }
+3545:   hideUserAuthGate();
+3546:   return true;
+3547: }
+3548: async function initializeUserSessionGate(){
+3549:   if(!googleConnectionStatus?.ok||!readonlyCache){
+3550:     if(state?.auth?.rememberUser&&state?.auth?.user){hideUserAuthGate();return true;}
+3551:     renderUserAuthGate({switchUser:true});authGateMessage('먼저 PC 데이터 연결 인증을 완료해 주세요.');return false;
+3552:   }
+3553:   const remembered=state?.auth?.rememberUser?state?.auth?.rememberedUser:null;
+3554:   if(remembered){const account=findUserAccount(remembered.name,remembered.email);if(account){state.auth.user=accountToSession(account);hideUserAuthGate();await save();return true;}}
+3555:   state.auth.user=null;renderUserAuthGate({switchUser:true});return false;
+===== app/resources/app/gyomuon.js lines 3900-3995 =====
+3900: }
+3901: 
+3902: function releaseReadinessRows(){
+3903:   const p=currentUserProfile(), account=findUserAccount(p.name,p.email);
+3904:   return [
+3905:     {name:'UEP 표준 구글시트',ok:Boolean(readonlyCache?.students?.length&&!googleConnectionError),note:readonlyCache?.students?.length?`${readonlyCache.students.length}명 학생 인식`:'연결 확인 필요'},
+3906:     {name:'사용자 계정 승인표',ok:Boolean((readonlyCache?.userAccounts||[]).length),note:`${(readonlyCache?.userAccounts||[]).filter(a=>a.active!==false).length}명 승인`},
+3907:     {name:'현재 사용자 권한',ok:Boolean(account&&account.active!==false),note:account?`${account.name} · ${account.admin==='Y'?'관리자':account.role||'교과담당'}`:'계정표 일치 확인 필요'},
+3908:     {name:'권한별 조회범위',ok:Boolean(currentTeacherAccessScope()?.label),note:currentTeacherAccessScope()?.label||'확인 필요'},
+3909:     {name:'업데이트 정보',ok:Boolean(state.settings.updateManifestUrl),note:state.settings.updateManifestUrl?'업데이트 확인 주소 등록':'manifest 주소 등록 필요'},
+3910:     {name:'Google API 보호',ok:true,note:'120초 캐시 · 429 재시도 · 순차 batch 조회'},
+3911:     {name:'런타임 진단',ok:true,note:'오류·중복 DOM·리소스 점검 활성'}
+3912:   ];
+3913: }
+3914: 
+3915: function settingsTabsMarkup(){
+3916:   const tabs=[
+3917:     ["basic","01 기본·연결"],
+3918:     ["security","02 사용자·보안"],
+3919:     ["operations","03 알림·운영"],
+3920:     ["system","04 시스템 관리"]
+3921:   ];
+3922:   return `<div class="settings-tabs settings-final-tabs">${tabs.map(([id,label])=>`<button class="${settingsPanel===id?'active':''}" data-settings-panel="${id}">${label}</button>`).join('')}</div>`;
+3923: }
+3924: 
+3925: function accessControlInlineMarkup(){
+3926:   const p=currentUserProfile(), isAdmin=currentRoleId()==="admin";
+3927:   const accounts=[...(readonlyCache?.userAccounts||[])].sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'ko'));
+3928:   const activeCount=accounts.filter(a=>a.active!==false).length, blockedCount=accounts.length-activeCount;
+3929:   const roleOptions=["관리자","학년부장","학년총무","담임교사","교과담당","교감","교장"];
+3930:   const rows=accounts.length?accounts.map(a=>`<tr data-inline-access-user="${escapeHtml(a.id)}"><td><b>${escapeHtml(a.name)}</b><small>${escapeHtml(maskEmail(a.email))}</small></td><td>${isAdmin?`<select data-inline-access-role>${roleOptions.map(r=>`<option ${accessAccountRole(a)===r?'selected':''}>${r}</option>`).join('')}</select>`:escapeHtml(a.admin==='Y'?'관리자':a.role||'교과담당')}</td><td>${isAdmin?`<select data-inline-access-grade>${[1,2,3].map(g=>`<option ${String(a.grade)==String(g)?'selected':''}>${g}</option>`).join('')}</select>`:escapeHtml(a.grade||'-')}</td><td>${isAdmin?`<select data-inline-access-class><option value="">-</option>${Array.from({length:14},(_,i)=>i+1).map(c=>`<option value="${c}" ${String(a.classNo)==String(c)?'selected':''}>${c}</option>`).join('')}</select>`:escapeHtml(a.classNo||'-')}</td><td><span class="state ${a.active!==false?'connected':'error'}">${a.active!==false?'승인':'차단'}</span></td><td>${isAdmin?`<button class="btn secondary" data-inline-access-toggle>${a.active!==false?'사용 중지':'사용 승인'}</button><button class="btn primary" data-inline-access-save>권한 저장</button>`:'-'}</td></tr>`).join(''):'<tr><td colspan="6">01_사용자계정에 등록된 사용자가 없습니다.</td></tr>';
+3931:   return `<article class="setting-card access-control-inline"><div class="connection-title"><div><small>UEP RELEASE SECURITY</small><h3>사용자·권한 승인</h3><p>01_사용자계정의 사용여부·역할·담당학년·담임반을 이 화면에서 바로 관리합니다.</p></div><span class="state connected">계정표 승인</span></div><div class="security-control-grid release-security-grid"><article><small>등록 사용자</small><b>${accounts.length}명</b><p>01_사용자계정 기준</p></article><article><small>사용 승인</small><b>${activeCount}명</b><p>로그인 가능</p></article><article><small>사용 중지</small><b>${blockedCount}명</b><p>로그인 차단</p></article><article><small>현재 관리자</small><b>${escapeHtml(p.name||'-')}</b><p>${escapeHtml(currentRoleDisplay())}</p></article></div><div class="access-user-table-wrap"><table class="access-user-table"><thead><tr><th>사용자</th><th>역할</th><th>학년</th><th>담임반</th><th>상태</th><th>관리</th></tr></thead><tbody>${rows}</tbody></table></div><div class="connection-actions"><button class="btn secondary" data-inline-access-refresh>계정표 새로고침</button></div><p class="safe-note">현재 로그인한 관리자 자기 계정은 사용 중지할 수 없습니다.</p></article>`;
+3932: }
+3933: 
+3934: function settingsView() {
+3935:   const connected = Boolean(readonlyCache?.students?.length && !googleConnectionError);
+3936:   const credentialReady = Boolean(googleConnectionStatus?.ok);
+3937:   const googleStatus = connected ? ["구글시트 연결됨", ""] : googleConnectionError ? ["권한·연결 오류", "error"] : credentialReady ? ["권한 확인 필요", "warn"] : ["인증 필요", "warn"];
+3938:   const connectionRows = [
+3939:     ["학생정보", readonlyCache?.students?.length], ["학사생", readonlyCache?.dormStudents?.length], ["학사외출", readonlyCache?.dormOutings?.length],
+3940:     ["성적", readonlyCache?.scoreRecords?.length], ["수능최저", readonlyCache?.admissionMinimums?.length], ["대학입결", readonlyCache?.admissionCuts?.length],
+3941:   ];
+3942:   const neisStatus = neisData?.ok ? (neisData.offline ? ["저장자료 표시", "warn"] : ["실시간 연결됨", ""]) : neisLoading ? ["불러오는 중", "warn"] : ["연결 확인", "error"];
+3943:   const profile=currentUserProfile(), access=currentTeacherAccessScope();
+3944: 
+3945:   const header=(title,desc,badge)=>`${settingsTabsMarkup()}<section class="settings-section-head"><div><small>UEP SETTINGS</small><h2>${title}</h2><p>${desc}</p></div><span>${badge}</span></section>`;
+3946: 
+3947:   if(settingsPanel==="security") return `<div class="module-page settings-v064 settings-final">
+3948:     ${header("사용자·보안","계정 승인과 역할, 민감정보 보호를 관리합니다.","관리자·학년부장")}
+3949:     <article class="setting-card sensitive-security-settings"><div><small>PRIVACY · SECURITY</small><h3>🔒 민감정보 보안</h3><p>교육비지원 · 요보호학생 · 위기학생 상세정보의 열람 비밀번호를 관리합니다.</p><p class="settings-help">상세정보는 1차 블라인드 후 비밀번호 인증을 거쳐 확인하며 인증은 10분 동안 유지됩니다.</p></div><div class="sensitive-security-status"><b>${sensitivePasswordConfigured()?'비밀번호 설정됨':'비밀번호 설정 필요'}</b><button type="button" class="btn primary" data-sensitive-password-set>${sensitivePasswordConfigured()?'비밀번호 변경':'비밀번호 설정'}</button><button type="button" class="btn secondary" data-sensitive-lock>즉시 잠금</button></div></article>
+3950:     <article class="setting-card role-settings-card"><div class="connection-title"><div><h3>사용자·권한 프로필</h3><p>현재 로그인 사용자의 역할과 담당 범위를 확인합니다.</p></div><span class="state">${escapeHtml(currentRoleDisplay())}</span></div><div class="user-profile-summary"><div><small>사용자</small><b>${escapeHtml(profile.name||"미설정")}</b></div><div><small>부서</small><b>${escapeHtml(profile.department||"미설정")}</b></div><div><small>조회 범위</small><b>${escapeHtml(access.label)}</b></div></div><p class="safe-note">담임은 학년 자료를 조회할 수 있고 타반 연락정보는 기본 마스킹합니다. 성적·응답·정규화 원천자료는 UEP에서 직접 수정하지 않습니다.</p></article>
+3951:     <article class="setting-card access-control-card"><div class="connection-title"><div><h3>사용자·권한 승인</h3><p>01_사용자계정의 사용여부·역할·담당학년·담임반을 기준으로 로그인과 조회범위를 제어합니다.</p></div><span class="state connected">계정표 승인</span></div><div class="connection-actions"><button class="btn primary" type="button" data-access-control>권한 승인 제어판</button></div><p class="safe-note">신규 사용자 등록은 표준 구글시트에서 관리하고 UEP에서는 승인상태와 역할을 조정합니다.</p></article>
+3952:   </div>`;
+3953: 
+3954:   if(settingsPanel==="operations") return `<div class="module-page settings-v064 settings-final">
+3955:     ${header("알림·운영","실제 운영 중 필요한 알림과 오류 신고만 관리합니다.","운영 설정")}
+3956:     <article class="setting-card mail-alert-settings"><h3>메일 알림</h3><p>필요한 운영 알림만 선택합니다. 발송 기준 시각은 일과운영시간과 연동합니다.</p><div class="mail-alert-grid">${[["dormOuting","학사외출"],["afternoonStudy","오후자습 현황"],["night1","야자1 현황"],["night2","야자2 현황"],["nightException","야간 이상상황"],["nightSummary","야간 종료 종합"]].map(([key,label])=>`<label><input type="checkbox" data-mail-alert="${key}" ${state.settings.mailAlerts?.[key]?"checked":""}> ${label}</label>`).join("")}</div><small>※ 실제 자동메일 발송은 연결된 UEP 데이터처리 메일 트리거가 이 설정값을 읽도록 연동됩니다.</small></article>
+3957:     <article class="setting-card issue-admin-card"><div class="connection-title"><div><h3>오류 신고 관리</h3><p>사용자가 저장한 오류 신고를 확인하고 처리 상태와 수정 버전을 기록합니다.</p></div><span class="state">${(state.issueReports||[]).filter(r=>r.status!=='fixed').length}건 처리 중</span></div><div class="connection-actions"><button class="btn secondary" data-open-issue-report>새 신고 작성</button><button class="btn primary" data-open-issue-manager>신고 관리</button></div><p class="safe-note">현재는 PC 로컬 저장 방식이며 중앙 수집은 관리자 서버 또는 관리 시트 연결 단계에서 확장합니다.</p></article>
+3958:   </div>`;
+3959: 
+3960:   if(settingsPanel==="system") return `<div class="module-page settings-v064 settings-final">
+3961:     ${header("시스템 관리","연결상태·배포 준비·업데이트처럼 평소에는 건드리지 않는 관리 도구입니다.","관리자 점검")}
+3962:     <article class="setting-card health-check-card"><div class="connection-title"><div><h3>연결 진단</h3><p>필수 탭과 주요 데이터가 정상적으로 읽히는지 한 번에 확인합니다.</p></div><span class="state ${googleConnectionError?'error':'connected'}">${googleConnectionError?'확인 필요':'정상'}</span></div><div class="health-list">${connectionHealthRows().map(row=>`<div><span>${row.ok?'✓':'!'}</span><b>${row.name}</b><small>${row.ok?'인식':'확인 필요'}</small></div>`).join('')}</div>${googleConnectionError?`<div class="connection-error-detail"><b>최근 오류</b><span>${escapeHtml(googleConnectionError)}</span></div>`:''}<div class="connection-actions"><button class="btn primary" data-run-health-check>다시 진단</button></div></article>
+3963:     <article class="setting-card"><h3>조회 연결 상태</h3><p>UEP 기준 구글시트에 실제 자료가 있는 항목을 확인합니다.</p>${connectionRows.map(([label,count]) => `<div class="setting-row"><span><b>${label}</b><small>${Number(count || 0).toLocaleString()}건 인식</small></span><span>${count ? "연결" : "자료 확인"}</span></div>`).join("")}</article>
+3964:     <article class="setting-card release-readiness-card"><div class="connection-title"><div><h3>배포 준비 점검</h3><p>교사용 배포 전에 필수 연결·계정·권한·업데이트·API 보호 상태를 확인합니다.</p></div><span class="state ${releaseReadinessRows().every(row=>row.ok)?'connected':'warn'}">${releaseReadinessRows().every(row=>row.ok)?'배포 준비':'확인 필요'}</span></div><div class="health-list release-health-list">${releaseReadinessRows().map(row=>`<div><span>${row.ok?'✓':'!'}</span><b>${escapeHtml(row.name)}</b><small>${escapeHtml(row.note)}</small></div>`).join('')}</div><div class="connection-actions"><button class="btn primary" type="button" data-access-control>권한 점검</button><button class="btn secondary" data-run-health-check>연결 다시 진단</button></div><p class="safe-note">자동 설치·롤백은 현재 비활성화되어 있습니다.</p></article>
+3965:     <article class="setting-card update-settings-card"><div class="connection-title"><div><h3>UEP 업데이트</h3><p>현재 버전 ${APP_VERSION} · 담임 배포판부터는 앱 내부 업데이트 채널을 사용합니다.</p></div><span class="state connected">업데이트 확인 작동</span></div><form id="updateSettingsForm" class="update-settings-form"><input id="updateManifestUrl" type="url" value="${escapeHtml(state.settings.updateManifestUrl||'')}" placeholder="https://.../uep-update.json"><button class="btn secondary" type="submit">주소 저장</button><button class="btn primary" type="button" data-check-update>업데이트 확인</button></form><div class="update-roadmap"><span class="done">① 동일 빌드</span><span class="done">② 버전 확인</span><span class="done">③ 업데이트 채널</span><span class="done">④ 앱 내부 적용·롤백</span></div><div id="updateCheckResult" class="update-check-result"><small>새 버전 확인 → 무결성 검증 → 앱 내부 적용 → 실패 시 이전판 복구 방식입니다.</small></div></article>
+3966:     <article class="setting-card"><div class="connection-title"><div><h3>UEP 정보</h3><p>UNHO Education Platform · Connect Data. Grow Students.</p></div><span class="state">v${APP_VERSION}</span></div><div class="setting-row"><span><b>기준 데이터</b><small>표준 구글시트 연결</small></span><span>${escapeHtml(readonlyCache?.sourceName||'연결 확인')}</span></div></article>
+3967:   </div>`;
+3968: 
+3969:   // 01 기본·연결 — 초기 설치와 연결 문제가 있을 때만 사용하는 영역
+3970:   return `<div class="module-page settings-v064 settings-final">
+3971:     ${header("기본·연결","초기 설치와 데이터 연결, NEIS 연동을 관리합니다.","학교 공용")}
+3972:     <article class="setting-card setup-wizard-card"><div><small>UEP SETUP GUIDE</small><h3>초기 설정 마법사</h3><p>처음 설치하거나 학교·계정·연결 정보를 다시 잡을 때만 사용합니다. 기존 설정은 유지됩니다.</p></div><button class="btn primary" type="button" data-setup-wizard>설정 마법사 시작</button></article>
+3973:     <article class="setting-card connection-overview"><div class="connection-title"><div><h3>UEP 구글시트 연결</h3><p>표준 구글시트를 조회하고 허용된 운영정보만 안전하게 양방향 수정합니다.</p></div><span class="state ${googleStatus[1]}">${googleStatus[0]}</span></div><div class="readonly-rule"><b>현재 기준</b><span>${escapeHtml(readonlyCache?.sourceName || "2026_운호고_UEP_DB_v1.0_Dev")} · 학생ID 기준 결합</span></div>${googleConnectionError ? `<div class="connection-error-detail"><b>오류 내용</b><span>${escapeHtml(googleConnectionError)}</span></div>` : ""}<div class="connection-actions"><button class="btn secondary" data-oauth-guide>${credentialReady ? "서비스 계정 JSON 변경" : "서비스 계정 JSON 등록"}</button><button class="btn primary" data-readonly-sync>지금 새로고침</button></div><p class="safe-note">서비스 계정 JSON은 Windows 보안 저장소에 암호화하여 보관합니다.</p></article>
+3974:     <article class="setting-card neis-settings-card"><div class="connection-title"><div><h3>NEIS 급식·시간표</h3><p>학교명으로 학교코드를 찾아 급식과 학급 시간표를 자동 조회합니다.</p></div><span class="state ${neisStatus[1]}">${neisStatus[0]}</span></div><form id="neisSettingsForm" class="neis-settings-form"><label>학교명<input id="neisSchoolName" required value="${escapeHtml(state.settings.neis.schoolName)}"></label><label>학년<select id="neisGrade">${[1,2,3].map((value) => `<option ${String(value) === String(state.settings.neis.grade) ? "selected" : ""}>${value}</option>`).join("")}</select></label><label>반<select id="neisClass">${Array.from({length:9},(_,index)=>index+1).map((value) => `<option ${String(value) === String(state.settings.neis.classNo) ? "selected" : ""}>${value}</option>`).join("")}</select></label><label class="neis-key-label">인증키<input id="neisApiKey" type="password" autocomplete="off" placeholder="${state.settings.neis.apiKeyConfigured?"등록됨 · 변경할 때만 입력":"발급받은 인증키 입력"}"></label><label class="neis-key-toggle"><input id="neisUseApiKey" type="checkbox" ${state.settings.neis.useApiKey?"checked":""}> 인증키 사용</label><button class="btn primary">저장 후 불러오기</button></form>${neisError ? `<div class="connection-error-detail"><b>${neisData?.offline ? "저장자료 안내" : "연결 오류"}</b><span>${escapeHtml(neisError)}</span></div>` : ""}<div class="connection-actions"><button class="btn secondary" data-neis-refresh>NEIS 다시 불러오기</button><button class="btn secondary" data-neis-clear-cache>저장자료 지우기</button></div><p class="safe-note">실시간 연결이 실패하면 마지막 정상 조회자료를 저장자료로 구분해 표시합니다.</p></article>
+3975:   </div>`;
+3976: }
+3977: 
+3978: const helpItems = {
+3979:   start:{title:"처음 시작하기",summary:"자료 연결과 기본 설정",steps:["설정에서 UEP 구글시트와 NEIS 연결 상태를 확인합니다.","사용자 역할과 담당 학년·반을 설정합니다.","대시보드에서 오늘의 업무와 프로그램을 확인합니다."],source:"기본연결시트·데이터처리시트·NEIS"},
+3980:   dashboard:{title:"대시보드",summary:"오늘 필요한 정보 한눈에 보기",steps:["시간·날씨와 개인시간표를 확인합니다.","학교 캘린더에서 월간·주간 일정을 조회합니다.","오늘의 업무·공지와 선택·방과후 프로그램을 확인합니다."],source:"학교캘린더·시간표·프로그램DB"},
+3981:   students:{title:"학생정보",summary:"학생 개인 통합 대시보드",steps:["반과 학생을 선택합니다.","연락정보·성적·활동·선택과목·프로그램 참여를 확인합니다.","보고서 보기는 UEP 내부 미리보기로 열고 필요한 자료만 출력합니다."],source:"기본연결시트·데이터처리시트"},
+3982:   timetable:{title:"시간표",summary:"개인·학급·학생·교사 시간표",steps:["개인시간표에서 자신의 수업을 확인합니다.","학급시간표는 날짜·학년·반을 선택해 NEIS 주간자료를 조회합니다.","원본 누락 진단이 표시되면 자동매칭보다 NEIS 자료 확인을 우선합니다."],source:"NEIS 공개 API·개인시간표DB"},
+3983:   attendance:{title:"출결",summary:"공결·지각·야자출결 통합",steps:["상단에서 공결·지각·야자출결을 선택합니다.","야자출결은 실제 운영일만 이동하며 학사·방과후·야간심화가 우선 표시됩니다.","출결 원본과 정규화 결과가 다르면 원본 응답과 데이터처리시트를 먼저 확인합니다."],source:"구글폼연결시트·데이터처리시트"},
+3984:   scores:{title:"성적",summary:"내신·모의고사 상담자료",steps:["반과 학생, 조회범위를 선택합니다.","내신 변화와 모의고사 등락을 비교합니다.","출력센터에서 A4 상담자료로 출력합니다."],source:"기본연결시트 성적DB"},
+3985:   admissions:{title:"입시",summary:"등급환산·수능최저·입결",steps:["학생의 모의고사 성적을 선택합니다.","대학별 수능최저 충족 가능성을 조회합니다.","환산식과 근거자료를 함께 확인합니다."],source:"수능최저DB·대학입결DB"},
+3986:   records:{title:"생활기록부",summary:"활동 근거부터 최종 기록까지",steps:["활동내역과 SDGs 이수현황을 확인합니다.","자율·진로·종합의견 근거자료를 선택합니다.","규칙 기반 또는 AI 초안을 생성하고 규칙 검토 후 최종 저장합니다."],source:"기본연결시트·보고서 정규화·규칙로그"},
+3987:   programs:{title:"프로그램",summary:"공통·선택·방과후 운영",steps:["공통활동은 자율·진로로 구분해 확인합니다.","선택활동은 명단·출석·보고서·SDGs·사진을 관리합니다.","방과후는 반복일정·결강·보강과 야자출결 영향을 관리합니다."],source:"기본연결시트 프로그램DB"},
+3988:   calendar:{title:"학교 일정",summary:"학년도 일정과 개인 일정",steps:["월간·주간 보기를 전환합니다.","학교·프로그램·개인·미확정 일정을 필터링합니다.","학년도 동기화 후 수정 잠금된 일정은 보존합니다."],source:"학교캘린더"},
+3989:   outputs:{title:"출력센터",summary:"확정자료 선택 출력",steps:["보고서·학생자료·선택과목·출석부·생활기록부·성적 그룹을 선택합니다.","반과 학생 또는 프로그램을 선택합니다.","미리보기 후 PDF·인쇄·Excel을 실행합니다."],source:"확정된 UEP 조회자료"},
+3990:   settings:{title:"설정",summary:"연결·역할·화면·업데이트",steps:["구글시트·NEIS 연결을 관리합니다.","역할과 권한 범위를 확인합니다.","업데이트 정보 주소를 등록하고 새 버전을 확인합니다."],source:"PC 보안저장소·UEP 설정"},
+3991: };
+3992: function helpView() {
+3993:   return `<div class="module-page help-manual-page"><div class="setting-card help-intro"><div><h3>UEP 사용 설명서</h3><p>각 메뉴의 자료 출처와 실제 업무 흐름을 기준으로 설명합니다.</p></div><span>${Object.keys(helpItems).length}개 메뉴</span></div><div class="help-grid">${Object.entries(helpItems).map(([key,item])=>`<article class="help-item"><button class="help-button" data-help="${key}"><span><b>${item.title}</b><small>${item.summary}</small></span><span>${helpOpen===key?"⌃":"⌄"}</span></button>${helpOpen===key?`<div class="help-content"><h4>${item.title}</h4><ol>${item.steps.map(step=>`<li>${step}</li>`).join("")}</ol><p><b>자료 출처:</b> ${item.source}</p><p><b>문제 확인 순서:</b> 원본시트 → 데이터처리시트 → UEP 화면 구현</p></div>`:""}</article>`).join("")}</div></div>`;
+3994: }
+3995: 
