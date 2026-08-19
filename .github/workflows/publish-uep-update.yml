@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download verified 0.80.64 base
+      - name: Download clean 0.80.64 base
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -28,9 +28,9 @@ jobs:
           Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
           if (-not (Test-Path 'app/UEP.exe')) { throw 'UEP.exe not found in 0.80.64 update' }
 
-      - name: Apply 0.80.65 quick-open approval popup UI fix
+      - name: Apply scoped 0.80.66 approval popup fix
         shell: pwsh
-        run: ./scripts/build-update-0.80.65.ps1
+        run: ./scripts/build-update-0.80.66.ps1
 
       - name: Build update package
         id: package
@@ -42,15 +42,15 @@ jobs:
           $sha = (Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
           "sha=$sha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-      - name: Publish v0.80.65 release
+      - name: Publish v0.80.66 release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = 'v0.80.65'
+          $tag = 'v0.80.66'
           gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
           if ($LASTEXITCODE -ne 0) {
-            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.80.65 자동업데이트 - 빠른열기 결재라인 UI 정리' --notes '빠른열기 결재라인 팝업에서 카드 밖으로 글자가 넘어가는 현상을 줄바꿈/폭 보정으로 정리하고, 내용량에 비해 불필요하게 생기던 내부 세로 스크롤을 제거했습니다. 0.80.64의 선택과목 연결 및 자동업데이트 기능은 그대로 유지합니다.'
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.80.66 자동업데이트 - 결재라인 UI 안전범위 보정' --notes '0.80.65에서 결재라인 UI 보정이 대시보드 컨테이너까지 영향을 준 문제를 제거했습니다. 정상 0.80.64를 기준으로 다시 빌드하며, 실제 주요 업무 결재라인 팝업 내부의 결재선 텍스트만 줄바꿈하고 불필요한 내부 스크롤만 제한적으로 제거합니다.'
           }
           gh release upload $tag UEP-update.zip --repo $env:GITHUB_REPOSITORY --clobber
 
@@ -60,27 +60,27 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SHA256: ${{ steps.package.outputs.sha }}
         run: |
-          $tag = 'v0.80.65'
+          $tag = 'v0.80.66'
           $asset = (gh release view $tag --repo $env:GITHUB_REPOSITORY --json assets | ConvertFrom-Json).assets | Where-Object { $_.name -eq 'UEP-update.zip' } | Select-Object -First 1
           if (-not $asset) { throw 'Release asset not found' }
           $policy = [ordered]@{
             channel = 'homeroom-stable'
-            latestVersion = '0.80.65'
+            latestVersion = '0.80.66'
             minimumAllowedVersion = '0.80.64'
             blockedVersions = @()
             forceUpdate = $false
             updateEnabled = $true
             downloadUrl = $asset.url
             sha256 = $env:SHA256
-            message = 'UEP 0.80.65 빠른열기 결재라인 UI 정리'
+            message = 'UEP 0.80.66 결재라인 UI 안전범위 보정'
             offlineGraceHours = 72
           } | ConvertTo-Json -Depth 4
           $info = gh api "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json?ref=main" | ConvertFrom-Json
           $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($policy))
-          $body = @{ message = 'Enable UEP 0.80.65 automatic update'; content = $encoded; sha = $info.sha; branch = 'main' } | ConvertTo-Json
+          $body = @{ message = 'Enable UEP 0.80.66 automatic update'; content = $encoded; sha = $info.sha; branch = 'main' } | ConvertTo-Json
           $body | gh api --method PUT -H 'Accept: application/vnd.github+json' "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json" --input -
 
       - uses: actions/upload-artifact@v4
         with:
-          name: UEP-0.80.65-Update-Package
+          name: UEP-0.80.66-Update-Package
           path: UEP-update.zip
