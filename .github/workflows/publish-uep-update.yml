@@ -15,42 +15,42 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download 0.80.66 base
+      - name: Download 0.80.67 base
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: v0.80.66
+          TAG: v0.80.67
         run: |
-          $ErrorActionPreference = 'Stop'
-          New-Item -ItemType Directory -Force source, app | Out-Null
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
           gh release download $env:TAG --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
-          if (-not (Test-Path 'source/UEP-update.zip')) { throw 'UEP 0.80.66 update ZIP not found' }
+          if(-not (Test-Path 'source/UEP-update.zip')){throw 'UEP 0.80.67 update ZIP not found'}
           Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
-          if (-not (Test-Path 'app/UEP.exe')) { throw 'UEP.exe not found in 0.80.66 update' }
+          if(-not (Test-Path 'app/UEP.exe')){throw 'UEP.exe not found in 0.80.67 update'}
 
-      - name: Apply 0.80.67 approval popup card layout fix
+      - name: Apply 0.80.68 login and approval popup fixes
         shell: pwsh
-        run: ./scripts/build-update-0.80.67.ps1
+        run: ./scripts/build-update-0.80.68.ps1
 
       - name: Build update package
         id: package
         shell: pwsh
         run: |
-          if (Test-Path UEP-update.zip) { Remove-Item UEP-update.zip -Force }
+          if(Test-Path UEP-update.zip){Remove-Item UEP-update.zip -Force}
           Compress-Archive -Path app/* -DestinationPath UEP-update.zip -CompressionLevel Optimal
-          if (-not (Test-Path UEP-update.zip)) { throw 'UEP-update.zip build failed' }
-          $sha = (Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          if(-not (Test-Path UEP-update.zip)){throw 'UEP-update.zip build failed'}
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
           "sha=$sha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-      - name: Publish v0.80.67 release
+      - name: Publish v0.80.68 release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = 'v0.80.67'
+          $tag='v0.80.68'
           gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
-          if ($LASTEXITCODE -ne 0) {
-            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.80.67 자동업데이트 - 결재라인 카드 높이/줄바꿈 개선' --notes '빠른열기 주요 업무 결재라인 팝업의 왼쪽 카드에서 결재선 문구가 카드 밖으로 잘리거나 다음 카드와 겹치는 현상을 개선합니다. 카드 높이를 내용에 맞게 자동 조정하고 긴 결재선은 카드 내부에서 줄바꿈합니다. 팝업 외 화면과 오른쪽 상세영역은 변경하지 않습니다.'
+          if($LASTEXITCODE -ne 0){
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.80.68 자동업데이트 - 담임 로그인 및 결재라인 보완' --notes '신규 배포 PC에서 01_사용자계정 캐시 동기화가 늦어도 배포 당시 승인된 담임 계정으로 로그인할 수 있도록 fallback을 추가합니다. 정상 계정표가 로드되면 시트 권한을 우선합니다. 빠른열기 결재라인은 왼쪽 목록의 실제 카드만 직접 보정하여 긴 결재선이 카드 내부에서 줄바꿈되도록 개선합니다.'
           }
           gh release upload $tag UEP-update.zip --repo $env:GITHUB_REPOSITORY --clobber
 
@@ -60,27 +60,27 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SHA256: ${{ steps.package.outputs.sha }}
         run: |
-          $tag = 'v0.80.67'
-          $asset = (gh release view $tag --repo $env:GITHUB_REPOSITORY --json assets | ConvertFrom-Json).assets | Where-Object { $_.name -eq 'UEP-update.zip' } | Select-Object -First 1
-          if (-not $asset) { throw 'Release asset not found' }
-          $policy = [ordered]@{
-            channel = 'homeroom-stable'
-            latestVersion = '0.80.67'
-            minimumAllowedVersion = '0.80.64'
-            blockedVersions = @()
-            forceUpdate = $false
-            updateEnabled = $true
-            downloadUrl = $asset.url
-            sha256 = $env:SHA256
-            message = 'UEP 0.80.67 결재라인 카드 레이아웃 개선'
-            offlineGraceHours = 72
+          $tag='v0.80.68'
+          $asset=(gh release view $tag --repo $env:GITHUB_REPOSITORY --json assets | ConvertFrom-Json).assets | Where-Object {$_.name -eq 'UEP-update.zip'} | Select-Object -First 1
+          if(-not $asset){throw 'Release asset not found'}
+          $policy=[ordered]@{
+            channel='homeroom-stable'
+            latestVersion='0.80.68'
+            minimumAllowedVersion='0.80.64'
+            blockedVersions=@()
+            forceUpdate=$false
+            updateEnabled=$true
+            downloadUrl=$asset.url
+            sha256=$env:SHA256
+            message='UEP 0.80.68 담임 로그인 및 결재라인 보완'
+            offlineGraceHours=72
           } | ConvertTo-Json -Depth 4
-          $info = gh api "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json?ref=main" | ConvertFrom-Json
-          $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($policy))
-          $body = @{ message = 'Enable UEP 0.80.67 automatic update'; content = $encoded; sha = $info.sha; branch = 'main' } | ConvertTo-Json
+          $info=gh api "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json?ref=main" | ConvertFrom-Json
+          $encoded=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($policy))
+          $body=@{message='Enable UEP 0.80.68 automatic update';content=$encoded;sha=$info.sha;branch='main'} | ConvertTo-Json
           $body | gh api --method PUT -H 'Accept: application/vnd.github+json' "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json" --input -
 
       - uses: actions/upload-artifact@v4
         with:
-          name: UEP-0.80.67-Update-Package
+          name: UEP-0.80.68-Update-Package
           path: UEP-update.zip
