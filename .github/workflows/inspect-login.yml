@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   inspect-login:
@@ -24,13 +24,25 @@ jobs:
           New-Item -ItemType Directory -Force source,app | Out-Null
           gh release download $env:TAG --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
           Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
-      - name: Print login-related snippets
+      - name: Save login-related snippets
         shell: pwsh
         run: |
+          New-Item -ItemType Directory -Force diagnostics | Out-Null
+          $out='diagnostics/login-snippets.txt'
+          "UEP 0.80.67 login/auth source snippets" | Set-Content $out -Encoding UTF8
           $files=@('app/resources/app/gyomuon.js','app/resources/app/electron/main.cjs')
           foreach($f in $files){
-            Write-Host "===== $f ====="
+            Add-Content $out "`n===== $f =====" -Encoding UTF8
             if(Test-Path $f){
-              Select-String -Path $f -Pattern '로그인|사용자계정|이메일|email|login|auth|teacher|성명|사용여부' -Context 5,12 | Select-Object -First 120 | ForEach-Object { $_.ToString() }
+              Select-String -Path $f -Pattern '로그인|사용자계정|이메일|email|login|auth|teacher|성명|사용여부' -Context 8,18 | Select-Object -First 160 | ForEach-Object { Add-Content $out $_.ToString() -Encoding UTF8 }
             }
           }
+      - name: Commit diagnostics
+        shell: pwsh
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add diagnostics/login-snippets.txt
+          git commit -m 'Capture UEP 0.80.67 login source snippets' || exit 0
+          git pull --rebase origin main
+          git push origin HEAD:main
