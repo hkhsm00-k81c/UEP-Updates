@@ -4,26 +4,21 @@ $pkg='app/resources/app/package.json'
 $g=Get-Content $gyo -Raw -Encoding UTF8
 
 # UEP 0.80.83: local user login must never wait for Google/readonly sync.
-# Google is a background data-sync layer. A missing/slow Google connection cannot hold the auth splash.
-
 $newGate=@'
 async function initializeUserSessionGate(){
   const remembered=state?.auth?.rememberUser?state?.auth?.rememberedUser:null;
   const saved=state?.auth?.user;
-  // Local-first: a valid saved local session is enough to open UEP immediately.
   if(remembered?.name&&remembered?.email&&saved?.name&&saved?.email){
     const sameName=String(saved.name).trim()===String(remembered.name).trim();
     const sameEmail=String(saved.email).trim().toLowerCase()===String(remembered.email).trim().toLowerCase();
     if(sameName&&sameEmail){hideUserAuthGate();return true;}
   }
-  // If account cache is already available, resolve the remembered user without waiting for Google.
   if(remembered){
     try{
       const account=findUserAccount(remembered.name,remembered.email);
       if(account){state.auth.user=accountToSession(account);hideUserAuthGate();save().catch(()=>{});return true;}
     }catch{}
   }
-  // No remembered local session: show normal user selection. Never ask for Google first.
   state.auth.user=null;
   renderUserAuthGate({switchUser:true});
   authGateMessage('교사 이름과 이메일로 UEP를 시작하세요. Google 최신 동기화는 로그인 후 별도로 확인합니다.');
@@ -31,11 +26,8 @@ async function initializeUserSessionGate(){
 }
 '@
 $pattern='(?s)async function initializeUserSessionGate\(\)\{.*?\n\}\s*(?=async function lockCurrentUser\()'
-if([regex]::IsMatch($g,$pattern)){
-  $g=[regex]::Replace($g,$pattern,$newGate+"`n",1)
-}else{throw 'initializeUserSessionGate block not found'}
+if([regex]::IsMatch($g,$pattern)){$g=[regex]::Replace($g,$pattern,$newGate+"`n",1)}else{throw 'initializeUserSessionGate block not found'}
 
-# Startup must not await Google-related user revalidation. The new gate is local-only, but keep a hard timeout as a safety belt.
 $old='await initializeUserSessionGate();'
 $new=@'
 await Promise.race([
@@ -50,11 +42,27 @@ await Promise.race([
 '@
 if($g.Contains($old)){$g=$g.Replace($old,$new.TrimEnd())}
 
-# Remove legacy admin-only setup-wizard forcing caused solely by Google disconnection.
-$legacy='(?s)\s*if\(!googleConnectionStatus\?\.ok\s*&&\s*currentRoleId\(\)==="admin"\)\s*\{.*?openSetupWizard\(3\).*?\}'
-if([regex]::IsMatch($g,$legacy)){$g=[regex]::Replace($g,$legacy,"`n  // Google sync failure is non-blocking in 0.80.83.",1)}
+# Remove the exact legacy admin Google-disconnection setup block using brace-balanced scanning.
+$needle='if(!googleConnectionStatus?.ok && currentRoleId()==="admin"){'
+$start=$g.IndexOf($needle)
+if($start -ge 0){
+  $depth=0;$end=-1;$quote='';$escape=$false
+  for($i=$start;$i -lt $g.Length;$i++){
+    $ch=$g[$i]
+    if($quote){
+      if($escape){$escape=$false;continue}
+      if($ch -eq '\'){$escape=$true;continue}
+      if($ch -eq $quote){$quote=''}
+      continue
+    }
+    if($ch -eq '"' -or $ch -eq "'" -or $ch -eq '`'){$quote=$ch;continue}
+    if($ch -eq '{'){$depth++}
+    elseif($ch -eq '}'){$depth--;if($depth -eq 0){$end=$i;break}}
+  }
+  if($end -lt 0){throw 'legacy admin setup block closing brace not found'}
+  $g=$g.Substring(0,$start)+'// Google sync failure is non-blocking in 0.80.83.'+$g.Substring($end+1)
+}
 
-# Last-resort watchdog: if any old auto-login transition remains visible, release it using the already saved local user.
 if($g -notmatch '__UEP_AUTOLOGIN_WATCHDOG_08083__'){
 $watch=@'
 
@@ -80,7 +88,6 @@ $watch=@'
 $g += $watch
 }
 
-# Visible version
 $g=$g.Replace('const APP_VERSION = "0.80.82";','const APP_VERSION = "0.80.83";')
 $g=$g.Replace('const APP_VERSION = "0.80.81";','const APP_VERSION = "0.80.83";')
 $g=$g.Replace('v0.80.82','v0.80.83')
