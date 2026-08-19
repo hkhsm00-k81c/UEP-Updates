@@ -1,0 +1,42 @@
+name: Inspect UEP 0.80.85 Dashboard
+
+on:
+  push:
+    paths:
+      - inspect-085-dashboard.trigger
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  inspect-dashboard:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download 0.80.85 package
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v0.80.85
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,diagnostics | Out-Null
+          gh release download $env:TAG --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
+      - name: Capture dashboard render code
+        shell: pwsh
+        run: |
+          $out='diagnostics/dashboard-085.txt'
+          'UEP 0.80.85 dashboard render inspection' | Set-Content $out -Encoding UTF8
+          $g='app/resources/app/gyomuon.js'
+          Select-String -Path $g -Pattern 'function navigate|const navigate|function renderDashboard|renderDashboard\(|dashboard.*render|pageContent|pageTitle|pageKicker|case "dashboard"|case ''dashboard''|pages\s*=|renderers\s*=' -Context 10,35 | Select-Object -First 220 | ForEach-Object {Add-Content $out $_.ToString() -Encoding UTF8}
+      - name: Commit diagnostics
+        shell: pwsh
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add diagnostics/dashboard-085.txt
+          git commit -m 'Inspect UEP 0.80.85 dashboard renderer' || exit 0
+          git pull --rebase origin main
+          git push origin HEAD:main
