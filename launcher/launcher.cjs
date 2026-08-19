@@ -19,11 +19,26 @@ function createWindow() {
   win.once('ready-to-show',()=>win.show());
 }
 function status(s,d,p,v){if(win&&!win.isDestroyed())win.webContents.executeJavaScript(`window.setUEPStatus(${JSON.stringify(s)},${JSON.stringify(d)},${Number.isFinite(p)?p:'undefined'},${JSON.stringify(v||'')})`).catch(()=>{});}
+function sleep(ms){return new Promise(resolve=>setTimeout(resolve,ms));}
+function isBusyError(e){return ['EBUSY','EPERM','EACCES'].includes(String(e?.code||'')) || /busy|locked|being used|access is denied/i.test(String(e?.message||''));}
+async function retryFs(label,fn,{attempts=14,delay=450}={}){
+  let last;
+  for(let i=1;i<=attempts;i++){
+    try{return fn();}
+    catch(e){
+      last=e;
+      if(!isBusyError(e)||i===attempts)throw e;
+      status('UEP 종료를 기다리고 있습니다.',`${label} · 파일 잠금 해제 대기 ${i}/${attempts}`,92,'업데이트 준비 중');
+      await sleep(delay + Math.min(900,(i-1)*90));
+    }
+  }
+  throw last;
+}
 
 function requestJson(url,redirects=0){
   return new Promise((resolve,reject)=>{
     if(redirects>8)return reject(new Error('정책 서버 리디렉션이 너무 많습니다.'));
-    const req=net.request({method:'GET',url}); req.setHeader('User-Agent','UEP-Launcher/1.3');
+    const req=net.request({method:'GET',url}); req.setHeader('User-Agent','UEP-Launcher/1.4');
     const timer=setTimeout(()=>{try{req.abort();}catch{} reject(new Error('정책 서버 연결 시간 초과'));},10000);
     req.on('response',res=>{
       const code=res.statusCode;
@@ -37,7 +52,7 @@ function requestJson(url,redirects=0){
 function download(url,dest,onProgress,redirects=0){
   return new Promise((resolve,reject)=>{
     if(redirects>10)return reject(new Error('업데이트 다운로드 리디렉션이 너무 많습니다.'));
-    const req=net.request({method:'GET',url});req.setHeader('User-Agent','UEP-Launcher/1.3');
+    const req=net.request({method:'GET',url});req.setHeader('User-Agent','UEP-Launcher/1.4');
     const timer=setTimeout(()=>{try{req.abort();}catch{} reject(new Error('업데이트 다운로드 시간 초과'));},120000);
     req.on('response',res=>{
       const code=res.statusCode;
@@ -66,10 +81,19 @@ async function installUpdate(policy,cur){
   status('새 버전을 준비하고 있습니다.','압축을 풀고 있습니다.',82,`최신 ${policy.latestVersion}`);fs.mkdirSync(stage,{recursive:true});
   execFileSync('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-Command',`Expand-Archive -LiteralPath '${tmp.replace(/'/g,"''")}' -DestinationPath '${stage.replace(/'/g,"''")}' -Force`],{windowsHide:true});
   if(!fs.existsSync(path.join(stage,'UEP.exe')))throw new Error('업데이트 패키지에 UEP.exe가 없습니다.');
-  status('UEP를 최신 버전으로 교체하고 있습니다.','기존 버전은 안전하게 백업합니다.',92,`최신 ${policy.latestVersion}`);
-  fs.rmSync(BACKUP_DIR,{recursive:true,force:true});if(fs.existsSync(APP_DIR))fs.renameSync(APP_DIR,BACKUP_DIR);
-  try{fs.renameSync(stage,APP_DIR);writeJson(VERSION_FILE,{version:policy.latestVersion,updatedAt:new Date().toISOString()});fs.rmSync(tmp,{force:true});}
-  catch(e){fs.rmSync(APP_DIR,{recursive:true,force:true});if(fs.existsSync(BACKUP_DIR))fs.renameSync(BACKUP_DIR,APP_DIR);throw e;}
+  status('UEP를 최신 버전으로 교체하고 있습니다.','기존 UEP 프로세스와 Windows 파일 잠금이 해제될 때까지 자동으로 기다립니다.',92,`최신 ${policy.latestVersion}`);
+  await retryFs('이전 백업 정리',()=>fs.rmSync(BACKUP_DIR,{recursive:true,force:true}));
+  if(fs.existsSync(APP_DIR)) await retryFs('현재 버전 백업',()=>fs.renameSync(APP_DIR,BACKUP_DIR));
+  try{
+    await retryFs('새 버전 적용',()=>fs.renameSync(stage,APP_DIR));
+    writeJson(VERSION_FILE,{version:policy.latestVersion,updatedAt:new Date().toISOString()});
+    try{fs.rmSync(tmp,{force:true});}catch{}
+  }
+  catch(e){
+    try{if(fs.existsSync(APP_DIR))await retryFs('실패 버전 정리',()=>fs.rmSync(APP_DIR,{recursive:true,force:true}),{attempts:6,delay:350});}catch{}
+    try{if(fs.existsSync(BACKUP_DIR))await retryFs('이전 버전 복원',()=>fs.renameSync(BACKUP_DIR,APP_DIR),{attempts:10,delay:450});}catch{}
+    throw e;
+  }
 }
 app.whenReady().then(async()=>{
   createWindow();const cur=localVersion();status('업데이트를 확인하고 있습니다.','최신 배포 정보를 확인하는 중입니다.',6,`현재 버전 ${cur}`);let policy,online=true;
