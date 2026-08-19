@@ -1,5 +1,6 @@
-Publish requested: UEP 0.80.78 resilient Desktop OAuth token exchange fix RETRY
-Requested at: 2026-08-19 22:18 KST
-Base: v0.80.77
-Fix: stop depending on one exact authorization-code source block; detect actual token URLSearchParams/body.set shapes, inject Desktop OAuth client secret, retain read-only Sheets scope and visible v0.80.78.
-Next bundled data work: selection-course joins must use stable studentID/student number rather than row position, and expose pre-consultation Google Form vs Liro main-application comparison as match/change/add/remove by semester.
+Publish requested: UEP 0.80.79 growth profile + selection-course comparison
+Requested at: 2026-08-19 22:35 KST
+Base: latest successfully built v0.80.78
+IMPORTANT: do not alter the Google OAuth implementation beyond inheriting 0.80.78; teacher-PC Google verification is deferred until tomorrow.
+Features: student growth/story profile with SDGs as a UNESCO/school-curriculum lens; teacher explanation for why SDGs are connected; student report guidance emphasizing career/major, social/community/environment/future problem awareness and viewpoint change; selection-course joins keyed by studentID first/student number fallback rather than row position; compare pre-consultation Google Form vs Liro main application by semester as match/change/add/remove.
+Visible version: v0.80.79
