@@ -14,32 +14,46 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Download current 0.80.69 package
+      - name: Download current 0.80.72 package
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference='Stop'
           New-Item -ItemType Directory -Force source,app | Out-Null
-          gh release download v0.80.69 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          gh release download v0.80.72 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
           Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
       - name: Extract OAuth integration targets
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
           $out = New-Object System.Collections.Generic.List[string]
-          function Add-Range($file,$from,$to){
-            $out.Add("===== $file lines $from-$to =====")
-            $lines=Get-Content $file -Encoding UTF8
-            for($i=$from;$i -le [Math]::Min($to,$lines.Count);$i++){ $out.Add(("{0}: {1}" -f $i,$lines[$i-1])) }
+          $files = @(
+            'app/resources/app/electron/main.cjs',
+            'app/resources/app/electron/preload.cjs',
+            'app/resources/app/gyomuon.js'
+          )
+          $patterns = 'oauth|google:|Google 계정|토큰|token|client_id|redirect_uri|127\.0\.0\.1|localhost|authorization|access_denied|승인'
+          foreach($file in $files){
+            if(!(Test-Path $file)){ continue }
+            $lines = Get-Content $file -Encoding UTF8
+            $hits = Select-String -Path $file -Pattern $patterns -Encoding UTF8
+            $ranges = @()
+            foreach($hit in $hits){
+              $from=[Math]::Max(1,$hit.LineNumber-18); $to=[Math]::Min($lines.Count,$hit.LineNumber+35)
+              $ranges += ,@($from,$to)
+            }
+            $ranges = $ranges | Sort-Object { $_[0] }
+            $merged = @()
+            foreach($r in $ranges){
+              if($merged.Count -eq 0 -or $r[0] -gt ($merged[-1][1]+1)){ $merged += ,@($r[0],$r[1]) }
+              elseif($r[1] -gt $merged[-1][1]){ $merged[-1][1]=$r[1] }
+            }
+            foreach($r in $merged){
+              $out.Add("===== $file lines $($r[0])-$($r[1]) =====")
+              for($i=$r[0];$i -le $r[1];$i++){ $out.Add(("{0}: {1}" -f $i,$lines[$i-1])) }
+            }
           }
-          Add-Range 'app/resources/app/electron/main.cjs' 250 430
-          Add-Range 'app/resources/app/electron/main.cjs' 1120 1215
-          Add-Range 'app/resources/app/electron/main.cjs' 1685 1775
-          if(Test-Path 'app/resources/app/electron/preload.cjs'){ Add-Range 'app/resources/app/electron/preload.cjs' 1 260 }
-          Add-Range 'app/resources/app/gyomuon.js' 330 470
-          Add-Range 'app/resources/app/gyomuon.js' 3400 3555
-          Add-Range 'app/resources/app/gyomuon.js' 3900 3995
           $out | Set-Content 'oauth-target-inspect.txt' -Encoding UTF8
       - name: Commit inspection report
         shell: pwsh
@@ -47,5 +61,5 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add oauth-target-inspect.txt
-          git commit -m 'Inspect UEP OAuth integration targets' || echo 'no changes'
+          git commit -m 'Inspect current UEP OAuth integration targets' || echo 'no changes'
           git push
