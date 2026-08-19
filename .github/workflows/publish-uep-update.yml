@@ -15,30 +15,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download 0.80.77 stable base
+      - name: Download 0.80.80 base
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: v0.80.77
+          TAG: v0.80.80
         run: |
           $ErrorActionPreference='Stop'
           New-Item -ItemType Directory -Force source,app | Out-Null
           gh release download $env:TAG --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
-          if(-not (Test-Path 'source/UEP-update.zip')){throw 'UEP 0.80.77 update ZIP not found'}
+          if(-not (Test-Path 'source/UEP-update.zip')){throw 'UEP 0.80.80 update ZIP not found'}
           Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
-          if(-not (Test-Path 'app/UEP.exe')){throw 'UEP.exe not found in 0.80.77 update'}
+          if(-not (Test-Path 'app/UEP.exe')){throw 'UEP.exe not found in 0.80.80 update'}
 
-      - name: Apply 0.80.78 Desktop OAuth token fix
+      - name: Apply 0.80.81 real selection and growth-story update
         shell: pwsh
-        run: ./scripts/build-update-0.80.78.ps1
-
-      - name: Apply 0.80.79 growth profile and selection comparison
-        shell: pwsh
-        run: ./scripts/build-update-0.80.79.ps1
-
-      - name: Apply 0.80.80 non-blocking Google architecture
-        shell: pwsh
-        run: ./scripts/build-update-0.80.80.ps1
+        run: ./scripts/build-update-0.80.81.ps1
 
       - name: Build update package
         id: package
@@ -50,15 +42,15 @@ jobs:
           $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
           "sha=$sha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-      - name: Publish v0.80.80 release
+      - name: Publish v0.80.81 release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag='v0.80.80'
+          $tag='v0.80.81'
           gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
           if($LASTEXITCODE -ne 0){
-            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.80.80 - 연결 안정화와 성장 프로파일' --notes 'Google OAuth 검증 코드는 0.80.78 흐름을 승계하고, Google 연결 실패가 담임 UEP 실행이나 설정마법사를 막지 않도록 데이터 연결 계층을 분리합니다. 마지막 정상 캐시로 계속 사용하며 연결 복구 시 최신 자료를 동기화합니다. 0.80.79의 SDGs 성장 프로파일 및 선택과목 사전상담-본신청 비교/학생ID 매칭도 포함합니다.'
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.80.81 - 선택과목 실제 연결 · 학생 성장 스토리' --notes '06_선택과목이력의 2-1/2-2 학기 표기를 UEP 표준 학기명으로 정규화하여 실제 과목 카드에 연결합니다. 기존 Google Form 사전상담과 리로스쿨 본신청을 학생ID/학번 기준으로 비교해 일치·변경·추가·삭제를 표시합니다. SDGs 화면은 이수현황 중심에서 벗어나 진로·전공, 탐구주제, 학교교육과정, 선택활동, 보고서, 사회적 가치를 함께 읽는 생활기록부 핵심 성장 프로파일로 재구성합니다.'
           }
           gh release upload $tag UEP-update.zip --repo $env:GITHUB_REPOSITORY --clobber
 
@@ -69,7 +61,7 @@ jobs:
           SHA256: ${{ steps.package.outputs.sha }}
         run: |
           $ErrorActionPreference='Stop'
-          $tag='v0.80.80'
+          $tag='v0.80.81'
           $asset=(gh release view $tag --repo $env:GITHUB_REPOSITORY --json assets | ConvertFrom-Json).assets | Where-Object {$_.name -eq 'UEP-update.zip'} | Select-Object -First 1
           if(-not $asset){throw 'Release asset not found'}
           $current=Get-Content 'uep-policy.json' -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -77,23 +69,23 @@ jobs:
           if([string]::IsNullOrWhiteSpace($oauthClientId)){throw 'googleOAuthClientId missing from uep-policy.json'}
           $policy=[ordered]@{
             channel='homeroom-stable'
-            latestVersion='0.80.80'
+            latestVersion='0.80.81'
             minimumAllowedVersion='0.80.64'
             blockedVersions=@()
             forceUpdate=$false
             updateEnabled=$true
             downloadUrl=$asset.url
             sha256=$env:SHA256
-            message='UEP 0.80.80 연결 안정화 · 성장 프로파일 · 선택과목 비교'
+            message='UEP 0.80.81 선택과목 실제 연결 · 학생 성장 스토리'
             offlineGraceHours=72
             googleOAuthClientId=$oauthClientId
           } | ConvertTo-Json -Depth 4
           $info=gh api "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json?ref=main" | ConvertFrom-Json
           $encoded=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($policy))
-          $body=@{message='Enable UEP 0.80.80 automatic update';content=$encoded;sha=$info.sha;branch='main'} | ConvertTo-Json
+          $body=@{message='Enable UEP 0.80.81 automatic update';content=$encoded;sha=$info.sha;branch='main'} | ConvertTo-Json
           $body | gh api --method PUT -H 'Accept: application/vnd.github+json' "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json" --input -
 
       - uses: actions/upload-artifact@v4
         with:
-          name: UEP-0.80.80-Update-Package
+          name: UEP-0.80.81-Update-Package
           path: UEP-update.zip
