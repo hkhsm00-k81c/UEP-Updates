@@ -5,57 +5,57 @@ $pkg='app/resources/app/package.json'
 $g=Get-Content $gyo -Raw -Encoding UTF8
 $h=Get-Content $idx -Raw -Encoding UTF8
 
-# UEP 0.80.84 - the visible stuck splash is the static userAuthGate in index.html.
-# Root cause: startup awaited window.schoolBoard.loadState() with no timeout before the JS could release the gate.
+# UEP 0.80.84 - prevent the static startup auth splash from remaining forever.
+# Root cause confirmed in 0.80.83: boot waits on window.schoolBoard.loadState() before the initial gate can be released.
 
-# 1) Local persisted-state IPC must never block application boot forever.
-$old=@'
-    const saved = window.schoolBoard?.loadState
-      ? await window.schoolBoard.loadState()
-      : JSON.parse(localStorage.getItem("gyomuon-state") || "null");
-'@
-$new=@'
-    // 0.80.84: local IPC state read is important but never allowed to hold the whole app indefinitely.
-    // If it times out, continue with base/localStorage state and let the normal login screen recover the user.
-    const saved = window.schoolBoard?.loadState
-      ? await withStartupTimeout(window.schoolBoard.loadState(), 1800, null)
-      : JSON.parse(localStorage.getItem("gyomuon-state") || "null");
-'@
-if($g.Contains($old)){$g=$g.Replace($old,$new)}else{throw 'startup loadState block not found'}
+# 1) Patch loadState by expression, not by exact whitespace/source layout.
+if($g -notmatch 'withStartupTimeout\(window\.schoolBoard\.loadState\(\),\s*1800,\s*null\)'){
+  $loadPattern='await\s+window\.schoolBoard\.loadState\(\)'
+  if([regex]::IsMatch($g,$loadPattern)){
+    $g=[regex]::Replace($g,$loadPattern,'await withStartupTimeout(window.schoolBoard.loadState(), 1800, null)',1)
+  }else{
+    throw 'window.schoolBoard.loadState await expression not found'
+  }
+}
 
-# 2) Restore-remembered animation itself must be short and non-blocking.
-$g=$g.Replace('await new Promise(resolve=>setTimeout(resolve,650));','await new Promise(resolve=>setTimeout(resolve,220));')
+# 2) Remembered-user transition should be brief. This replacement is optional across source variants.
+$g=[regex]::Replace($g,'await\s+new\s+Promise\(resolve=>setTimeout\(resolve,\s*650\)\);','await new Promise(resolve=>setTimeout(resolve,220));',1)
 
 # 3) Static HTML startup gate gets an independent fail-safe.
-# This runs before gyomuon.js and prevents an eternal blank/auth splash even if an early renderer error occurs.
 if($h -notmatch '__UEP_BOOT_FAILSAFE_08084__'){
-$needle='<body><div id="userAuthGate" class="user-auth-gate">'
-$replacement=@'
-<body><div id="userAuthGate" class="user-auth-gate">
-'@
-if(-not $h.Contains($needle)){throw 'index userAuthGate opening not found'}
-$h=$h.Replace($needle,$replacement.TrimEnd())
-$script=@'
+  if($h -notmatch '<div\s+id=["'']userAuthGate["'']') { throw 'index userAuthGate not found' }
+  $script=@'
 <script>
 // __UEP_BOOT_FAILSAFE_08084__
-// The real app should replace/hide this gate almost immediately. If startup IPC or renderer initialization stalls,
-// release the static splash so users are never trapped on "자동 로그인 중" forever.
-window.__uepBootFailsafe=setTimeout(function(){
-  try{
-    var gate=document.getElementById('userAuthGate');
-    if(!gate||gate.classList.contains('hidden')) return;
-    var card=gate.querySelector('.user-auth-card');
-    if(card){
-      card.innerHTML='<div class="user-auth-brand"><span>U</span><div><small>UNHO EDUCATION PLATFORM</small><h2>UEP 시작 복구</h2><p>저장된 사용자 확인이 지연되어 UEP 화면을 먼저 엽니다.</p></div></div><button id="uepBootContinue" class="btn primary" type="button" style="margin-top:14px;width:100%">UEP 먼저 시작</button>';
-      var b=document.getElementById('uepBootContinue');
-      if(b)b.onclick=function(){gate.classList.add('hidden');document.body.classList.remove('uep-auth-locked');};
-    }
-    setTimeout(function(){try{if(gate&&!gate.classList.contains('hidden'))gate.classList.add('hidden');}catch(e){}},1800);
-  }catch(e){}
-},3200);
+(function(){
+  var started=Date.now();
+  window.__uepBootFailsafe=setTimeout(function(){
+    try{
+      var gate=document.getElementById('userAuthGate');
+      if(!gate||gate.classList.contains('hidden')) return;
+      var text=String(gate.textContent||'');
+      if(!/자동 로그인|저장된 사용자|연결 정보/.test(text)) return;
+      var card=gate.querySelector('.user-auth-card');
+      if(card){
+        card.innerHTML='<div class="user-auth-brand"><span>U</span><div><small>UNHO EDUCATION PLATFORM</small><h2>UEP 시작 복구</h2><p>저장된 사용자 확인이 지연되어 UEP 화면을 먼저 엽니다.</p></div></div><button id="uepBootContinue" class="btn primary" type="button" style="margin-top:14px;width:100%">UEP 먼저 시작</button>';
+        var b=document.getElementById('uepBootContinue');
+        if(b)b.onclick=function(){gate.classList.add('hidden');document.body.classList.remove('uep-auth-locked');};
+      }
+      setTimeout(function(){
+        try{
+          if(gate&&!gate.classList.contains('hidden')){
+            gate.classList.add('hidden');
+            document.body.classList.remove('uep-auth-locked');
+          }
+        }catch(e){}
+      },1600);
+    }catch(e){}
+  },3200);
+})();
 </script>
 '@
-$h=$h.Replace('</body>',$script+"`n</body>")
+  if($h.Contains('</body>')){$h=$h.Replace('</body>',$script+"`n</body>")}
+  else{throw 'index closing body not found'}
 }
 
 # 4) Visible version markers.
@@ -77,7 +77,7 @@ node --check $gyo
 
 $verifyG=Get-Content $gyo -Raw -Encoding UTF8
 $verifyH=Get-Content $idx -Raw -Encoding UTF8
-if(-not $verifyG.Contains('withStartupTimeout(window.schoolBoard.loadState(), 1800, null)')){throw 'loadState startup timeout missing'}
+if($verifyG -notmatch 'withStartupTimeout\(window\.schoolBoard\.loadState\(\),\s*1800,\s*null\)'){throw 'loadState startup timeout missing'}
 if(-not $verifyH.Contains('__UEP_BOOT_FAILSAFE_08084__')){throw 'HTML boot failsafe missing'}
-if(-not $verifyG.Contains('0.80.84')){throw 'visible 0.80.84 version missing'}
-Write-Host 'UEP 0.80.84 startup recovery applied: loadState timeout + static auth splash failsafe.'
+if(-not ($verifyG.Contains('0.80.84') -or $verifyH.Contains('0.80.84'))){throw 'visible 0.80.84 version missing'}
+Write-Host 'UEP 0.80.84 startup recovery applied: tolerant loadState timeout patch + static auth splash failsafe.'
