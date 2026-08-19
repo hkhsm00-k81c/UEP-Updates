@@ -6,8 +6,7 @@ $pkg='app/resources/app/package.json'
 
 $m=Get-Content $main -Raw -Encoding UTF8
 
-# 0.80.75: use Google's documented loopback root URI form and expose exact token error details.
-# Avoid PowerShell interpreting JavaScript operators by using a single-quoted here-string.
+# 0.80.76: corrected OAuth loopback callback syntax + token diagnostics.
 $oldCallback=@'
 if(u.pathname!=='/oauth2callback'){res.writeHead(404);res.end('Not found');return;}
 '@
@@ -44,19 +43,20 @@ $m=$m.Replace($old,$new)
 Set-Content $main $m -Encoding UTF8 -NoNewline
 
 $g=Get-Content $gyo -Raw -Encoding UTF8
-$g=$g.Replace('const APP_VERSION = "0.80.74";','const APP_VERSION = "0.80.75";')
-$g=$g.Replace('v0.80.70','v0.80.75')
-$g=$g.Replace('v0.80.71','v0.80.75')
-$g=$g.Replace('v0.80.72','v0.80.75')
-$g=$g.Replace('v0.80.73','v0.80.75')
-$g=$g.Replace('v0.80.74','v0.80.75')
+$g=$g.Replace('const APP_VERSION = "0.80.74";','const APP_VERSION = "0.80.76";')
+$g=$g.Replace('v0.80.70','v0.80.76')
+$g=$g.Replace('v0.80.71','v0.80.76')
+$g=$g.Replace('v0.80.72','v0.80.76')
+$g=$g.Replace('v0.80.73','v0.80.76')
+$g=$g.Replace('v0.80.74','v0.80.76')
+$g=$g.Replace('v0.80.75','v0.80.76')
 Set-Content $gyo $g -Encoding UTF8 -NoNewline
 
 $p=Get-Content $pkg -Raw -Encoding UTF8 | ConvertFrom-Json
-$p.version='0.80.75'
+$p.version='0.80.76'
 $p | ConvertTo-Json -Depth 20 | Set-Content $pkg -Encoding UTF8
 
 node --check $main
 node --check 'app/resources/app/electron/preload.cjs'
 node --check $gyo
-Write-Host 'UEP 0.80.75 loopback/token diagnostics patch applied.'
+Write-Host 'UEP 0.80.76 OAuth callback syntax/token diagnostics patch applied.'
