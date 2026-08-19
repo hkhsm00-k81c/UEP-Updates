@@ -1,0 +1,50 @@
+name: Validate UEP Launcher V2 Update Path
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'validate-launcher-v2.trigger'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate launcher syntax and safety invariants
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check launcher/launcher.cjs
+          $src=Get-Content launcher/launcher.cjs -Raw -Encoding UTF8
+          foreach($required in @("LAUNCHER_VERSION='2.0.0'",'recoverInterruptedSwap','stopUEP','APP_DIR','NEXT_DIR','BACKUP_DIR','sha256','policy-cache.json')){
+            if(-not $src.Contains($required)){throw "missing launcher invariant: $required"}
+          }
+      - name: Validate current policy and release package
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $p=Get-Content uep-policy.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          if(-not $p.updateEnabled){throw 'update is disabled'}
+          if([string]::IsNullOrWhiteSpace([string]$p.latestVersion)){throw 'latestVersion missing'}
+          if([string]::IsNullOrWhiteSpace([string]$p.downloadUrl)){throw 'downloadUrl missing'}
+          if([string]::IsNullOrWhiteSpace([string]$p.sha256)){throw 'sha256 missing'}
+          New-Item -ItemType Directory -Force verify | Out-Null
+          gh release download "v$($p.latestVersion)" --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir verify
+          if(-not (Test-Path verify/UEP-update.zip)){throw 'release update zip missing'}
+          $actual=(Get-FileHash verify/UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          if($actual -ne ([string]$p.sha256).ToLower()){throw 'policy SHA does not match release asset'}
+          Expand-Archive verify/UEP-update.zip verify/app -Force
+          if(-not (Test-Path verify/app/UEP.exe)){throw 'release package missing UEP.exe'}
+      - name: Validate installer follows policy dynamically
+        shell: pwsh
+        run: |
+          $wf=Get-Content .github/workflows/build-homeroom-installer.yml -Raw -Encoding UTF8
+          if($wf -match 'TAG: v0\.80\.76'){throw 'installer still pins old UEP 0.80.76'}
+          if(-not $wf.Contains('uep-policy.json')){throw 'installer does not resolve current stable policy'}
+          Write-Host 'Launcher V2 update path validation passed.'
