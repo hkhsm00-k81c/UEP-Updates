@@ -7,8 +7,15 @@ $pkg='app/resources/app/package.json'
 $m=Get-Content $main -Raw -Encoding UTF8
 
 # 0.80.75: use Google's documented loopback root URI form and expose exact token error details.
-# IMPORTANT: replacement text is JavaScript, so use JS || rather than PowerShell -and.
-$m=$m.Replace("if(u.pathname!=='/oauth2callback'){res.writeHead(404);res.end('Not found');return;}","if(u.pathname!=='/' && u.pathname!=='/oauth2callback'){res.writeHead(404);res.end('Not found');return;}")
+# Avoid PowerShell interpreting JavaScript operators by using a single-quoted here-string.
+$oldCallback=@'
+if(u.pathname!=='/oauth2callback'){res.writeHead(404);res.end('Not found');return;}
+'@
+$newCallback=@'
+if(u.pathname!=='/' && u.pathname!=='/oauth2callback'){res.writeHead(404);res.end('Not found');return;}
+'@
+if(-not $m.Contains($oldCallback)){throw '0.80.74 OAuth callback guard not found'}
+$m=$m.Replace($oldCallback,$newCallback)
 $m=$m.Replace('const redirectUri=`http://127.0.0.1:${port}/oauth2callback`;','const redirectUri=`http://127.0.0.1:${port}/`;')
 
 $old=@'
