@@ -42,25 +42,10 @@ await Promise.race([
 '@
 if($g.Contains($old)){$g=$g.Replace($old,$new.TrimEnd())}
 
-# Remove the exact legacy admin Google-disconnection setup block using brace-balanced scanning.
-$needle='if(!googleConnectionStatus?.ok && currentRoleId()==="admin"){'
-$start=$g.IndexOf($needle)
-if($start -ge 0){
-  $depth=0;$end=-1;$quote='';$escape=$false
-  for($i=$start;$i -lt $g.Length;$i++){
-    $ch=$g[$i]
-    if($quote){
-      if($escape){$escape=$false;continue}
-      if($ch -eq '\'){$escape=$true;continue}
-      if($ch -eq $quote){$quote=''}
-      continue
-    }
-    if($ch -eq '"' -or $ch -eq "'" -or $ch -eq '`'){$quote=$ch;continue}
-    if($ch -eq '{'){$depth++}
-    elseif($ch -eq '}'){$depth--;if($depth -eq 0){$end=$i;break}}
-  }
-  if($end -lt 0){throw 'legacy admin setup block closing brace not found'}
-  $g=$g.Substring(0,$start)+'// Google sync failure is non-blocking in 0.80.83.'+$g.Substring($end+1)
+# Preserve any existing if/else chain. Disable only the Google-disconnected admin condition.
+$legacyCond='if(!googleConnectionStatus?.ok && currentRoleId()==="admin")'
+if($g.Contains($legacyCond)){
+  $g=$g.Replace($legacyCond,'if(false && !googleConnectionStatus?.ok && currentRoleId()==="admin")')
 }
 
 if($g -notmatch '__UEP_AUTOLOGIN_WATCHDOG_08083__'){
@@ -105,4 +90,4 @@ $verify=Get-Content $gyo -Raw -Encoding UTF8
 if(-not $verify.Contains('0.80.83')){throw 'visible 0.80.83 version missing'}
 if(-not $verify.Contains('__UEP_AUTOLOGIN_WATCHDOG_08083__')){throw 'auto-login watchdog missing'}
 if($verify -match '먼저 PC 데이터 연결 인증을 완료해 주세요'){throw 'legacy Google-first login gate still present'}
-Write-Host 'UEP 0.80.83 local-first auto-login recovery applied. Google sync is non-blocking.'
+Write-Host 'UEP 0.80.83 local-first auto-login recovery applied. Google sync is non-blocking and startup if/else structure is preserved.'
