@@ -1,0 +1,49 @@
+name: Inspect UEP Readonly Gateway
+
+on:
+  push:
+    paths:
+      - inspect-readonly.trigger
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download current package
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v0.80.69
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download $env:TAG --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
+      - name: Inspect possible shared/read-only gateways
+        shell: pwsh
+        run: |
+          $targets=@('app/resources/app/electron/main.cjs','app/resources/app/electron/google-data.cjs','app/resources/app/gyomuon.js')
+          $patterns='script.google.com|googleusercontent|web.?app|proxy|gateway|readonly|read-only|공유|중계|fetch\(|https://|service.?account|oauth'
+          $out=@()
+          foreach($f in $targets){
+            if(Test-Path $f){
+              $out += "===== $f ====="
+              $out += (Select-String -Path $f -Pattern $patterns -Context 3,8 | Select-Object -First 250 | ForEach-Object {$_.ToString()})
+            }
+          }
+          Set-Content -Path readonly-gateway-inspect.txt -Value $out -Encoding UTF8
+      - name: Commit inspection
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add readonly-gateway-inspect.txt
+          git commit -m 'Inspect UEP readonly Google gateway' || exit 0
+          git push
