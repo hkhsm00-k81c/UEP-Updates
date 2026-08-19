@@ -1,0 +1,41 @@
+name: Validate UEP 0.80.70 Candidate
+
+on:
+  push:
+    paths:
+      - validate-0.80.70.trigger
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download 0.80.69 base
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.80.69 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
+      - name: Apply candidate patch
+        shell: pwsh
+        run: ./scripts/build-update-0.80.70.ps1
+      - name: Validate patched files
+        shell: pwsh
+        run: |
+          node --check app/resources/app/electron/main.cjs
+          node --check app/resources/app/electron/preload.cjs
+          node --check app/resources/app/gyomuon.js
+          $main=Get-Content app/resources/app/electron/main.cjs -Raw -Encoding UTF8
+          $pre=Get-Content app/resources/app/electron/preload.cjs -Raw -Encoding UTF8
+          $gyo=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          foreach($needle in @('__UEP_GOOGLE_USER_OAUTH_08070__','google:authorizeUser','getReadonlySheetsAuth')){if(-not $main.Contains($needle)){throw "missing main marker: $needle"}}
+          foreach($needle in @('authorizeGoogleUser','disconnectGoogleUser')){if(-not $pre.Contains($needle)){throw "missing preload marker: $needle"}}
+          if(-not $gyo.Contains('__UEP_GOOGLE_OAUTH_UI_08070__')){throw 'missing renderer OAuth UI marker'}
+          if(-not $gyo.Contains('const APP_VERSION = "0.80.70";')){throw 'version marker not updated'}
