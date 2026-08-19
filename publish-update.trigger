@@ -1,4 +1,4 @@
-Publish requested: UEP 0.80.73 emergency homeroom Google OAuth persistence fix
-Requested at: 2026-08-19 13:00 KST
-Base: v0.80.72
-Goal: force OAuth token persistence to canonical Windows AppData/UNHO Education Platform path, migrate legacy 0.80.72 token files, and keep homeroom Google connection across refresh/restart before 13:30 demo
+Publish requested: UEP 0.80.74 emergency homeroom Google OAuth token exchange/save fix
+Requested at: 2026-08-19 13:05 KST
+Base: v0.80.73
+Goal: save OAuth tokens immediately after successful exchange, make userinfo best-effort, align requested Sheets scope with configured consent scope, and surface the exact failure reason before 13:30 demo
