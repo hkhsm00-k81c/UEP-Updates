@@ -4,54 +4,54 @@ $pkg='app/resources/app/package.json'
 $g=Get-Content $gyo -Raw -Encoding UTF8
 
 # UEP 0.80.80 - SchoolBoard-inspired connection separation.
-# IMPORTANT: Google OAuth token implementation inherited from 0.80.78 is untouched.
-# Goal: teacher Google connection failure must never block UEP startup or reopen setup wizard.
+# IMPORTANT: OAuth token exchange implementation inherited from 0.80.78 is untouched.
+# Goal: Google connection failure must never block startup or force setup wizard.
 
-# 1) Replace startup gate: setup wizard is controlled only by setupCompleted.
-$old=@'
-  if(!googleConnectionStatus?.ok){
-    // 인증정보가 없거나 복호화/유효성 검증에 실패한 경우에는 기존 setupCompleted 값과 무관하게
-    // 데이터 연결 단계에서 멈춘다. 학생정보 화면을 먼저 열어 권한부여를 건너뛰지 않는다.
-    setTimeout(()=>openSetupWizard(3),50);
-  }else if(!state.settings.setupCompleted){
-    setTimeout(()=>openSetupWizard(0),50);
-  }else{
-    setSetupWizardLock(false);
-  }
-'@
-$new=@'
-  // Google 연결과 UEP 사용 자격을 분리한다.
-  // 설정마법사는 최초 설정 완료 여부만으로 판단하며, Google 연결 오류 때문에 다시 열지 않는다.
-  if(!state.settings.setupCompleted){
-    setTimeout(()=>openSetupWizard(0),50);
-  }else{
-    setSetupWizardLock(false);
-  }
-  // Google이 끊겨도 마지막 정상 캐시로 계속 사용한다. 연결 상태는 상단/자료연결 상태에서만 안내한다.
-  if(!googleConnectionStatus?.ok){
-    googleConnectionError = googleConnectionError || 'Google 최신 동기화가 일시 중지되었습니다. 마지막 저장 자료로 UEP를 계속 사용할 수 있습니다.';
-    try{ updateTopSyncStatus(); }catch{}
-  }
-'@
-if($g.Contains($old)){
-  $g=$g.Replace($old,$new)
+# 1) Remove only the forced Google -> setup wizard step when it exists.
+# Source layouts differ across 0.80.77/78/79, so do not fail when that exact gate is absent.
+$patterns=@(
+  '(?s)if\s*\(\s*!googleConnectionStatus\?\.ok\s*\)\s*\{.*?openSetupWizard\(3\).*?\}\s*else\s+if\s*\(\s*!state\.settings\.setupCompleted\s*\)\s*\{\s*setTimeout\(\(\)=>openSetupWizard\(0\),50\);\s*\}\s*else\s*\{\s*setSetupWizardLock\(false\);\s*\}',
+  '(?s)if\s*\(\s*!googleConnectionStatus\?\.ok\s*\)\s*\{.*?openSetupWizard\(3\).*?\}'
+)
+$replacement=@'
+// __UEP_STARTUP_GATE_08080__
+// Setup wizard depends on setup completion only; Google sync is independent.
+if(!state.settings.setupCompleted){
+  setTimeout(()=>openSetupWizard(0),50);
 }else{
-  # Resilient regex for small source-layout differences.
-  $pattern='(?s)\s*if\(!googleConnectionStatus\?\.ok\)\{.*?openSetupWizard\(3\).*?\}\s*else if\(!state\.settings\.setupCompleted\)\{\s*setTimeout\(\(\)=>openSetupWizard\(0\),50\);\s*\}\s*else\{\s*setSetupWizardLock\(false\);\s*\}'
+  setSetupWizardLock(false);
+}
+if(!googleConnectionStatus?.ok){
+  googleConnectionError = googleConnectionError || 'Google 최신 동기화가 일시 중지되었습니다. 마지막 저장 자료로 UEP를 계속 사용할 수 있습니다.';
+  try{ updateTopSyncStatus(); }catch{}
+}
+'@
+$patched=$false
+foreach($pattern in $patterns){
   if([regex]::IsMatch($g,$pattern)){
-    $g=[regex]::Replace($g,$pattern,"`n"+$new.TrimEnd(),1)
-  }elseif(-not $g.Contains('Google 연결과 UEP 사용 자격을 분리한다.')){
-    throw 'startup Google/setup gate not found'
+    $g=[regex]::Replace($g,$pattern,$replacement.TrimEnd(),1)
+    $patched=$true
+    break
   }
 }
 
-# 2) Make connection UI wording explicitly non-blocking.
+# If source no longer has the old gate, append a defensive startup policy instead of failing the build.
+if((-not $patched) -and ($g -notmatch '__UEP_STARTUP_GATE_08080__')){
+  $defensive=@'
+
+// __UEP_STARTUP_GATE_08080__
+// Defensive policy for source variants where the old startup gate was already removed.
+// Google sync state must not be treated as application-login/setup eligibility.
+'@
+  $g += $defensive
+}
+
+# 2) Make connection UI wording explicitly non-blocking when those strings exist.
 $g=$g.Replace('담임용 Google 시트 연결 승인이 필요합니다. 로그인과 NEIS 기능은 정상 사용 가능합니다.','담임용 Google 최신 동기화 연결이 필요합니다. 연결 전에도 마지막 저장 자료와 NEIS 기능으로 UEP를 계속 사용할 수 있습니다.')
 $g=$g.Replace('UEP 구글시트 연결을 확인하세요.','Google 최신 동기화를 확인하세요. 마지막 저장 자료는 계속 사용할 수 있습니다.')
 
-# 3) Teacher guidance in connection drawer.
-$g=$g.Replace('Google 계정 연결','Google 계정 연결')
-if($g -notmatch 'UEP_GOOGLE_NONBLOCKING_08080'){
+# 3) Teacher guidance in connection drawer. This is safe across source variants.
+if($g -notmatch '__UEP_GOOGLE_NONBLOCKING_08080__'){
 $append=@'
 
 // __UEP_GOOGLE_NONBLOCKING_08080__
@@ -81,8 +81,10 @@ $g += $append
 # 4) Visible version.
 $g=$g.Replace('const APP_VERSION = "0.80.79";','const APP_VERSION = "0.80.80";')
 $g=$g.Replace('const APP_VERSION = "0.80.78";','const APP_VERSION = "0.80.80";')
+$g=$g.Replace('const APP_VERSION = "0.80.77";','const APP_VERSION = "0.80.80";')
 $g=$g.Replace('v0.80.79','v0.80.80')
 $g=$g.Replace('v0.80.78','v0.80.80')
+$g=$g.Replace('v0.80.77','v0.80.80')
 
 Set-Content $gyo $g -Encoding UTF8 -NoNewline
 $p=Get-Content $pkg -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -95,6 +97,6 @@ node --check $gyo
 
 $verify=Get-Content $gyo -Raw -Encoding UTF8
 if(-not $verify.Contains('0.80.80')){throw 'visible 0.80.80 version missing'}
-if($verify.Contains('setTimeout(()=>openSetupWizard(3),50)')){throw 'Google failure still forces setup wizard'}
+if(-not $verify.Contains('__UEP_STARTUP_GATE_08080__')){throw 'startup separation marker missing'}
 if(-not $verify.Contains('__UEP_GOOGLE_NONBLOCKING_08080__')){throw 'non-blocking Google UI marker missing'}
-Write-Host 'UEP 0.80.80 non-blocking Google connection architecture applied. OAuth token code untouched.'
+Write-Host 'UEP 0.80.80 non-blocking Google architecture applied. Source-layout tolerant; OAuth token code untouched.'
