@@ -14,7 +14,8 @@ OutputBaseFilename=UEP-Setup-With-AutoUpdater
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
-UninstallDisplayIcon={app}\{#MyLauncherExeName}
+SetupIconFile=..\launcher\uep.ico
+UninstallDisplayIcon={app}\app-current\UEP.exe
 CloseApplications=yes
 RestartApplications=no
 
@@ -24,8 +25,8 @@ Source: "..\launcher-dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubd
 Source: "..\installed-version.json"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{autodesktop}\UEP"; Filename: "{app}\{#MyLauncherExeName}"; WorkingDir: "{app}"
-Name: "{group}\UEP"; Filename: "{app}\{#MyLauncherExeName}"; WorkingDir: "{app}"
+Name: "{autodesktop}\UEP"; Filename: "{app}\{#MyLauncherExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\app-current\UEP.exe"
+Name: "{group}\UEP"; Filename: "{app}\{#MyLauncherExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\app-current\UEP.exe"
 
 [Run]
 Filename: "{app}\{#MyLauncherExeName}"; Description: "UEP 실행"; Flags: nowait postinstall skipifsilent
