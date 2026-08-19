@@ -1,4 +1,4 @@
-Publish requested: UEP 0.80.76 OAuth callback syntax hotfix
-Requested at: 2026-08-19 16:34 KST
-Base: v0.80.74
-Goal: publish corrected OAuth callback JavaScript as a new 0.80.76 version so existing 0.80.75 clients reliably detect and install the update; retain loopback root redirect, PKCE token diagnostics, and visible v0.80.76 header.
+Publish requested: UEP 0.80.77 teacher Google connection architecture refactor
+Requested at: 2026-08-19 17:46 KST
+Base: v0.80.76
+Goal: separate admin service-account and teacher OAuth paths; request read-only Sheets scope for teachers; normalize Desktop loopback redirect to host:port; stop Google connection failures from forcing repeated setup wizard; show visible v0.80.77.
