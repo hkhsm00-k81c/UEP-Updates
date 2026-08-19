@@ -1,8 +1,7 @@
-Publish requested: UEP 0.80.80 connection architecture stabilization - retry 2
+Publish requested: UEP 0.80.81 real selection connection + student growth story
 Requested at: 2026-08-19 KST
-Fix: 0.80.80 patch no longer assumes one exact startup Google/setup gate layout. It patches the gate when present and safely applies the non-blocking architecture marker when 0.80.79 source already differs.
-Base: v0.80.77 + bundled 0.80.78 + 0.80.79 + 0.80.80 patches
-Google: inherit 0.80.78 OAuth token behavior; do not force Google as an app-start gate.
-Architecture: completed setup wizard must not reopen only because Google is disconnected; last successful cache remains usable; Google is a sync-layer warning/reconnect action.
-Features inherited: SDGs/student growth story profile and teacher guidance; selection-course studentID-first matching and pre-consultation vs Liro main-application comparison.
-Visible version: v0.80.80
+Base: v0.80.80
+Selection: normalize 06_선택과목이력 2-1/2-2 to UEP term labels; studentID-first/studentNo fallback; expose Google Form pre-consultation vs Liro main application comparison as 일치/변경/추가/삭제.
+SDGs: replace old 이수현황/counting screen with 생활기록부 핵심 성장 프로파일 integrating career/major, exploration topics, school curriculum activities, selected activities, reports and SDGs/social values; include homeroom-teacher explanation and coaching questions.
+Google OAuth/updater behavior: inherit v0.80.80 unchanged.
+Visible version: v0.80.81
