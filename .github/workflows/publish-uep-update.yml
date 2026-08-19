@@ -15,22 +15,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download 0.80.85 stable base
+      - name: Download 0.80.86 stable base
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: v0.80.85
+          TAG: v0.80.86
         run: |
           $ErrorActionPreference='Stop'
           New-Item -ItemType Directory -Force source,app | Out-Null
           gh release download $env:TAG --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
-          if(-not (Test-Path 'source/UEP-update.zip')){throw 'UEP 0.80.85 update ZIP not found'}
+          if(-not (Test-Path 'source/UEP-update.zip')){throw 'UEP 0.80.86 update ZIP not found'}
           Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
-          if(-not (Test-Path 'app/UEP.exe')){throw 'UEP.exe not found in 0.80.85 update'}
+          if(-not (Test-Path 'app/UEP.exe')){throw 'UEP.exe not found in 0.80.86 update'}
 
-      - name: Apply 0.80.86 startup pipeline recovery
+      - name: Apply 0.80.87 renderer bridge recovery
         shell: pwsh
-        run: ./scripts/build-update-0.80.86.ps1
+        run: ./scripts/build-update-0.80.87.ps1
 
       - name: Build update package
         id: package
@@ -42,15 +42,15 @@ jobs:
           $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
           "sha=$sha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-      - name: Publish v0.80.86 release
+      - name: Publish v0.80.87 release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag='v0.80.86'
+          $tag='v0.80.87'
           gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
           if($LASTEXITCODE -ne 0){
-            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.80.86 - 대시보드 부팅 복구' --notes '0.80.85에서 확인된 빈 대시보드는 navigate/render 자체의 오류카드 단계까지 도달하지 못한 부팅 파이프라인 중단으로 판단했습니다. 저장상태 정규화와 자동 사용자 복원 오류를 각각 격리하고, 자동 사용자 복원에는 1.2초 타임아웃을 적용합니다. 초기 pageContent가 비어 있으면 즉시 dashboard를 강제 렌더하고, gyomuon.js 내부 hard recovery가 여러 차례 재시도하여 빈 화면이 남지 않게 합니다. Google/NEIS/공유시트 연결은 계속 비차단으로 유지합니다.'
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.80.87 - 렌더러 복구 경로 연결' --notes '0.80.86 실패 원인을 구조적으로 수정합니다. gyomuon.js가 type=module로 실행되어 index.html의 독립 복구 watchdog이 모듈 내부 navigate/render 함수에 접근하지 못하던 문제를 제거합니다. 본체는 defer classic script로 실행하고 navigate/render/load를 명시적으로 전역 브리지합니다. HTML watchdog은 본체 렌더러를 직접 호출해 빈 대시보드를 복구합니다. 자동업데이트는 0.80.86 실제 적용으로 정상 경로가 확인되었으며, Google/NEIS/공유시트 연결은 화면 부팅 뒤 백그라운드 단계로 유지합니다.'
           }
           gh release upload $tag UEP-update.zip --repo $env:GITHUB_REPOSITORY --clobber
 
@@ -61,7 +61,7 @@ jobs:
           SHA256: ${{ steps.package.outputs.sha }}
         run: |
           $ErrorActionPreference='Stop'
-          $tag='v0.80.86'
+          $tag='v0.80.87'
           $asset=(gh release view $tag --repo $env:GITHUB_REPOSITORY --json assets | ConvertFrom-Json).assets | Where-Object {$_.name -eq 'UEP-update.zip'} | Select-Object -First 1
           if(-not $asset){throw 'Release asset not found'}
           $current=Get-Content 'uep-policy.json' -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -69,23 +69,23 @@ jobs:
           if([string]::IsNullOrWhiteSpace($oauthClientId)){throw 'googleOAuthClientId missing from uep-policy.json'}
           $policy=[ordered]@{
             channel='homeroom-stable'
-            latestVersion='0.80.86'
+            latestVersion='0.80.87'
             minimumAllowedVersion='0.80.64'
             blockedVersions=@()
             forceUpdate=$false
             updateEnabled=$true
             downloadUrl=$asset.url
             sha256=$env:SHA256
-            message='UEP 0.80.86 대시보드 부팅 복구'
+            message='UEP 0.80.87 렌더러 복구 경로 연결'
             offlineGraceHours=72
             googleOAuthClientId=$oauthClientId
           } | ConvertTo-Json -Depth 4
           $info=gh api "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json?ref=main" | ConvertFrom-Json
           $encoded=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($policy))
-          $body=@{message='Enable UEP 0.80.86 automatic update';content=$encoded;sha=$info.sha;branch='main'} | ConvertTo-Json
+          $body=@{message='Enable UEP 0.80.87 automatic update';content=$encoded;sha=$info.sha;branch='main'} | ConvertTo-Json
           $body | gh api --method PUT -H 'Accept: application/vnd.github+json' "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json" --input -
 
       - uses: actions/upload-artifact@v4
         with:
-          name: UEP-0.80.86-Update-Package
+          name: UEP-0.80.87-Update-Package
           path: UEP-update.zip
