@@ -1,0 +1,43 @@
+name: Inspect UEP Google UI
+
+on:
+  push:
+    paths:
+      - inspect-google-ui.trigger
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download current package
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.80.69 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
+      - name: Extract renderer Google connection contexts
+        shell: pwsh
+        run: |
+          $out=New-Object System.Collections.Generic.List[string]
+          foreach($f in @('app/resources/app/gyomuon.js','app/resources/app/electron/preload.cjs')){
+            $out.Add("===== $f =====")
+            if(Test-Path $f){
+              Select-String -Path $f -Pattern 'googleConnectionStatus|googleConnectionError|selectGoogleCredential|previewReadonlySync|readReadonlyCache|구글 새로고침|연결 설정|Google 시트|googleCredentialStatus|performReadonlySync|initializeGoogle|setupGoogle' -Context 12,30 | Select-Object -First 180 | ForEach-Object { $out.Add($_.ToString()) }
+            }
+          }
+          $out | Set-Content google-ui-inspect.txt -Encoding UTF8
+      - name: Commit report
+        shell: pwsh
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add google-ui-inspect.txt
+          git commit -m 'Inspect UEP Google connection UI' || echo 'no changes'
+          git push
