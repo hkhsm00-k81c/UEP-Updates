@@ -15,22 +15,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download 0.80.73 base
+      - name: Download 0.80.74 base
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: v0.80.73
+          TAG: v0.80.74
         run: |
           $ErrorActionPreference='Stop'
           New-Item -ItemType Directory -Force source,app | Out-Null
           gh release download $env:TAG --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
-          if(-not (Test-Path 'source/UEP-update.zip')){throw 'UEP 0.80.73 update ZIP not found'}
+          if(-not (Test-Path 'source/UEP-update.zip')){throw 'UEP 0.80.74 update ZIP not found'}
           Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
-          if(-not (Test-Path 'app/UEP.exe')){throw 'UEP.exe not found in 0.80.73 update'}
+          if(-not (Test-Path 'app/UEP.exe')){throw 'UEP.exe not found in 0.80.74 update'}
 
-      - name: Apply 0.80.74 emergency OAuth exchange/save fix
+      - name: Apply 0.80.75 OAuth token exchange fix
         shell: pwsh
-        run: ./scripts/build-update-0.80.74.ps1
+        run: ./scripts/build-update-0.80.75.ps1
 
       - name: Build update package
         id: package
@@ -42,15 +42,15 @@ jobs:
           $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
           "sha=$sha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-      - name: Publish v0.80.74 release
+      - name: Publish v0.80.75 release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag='v0.80.74'
+          $tag='v0.80.75'
           gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
           if($LASTEXITCODE -ne 0){
-            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.80.74 긴급업데이트 - 담임 Google 승인 토큰 저장' --notes '시연 전 긴급 수정. Google OAuth 승인 코드 교환이 성공하면 토큰을 userinfo 조회보다 먼저 즉시 저장하고 저장 결과를 재확인합니다. userinfo 실패는 연결 실패로 처리하지 않고 로그인 이메일 또는 id_token 정보로 보완합니다. 요청 범위를 Google Cloud에 등록한 spreadsheets 범위와 일치시킵니다. 실패 시 UEP 화면에 실제 원인을 남깁니다.'
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.80.75 긴급업데이트 - Google 토큰 교환 400 수정' --notes 'Google Desktop OAuth 루프백 redirect URI를 공식 예시 형태인 http://127.0.0.1:<port>/ 로 단순화하고, PKCE code_verifier를 명시적으로 전송합니다. 토큰 교환 실패 시 Google의 error/error_description을 UEP 화면에 그대로 표시합니다. 상단 버전 배지도 0.80.75로 정리합니다.'
           }
           gh release upload $tag UEP-update.zip --repo $env:GITHUB_REPOSITORY --clobber
 
@@ -61,7 +61,7 @@ jobs:
           SHA256: ${{ steps.package.outputs.sha }}
         run: |
           $ErrorActionPreference='Stop'
-          $tag='v0.80.74'
+          $tag='v0.80.75'
           $asset=(gh release view $tag --repo $env:GITHUB_REPOSITORY --json assets | ConvertFrom-Json).assets | Where-Object {$_.name -eq 'UEP-update.zip'} | Select-Object -First 1
           if(-not $asset){throw 'Release asset not found'}
           $current=Get-Content 'uep-policy.json' -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -69,23 +69,23 @@ jobs:
           if([string]::IsNullOrWhiteSpace($oauthClientId)){throw 'googleOAuthClientId missing from uep-policy.json'}
           $policy=[ordered]@{
             channel='homeroom-stable'
-            latestVersion='0.80.74'
+            latestVersion='0.80.75'
             minimumAllowedVersion='0.80.64'
             blockedVersions=@()
             forceUpdate=$false
             updateEnabled=$true
             downloadUrl=$asset.url
             sha256=$env:SHA256
-            message='UEP 0.80.74 담임 Google 승인 토큰 저장 긴급패치'
+            message='UEP 0.80.75 Google 토큰 교환 400 긴급패치'
             offlineGraceHours=72
             googleOAuthClientId=$oauthClientId
           } | ConvertTo-Json -Depth 4
           $info=gh api "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json?ref=main" | ConvertFrom-Json
           $encoded=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($policy))
-          $body=@{message='Enable UEP 0.80.74 automatic update';content=$encoded;sha=$info.sha;branch='main'} | ConvertTo-Json
+          $body=@{message='Enable UEP 0.80.75 automatic update';content=$encoded;sha=$info.sha;branch='main'} | ConvertTo-Json
           $body | gh api --method PUT -H 'Accept: application/vnd.github+json' "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json" --input -
 
       - uses: actions/upload-artifact@v4
         with:
-          name: UEP-0.80.74-Update-Package
+          name: UEP-0.80.75-Update-Package
           path: UEP-update.zip
