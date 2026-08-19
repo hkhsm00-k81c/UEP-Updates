@@ -1,7 +1,8 @@
-Publish requested: UEP 0.80.81 real selection connection + student growth story
-Requested at: 2026-08-19 KST
-Base: v0.80.80
-Selection: normalize 06_선택과목이력 2-1/2-2 to UEP term labels; studentID-first/studentNo fallback; expose Google Form pre-consultation vs Liro main application comparison as 일치/변경/추가/삭제.
-SDGs: replace old 이수현황/counting screen with 생활기록부 핵심 성장 프로파일 integrating career/major, exploration topics, school curriculum activities, selected activities, reports and SDGs/social values; include homeroom-teacher explanation and coaching questions.
-Google OAuth/updater behavior: inherit v0.80.80 unchanged.
-Visible version: v0.80.81
+Publish requested: UEP 0.80.82 selection validation + evidence-based growth profile
+Requested at: 2026-08-20 KST
+Base: v0.80.81
+Selection: dynamically normalize 2-1/2-2/3-1/3-2 from 06_선택과목이력 so tomorrow's 3rd-grade upload appears without code changes; keep Google Form pre-consultation vs main application comparison; track prior 문이과 혼합/과학 위계/학기간 중복 errors into 본신청 as 해결/지속/신규/재검토.
+Growth: SDGs cards require evidence from reports, volunteering, curriculum activities, programs and explicit SDG metadata; distinguish confirmed evidence vs possible links; explain UNESCO sustainable-development education and commonly emphasized university talent competencies together with career/major and exploration story.
+Program center: add the same student-growth/evidence lens so recommendations are interpreted as missing experiences to supplement, not SDG boxes to fill.
+Google OAuth: inherit current implementation unchanged.
+Visible version: v0.80.82
