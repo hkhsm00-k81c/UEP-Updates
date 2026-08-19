@@ -1,0 +1,36 @@
+name: Inspect UEP Login Code
+
+on:
+  push:
+    paths:
+      - inspect-login.trigger
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-login:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download current 0.80.67 package
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v0.80.67
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download $env:TAG --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
+      - name: Print login-related snippets
+        shell: pwsh
+        run: |
+          $files=@('app/resources/app/gyomuon.js','app/resources/app/electron/main.cjs')
+          foreach($f in $files){
+            Write-Host "===== $f ====="
+            if(Test-Path $f){
+              Select-String -Path $f -Pattern '로그인|사용자계정|이메일|email|login|auth|teacher|성명|사용여부' -Context 5,12 | Select-Object -First 120 | ForEach-Object { $_.ToString() }
+            }
+          }
