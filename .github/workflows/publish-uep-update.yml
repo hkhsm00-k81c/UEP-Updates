@@ -28,7 +28,7 @@ jobs:
           Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
           if(-not (Test-Path 'app/UEP.exe')){throw 'UEP.exe not found in 0.80.74 update'}
 
-      - name: Apply 0.80.75 OAuth token exchange fix
+      - name: Apply 0.80.76 OAuth callback/token fix
         shell: pwsh
         run: ./scripts/build-update-0.80.75.ps1
 
@@ -42,15 +42,15 @@ jobs:
           $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
           "sha=$sha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-      - name: Publish v0.80.75 release
+      - name: Publish v0.80.76 release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag='v0.80.75'
+          $tag='v0.80.76'
           gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
           if($LASTEXITCODE -ne 0){
-            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.80.75 긴급업데이트 - Google 토큰 교환 400 수정' --notes 'Google Desktop OAuth 루프백 redirect URI를 공식 예시 형태인 http://127.0.0.1:<port>/ 로 단순화하고, PKCE code_verifier를 명시적으로 전송합니다. 토큰 교환 실패 시 Google의 error/error_description을 UEP 화면에 그대로 표시합니다. 상단 버전 배지도 0.80.75로 정리합니다.'
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.80.76 긴급업데이트 - OAuth 콜백 문법 수정' --notes '0.80.75 재빌드에서 발견된 OAuth 콜백 JavaScript 문법 오류를 수정하고 별도 버전 0.80.76으로 배포합니다. Google Desktop OAuth 루프백 root redirect, PKCE 토큰 교환 진단, 상단 버전 0.80.76 표시를 포함합니다.'
           }
           gh release upload $tag UEP-update.zip --repo $env:GITHUB_REPOSITORY --clobber
 
@@ -61,7 +61,7 @@ jobs:
           SHA256: ${{ steps.package.outputs.sha }}
         run: |
           $ErrorActionPreference='Stop'
-          $tag='v0.80.75'
+          $tag='v0.80.76'
           $asset=(gh release view $tag --repo $env:GITHUB_REPOSITORY --json assets | ConvertFrom-Json).assets | Where-Object {$_.name -eq 'UEP-update.zip'} | Select-Object -First 1
           if(-not $asset){throw 'Release asset not found'}
           $current=Get-Content 'uep-policy.json' -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -69,23 +69,23 @@ jobs:
           if([string]::IsNullOrWhiteSpace($oauthClientId)){throw 'googleOAuthClientId missing from uep-policy.json'}
           $policy=[ordered]@{
             channel='homeroom-stable'
-            latestVersion='0.80.75'
+            latestVersion='0.80.76'
             minimumAllowedVersion='0.80.64'
             blockedVersions=@()
             forceUpdate=$false
             updateEnabled=$true
             downloadUrl=$asset.url
             sha256=$env:SHA256
-            message='UEP 0.80.75 Google 토큰 교환 400 긴급패치'
+            message='UEP 0.80.76 OAuth 콜백 문법 긴급패치'
             offlineGraceHours=72
             googleOAuthClientId=$oauthClientId
           } | ConvertTo-Json -Depth 4
           $info=gh api "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json?ref=main" | ConvertFrom-Json
           $encoded=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($policy))
-          $body=@{message='Enable UEP 0.80.75 automatic update';content=$encoded;sha=$info.sha;branch='main'} | ConvertTo-Json
+          $body=@{message='Enable UEP 0.80.76 automatic update';content=$encoded;sha=$info.sha;branch='main'} | ConvertTo-Json
           $body | gh api --method PUT -H 'Accept: application/vnd.github+json' "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json" --input -
 
       - uses: actions/upload-artifact@v4
         with:
-          name: UEP-0.80.75-Update-Package
+          name: UEP-0.80.76-Update-Package
           path: UEP-update.zip
