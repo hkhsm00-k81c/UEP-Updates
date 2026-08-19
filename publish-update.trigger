@@ -1,4 +1,4 @@
-Publish requested: UEP 0.80.75 emergency Google OAuth token exchange fix
-Requested at: 2026-08-19 13:10 KST
+Publish requested: UEP 0.80.75 rebuild after JavaScript syntax hotfix
+Requested at: 2026-08-19 13:13 KST
 Base: v0.80.74
-Goal: use documented loopback root redirect URI, send PKCE verifier explicitly, surface exact Google token error/error_description, and correct visible version badge before 13:30 demo
+Goal: rebuild 0.80.75 after correcting accidental PowerShell -and injected into main.cjs to valid JavaScript &&; retain OAuth token diagnostics and visible version fix.
