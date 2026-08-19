@@ -1,7 +1,10 @@
-Publish requested: UEP 0.80.87 renderer bridge recovery
+Publish requested: UEP 0.80.88 growth profile visual refinement
 Requested at: 2026-08-20 KST
-Base: v0.80.86
-Evidence: automatic update succeeds and v0.80.86 static shell is active, but pageContent remains empty. Runtime inspection confirmed gyomuon.js is loaded as type=module while index.html recovery watchdog tries to call module-scoped navigate(), so the independent recovery layer cannot reach the renderer.
-Fix: load gyomuon.js as deferred classic script, explicitly bridge navigate/render/load to window, replace module-blind watchdog with renderer-aware retries, and keep Google/NEIS/shared-sheet work behind UI startup.
-Inherited: all 0.80.86 and earlier features including Launcher V2, selection validation/history, 3rd-grade auto-expansion, evidence-based SDGs/UNESCO/university-talent profile, program planning-center linkage.
-Visible version: v0.80.87
+Base: v0.80.87 stable renderer recovery
+Scope: UI-only refinement. Preserve launcher, automatic update, dashboard recovery, Google/NEIS/shared-sheet startup paths.
+Fix 1: compress and visually unify the growth-profile introduction, core student story and lens explanation so the student story is visible sooner.
+Fix 2: reduce oversized intermediate cards into compact summary metrics beneath the story.
+Fix 3: redesign SDGs evidence map hierarchy so confirmed evidence is prominent, possible links are secondary, and no-evidence goals are quiet; compact evidence detail cards.
+Data logic: no evidence calculation or connection logic changes in this release.
+Next session: verify homeroom-teacher launcher/install/Google connection first before further functional changes.
+Visible version: v0.80.88
