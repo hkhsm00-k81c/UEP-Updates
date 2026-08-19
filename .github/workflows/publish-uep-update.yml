@@ -40,9 +40,9 @@ jobs:
             Copy-Item (Join-Path $tmp '*') app -Recurse -Force
           }
 
-      - name: Apply 0.80.63 fixes
+      - name: Apply 0.80.64 fixes
         shell: pwsh
-        run: ./scripts/build-update-0.80.63.ps1
+        run: ./scripts/build-update-0.80.64.ps1
 
       - name: Build update package
         id: package
@@ -54,15 +54,15 @@ jobs:
           $sha = (Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
           "sha=$sha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-      - name: Publish v0.80.63 release
+      - name: Publish v0.80.64 release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = 'v0.80.63'
+          $tag = 'v0.80.64'
           gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
           if ($LASTEXITCODE -ne 0) {
-            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.80.63 자동업데이트 - 선택과목 학생매칭 보완' --notes '생활기록부 선택과목에서 외부 교육과정 시트의 학생ID와 UEP 내부 학생ID가 달라도 학번으로 재매칭하도록 보완했습니다.'
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.80.64 자동업데이트 - 아이콘 복원 연습' --notes '0.80.63 선택과목 연결을 유지하면서 바탕화면/시작메뉴 UEP 바로가기의 대상은 Launcher로 유지하고 아이콘만 기존 UEP.exe 학교 아이콘으로 복원합니다.'
           }
           gh release upload $tag UEP-update.zip --repo $env:GITHUB_REPOSITORY --clobber
 
@@ -72,27 +72,27 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SHA256: ${{ steps.package.outputs.sha }}
         run: |
-          $tag = 'v0.80.63'
+          $tag = 'v0.80.64'
           $asset = (gh release view $tag --repo $env:GITHUB_REPOSITORY --json assets | ConvertFrom-Json).assets | Where-Object { $_.name -eq 'UEP-update.zip' } | Select-Object -First 1
           if (-not $asset) { throw 'Release asset not found' }
           $policy = [ordered]@{
             channel = 'homeroom-stable'
-            latestVersion = '0.80.63'
-            minimumAllowedVersion = '0.80.62'
+            latestVersion = '0.80.64'
+            minimumAllowedVersion = '0.80.63'
             blockedVersions = @()
-            forceUpdate = $true
+            forceUpdate = $false
             updateEnabled = $true
             downloadUrl = $asset.url
             sha256 = $env:SHA256
-            message = 'UEP 0.80.63 선택과목 학생매칭 보완'
+            message = 'UEP 0.80.64 아이콘 복원 업데이트'
             offlineGraceHours = 72
           } | ConvertTo-Json -Depth 4
           $info = gh api "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json?ref=main" | ConvertFrom-Json
           $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($policy))
-          $body = @{ message = 'Enable UEP 0.80.63 automatic update'; content = $encoded; sha = $info.sha; branch = 'main' } | ConvertTo-Json
+          $body = @{ message = 'Enable UEP 0.80.64 automatic update'; content = $encoded; sha = $info.sha; branch = 'main' } | ConvertTo-Json
           $body | gh api --method PUT -H 'Accept: application/vnd.github+json' "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json" --input -
 
       - uses: actions/upload-artifact@v4
         with:
-          name: UEP-0.80.63-Update-Package
+          name: UEP-0.80.64-Update-Package
           path: UEP-update.zip
