@@ -1,0 +1,55 @@
+name: Inspect UEP 0.80.84 Package
+
+on:
+  push:
+    paths:
+      - inspect-084.trigger
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  inspect-084:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download 0.80.84 package
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v0.80.84
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,diagnostics | Out-Null
+          gh release download $env:TAG --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
+      - name: Inspect package identity and startup
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $out='diagnostics/package-084.txt'
+          "UEP 0.80.84 package inspection" | Set-Content $out -Encoding UTF8
+          $pkg='app/resources/app/package.json'
+          $gyo='app/resources/app/gyomuon.js'
+          $idx='app/resources/app/index.html'
+          Add-Content $out "`n=== package.json ===" -Encoding UTF8
+          if(Test-Path $pkg){Get-Content $pkg -Raw -Encoding UTF8 | Add-Content $out -Encoding UTF8}
+          Add-Content $out "`n=== version markers ===" -Encoding UTF8
+          foreach($f in @($gyo,$idx)){
+            if(Test-Path $f){
+              Add-Content $out "`n--- $f ---" -Encoding UTF8
+              Select-String -Path $f -Pattern 'APP_VERSION|headerVersionChip|v0\.78\.6|v0\.80\.84|0\.80\.84|2026년 7월 20일|loadState|initialStateLoaded|navigate\(state\.activePage|userAuthGate' -Context 3,6 | Select-Object -First 140 | ForEach-Object {Add-Content $out $_.ToString() -Encoding UTF8}
+            }
+          }
+          Add-Content $out "`n=== exe and resource timestamps ===" -Encoding UTF8
+          Get-Item 'app/UEP.exe',$pkg,$gyo,$idx | Select-Object FullName,Length,LastWriteTimeUtc | Format-Table -AutoSize | Out-String | Add-Content $out -Encoding UTF8
+      - name: Commit diagnostics
+        shell: pwsh
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add diagnostics/package-084.txt
+          git commit -m 'Inspect UEP 0.80.84 package identity' || exit 0
+          git pull --rebase origin main
+          git push origin HEAD:main
