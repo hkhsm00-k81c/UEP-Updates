@@ -1,0 +1,54 @@
+name: Inspect UEP 0.80.92 Feature Sources
+
+on:
+  push:
+    paths:
+      - inspect-092-features.trigger
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download 0.80.92 package
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.80.92 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
+      - name: Extract exact feature implementation regions
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $targets=@('app/resources/app/gyomuon.js','app/resources/app/electron/main.cjs','app/resources/app/electron/preload.cjs','app/resources/app/electron/google-data.cjs')
+          $patterns=@('급식지도','오늘 급식','중식','석식','결재라인','결재','개인정보','privacy','mask','내신통계','선택과목이력','선택과목','selection','학사외출','외출','outing','quick')
+          $out=New-Object System.Collections.Generic.List[string]
+          foreach($file in $targets){
+            if(!(Test-Path $file)){continue}
+            $lines=Get-Content $file -Encoding UTF8
+            $hits=@()
+            foreach($p in $patterns){$hits += Select-String -Path $file -Pattern $p -SimpleMatch -Encoding UTF8}
+            $nums=$hits.LineNumber | Sort-Object -Unique
+            $ranges=@()
+            foreach($n in $nums){$ranges+=,@([Math]::Max(1,$n-28),[Math]::Min($lines.Count,$n+55))}
+            $ranges=$ranges|Sort-Object {$_[0]}
+            $merged=@()
+            foreach($r in $ranges){if($merged.Count-eq 0 -or $r[0]-gt $merged[-1][1]+1){$merged+=,@($r[0],$r[1])}elseif($r[1]-gt $merged[-1][1]){$merged[-1][1]=$r[1]}}
+            foreach($r in $merged){$out.Add("===== $file lines $($r[0])-$($r[1]) =====");for($i=$r[0];$i-le $r[1];$i++){$out.Add(("{0}: {1}" -f $i,$lines[$i-1]))}}
+          }
+          $out | Set-Content 'inspect-092-features-output.txt' -Encoding UTF8
+      - name: Commit inspection report
+        shell: pwsh
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add inspect-092-features-output.txt
+          git commit -m 'Inspect 0.80.92 feature implementation sources' || echo 'no changes'
+          git push
