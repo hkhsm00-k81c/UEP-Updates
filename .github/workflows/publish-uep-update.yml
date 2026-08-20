@@ -15,39 +15,41 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download 0.80.96 shipped base
+      - name: Download 0.80.97 shipped base
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: v0.80.96
+          TAG: v0.80.97
         run: |
           $ErrorActionPreference='Stop'
           New-Item -ItemType Directory -Force source,app | Out-Null
           gh release download $env:TAG --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
-          if(-not (Test-Path 'source/UEP-update.zip')){throw 'UEP 0.80.96 update ZIP not found'}
+          if(-not (Test-Path 'source/UEP-update.zip')){throw 'UEP 0.80.97 update ZIP not found'}
           Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
-          if(-not (Test-Path 'app/UEP.exe')){throw 'UEP.exe not found in 0.80.96 update'}
+          if(-not (Test-Path 'app/UEP.exe')){throw 'UEP.exe not found in 0.80.97 update'}
 
-      - name: Apply 0.80.97 direct selection loader fix
+      - name: Apply 0.80.98 SDGs evidence-card refinement
         shell: pwsh
-        run: ./scripts/build-update-0.80.97.ps1
+        run: ./scripts/build-update-0.80.98.ps1
 
-      - name: Verify direct 06 selection runtime markers
+      - name: Verify SDGs clickless evidence cards
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
           $g=Get-Content 'app/resources/app/gyomuon.js' -Raw -Encoding UTF8
-          $d=Get-Content 'app/resources/app/electron/google-data.cjs' -Raw -Encoding UTF8
+          $c=Get-Content 'app/resources/app/gyomuon.css' -Raw -Encoding UTF8
+          $purposeCount=([regex]::Matches($g,[regex]::Escape('SDGs 17개를 채우는 것이 목적이 아닙니다.'))).Count
           $checks=[ordered]@{
-            'UI subjectSelections only'=$g.Contains('for(const raw of (readonlyCache?.subjectSelections||[]))')
-            '06 range 6000'=$d.Contains('"06_선택과목이력": "''06_선택과목이력''!A1:X6000"')
-            'direct final rows'=$d.Contains("const selectedSubjectRows = legacySelectedSubjectRows.filter(row=>String(row.final||'').trim()==='Y');")
-            'subjectSelections exported'=$d.Contains('subjectSelections:selectedSubjects')
-            'no curriculum fallback'=(-not $d.Contains('confirmedSubjects.length ? confirmedSubjects : curriculumSubjects'))
-            'no legacy comparison UI'=(-not $g.Contains('${profilePanel}${selectionComparisonMarkup(student)}'))
+            'evidence cards'=$g.Contains('growth-sdg-evidence-card')
+            'evidence lists'=$g.Contains('growth-sdg-evidence-list')
+            'status ordering'=$g.Contains('priority:confirmedEvidence.length?0:possibleEvidence.length?1:2')
+            'old click detail disabled'=$g.Contains('const detail=null;')
+            'purpose badge single'=($purposeCount -le 1)
+            'new card css'=$c.Contains('__UEP_SDGS_EVIDENCE_CARDS_08098__')
+            'selection 06 connection preserved'=$g.Contains('for(const raw of (readonlyCache?.subjectSelections||[]))')
           }
           $checks.GetEnumerator() | ForEach-Object { Write-Host ("CHECK {0} = {1}" -f $_.Key,$_.Value) }
-          if($checks.Values -contains $false){throw 'Direct 06 selection verification failed'}
+          if($checks.Values -contains $false){throw 'SDGs evidence-card verification failed'}
 
       - name: Build update package
         id: package
@@ -59,15 +61,15 @@ jobs:
           $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
           "sha=$sha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-      - name: Publish v0.80.97 release
+      - name: Publish v0.80.98 release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag='v0.80.97'
+          $tag='v0.80.98'
           gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
           if($LASTEXITCODE -ne 0){
-            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.80.97 - 선택과목 06 직접연결' --notes '생활기록부 교육과정 선택과목을 기본정보연결시트 06_선택과목이력의 최종(Y) 직접 이관 리로스쿨 기록 하나만 기준으로 표시합니다. 06 탭 전체 5천여 행을 읽도록 범위를 확장하고, UI가 읽는 subjectSelections 키에 동일 데이터를 직접 전달합니다. 오류검증도 과거 오류시트가 아니라 이 직접 이관 기록을 대상으로 재계산합니다. 다른 완료 기능은 수정하지 않습니다.'
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.80.98 - SDGs 근거 지도 가독성 개선' --notes '생활기록부 SDGs 연계 성장 프로파일만 원포인트 수정합니다. 중복 안내 문구를 정리하고, SDGs 카드를 클릭하지 않아도 실제 자율·진로·동아리·봉사·선택활동·프로그램·보고서 근거가 카드 안에 보이도록 합니다. 근거 확인 → 연결 가능 → 근거 없음 순으로 배치하고, 대표 근거 최대 6건과 외 n건을 표시합니다. v0.80.97의 선택과목 06_선택과목이력 직접 연결을 포함한 기존 완료 기능은 보존합니다.'
           }
           gh release upload $tag UEP-update.zip --repo $env:GITHUB_REPOSITORY --clobber
 
@@ -78,30 +80,30 @@ jobs:
           SHA256: ${{ steps.package.outputs.sha }}
         run: |
           $ErrorActionPreference='Stop'
-          $tag='v0.80.97'
+          $tag='v0.80.98'
           $asset=(gh release view $tag --repo $env:GITHUB_REPOSITORY --json assets | ConvertFrom-Json).assets | Where-Object {$_.name -eq 'UEP-update.zip'} | Select-Object -First 1
           if(-not $asset){throw 'Release asset not found'}
           $current=Get-Content 'uep-policy.json' -Raw -Encoding UTF8 | ConvertFrom-Json
           $oauthClientId=[string]$current.googleOAuthClientId
           $policy=[ordered]@{
             channel='homeroom-stable'
-            latestVersion='0.80.97'
+            latestVersion='0.80.98'
             minimumAllowedVersion='0.80.64'
             blockedVersions=@()
             forceUpdate=$false
             updateEnabled=$true
             downloadUrl=$asset.url
             sha256=$env:SHA256
-            message='UEP 0.80.97 선택과목 기본정보 06 직접연결'
+            message='UEP 0.80.98 SDGs 근거 지도 가독성 개선'
             offlineGraceHours=72
             googleOAuthClientId=$oauthClientId
           } | ConvertTo-Json -Depth 4
           $info=gh api "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json?ref=main" | ConvertFrom-Json
           $encoded=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($policy))
-          $body=@{message='Enable UEP 0.80.97 automatic update';content=$encoded;sha=$info.sha;branch='main'} | ConvertTo-Json
+          $body=@{message='Enable UEP 0.80.98 automatic update';content=$encoded;sha=$info.sha;branch='main'} | ConvertTo-Json
           $body | gh api --method PUT -H 'Accept: application/vnd.github+json' "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json" --input -
 
       - uses: actions/upload-artifact@v4
         with:
-          name: UEP-0.80.97-Update-Package
+          name: UEP-0.80.98-Update-Package
           path: UEP-update.zip
