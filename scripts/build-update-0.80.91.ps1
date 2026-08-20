@@ -6,18 +6,18 @@ $m=Get-Content $main -Raw -Encoding UTF8
 $g=Get-Content $gyo -Raw -Encoding UTF8
 
 # UEP 0.80.91 - Desktop OAuth secretless token exchange.
-# 0.80.78 injected a client_secret that belonged to a different OAuth client.
-# Current teacher connection uses the Desktop client ID from uep-policy.json, so token exchange must not send the stale secret.
+# Remove the stale secret injected by 0.80.78. Use single-quoted
+# PowerShell regex strings so quote escaping cannot break the parser.
 
-# Remove object-literal client_secret entries.
-$m=[regex]::Replace($m,"(?s),\s*client_secret\s*:\s*['\"][^'\"]+['\"]",'')
-$m=[regex]::Replace($m,"(?s)client_secret\s*:\s*['\"][^'\"]+['\"]\s*,?",'')
+$objectSecret = '(?s),\s*client_secret\s*:\s*["''][^"'']+["'']'
+$leadingSecret = '(?s)client_secret\s*:\s*["''][^"'']+["'']\s*,?'
+$setterSecret = '(?m)^\s*[A-Za-z_$][\w$]*\.(set|append)\(\s*["'']client_secret["'']\s*,\s*["''][^"'']*["'']\s*\);?\s*$'
+$constantSecret = '(?m)^\s*const\s+clientSecret\s*=\s*["''][^"'']+["''];?\s*$'
 
-# Remove imperative URLSearchParams/FormData setters/appends for client_secret.
-$m=[regex]::Replace($m,"(?m)^\s*[A-Za-z_$][\w$]*\.(set|append)\(\s*['\"]client_secret['\"]\s*,\s*['\"][^'\"]*['\"]\s*\);?\s*$",'')
-
-# Remove any legacy constant that only stores the previously injected secret.
-$m=[regex]::Replace($m,"(?m)^\s*const\s+clientSecret\s*=\s*['\"][^'\"]+['\"];?\s*$",'')
+$m=[regex]::Replace($m,$objectSecret,'')
+$m=[regex]::Replace($m,$leadingSecret,'')
+$m=[regex]::Replace($m,$setterSecret,'')
+$m=[regex]::Replace($m,$constantSecret,'')
 
 # Keep teacher OAuth read-only and loopback redirect normalized.
 $m=$m.Replace("authUrl.searchParams.set('scope','openid email https://www.googleapis.com/auth/spreadsheets');","authUrl.searchParams.set('scope','openid email https://www.googleapis.com/auth/spreadsheets.readonly');")
@@ -42,7 +42,7 @@ node --check $gyo
 if($LASTEXITCODE -ne 0){throw 'gyomuon syntax check failed'}
 
 $verify=Get-Content $main -Raw -Encoding UTF8
-if($verify -match "client_secret\s*[:),]"){throw 'legacy client_secret token parameter still present'}
+if($verify -match 'client_secret\s*[:),]'){throw 'legacy client_secret token parameter still present'}
 if($verify -notmatch 'spreadsheets\.readonly'){throw 'teacher readonly OAuth scope missing'}
 if((Get-Content $gyo -Raw -Encoding UTF8) -notmatch '0\.80\.91'){throw 'visible 0.80.91 version missing'}
 Write-Host 'UEP 0.80.91 Desktop OAuth secretless fix applied.'
