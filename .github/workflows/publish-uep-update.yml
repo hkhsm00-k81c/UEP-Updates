@@ -28,9 +28,9 @@ jobs:
           Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
           if(-not (Test-Path 'app/UEP.exe')){throw 'UEP.exe not found in 0.80.92 update'}
 
-      - name: Apply 0.80.93 bundled refinements
+      - name: Apply 0.80.94 source-level fixes
         shell: pwsh
-        run: ./scripts/build-update-0.80.93.ps1
+        run: ./scripts/build-update-0.80.94.ps1
 
       - name: Build update package
         id: package
@@ -42,15 +42,15 @@ jobs:
           $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
           "sha=$sha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-      - name: Publish v0.80.93 release
+      - name: Publish v0.80.94 release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag='v0.80.93'
+          $tag='v0.80.94'
           gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
           if($LASTEXITCODE -ne 0){
-            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.80.93 - 운영 화면 및 선택과목 개선' --notes '0.80.92 Google OAuth 복구를 유지하면서 선택과목 현재 신청상태 중심 검증, 통계 개인정보 마스킹 보정, 빠른열기 결재라인 압축 및 급식정보 가독성 개선을 묶어 반영합니다.'
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.80.94 - 원본 구현부 직접 수정' --notes '0.80.92 안정판을 기준으로 실제 원본 구현부를 직접 수정합니다. 06_선택과목이력의 정규화/레거시 행을 병합해 3학년 본신청을 자동 반영하고, 현재 본신청 기준 문·이과 혼합·과학 위계·학기간 중복을 표시합니다. 사전신청은 오류 이력만 표시합니다. 급식지도 오늘 중식·석식은 말줄임 없이 전체 메뉴를 표시하고 결재라인 팝업은 실제 approval 렌더러 CSS를 압축합니다. 개인정보 가리기는 내신통계에서 학번·이름만 가리고 순위·과목수·총점·5/9등급·성취도 값은 표시합니다. 학사외출 현황에 교사 직접 추가 기능을 넣고 02_학사외출_일자별에 교사등록 출처로 저장합니다. 0.80.92 OAuth/런처/대시보드 복구 경로는 유지합니다.'
           }
           gh release upload $tag UEP-update.zip --repo $env:GITHUB_REPOSITORY --clobber
 
@@ -61,7 +61,7 @@ jobs:
           SHA256: ${{ steps.package.outputs.sha }}
         run: |
           $ErrorActionPreference='Stop'
-          $tag='v0.80.93'
+          $tag='v0.80.94'
           $asset=(gh release view $tag --repo $env:GITHUB_REPOSITORY --json assets | ConvertFrom-Json).assets | Where-Object {$_.name -eq 'UEP-update.zip'} | Select-Object -First 1
           if(-not $asset){throw 'Release asset not found'}
           $current=Get-Content 'uep-policy.json' -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -69,23 +69,23 @@ jobs:
           if([string]::IsNullOrWhiteSpace($oauthClientId)){throw 'googleOAuthClientId missing from uep-policy.json'}
           $policy=[ordered]@{
             channel='homeroom-stable'
-            latestVersion='0.80.93'
+            latestVersion='0.80.94'
             minimumAllowedVersion='0.80.64'
             blockedVersions=@()
             forceUpdate=$false
             updateEnabled=$true
             downloadUrl=$asset.url
             sha256=$env:SHA256
-            message='UEP 0.80.93 운영 화면 및 선택과목 개선'
+            message='UEP 0.80.94 원본 구현부 직접 수정'
             offlineGraceHours=72
             googleOAuthClientId=$oauthClientId
           } | ConvertTo-Json -Depth 4
           $info=gh api "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json?ref=main" | ConvertFrom-Json
           $encoded=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($policy))
-          $body=@{message='Enable UEP 0.80.93 automatic update';content=$encoded;sha=$info.sha;branch='main'} | ConvertTo-Json
+          $body=@{message='Enable UEP 0.80.94 automatic update';content=$encoded;sha=$info.sha;branch='main'} | ConvertTo-Json
           $body | gh api --method PUT -H 'Accept: application/vnd.github+json' "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json" --input -
 
       - uses: actions/upload-artifact@v4
         with:
-          name: UEP-0.80.93-Update-Package
+          name: UEP-0.80.94-Update-Package
           path: UEP-update.zip
