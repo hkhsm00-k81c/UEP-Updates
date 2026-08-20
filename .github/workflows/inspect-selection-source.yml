@@ -1,0 +1,52 @@
+name: Inspect UEP 0.80.96 Selection Loader
+
+on:
+  push:
+    paths:
+      - inspect-selection-source.trigger
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download shipped 0.80.96
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,diagnostics | Out-Null
+          gh release download v0.80.96 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive source/UEP-update.zip -DestinationPath app -Force
+      - name: Extract selection loader snippets
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $path='app/resources/app/electron/google-data.cjs'
+          $text=Get-Content $path -Raw -Encoding UTF8
+          $terms=@('06_선택과목이력','subjectSelections','selectedSubjectRows','normalizedSubjectRows','fallbackSubjectRows','legacySelectedSubjectRows','selectionSubjectErrors')
+          $out=@()
+          foreach($term in $terms){
+            $out += "===== TERM: $term ====="
+            $start=0;$count=0
+            while(($idx=$text.IndexOf($term,$start,[System.StringComparison]::Ordinal)) -ge 0 -and $count -lt 8){
+              $a=[Math]::Max(0,$idx-1800);$b=[Math]::Min($text.Length,$idx+2600)
+              $out += $text.Substring($a,$b-$a)
+              $out += "`n-----`n"
+              $start=$idx+$term.Length;$count++
+            }
+          }
+          Set-Content diagnostics/selection-loader-08096.txt ($out -join "`r`n") -Encoding UTF8
+      - name: Commit diagnostics
+        shell: pwsh
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add diagnostics/selection-loader-08096.txt
+          git commit -m 'Capture shipped 0.80.96 selection loader' || exit 0
+          git push
