@@ -1,7 +1,8 @@
-Publish requested: UEP 0.80.92 homeroom Google OAuth client migration recovery - retry
+Publish requested: UEP 0.80.93 bundled operational refinements
 Requested at: 2026-08-20 KST
-Base: v0.80.91 stable release
-Retry reason: first 0.80.92 build reached the verification phase but the PowerShell regex used only for validation had an unmatched parenthesis. OAuth patch logic itself was not the failing step.
-Fix: replace fragile validation regex with exact string checks; keep current policy Desktop OAuth client_id authoritative and clear stale saved OAuth credentials when client IDs differ.
-Preserve: 0.80.91 PKCE secretless/read-only Sheets OAuth; 0.80.90 selection/SDGs/privacy; launcher, updater and dashboard recovery.
-Visible version: v0.80.92
+Base: v0.80.92 stable release
+Selection: pre-application is retained as error history only; current/main application is the authoritative current state. Surface current mixed humanities/science selection, science prerequisite hierarchy violations, and cross-semester duplicate applications. Preserve current subject application display and 3rd-year data loaded from the selection-history source when present.
+Privacy: in grade statistics, privacy mode masks only student identifiers (name/student number); score, rank, grade, subject, achievement and calculated statistics remain visible.
+Quick open: compact approval-line popup and improve meal-info readability without truncation.
+Preserve: 0.80.92 Google OAuth recovery, launcher/updater/dashboard recovery, SDGs/growth-profile refinements.
+Visible version: v0.80.93
