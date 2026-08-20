@@ -1,0 +1,62 @@
+name: Inspect UEP 0.80.94 Google and Approval
+on:
+  push:
+    paths:
+      - inspect-094-google-approval.trigger
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download published 0.80.94
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force pkg,app | Out-Null
+          gh release download v0.80.94 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir pkg
+          Expand-Archive pkg/UEP-update.zip app -Force
+      - name: Extract exact OAuth and approval runtime sources
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $m=Get-Content app/resources/app/electron/main.cjs -Raw -Encoding UTF8
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          $c=Get-Content app/resources/app/gyomuon.css -Raw -Encoding UTF8
+          $policy=Get-Content uep-policy.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          $out=New-Object System.Collections.Generic.List[string]
+          $out.Add('=== POLICY ===')
+          $cid=[string]$policy.googleOAuthClientId
+          $out.Add('clientId present=' + (-not [string]::IsNullOrWhiteSpace($cid)))
+          $out.Add('clientId desktop-like=' + ($cid -match '\.apps\.googleusercontent\.com$'))
+          $out.Add('clientId length=' + $cid.Length)
+          $out.Add('')
+          foreach($term in @('loadGoogleOAuthClientId','googleOAuthClientId','accounts.google.com/o/oauth2','oauth2.googleapis.com/token','code_verifier','redirect_uri','client_secret','invalid_client','refresh_token')){
+            $out.Add("=== MAIN TERM: $term ===")
+            $matches=[regex]::Matches($m,[regex]::Escape($term),[System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+            $out.Add('count=' + $matches.Count)
+            foreach($match in $matches | Select-Object -First 8){$s=[Math]::Max(0,$match.Index-600);$l=[Math]::Min(1500,$m.Length-$s);$out.Add($m.Substring($s,$l));$out.Add('---')}
+          }
+          foreach($term in @('approvalListMarkup','showApprovalDetail','approval-explorer','approval-nav','approval-nav-row','approval-detail')){
+            $out.Add("=== APPROVAL JS TERM: $term ===")
+            $matches=[regex]::Matches($g,[regex]::Escape($term))
+            $out.Add('count=' + $matches.Count)
+            foreach($match in $matches | Select-Object -First 6){$s=[Math]::Max(0,$match.Index-700);$l=[Math]::Min(1800,$g.Length-$s);$out.Add($g.Substring($s,$l));$out.Add('---')}
+            $out.Add("=== APPROVAL CSS TERM: $term ===")
+            $matches=[regex]::Matches($c,[regex]::Escape($term))
+            $out.Add('count=' + $matches.Count)
+            foreach($match in $matches | Select-Object -First 8){$s=[Math]::Max(0,$match.Index-500);$l=[Math]::Min(1400,$c.Length-$s);$out.Add($c.Substring($s,$l));$out.Add('---')}
+          }
+          $out | Set-Content inspect-094-google-approval-output.txt -Encoding UTF8
+      - name: Commit focused inspection output
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add inspect-094-google-approval-output.txt
+          git diff --cached --quiet; if($LASTEXITCODE -ne 0){git commit -m 'Capture 0.80.94 Google OAuth and approval runtime sources';git push}
