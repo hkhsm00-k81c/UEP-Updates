@@ -1,6 +1,6 @@
 Publish requested: UEP 0.80.96 ONE-POINT curriculum selection-history fix
-Requested at: 2026-08-20 23:10 KST
-Retry reason: previous run failed because a whole-file .NET regex timed out on large gyomuon.js. build-update-0.80.96.ps1 now uses literal IndexOf anchors instead of the expensive regex.
+Requested at: 2026-08-20 23:17 KST
+Retry reason: previous run found selectionErrorsForStudent start but not the guessed following-function anchor. The build now replaces the exact shipped 0.80.95 selectionErrorsForStudent block directly, with no regex and no guessed end-function name.
 Base: shipped v0.80.95 update package.
 Scope lock: 생활기록부 > 교육과정(선택과목) only. Do not modify meal, privacy, dorm outing, approval line, or Google OAuth.
 Single source of truth: 기본정보연결시트 06_선택과목이력 -> readonlyCache.subjectSelections only. This is the directly migrated Liroschool application record.
