@@ -8,7 +8,7 @@ $d=Get-Content $google -Raw -Encoding UTF8
 # Version bump.
 $g=$g.Replace('const APP_VERSION = "0.80.96";','const APP_VERSION = "0.80.97";').Replace('v0.80.96','v0.80.97')
 
-# 06_선택과목이력 currently has >5,000 rows. Read the whole direct-migration table.
+# 06_선택과목이력 has 5,410 rows. Read the complete direct-migration table.
 $oldRange='"06_선택과목이력": "''06_선택과목이력''!A1:X2000"'
 $newRange='"06_선택과목이력": "''06_선택과목이력''!A1:X6000"'
 if(-not $d.Contains($oldRange)){throw '06 selection range anchor not found'}
@@ -26,23 +26,20 @@ const selectedSubjectRows = (()=>{
     return out;
   })();
 '@
-$newSelected=@'
-const selectedSubjectRows = legacySelectedSubjectRows.filter(row=>String(row.final||'').trim()==='Y');
-'@
+$newSelected="const selectedSubjectRows = legacySelectedSubjectRows.filter(row=>String(row.final||'').trim()==='Y');"
 if(-not $d.Contains($oldSelected.Trim())){throw 'selectedSubjectRows merge block not found'}
-$d=$d.Replace($oldSelected.Trim(),$newSelected.Trim())
+$d=$d.Replace($oldSelected.Trim(),$newSelected)
 
-# Do not import historical error rows from another sheet. Recalculate only from the direct 06 rows.
-$oldErrors=@'
-const selectionSubjectErrors = rowsFrom("41_선택과목_오류검토").map((row,index)=>({
-    id:String(row["오류ID"]||`selection-error-${index}`), studentId:String(valueByHeader(row, "학생ID", "학생 ID")||"").trim(), studentNo:String(valueByHeader(row, "학번")||"").replace(/\.0$/, ""), name:String(valueByHeader(row, "성명", "이름", "학생명")||"").trim(), type:String(row["오류유형"]||"").trim(), severity:String(row["심각도"]||"확인").trim(), subject:String(row["표준과목명"]||"").trim(), terms:String(row["관련학기"]||"").trim(), detail:String(row["상세내용"]||"").trim(), status:String(row["처리상태"]||"미처리").trim()
-  })).filter(row=>(row.studentId||row.studentNo)&&row.type);
-'@
-$newErrors='const selectionSubjectErrors = [];'
-if(-not $d.Contains($oldErrors.Trim())){throw 'legacy selection error import block not found'}
-$d=$d.Replace($oldErrors.Trim(),$newErrors)
+# Remove historical 41_선택과목_오류검토 import by stable literal boundaries, then infer errors only from selectedSubjectRows.
+$errStartNeedle='const selectionSubjectErrors = rowsFrom("41_선택과목_오류검토")'
+$errStart=$d.IndexOf($errStartNeedle,[System.StringComparison]::Ordinal)
+if($errStart -lt 0){throw 'legacy selection error import start not found'}
+$errEndNeedle='const scienceSubjectPattern'
+$errEnd=$d.IndexOf($errEndNeedle,$errStart,[System.StringComparison]::Ordinal)
+if($errEnd -lt 0){throw 'legacy selection error import end not found'}
+$d=$d.Substring(0,$errStart)+'const selectionSubjectErrors = [];'+[Environment]::NewLine+'  '+$d.Substring($errEnd)
 
-# selectedSubjects is also direct 06 final rows only. No curriculum/form fallback.
+# selectedSubjects is the exact same direct 06 final rows. No curriculum/form fallback.
 $oldDisplay=@'
 const confirmedSubjects = legacySelectedSubjectRows.filter(row=>row.final==="Y"||row.status==="확정");
   const selectedSubjects = (confirmedSubjects.length ? confirmedSubjects : curriculumSubjects).map(row=>{
@@ -75,7 +72,7 @@ $checkD=Get-Content $google -Raw -Encoding UTF8
 $checks=[ordered]@{
   '06 range 6000'=$checkD.Contains('"06_선택과목이력": "''06_선택과목이력''!A1:X6000"')
   'direct final source'=$checkD.Contains("const selectedSubjectRows = legacySelectedSubjectRows.filter(row=>String(row.final||'').trim()==='Y');")
-  'no legacy error import'=$checkD.Contains('const selectionSubjectErrors = [];')
+  'no legacy error import'=(-not $checkD.Contains('41_선택과목_오류검토'))
   'subjectSelections export'=$checkD.Contains('subjectSelections:selectedSubjects')
   'no curriculum fallback'=(-not $checkD.Contains('confirmedSubjects.length ? confirmedSubjects : curriculumSubjects'))
 }
