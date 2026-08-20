@@ -15,22 +15,41 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download 0.80.92 stable base
+      - name: Download 0.80.94 shipped base
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: v0.80.92
+          TAG: v0.80.94
         run: |
           $ErrorActionPreference='Stop'
           New-Item -ItemType Directory -Force source,app | Out-Null
           gh release download $env:TAG --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
-          if(-not (Test-Path 'source/UEP-update.zip')){throw 'UEP 0.80.92 update ZIP not found'}
+          if(-not (Test-Path 'source/UEP-update.zip')){throw 'UEP 0.80.94 update ZIP not found'}
           Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
-          if(-not (Test-Path 'app/UEP.exe')){throw 'UEP.exe not found in 0.80.92 update'}
+          if(-not (Test-Path 'app/UEP.exe')){throw 'UEP.exe not found in 0.80.94 update'}
 
-      - name: Apply 0.80.94 source-level fixes
+      - name: Apply 0.80.95 Google recovery and approval fixes
         shell: pwsh
-        run: ./scripts/build-update-0.80.94.ps1
+        run: ./scripts/build-update-0.80.95.ps1
+
+      - name: Verify preserved and repaired runtime markers
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $g=Get-Content 'app/resources/app/gyomuon.js' -Raw -Encoding UTF8
+          $c=Get-Content 'app/resources/app/gyomuon.css' -Raw -Encoding UTF8
+          $m=Get-Content 'app/resources/app/electron/main.cjs' -Raw -Encoding UTF8
+          $checks=[ordered]@{
+            'meal preserved'=$g.Contains('duty-meal-menu-full')
+            'privacy preserved'=$g.Contains('privacy-demo-mode')
+            'outing teacher editor preserved'=$g.Contains('openDormOutingTeacherEditor')
+            'outing save preserved'=$m.Contains('dormOuting:save')
+            'selection merge preserved'=$g.Contains('readonlyCache?.subjectSelections')
+            'approval 095 css'=$c.Contains('__UEP_APPROVAL_COMPACT_08095__')
+            'oauth stale recovery'=$m.Contains('저장된 Google 인증정보가 현재 UEP 연결설정과 맞지 않습니다')
+          }
+          $checks.GetEnumerator() | ForEach-Object { Write-Host ("CHECK {0} = {1}" -f $_.Key,$_.Value) }
+          if($checks.Values -contains $false){throw 'One or more required runtime markers are missing'}
 
       - name: Build update package
         id: package
@@ -42,15 +61,15 @@ jobs:
           $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
           "sha=$sha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-      - name: Publish v0.80.94 release
+      - name: Publish v0.80.95 release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag='v0.80.94'
+          $tag='v0.80.95'
           gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
           if($LASTEXITCODE -ne 0){
-            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.80.94 - 원본 구현부 직접 수정' --notes '0.80.92 안정판을 기준으로 실제 원본 구현부를 직접 수정합니다. 06_선택과목이력의 정규화/레거시 행을 병합해 3학년 본신청을 자동 반영하고, 현재 본신청 기준 문·이과 혼합·과학 위계·학기간 중복을 표시합니다. 사전신청은 오류 이력만 표시합니다. 급식지도 오늘 중식·석식은 말줄임 없이 전체 메뉴를 표시하고 결재라인 팝업은 실제 approval 렌더러 CSS를 압축합니다. 개인정보 가리기는 내신통계에서 학번·이름만 가리고 순위·과목수·총점·5/9등급·성취도 값은 표시합니다. 학사외출 현황에 교사 직접 추가 기능을 넣고 02_학사외출_일자별에 교사등록 출처로 저장합니다. 0.80.92 OAuth/런처/대시보드 복구 경로는 유지합니다.'
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.80.95 - 담임 Google 연결 복구 및 결재라인 개선' --notes '0.80.94 실제 배포본을 기준으로 정상 반영된 급식지도 중식·석식, 개인정보 가리기, 학사외출 교사추가, 선택과목 병합 로직을 보존합니다. 담임 Google OAuth는 저장된 인증정보가 invalid_client/invalid_grant로 거절될 경우 오래된 인증 상태를 자동 정리하고 재승인을 요구하도록 복구 경로를 강화합니다. 결재라인은 실제 approval explorer/nav/detail 구조를 기준으로 목록과 상세영역을 압축해 한 화면 가독성을 개선합니다.'
           }
           gh release upload $tag UEP-update.zip --repo $env:GITHUB_REPOSITORY --clobber
 
@@ -61,7 +80,7 @@ jobs:
           SHA256: ${{ steps.package.outputs.sha }}
         run: |
           $ErrorActionPreference='Stop'
-          $tag='v0.80.94'
+          $tag='v0.80.95'
           $asset=(gh release view $tag --repo $env:GITHUB_REPOSITORY --json assets | ConvertFrom-Json).assets | Where-Object {$_.name -eq 'UEP-update.zip'} | Select-Object -First 1
           if(-not $asset){throw 'Release asset not found'}
           $current=Get-Content 'uep-policy.json' -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -69,23 +88,23 @@ jobs:
           if([string]::IsNullOrWhiteSpace($oauthClientId)){throw 'googleOAuthClientId missing from uep-policy.json'}
           $policy=[ordered]@{
             channel='homeroom-stable'
-            latestVersion='0.80.94'
+            latestVersion='0.80.95'
             minimumAllowedVersion='0.80.64'
             blockedVersions=@()
             forceUpdate=$false
             updateEnabled=$true
             downloadUrl=$asset.url
             sha256=$env:SHA256
-            message='UEP 0.80.94 원본 구현부 직접 수정'
+            message='UEP 0.80.95 담임 Google 연결 복구 및 결재라인 개선'
             offlineGraceHours=72
             googleOAuthClientId=$oauthClientId
           } | ConvertTo-Json -Depth 4
           $info=gh api "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json?ref=main" | ConvertFrom-Json
           $encoded=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($policy))
-          $body=@{message='Enable UEP 0.80.94 automatic update';content=$encoded;sha=$info.sha;branch='main'} | ConvertTo-Json
+          $body=@{message='Enable UEP 0.80.95 automatic update';content=$encoded;sha=$info.sha;branch='main'} | ConvertTo-Json
           $body | gh api --method PUT -H 'Accept: application/vnd.github+json' "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json" --input -
 
       - uses: actions/upload-artifact@v4
         with:
-          name: UEP-0.80.94-Update-Package
+          name: UEP-0.80.95-Update-Package
           path: UEP-update.zip
