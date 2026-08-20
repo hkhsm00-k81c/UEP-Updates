@@ -79,7 +79,6 @@ function selectionErrorsForStudent(student){
 if(-not $g.Contains($oldErrors)){throw 'selectionErrorsForStudent not found'}
 $g=$g.Replace($oldErrors,$newErrors.Trim())
 
-# Remove the old pre-vs-main comparison panel from curriculum workspace.
 $oldCurr='${profilePanel}${selectionComparisonMarkup(student)}${selectionErrorHistoryMarkup(student)}${errorPanel}'
 $newCurr='${profilePanel}${selectionErrorHistoryMarkup(student)}${errorPanel}'
 if(-not $g.Contains($oldCurr)){throw 'curriculum panel composition not found'}
@@ -92,7 +91,7 @@ $g=$g.Replace('현재 학기간 동일과목 중복 및 문·이과 교차 오�
 # 3) MEAL: make monthly quick-open meal text a real multi-line menu.
 $g=$g.Replace('<span>${escapeHtml((meal.menu||[]).join('' · ''))}</span>','<span class="duty-meal-menu-full">${(meal.menu||[]).map(item=>`<i>${escapeHtml(item)}</i>`).join('''')}</span>')
 
-# 4) TEACHER-ADDED DORM OUTING: shared sheet write, same normalized 02_학사외출_일자별 source.
+# 4) TEACHER-ADDED DORM OUTING.
 $mainAnchor='async function saveStudentGuidanceRecord(payload={}){'
 $saveOuting=@'
 async function saveDormOuting(payload={}){
@@ -101,12 +100,7 @@ async function saveDormOuting(payload={}){
   const account=await readEncrypted(credentialPath()); if(!validateServiceAccount(account))throw new Error('학사외출 교사등록은 쓰기 연결이 필요합니다. 관리자 연결 상태를 확인하세요.');
   const token=await getSheetsToken(account),now=new Date().toISOString(),id=String(payload.id||`OUT-TEACHER-${crypto.randomUUID()}`);
   const category=String(payload.category||'외출'),home=/퇴소|귀가/.test(category);
-  const row=[[
-    id,'',String(payload.date||now.slice(0,10)),String(payload.studentId||''),String(payload.grade||'1'),String(payload.className||''),String(payload.number||''),String(payload.name||''),
-    '교사등록',category,home?'귀가형':'복귀형',String(payload.outTime||''),home?'':String(payload.returnTime||''),home?String(payload.returnTime||''):'',
-    String(payload.reason||''),String(payload.destination||''),String(payload.guardian||''),String(payload.note||''),String(payload.status||'확인'),now,now,'UEP반영',now,'','','',
-    'Y','교사 직접등록','담임·관리자 직접 확인',now
-  ]];
+  const row=[[id,'',String(payload.date||now.slice(0,10)),String(payload.studentId||''),String(payload.grade||'1'),String(payload.className||''),String(payload.number||''),String(payload.name||''),'교사등록',category,home?'귀가형':'복귀형',String(payload.outTime||''),home?'':String(payload.returnTime||''),home?String(payload.returnTime||''):'',String(payload.reason||''),String(payload.destination||''),String(payload.guardian||''),String(payload.note||''),String(payload.status||'확인'),now,now,'UEP반영',now,'','','','Y','교사 직접등록','담임·관리자 직접 확인',now]];
   await appendSheetValues(token,UEP_SPREADSHEET_ID,"'02_학사외출_일자별'!A:AD",row);
   liveDataCache=null;liveDataFetchedAt=0;const data=await fetchLiveData({force:true});return {ok:true,id,data};
 }
@@ -114,8 +108,12 @@ async function saveDormOuting(payload={}){
 '@
 if(-not $m.Contains($mainAnchor)){throw 'main outing insertion anchor not found'}
 $m=$m.Replace($mainAnchor,$saveOuting+$mainAnchor)
-$m=$m.Replace('ipcMain.handle("studentGuidance:save", async (_event, payload={}) => saveStudentGuidanceRecord(payload));','ipcMain.handle("studentGuidance:save", async (_event, payload={}) => saveStudentGuidanceRecord(payload));`n  ipcMain.handle("dormOuting:save", async (_event, payload={}) => saveDormOuting(payload));')
-$p=$p.Replace('saveStudentGuidanceRecord: (payload) => ipcRenderer.invoke("studentGuidance:save", payload),','saveStudentGuidanceRecord: (payload) => ipcRenderer.invoke("studentGuidance:save", payload),`n  saveDormOuting: (payload) => ipcRenderer.invoke("dormOuting:save", payload),')
+$ipcOld='ipcMain.handle("studentGuidance:save", async (_event, payload={}) => saveStudentGuidanceRecord(payload));'
+$ipcNew=$ipcOld+[Environment]::NewLine+'  ipcMain.handle("dormOuting:save", async (_event, payload={}) => saveDormOuting(payload));'
+$m=$m.Replace($ipcOld,$ipcNew)
+$preOld='saveStudentGuidanceRecord: (payload) => ipcRenderer.invoke("studentGuidance:save", payload),'
+$preNew=$preOld+[Environment]::NewLine+'  saveDormOuting: (payload) => ipcRenderer.invoke("dormOuting:save", payload),'
+$p=$p.Replace($preOld,$preNew)
 
 $outingAnchor='function openDormOutingDrawer() {'
 $outingEditor=@'
@@ -124,7 +122,7 @@ function openDormOutingTeacherEditor(){
   const ids=new Set(dorm.flatMap(x=>[String(x.studentId||''),String(x.studentNo||'')]).filter(Boolean));
   const students=(ids.size?all.filter(s=>ids.has(String(s.id||''))||ids.has(String(s.studentNo||''))):all).filter(s=>String(s.status||'재학')==='재학').sort((a,b)=>String(a.studentNo||'').localeCompare(String(b.studentNo||''),'ko'));
   const layer=document.createElement('div');layer.className='issue-layer';layer.id='dormOutingTeacherLayer';
-  layer.innerHTML=`<div class="issue-dialog dorm-outing-teacher-dialog"><header><div><small>DORMITORY · TEACHER ENTRY</small><h3>학사외출 교사 추가</h3><p>갑작스러운 병원 진료 등 학생 폼 제출이 어려운 경우 교사가 직접 기록합니다.</p></div><button type="button" data-outing-editor-close>×</button></header><form id="dormOutingTeacherForm"><div class="dorm-outing-editor-grid"><label>학생<select id="dormOutingTeacherStudent" required><option value="">학생 선택</option>${students.map(s=>`<option value="${escapeHtml(s.id||s.studentNo||'')}">${escapeHtml(`${s.studentNo||''} ${s.name||''}`)}</option>`).join('')}</select></label><label>날짜<input id="dormOutingTeacherDate" type="date" value="${escapeHtml(dateKey(outingViewDate))}" required></label><label>구분<select id="dormOutingTeacherCategory"><option>외출</option><option>병원외출</option><option>퇴소</option><option>늦은 입소</option></select></label><label>외출시간<input id="dormOutingTeacherOut" type="time"></label><label>복귀·귀가 예정<input id="dormOutingTeacherReturn" type="time"></label><label>사유<input id="dormOutingTeacherReason" placeholder="예: 복통으로 병원 진료" required></label><label>목적지<input id="dormOutingTeacherDestination" placeholder="병원·자택 등"></label><label class="wide">비고<input id="dormOutingTeacherNote" placeholder="보호자 연락 여부 등"></label></div><div class="modal-actions"><button type="button" class="btn secondary" data-outing-editor-close>취소</button><button class="btn primary" type="submit">교사등록 저장</button></div></form></div>`;
+  layer.innerHTML=`<div class="issue-dialog dorm-outing-teacher-dialog"><header><div><small>DORMITORY · TEACHER ENTRY</small><h3>학사외출 교사 추가</h3><p>갑작스러운 병원 진료 등 학생 폼 제출이 어려운 경우 교사가 직접 기록합니다.</p></div><button type="button" data-outing-editor-close>×</button></header><form id="dormOutingTeacherForm"><div class="dorm-outing-editor-grid"><label>학생<select id="dormOutingTeacherStudent" required><option value="">학생 선택</option>${students.map(s=>`<option value="${escapeHtml(s.id||s.studentNo||'')}">${escapeHtml((s.studentNo||'')+' '+(s.name||''))}</option>`).join('')}</select></label><label>날짜<input id="dormOutingTeacherDate" type="date" value="${escapeHtml(dateKey(outingViewDate))}" required></label><label>구분<select id="dormOutingTeacherCategory"><option>외출</option><option>병원외출</option><option>퇴소</option><option>늦은 입소</option></select></label><label>외출시간<input id="dormOutingTeacherOut" type="time"></label><label>복귀·귀가 예정<input id="dormOutingTeacherReturn" type="time"></label><label>사유<input id="dormOutingTeacherReason" placeholder="예: 복통으로 병원 진료" required></label><label>목적지<input id="dormOutingTeacherDestination" placeholder="병원·자택 등"></label><label class="wide">비고<input id="dormOutingTeacherNote" placeholder="보호자 연락 여부 등"></label></div><div class="modal-actions"><button type="button" class="btn secondary" data-outing-editor-close>취소</button><button class="btn primary" type="submit">교사등록 저장</button></div></form></div>`;
   document.body.appendChild(layer);const close=()=>layer.remove();layer.querySelectorAll('[data-outing-editor-close]').forEach(b=>b.onclick=close);
   layer.querySelector('#dormOutingTeacherForm').onsubmit=async e=>{e.preventDefault();const id=layer.querySelector('#dormOutingTeacherStudent').value,student=students.find(s=>String(s.id||s.studentNo||'')===String(id));if(!student)return toast('학생을 선택하세요.');const payload={role:currentRoleId(),studentId:String(student.id||''),studentNo:String(student.studentNo||''),name:String(student.name||''),grade:String(student.grade||'1'),className:String(classNumberOf(student)||''),number:String(student.number||''),date:layer.querySelector('#dormOutingTeacherDate').value,category:layer.querySelector('#dormOutingTeacherCategory').value,outTime:layer.querySelector('#dormOutingTeacherOut').value,returnTime:layer.querySelector('#dormOutingTeacherReturn').value,reason:layer.querySelector('#dormOutingTeacherReason').value.trim(),destination:layer.querySelector('#dormOutingTeacherDestination').value.trim(),note:layer.querySelector('#dormOutingTeacherNote').value.trim(),status:'확인',writer:currentLoginTeacherName()||''};const btn=e.submitter;btn.disabled=true;btn.textContent='저장 중…';try{const result=await window.schoolBoard?.saveDormOuting?.(payload);if(!result?.ok)throw new Error(result?.reason||'저장 실패');readonlyCache=result.data||readonlyCache;close();openDormOutingDrawer();updateDormOutingCount();toast('학사외출을 교사등록으로 저장했습니다.');}catch(err){btn.disabled=false;btn.textContent='교사등록 저장';toast(err?.message||'학사외출 저장 실패');}};
 }
@@ -135,10 +133,10 @@ $g=$g.Replace($outingAnchor,$outingEditor+$outingAnchor)
 $g=$g.Replace('<button class="btn primary" data-outing-print>오늘 명단 출력</button>','<button class="btn primary" data-outing-teacher-add>+ 외출 추가</button><button class="btn primary" data-outing-print>오늘 명단 출력</button>')
 $printBind='  $("[data-outing-print]")?.addEventListener("click",()=>{'
 if(-not $g.Contains($printBind)){throw 'outing action bind anchor not found'}
-$g=$g.Replace($printBind,'  $("[data-outing-teacher-add]")?.addEventListener("click",openDormOutingTeacherEditor);`n'+$printBind)
+$printNew='  $("[data-outing-teacher-add]")?.addEventListener("click",openDormOutingTeacherEditor);'+[Environment]::NewLine+$printBind
+$g=$g.Replace($printBind,$printNew)
 
 # 5) Exact CSS source fixes.
-# Privacy: remove broad score-statistic blur; keep only student number/name inside the student button masked.
 $c=$c.Replace('.privacy-demo-mode .internal-ranking-row span,`n.privacy-demo-mode .internal-ranking-row b,`n.privacy-demo-mode .internal-ranking-row strong,','')
 $extraCss=@'
 
