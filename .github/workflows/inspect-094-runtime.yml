@@ -1,0 +1,44 @@
+name: Inspect UEP 0.80.94 Runtime Features
+on:
+  push:
+    paths:
+      - inspect-094.trigger
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download published 0.80.94
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force pkg,app | Out-Null
+          gh release download v0.80.94 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir pkg
+          Expand-Archive pkg/UEP-update.zip app -Force
+      - name: Verify four requested features in shipped package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          $m=Get-Content app/resources/app/electron/main.cjs -Raw -Encoding UTF8
+          $p=Get-Content app/resources/app/electron/preload.cjs -Raw -Encoding UTF8
+          $d=Get-Content app/resources/app/electron/google-data.cjs -Raw -Encoding UTF8
+          $checks=[ordered]@{
+            'teacher google oauth client path'=($m -match 'googleOAuthClientId|loadGoogleOAuthClientId|OAuth')
+            'approval compact runtime'=($g -match 'approval-list-compact|approval-detail-compact')
+            'outing teacher editor'=($g -match 'openDormOutingTeacherEditor')
+            'outing save ipc'=($m -match 'dormOuting:save' -and $p -match 'saveDormOuting')
+            'selection merged source'=($d -match 'normalizedSubjectRows.*fallbackSubjectRows.*legacySelectedSubjectRows')
+            'selection current validation'=($d -match '현재 본신청 자동검증')
+            'record selection source'=($g -match 'subjectSelections')
+          }
+          $checks.GetEnumerator() | ForEach-Object { Write-Host ("CHECK {0} = {1}" -f $_.Key,$_.Value) }
+          node --check app/resources/app/gyomuon.js
+          node --check app/resources/app/electron/main.cjs
+          node --check app/resources/app/electron/preload.cjs
+          node --check app/resources/app/electron/google-data.cjs
+          if($checks.Values -contains $false){throw 'One or more shipped feature markers are missing'}
