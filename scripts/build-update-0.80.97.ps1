@@ -30,7 +30,7 @@ $newSelected="const selectedSubjectRows = legacySelectedSubjectRows.filter(row=>
 if(-not $d.Contains($oldSelected.Trim())){throw 'selectedSubjectRows merge block not found'}
 $d=$d.Replace($oldSelected.Trim(),$newSelected)
 
-# Remove historical 41_선택과목_오류검토 import by stable literal boundaries, then infer errors only from selectedSubjectRows.
+# Remove historical 41_선택과목_오류검토 import by stable literal boundaries.
 $errStartNeedle='const selectionSubjectErrors = rowsFrom("41_선택과목_오류검토")'
 $errStart=$d.IndexOf($errStartNeedle,[System.StringComparison]::Ordinal)
 if($errStart -lt 0){throw 'legacy selection error import start not found'}
@@ -39,20 +39,20 @@ $errEnd=$d.IndexOf($errEndNeedle,$errStart,[System.StringComparison]::Ordinal)
 if($errEnd -lt 0){throw 'legacy selection error import end not found'}
 $d=$d.Substring(0,$errStart)+'const selectionSubjectErrors = [];'+[Environment]::NewLine+'  '+$d.Substring($errEnd)
 
-# selectedSubjects is the exact same direct 06 final rows. No curriculum/form fallback.
-$oldDisplay=@'
-const confirmedSubjects = legacySelectedSubjectRows.filter(row=>row.final==="Y"||row.status==="확정");
-  const selectedSubjects = (confirmedSubjects.length ? confirmedSubjects : curriculumSubjects).map(row=>{
-    const meta=selectionSubmissionMeta.get(String(row.studentNo||"").replace(/\.0$/,""))||{};
-    return {...row,finalSubmittedAt:meta.finalSubmittedAt||row.finalSubmittedAt||row.submittedAt||"",submissionCount:meta.submissionCount||row.submissionCount||1,modifiedAfterNotice:Boolean(meta.modifiedAfterNotice||row.modifiedAfterNotice)};
-  });
-'@
+# selectedSubjects must be the exact same direct 06 final rows. Replace by stable section boundaries, not whitespace-sensitive text.
+$displayStartNeedle='const confirmedSubjects = legacySelectedSubjectRows.filter'
+$displayStart=$d.IndexOf($displayStartNeedle,[System.StringComparison]::Ordinal)
+if($displayStart -lt 0){throw 'selectedSubjects fallback start not found'}
+$displayEndNeedle='// 0.80.81:'
+$displayEnd=$d.IndexOf($displayEndNeedle,$displayStart,[System.StringComparison]::Ordinal)
+if($displayEnd -lt 0){throw 'selectedSubjects fallback end not found'}
 $newDisplay=@'
 const confirmedSubjects = selectedSubjectRows;
   const selectedSubjects = confirmedSubjects.map(row=>({...row}));
+
+  
 '@
-if(-not $d.Contains($oldDisplay.Trim())){throw 'selectedSubjects fallback block not found'}
-$d=$d.Replace($oldDisplay.Trim(),$newDisplay.Trim())
+$d=$d.Substring(0,$displayStart)+$newDisplay+$d.Substring($displayEnd)
 
 # Export the exact same rows under the key the 0.80.96 curriculum UI reads.
 $oldReturn='    selectedSubjects,'
@@ -72,7 +72,8 @@ $checkD=Get-Content $google -Raw -Encoding UTF8
 $checks=[ordered]@{
   '06 range 6000'=$checkD.Contains('"06_선택과목이력": "''06_선택과목이력''!A1:X6000"')
   'direct final source'=$checkD.Contains("const selectedSubjectRows = legacySelectedSubjectRows.filter(row=>String(row.final||'').trim()==='Y');")
-  'no legacy error import'=(-not $checkD.Contains('41_선택과목_오류검토'))
+  'no legacy error import'=(-not $checkD.Contains('rowsFrom("41_선택과목_오류검토")'))
+  'direct selectedSubjects'=$checkD.Contains('const confirmedSubjects = selectedSubjectRows;')
   'subjectSelections export'=$checkD.Contains('subjectSelections:selectedSubjects')
   'no curriculum fallback'=(-not $checkD.Contains('confirmedSubjects.length ? confirmedSubjects : curriculumSubjects'))
 }
