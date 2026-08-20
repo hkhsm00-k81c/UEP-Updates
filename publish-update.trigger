@@ -1,7 +1,7 @@
 Publish requested: UEP 0.80.96 ONE-POINT curriculum selection-history fix
-Requested at: 2026-08-20 23:05 KST
+Requested at: 2026-08-20 23:10 KST
+Retry reason: previous run failed because a whole-file .NET regex timed out on large gyomuon.js. build-update-0.80.96.ps1 now uses literal IndexOf anchors instead of the expensive regex.
 Base: shipped v0.80.95 update package.
-Important correction: publish workflow itself is now switched from 0.80.95 to 0.80.96. Earlier trigger alone could not build 0.80.96 because the workflow still called the 0.80.95 script.
 Scope lock: 생활기록부 > 교육과정(선택과목) only. Do not modify meal, privacy, dorm outing, approval line, or Google OAuth.
 Single source of truth: 기본정보연결시트 06_선택과목이력 -> readonlyCache.subjectSelections only. This is the directly migrated Liroschool application record.
 Remove from curriculum UI/data path: legacy pre-application comparison, Google Form comparison, comparison/history panels, selectedSubjects fallback/merge.
