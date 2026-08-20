@@ -1,0 +1,45 @@
+name: Probe UEP Google OAuth Client V2
+on:
+  push:
+    paths:
+      - probe-google-oauth-v2.trigger
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Probe and persist result
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          CLIENT_ID=$(python - <<'PY'
+import json
+print(json.load(open('uep-policy.json',encoding='utf-8'))['googleOAuthClientId'])
+PY
+)
+          RESP=$(curl -sS -w '\nHTTP_STATUS:%{http_code}\n' -X POST 'https://oauth2.googleapis.com/token' \
+            -H 'Content-Type: application/x-www-form-urlencoded' \
+            --data-urlencode "client_id=$CLIENT_ID" \
+            --data-urlencode 'code=UEP_DIAGNOSTIC_INVALID_CODE' \
+            --data-urlencode 'code_verifier=UEP_DIAGNOSTIC_INVALID_VERIFIER' \
+            --data-urlencode 'redirect_uri=http://127.0.0.1:53682' \
+            --data-urlencode 'grant_type=authorization_code' || true)
+          RESULT=UNEXPECTED_RESPONSE
+          echo "$RESP" | grep -q '"error": "invalid_client"' && RESULT=INVALID_CLIENT
+          echo "$RESP" | grep -q '"error": "invalid_grant"' && RESULT=CLIENT_ACCEPTED_SECRETLESS
+          echo "$RESP" | grep -q '"error": "unauthorized_client"' && RESULT=UNAUTHORIZED_CLIENT
+          {
+            echo "RESULT=$RESULT"
+            echo "CLIENT_ID=$CLIENT_ID"
+            echo "$RESP"
+          } > probe-google-oauth-result.txt
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add probe-google-oauth-result.txt
+          git commit -m "Record Google OAuth probe result" || true
+          git push
