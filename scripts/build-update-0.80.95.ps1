@@ -10,8 +10,10 @@ $m=Get-Content $main -Raw -Encoding UTF8
 # Version bump from shipped 0.80.94 package.
 $g=$g.Replace('const APP_VERSION = "0.80.94";','const APP_VERSION = "0.80.95";').Replace('v0.80.94','v0.80.95')
 
-# Google OAuth: actively recover stale user OAuth state instead of repeatedly surfacing invalid_client/invalid_grant.
-$oldRefresh="if(!response.ok){let detail='';try{detail=(await response.json())?.error_description||'';}catch{};throw googleOAuthError(`Google 계정 토큰 갱신 실패 (${response.status})${detail?`: ${detail}`:''}`,\"UEP_GOOGLE_USER_AUTH_REQUIRED\");}"
+# Google OAuth: recover stale user OAuth state instead of repeatedly surfacing invalid_client/invalid_grant.
+$oldRefresh=@'
+if(!response.ok){let detail='';try{detail=(await response.json())?.error_description||'';}catch{};throw googleOAuthError(`Google 계정 토큰 갱신 실패 (${response.status})${detail?`: ${detail}`:''}`,"UEP_GOOGLE_USER_AUTH_REQUIRED");}
+'@
 $newRefresh=@'
 if(!response.ok){
     let payload={},detail='',errCode='';
@@ -24,11 +26,13 @@ if(!response.ok){
     throw googleOAuthError(`Google 계정 토큰 갱신 실패 (${response.status})${detail?`: ${detail}`:''}`,"UEP_GOOGLE_USER_AUTH_REQUIRED");
   }
 '@
-if(-not $m.Contains($oldRefresh)){throw 'refreshGoogleUserOAuth response block not found'}
-$m=$m.Replace($oldRefresh,$newRefresh.Trim())
+if(-not $m.Contains($oldRefresh.Trim())){throw 'refreshGoogleUserOAuth response block not found'}
+$m=$m.Replace($oldRefresh.Trim(),$newRefresh.Trim())
 
 # Authorization exchange: clear stale state and give an actionable diagnosis for invalid_client.
-$oldTokenThrow="throw googleOAuthError(`Google 토큰 교환 실패 (${response.status})${suffix?`: ${suffix}`:''}${!suffix&&raw?`: ${raw}`:''}`,'UEP_GOOGLE_OAUTH_TOKEN_FAILED');"
+$oldTokenThrow=@'
+throw googleOAuthError(`Google 토큰 교환 실패 (${response.status})${suffix?`: ${suffix}`:''}${!suffix&&raw?`: ${raw}`:''}`,'UEP_GOOGLE_OAUTH_TOKEN_FAILED');
+'@
 $newTokenThrow=@'
 if(errCode==='invalid_client'){
         googleOAuthPolicyCache={clientId:'',expiresAt:0};
@@ -37,8 +41,8 @@ if(errCode==='invalid_client'){
       }
       throw googleOAuthError(`Google 토큰 교환 실패 (${response.status})${suffix?`: ${suffix}`:''}${!suffix&&raw?`: ${raw}`:''}`,'UEP_GOOGLE_OAUTH_TOKEN_FAILED');
 '@
-if(-not $m.Contains($oldTokenThrow)){throw 'authorization token error block not found'}
-$m=$m.Replace($oldTokenThrow,$newTokenThrow.Trim())
+if(-not $m.Contains($oldTokenThrow.Trim())){throw 'authorization token error block not found'}
+$m=$m.Replace($oldTokenThrow.Trim(),$newTokenThrow.Trim())
 
 # Approval line: use the actual shipped approval explorer/nav/detail structure and make it visibly compact.
 $approvalCss=@'
