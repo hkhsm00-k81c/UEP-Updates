@@ -28,8 +28,10 @@ node --check 'app/resources/app/electron/preload.cjs'
 if($LASTEXITCODE -ne 0){throw 'preload syntax check failed'}
 node --check $gyo
 if($LASTEXITCODE -ne 0){throw 'gyomuon syntax check failed'}
+
 $verify=Get-Content $main -Raw -Encoding UTF8
-if($verify -match "String\(saved\.client_id\|\|'')\.trim\(\) \|\| await loadGoogleOAuthClientId"){throw 'stale saved client_id precedence still present'}
-if($verify -notmatch 'await disconnectGoogleUser\(\)'){throw 'OAuth client migration reset missing'}
+$legacy="const clientId=String(saved.client_id||'').trim() || await loadGoogleOAuthClientId();"
+if($verify.Contains($legacy)){throw 'stale saved client_id precedence still present'}
+if(-not $verify.Contains('await disconnectGoogleUser();')){throw 'OAuth client migration reset missing'}
 if((Get-Content $gyo -Raw -Encoding UTF8) -notmatch '0\.80\.92'){throw 'visible 0.80.92 version missing'}
 Write-Host 'UEP 0.80.92 OAuth client migration fix applied.'
