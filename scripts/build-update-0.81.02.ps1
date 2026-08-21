@@ -3,7 +3,7 @@ $ErrorActionPreference='Stop'
 $main='app/resources/app/electron/main.cjs'
 $preload='app/resources/app/electron/preload.cjs'
 $gyo='app/resources/app/gyomuon.js'
-$css='app/resources/app/styles.css'
+$css='app/resources/app/gyomuon.css'
 $pkg='app/resources/app/package.json'
 
 $m=Get-Content $main -Raw -Encoding UTF8
