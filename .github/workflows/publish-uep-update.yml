@@ -218,6 +218,11 @@ jobs:
         run: |
           & ./scripts/build-update-0.81.09.ps1
 
+      - name: Apply and verify 0.81.10 selection compatibility recovery
+        shell: pwsh
+        run: |
+          & ./scripts/build-update-0.81.10.ps1
+
       - name: Build update package
         id: package
         shell: pwsh
@@ -228,15 +233,15 @@ jobs:
           $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
           "sha=$sha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-      - name: Publish v0.81.09 release
+      - name: Publish v0.81.10 release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag='v0.81.09'
+          $tag='v0.81.10'
           gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
           if($LASTEXITCODE -ne 0){
-            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.09 - 시작 복구 긴급 수정' --notes 'v0.81.08에서 대시보드 시작 복구 화면에 멈출 수 있는 출결·상담 전체 함수 재정의를 제거합니다. 학사외출 교사등록, 시간대별 전문사감 보고와 동일 본문 메일, 나이스 병합셀 학번·이름·과목 파서 및 개인별 필터는 유지합니다.'
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.10 - 교육과정 화면 시작 복구' --notes '폐기된 selectionView 직접 참조를 제거하고 통합된 생활기록부 교육과정 화면으로 안전하게 연결하여 Google 자료 동기화 후 시작 화면이 멈추는 문제를 수정합니다.'
           }
           gh release upload $tag UEP-update.zip --repo $env:GITHUB_REPOSITORY --clobber
 
@@ -247,31 +252,31 @@ jobs:
           SHA256: ${{ steps.package.outputs.sha }}
         run: |
           $ErrorActionPreference='Stop'
-          $tag='v0.81.09'
+          $tag='v0.81.10'
           $asset=(gh release view $tag --repo $env:GITHUB_REPOSITORY --json assets | ConvertFrom-Json).assets | Where-Object {$_.name -eq 'UEP-update.zip'} | Select-Object -First 1
           if(-not $asset){throw 'Release asset not found'}
           $current=Get-Content 'uep-policy.json' -Raw -Encoding UTF8 | ConvertFrom-Json
           $oauthClientId=[string]$current.googleOAuthClientId
           $policy=[ordered]@{
             channel='homeroom-stable'
-            latestVersion='0.81.09'
+            latestVersion='0.81.10'
             minimumAllowedVersion='0.80.64'
             blockedVersions=@()
             forceUpdate=$false
             updateEnabled=$true
             downloadUrl=$asset.url
             sha256=$env:SHA256
-            message='UEP 0.81.09 시작 복구 긴급 수정 업데이트'
+            message='UEP 0.81.10 교육과정 화면 시작 복구 업데이트'
             offlineGraceHours=72
             googleOAuthClientId=$oauthClientId
           } | ConvertTo-Json -Depth 4
           $info=gh api "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json?ref=main" | ConvertFrom-Json
           $encoded=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($policy))
-          $body=@{message='Enable UEP 0.81.09 automatic update';content=$encoded;sha=$info.sha;branch='main'} | ConvertTo-Json
+          $body=@{message='Enable UEP 0.81.10 automatic update';content=$encoded;sha=$info.sha;branch='main'} | ConvertTo-Json
           $body | gh api --method PUT -H 'Accept: application/vnd.github+json' "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json" --input -
 
       - uses: actions/upload-artifact@v4
         with:
-          name: UEP-0.81.09-Update-Package
+          name: UEP-0.81.10-Update-Package
           path: UEP-update.zip
 
