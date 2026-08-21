@@ -15,3 +15,7 @@ Retry: line-ending-safe removal of legacy 06A range.
 Retry 2: rebuild canonical selection range map.
 
 Retry 3: align release verification with canonical A1:AI1000 wide-row source; require legacy 06A absence.
+
+Publish requested: UEP 0.81.07 refinement
+Requested at: 2026-08-21 KST
+Scope: SDGs evidence consolidation; curriculum query/order/error highlighting/four-term layout/expected grade; NEIS merged-cell identity parsing and editable validation rules.
