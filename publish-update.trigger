@@ -19,3 +19,5 @@ Retry 3: align release verification with canonical A1:AI1000 wide-row source; re
 Publish requested: UEP 0.81.07 refinement
 Requested at: 2026-08-21 KST
 Scope: SDGs evidence consolidation; curriculum query/order/error highlighting/four-term layout/expected grade; NEIS merged-cell identity parsing and editable validation rules.
+
+Retry 0.81.07: corrected regex verification literal.
