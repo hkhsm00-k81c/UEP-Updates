@@ -33,3 +33,7 @@ Scope: remove the v0.81.08 dashboard startup override while retaining dorm save,
 Publish requested: UEP 0.81.10 selection compatibility recovery
 Requested: 2026-08-22
 Scope: remove the stale selectionView startup reference and route legacy selection navigation to the integrated curriculum view.
+
+Publish requested: UEP 0.81.11 integrated view registry recovery
+Requested: 2026-08-22
+Scope: remove all stale standalone selection and SDGs view references, retain safe standalone record validation.
