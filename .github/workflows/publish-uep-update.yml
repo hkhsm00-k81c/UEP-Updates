@@ -208,6 +208,11 @@ jobs:
         run: |
           & ./scripts/build-update-0.81.07.ps1
 
+      - name: Apply and verify 0.81.08 operations and NEIS parser
+        shell: pwsh
+        run: |
+          & ./scripts/build-update-0.81.08.ps1
+
       - name: Build update package
         id: package
         shell: pwsh
@@ -218,15 +223,15 @@ jobs:
           $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
           "sha=$sha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-      - name: Publish v0.81.07 release
+      - name: Publish v0.81.08 release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag='v0.81.07'
+          $tag='v0.81.08'
           gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
           if($LASTEXITCODE -ne 0){
-            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.07 - 선택과목·SDGs·세특 조회 개선' --notes '교육과정 전체·반별·개인별 조회 순서와 학생 이동을 정리하고, 오류를 상단 및 관련 과목에 표시합니다. 네 학기 카드를 데스크톱 4열로 배치하며 과목 명단의 예상등급 열을 복구합니다. SDGs 중복 근거지도를 제거하고 실제 근거연결 중심으로 정리합니다. 나이스 엑셀 병합형 학급·과목을 이어받아 학번·이름·과목을 표시하고 검증규칙 관리 팝업을 제공합니다.'
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.08 - 학사외출·출결·상담·세특 파서 개선' --notes '학사외출 교사등록의 실제 저장과 즉시 재조회 경로를 보완하고 전문사감 보고문을 시간대별 귀가학생 형식으로 통일합니다. 공결 팝업에 출석인정 세부유형과 교시를 표시하며 담임 상담필요 영역은 본인 반 학생카드로 구성합니다. 나이스 고정양식의 병합 셀을 이어받아 학번·이름·과목을 정규화하고 반별·개인별·과목별·오류 조회를 제공합니다.'
           }
           gh release upload $tag UEP-update.zip --repo $env:GITHUB_REPOSITORY --clobber
 
@@ -237,33 +242,32 @@ jobs:
           SHA256: ${{ steps.package.outputs.sha }}
         run: |
           $ErrorActionPreference='Stop'
-          $tag='v0.81.07'
+          $tag='v0.81.08'
           $asset=(gh release view $tag --repo $env:GITHUB_REPOSITORY --json assets | ConvertFrom-Json).assets | Where-Object {$_.name -eq 'UEP-update.zip'} | Select-Object -First 1
           if(-not $asset){throw 'Release asset not found'}
           $current=Get-Content 'uep-policy.json' -Raw -Encoding UTF8 | ConvertFrom-Json
           $oauthClientId=[string]$current.googleOAuthClientId
           $policy=[ordered]@{
             channel='homeroom-stable'
-            latestVersion='0.81.07'
+            latestVersion='0.81.08'
             minimumAllowedVersion='0.80.64'
             blockedVersions=@()
             forceUpdate=$false
             updateEnabled=$true
             downloadUrl=$asset.url
             sha256=$env:SHA256
-            message='UEP 0.81.07 선택과목·SDGs·세특 조회 개선 업데이트'
+            message='UEP 0.81.08 학사외출·출결·상담·세특 파서 개선 업데이트'
             offlineGraceHours=72
             googleOAuthClientId=$oauthClientId
           } | ConvertTo-Json -Depth 4
           $info=gh api "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json?ref=main" | ConvertFrom-Json
           $encoded=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($policy))
-          $body=@{message='Enable UEP 0.81.07 automatic update';content=$encoded;sha=$info.sha;branch='main'} | ConvertTo-Json
+          $body=@{message='Enable UEP 0.81.08 automatic update';content=$encoded;sha=$info.sha;branch='main'} | ConvertTo-Json
           $body | gh api --method PUT -H 'Accept: application/vnd.github+json' "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json" --input -
 
       - uses: actions/upload-artifact@v4
         with:
-          name: UEP-0.81.07-Update-Package
+          name: UEP-0.81.08-Update-Package
           path: UEP-update.zip
-
 
 
