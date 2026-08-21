@@ -100,7 +100,31 @@ jobs:
           git push
           throw 'UEP 0.81.04 apply failed; bounded status committed'
 
-      - name: Verify 0.81.04 operational features
+      - name: Apply 0.81.05 curriculum and SDGs integration
+        id: apply08105
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          try {
+            & ./scripts/build-update-0.81.05.ps1 *>&1 | Tee-Object -FilePath build-08105-status.txt
+          } catch {
+            ($_ | Out-String) | Add-Content build-08105-status.txt
+            exit 1
+          }
+
+      - name: Commit bounded 0.81.05 failure status
+        if: steps.apply08105.outcome == 'failure'
+        shell: pwsh
+        run: |
+          Add-Content build-08105-status.txt 'BUILD_FAILED_BEFORE_RELEASE'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- build-08105-status.txt
+          git commit -m 'Record UEP 0.81.05 build failure'
+          git push
+          throw 'UEP 0.81.05 apply failed; bounded status committed'
+
+      - name: Verify 0.81.05 curriculum and SDGs integration
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
@@ -138,7 +162,14 @@ jobs:
           $checks['SDGs standalone page']=$g.Contains('function sdgsView()')
           $checks['recordcheck standalone page']=$g.Contains('function recordcheckView()')
           $checks['recordcheck separated']=(-not $g.Contains('if(sdgs)sdgs.dataset.primaryEvidenceMap="1";mountValidator(profile);'))
-          if($checks.Values -contains $false){throw 'UEP 0.81.04 operational feature verification failed'}
+          $checks['four semester analysis']=$g.Contains('["2-1","2-2","3-1","3-2"]')
+          $checks['curriculum internal tabs']=$g.Contains('반별·학생별 신청이력')
+          $checks['cross-term duplicates']=$g.Contains('학기간 동일과목 중복')
+          $checks['SDGs evidence supplement']=$g.Contains('function uepSdgsSupplementPanel')
+          $checks['selection nav removed']=(-not (Get-Content 'app/resources/app/index.html' -Raw -Encoding UTF8).Contains('data-page="selection"'))
+          $checks['sdgs nav removed']=(-not (Get-Content 'app/resources/app/index.html' -Raw -Encoding UTF8).Contains('data-page="sdgs"'))
+          $checks['NEIS UTF8']=$m.Contains('[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)')
+          if($checks.Values -contains $false){throw 'UEP 0.81.05 integration verification failed'}
 
       - name: Build update package
         id: package
@@ -150,15 +181,15 @@ jobs:
           $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
           "sha=$sha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-      - name: Publish v0.81.04 release
+      - name: Publish v0.81.05 release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag='v0.81.04'
+          $tag='v0.81.05'
           gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
           if($LASTEXITCODE -ne 0){
-            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.04 - 선택과목·SDGs·세특 검증' --notes '06A 학생별 선택과목을 기반으로 오류검증, 과목별 신청인원·명단·예상등수·예상등급·예상분반과 학생 보완 문자메시지를 제공합니다. 과목 명단에는 현재 학사생을 표시하고 전출·자퇴 학생은 제외합니다. SDGs 근거지도와 세특 로컬 오류검증을 각각 독립 메뉴로 제공합니다. 실험 중인 담임 공용읽기 API는 포함하지 않습니다.'
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.05 - 생활기록부 교육과정·SDGs 통합' --notes '선택과목을 생활기록부 교육과정 내부로 이동하고 2-1, 2-2, 3-1, 3-2 전체 학기의 신청이력, 오류, 과목별 인원·명단·예상등수·등급·분반을 제공합니다. SDGs는 기존 생활기록부 탭에서 근거 보완 질문을 제공하며 세특 오류검증은 별도 페이지를 유지하고 한글 엑셀 원문 깨짐을 수정합니다.'
           }
           gh release upload $tag UEP-update.zip --repo $env:GITHUB_REPOSITORY --clobber
 
@@ -169,31 +200,32 @@ jobs:
           SHA256: ${{ steps.package.outputs.sha }}
         run: |
           $ErrorActionPreference='Stop'
-          $tag='v0.81.04'
+          $tag='v0.81.05'
           $asset=(gh release view $tag --repo $env:GITHUB_REPOSITORY --json assets | ConvertFrom-Json).assets | Where-Object {$_.name -eq 'UEP-update.zip'} | Select-Object -First 1
           if(-not $asset){throw 'Release asset not found'}
           $current=Get-Content 'uep-policy.json' -Raw -Encoding UTF8 | ConvertFrom-Json
           $oauthClientId=[string]$current.googleOAuthClientId
           $policy=[ordered]@{
             channel='homeroom-stable'
-            latestVersion='0.81.04'
+            latestVersion='0.81.05'
             minimumAllowedVersion='0.80.64'
             blockedVersions=@()
             forceUpdate=$false
             updateEnabled=$true
             downloadUrl=$asset.url
             sha256=$env:SHA256
-            message='UEP 0.81.04 선택과목·SDGs·세특 검증 기능 업데이트'
+            message='UEP 0.81.05 생활기록부 교육과정·SDGs 통합 및 세특 한글 수정'
             offlineGraceHours=72
             googleOAuthClientId=$oauthClientId
           } | ConvertTo-Json -Depth 4
           $info=gh api "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json?ref=main" | ConvertFrom-Json
           $encoded=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($policy))
-          $body=@{message='Enable UEP 0.81.04 automatic update';content=$encoded;sha=$info.sha;branch='main'} | ConvertTo-Json
+          $body=@{message='Enable UEP 0.81.05 automatic update';content=$encoded;sha=$info.sha;branch='main'} | ConvertTo-Json
           $body | gh api --method PUT -H 'Accept: application/vnd.github+json' "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json" --input -
 
       - uses: actions/upload-artifact@v4
         with:
-          name: UEP-0.81.04-Update-Package
+          name: UEP-0.81.05-Update-Package
           path: UEP-update.zip
+
 
