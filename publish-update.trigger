@@ -1,13 +1,11 @@
-Publish requested: UEP 0.81.05 curriculum and SDGs integration
+Publish requested: UEP 0.81.06 final operational workflow
 Requested at: 2026-08-21 KST
-Selection placement: 생활기록부 → 교육과정, not a standalone sidebar menu.
-Selection semesters: 2-1, 2-2, 3-1, 3-2.
-Selection functions: class/student application history with errors, course applicant counts, full rosters, first-year-grade-based expected rank and grade, expected sections, and correction SMS.
-Dormitory: show current 학사 badge only in course rosters.
-Enrollment: exclude transfer, dropout, expulsion, and removed-enrollment students.
-SDGs placement: existing 생활기록부 → SDGs tab, with evidence supplementation questions and copy action.
-Record checker: keep standalone; force Excel COM PowerShell output to UTF-8.
-Distribution: existing GitHub automatic updater only.
-Security: do not include the experimental readonly gateway or embedded secrets.
-Build script: scripts/build-update-0.81.05.ps1
-Visible version: v0.81.05
+Selection source: renamed wide 06_선택과목이력 only; 260 active students.
+Curriculum: student application includes errors and correction SMS; subject workflow is semester cards then subject cards then protected roster.
+Subjects: all 2-1, 2-2, 3-1, 3-2 courses; applicants, expected sections, closure/crowding state; grade/class sorting; dorm badge; privacy mode.
+SDGs: actual evidence from activities, volunteering, programs, reports, subjects and career; supplementation at page bottom; UEP student picker.
+Recordcheck: class and subject filters, errors only, confirm/dismiss, printable/PDF report.
+Distribution: GitHub automatic updater only; no original ZIP distribution to teachers.
+Security: no experimental readonly gateway or embedded secrets.
+Build script: scripts/build-update-0.81.06.ps1
+Visible version: v0.81.06
