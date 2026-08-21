@@ -124,7 +124,31 @@ jobs:
           git push
           throw 'UEP 0.81.05 apply failed; bounded status committed'
 
-      - name: Verify 0.81.05 curriculum and SDGs integration
+      - name: Apply 0.81.06 final workflow
+        id: apply08106
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          try {
+            & ./scripts/build-update-0.81.06.ps1 *>&1 | Tee-Object -FilePath build-08106-status.txt
+          } catch {
+            ($_ | Out-String) | Add-Content build-08106-status.txt
+            exit 1
+          }
+
+      - name: Commit bounded 0.81.06 failure status
+        if: steps.apply08106.outcome == 'failure'
+        shell: pwsh
+        run: |
+          Add-Content build-08106-status.txt 'BUILD_FAILED_BEFORE_RELEASE'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- build-08106-status.txt
+          git commit -m 'Record UEP 0.81.06 build failure'
+          git push
+          throw 'UEP 0.81.06 apply failed; bounded status committed'
+
+      - name: Verify 0.81.06 final workflow
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
@@ -169,7 +193,15 @@ jobs:
           $checks['selection nav removed']=(-not (Get-Content 'app/resources/app/index.html' -Raw -Encoding UTF8).Contains('data-page="selection"'))
           $checks['sdgs nav removed']=(-not (Get-Content 'app/resources/app/index.html' -Raw -Encoding UTF8).Contains('data-page="sdgs"'))
           $checks['NEIS UTF8']=$m.Contains('[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)')
-          if($checks.Values -contains $false){throw 'UEP 0.81.05 integration verification failed'}
+          $checks['single wide selection source']=$d.Contains('"06_선택과목이력": "''06_선택과목이력''!A1:AI1000"') -and (-not $d.Contains('06A_학생별선택과목'))
+          $checks['student application workspace']=$g.Contains('function uepStudentApplicationView')
+          $checks['subject card drilldown']=$g.Contains('function uepSubjectApplicationView')
+          $checks['subject privacy']=$g.Contains('privacyModeEnabled()')
+          $checks['SDGs live evidence']=$g.Contains('function uepSdgsEvidenceBridge')
+          $checks['SDGs supplement bottom']=$g.Contains('uepSdgsEvidenceBridge()+supplement')
+          $checks['recordcheck decisions']=$g.Contains('data-neis-confirm') -and $g.Contains('data-neis-dismiss')
+          $checks['recordcheck report']=$g.Contains('data-neis-print')
+          if($checks.Values -contains $false){throw 'UEP 0.81.06 final verification failed'}
 
       - name: Build update package
         id: package
@@ -181,15 +213,15 @@ jobs:
           $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
           "sha=$sha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-      - name: Publish v0.81.05 release
+      - name: Publish v0.81.06 release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag='v0.81.05'
+          $tag='v0.81.06'
           gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
           if($LASTEXITCODE -ne 0){
-            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.05 - 생활기록부 교육과정·SDGs 통합' --notes '선택과목을 생활기록부 교육과정 내부로 이동하고 2-1, 2-2, 3-1, 3-2 전체 학기의 신청이력, 오류, 과목별 인원·명단·예상등수·등급·분반을 제공합니다. SDGs는 기존 생활기록부 탭에서 근거 보완 질문을 제공하며 세특 오류검증은 별도 페이지를 유지하고 한글 엑셀 원문 깨짐을 수정합니다.'
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.06 - 선택과목·SDGs·세특 운영 완성' --notes '새 06 선택과목 학생별 구조 하나만 사용합니다. 생활기록부 교육과정에서 학생신청과 오류·보완문자를 통합하고, 학기별 과목 카드에서 신청인원·분반·폐강위기를 먼저 본 뒤 명단·예상성적·등급·학사를 확인합니다. SDGs 실제 근거를 활동·봉사·프로그램·보고서·선택과목에서 연결하고 보완은 하단에 배치합니다. 세특검증은 반·과목·오류 필터, 확인·해제, 오류리포트 출력을 제공합니다.'
           }
           gh release upload $tag UEP-update.zip --repo $env:GITHUB_REPOSITORY --clobber
 
@@ -200,32 +232,33 @@ jobs:
           SHA256: ${{ steps.package.outputs.sha }}
         run: |
           $ErrorActionPreference='Stop'
-          $tag='v0.81.05'
+          $tag='v0.81.06'
           $asset=(gh release view $tag --repo $env:GITHUB_REPOSITORY --json assets | ConvertFrom-Json).assets | Where-Object {$_.name -eq 'UEP-update.zip'} | Select-Object -First 1
           if(-not $asset){throw 'Release asset not found'}
           $current=Get-Content 'uep-policy.json' -Raw -Encoding UTF8 | ConvertFrom-Json
           $oauthClientId=[string]$current.googleOAuthClientId
           $policy=[ordered]@{
             channel='homeroom-stable'
-            latestVersion='0.81.05'
+            latestVersion='0.81.06'
             minimumAllowedVersion='0.80.64'
             blockedVersions=@()
             forceUpdate=$false
             updateEnabled=$true
             downloadUrl=$asset.url
             sha256=$env:SHA256
-            message='UEP 0.81.05 생활기록부 교육과정·SDGs 통합 및 세특 한글 수정'
+            message='UEP 0.81.06 선택과목·SDGs 근거·세특검증 운영 업데이트'
             offlineGraceHours=72
             googleOAuthClientId=$oauthClientId
           } | ConvertTo-Json -Depth 4
           $info=gh api "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json?ref=main" | ConvertFrom-Json
           $encoded=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($policy))
-          $body=@{message='Enable UEP 0.81.05 automatic update';content=$encoded;sha=$info.sha;branch='main'} | ConvertTo-Json
+          $body=@{message='Enable UEP 0.81.06 automatic update';content=$encoded;sha=$info.sha;branch='main'} | ConvertTo-Json
           $body | gh api --method PUT -H 'Accept: application/vnd.github+json' "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json" --input -
 
       - uses: actions/upload-artifact@v4
         with:
-          name: UEP-0.81.05-Update-Package
+          name: UEP-0.81.06-Update-Package
           path: UEP-update.zip
+
 
 
