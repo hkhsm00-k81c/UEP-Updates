@@ -1,0 +1,80 @@
+name: Validate UEP 0.81.04 Candidate
+
+on:
+  push:
+    branches:
+      - codex/uep-0.81.04-readonly-gateway
+    paths:
+      - scripts/build-update-0.81.04.ps1
+      - .github/workflows/validate-uep-0.81.04.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-candidate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download 0.81.01 shipped base
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.81.01 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
+          if(-not (Test-Path 'app/UEP.exe')){throw 'UEP.exe not found'}
+
+      - name: Apply preserved 0.81.02 features
+        shell: pwsh
+        run: ./scripts/build-update-0.81.02.ps1
+
+      - name: Apply 0.81.03 recovery compatibility
+        shell: pwsh
+        run: ./scripts/build-update-0.81.03.ps1
+
+      - name: Apply 0.81.04 readonly gateway
+        shell: pwsh
+        run: ./scripts/build-update-0.81.04.ps1
+
+      - name: Verify syntax and feature markers
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $g=Get-Content 'app/resources/app/gyomuon.js' -Raw -Encoding UTF8
+          $m=Get-Content 'app/resources/app/electron/main.cjs' -Raw -Encoding UTF8
+          $p=Get-Content 'app/resources/app/electron/preload.cjs' -Raw -Encoding UTF8
+          $d=Get-Content 'app/resources/app/electron/google-data.cjs' -Raw -Encoding UTF8
+          node --check 'app/resources/app/gyomuon.js'
+          node --check 'app/resources/app/electron/main.cjs'
+          node --check 'app/resources/app/electron/preload.cjs'
+          $checks=[ordered]@{
+            'version 0.81.04'=$g.Contains('const APP_VERSION = "0.81.04";')
+            'gateway marker'=$m.Contains('__UEP_READONLY_GATEWAY_08104__')
+            'teacher login IPC'=$m.Contains('ipcMain.handle("uep:login"')
+            'gateway read only'=$m.Contains('uepGatewayBatchRead')
+            'no client secret'=(-not $m.Contains('UEP_GATEWAY_APP_KEY'))
+            'no per-PC OAuth gate'=$m.Contains('mode:"uep_readonly_gateway"')
+            'selection 06 UI'=$g.Contains('for(const raw of (readonlyCache?.subjectSelections||[]))')
+            'selection 06 range'=$d.Contains('"06_선택과목이력"')
+            'privacy'=$g.Contains('privacyModeButton')
+            'meal duty'=$g.Contains('saveLunchDuty')
+            'dorm outing'=$g.Contains('dormOutings')
+            'recordbook validator'=$g.Contains('__UEP_RECORDBOOK_LOCAL_VALIDATOR_08102__')
+            'SDGs evidence cards'=$g.Contains('growth-sdg-evidence-card')
+          }
+          $checks.GetEnumerator() | ForEach-Object { Write-Host ("CHECK {0} = {1}" -f $_.Key,$_.Value) }
+          if($checks.Values -contains $false){throw 'UEP 0.81.04 candidate verification failed'}
+
+      - name: Package candidate only
+        shell: pwsh
+        run: Compress-Archive -Path app/* -DestinationPath UEP-0.81.04-candidate.zip -CompressionLevel Optimal
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UEP-0.81.04-Candidate
+          path: UEP-0.81.04-candidate.zip
