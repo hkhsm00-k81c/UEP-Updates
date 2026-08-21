@@ -26,4 +26,6 @@ Publish requested: UEP 0.81.08 operations and NEIS parser
 Requested at: 2026-08-22 KST
 Scope: teacher dorm-outing save; grouped supervisor report/email; official attendance detail and periods; homeroom counseling student cards; fixed-layout NEIS merged-cell parser and individual filter.
 
-Retry 0.81.08: trigger release workflow after approved merge.
+Publish requested: UEP 0.81.09 startup recovery
+Requested at: 2026-08-22 KST
+Scope: remove the v0.81.08 dashboard startup override while retaining dorm save, supervisor report/email and fixed-layout NEIS parsing.
