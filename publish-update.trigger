@@ -29,3 +29,7 @@ Scope: teacher dorm-outing save; grouped supervisor report/email; official atten
 Publish requested: UEP 0.81.09 startup recovery
 Requested at: 2026-08-22 KST
 Scope: remove the v0.81.08 dashboard startup override while retaining dorm save, supervisor report/email and fixed-layout NEIS parsing.
+
+Publish requested: UEP 0.81.10 selection compatibility recovery
+Requested: 2026-08-22
+Scope: remove the stale selectionView startup reference and route legacy selection navigation to the integrated curriculum view.
