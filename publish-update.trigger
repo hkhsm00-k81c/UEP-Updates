@@ -1,5 +1,6 @@
 Publish requested: UEP 0.81.01 bounds-safe ZIP-era connection model + login identity
 Requested at: 2026-08-21 KST
+Retry after publisher workflow was advanced to v0.81.01.
 Fix: replace unsafe Substring verification with required-anchor and bounds checks so missing/replaced handlers fail with a clear anchor error instead of a negative length.
 Base: build from the last known-good 0.80.99 prerequisite; do not invoke the failed 0.81.00 post-build verification.
 Core: school/service connection supplies Google Sheet data immediately. UEP login name+email identifies teacher, homeroom, and role permissions.
