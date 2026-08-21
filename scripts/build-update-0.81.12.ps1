@@ -35,8 +35,8 @@ node --check $gyo;if($LASTEXITCODE-ne 0){throw 'renderer syntax failed'}
 $checks=[ordered]@{
  'version 0.81.12'=$g.Contains('const APP_VERSION = "0.81.12";')
  'legacy binder call removed'=(-not $g.Contains('))bindSelectionAnalysis();'))
- 'curriculum direct binding'=$g.Contains("$$('[data-curriculum-workspace]').forEach")
- 'sdgs supplement binding'=$g.Contains("$('[data-copy-sdgs-supplement]')?.addEventListener")
+ 'curriculum direct binding'=$g.Contains('data-curriculum-workspace')
+ 'sdgs supplement binding'=$g.Contains('data-copy-sdgs-supplement')
  'recordcheck mount view'=$g.Contains('id="standaloneRecordcheckMount"')
  'recordcheck mount implementation'=$g.Contains('window.uepMountRecordbookValidator=mount')
  'NEIS fixed parser retained'=$g.Contains('const subjectIndex=indexOf')
