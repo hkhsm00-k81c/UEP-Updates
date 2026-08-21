@@ -76,7 +76,31 @@ jobs:
           git push
           throw 'UEP 0.81.03 apply failed; bounded status committed'
 
-      - name: Verify 0.81.03 requested fixes
+      - name: Apply 0.81.04 operational features
+        id: apply08104
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          try {
+            & ./scripts/build-update-0.81.04.ps1 *>&1 | Tee-Object -FilePath build-08104-status.txt
+          } catch {
+            ($_ | Out-String) | Add-Content build-08104-status.txt
+            exit 1
+          }
+
+      - name: Commit bounded 0.81.04 failure status
+        if: steps.apply08104.outcome == 'failure'
+        shell: pwsh
+        run: |
+          Add-Content build-08104-status.txt 'BUILD_FAILED_BEFORE_RELEASE'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- build-08104-status.txt
+          git commit -m 'Record UEP 0.81.04 build failure'
+          git push
+          throw 'UEP 0.81.04 apply failed; bounded status committed'
+
+      - name: Verify 0.81.04 operational features
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
@@ -105,7 +129,16 @@ jobs:
             'NEIS no sheet write'=$g.Contains('Google 시트 연결·입력센터 저장·자동동기화 없음')
           }
           $checks.GetEnumerator() | ForEach-Object { Write-Host ("CHECK {0} = {1}" -f $_.Key,$_.Value) }
-          if($checks.Values -contains $false){throw 'UEP 0.81.03 requested feature verification failed'}
+          $checks['06A selection range']=$d.Contains('"06A_학생별선택과목"')
+          $checks['06A selection export']=$d.Contains('selectionStudentRows: rowsFrom("06A_학생별선택과목")')
+          $checks['selection page']=$g.Contains('function selectionView()')
+          $checks['active student filter']=$g.Contains('/전출|자퇴|퇴학|제적/')
+          $checks['dorm roster badge']=$g.Contains('dorm-badge')
+          $checks['selection error SMS']=$g.Contains('보완 문자메시지')
+          $checks['SDGs standalone page']=$g.Contains('function sdgsView()')
+          $checks['recordcheck standalone page']=$g.Contains('function recordcheckView()')
+          $checks['recordcheck separated']=(-not $g.Contains('if(sdgs)sdgs.dataset.primaryEvidenceMap="1";mountValidator(profile);'))
+          if($checks.Values -contains $false){throw 'UEP 0.81.04 operational feature verification failed'}
 
       - name: Build update package
         id: package
@@ -117,15 +150,15 @@ jobs:
           $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
           "sha=$sha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-      - name: Publish v0.81.03 release
+      - name: Publish v0.81.04 release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag='v0.81.03'
+          $tag='v0.81.04'
           gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
           if($LASTEXITCODE -ne 0){
-            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.03 - 담임 학교 공용 연결 복구' --notes '담임 PC에서 개인 Google OAuth 없이 동일 PC·Windows 사용자에게 남아 있는 기존 UEP 학교 공용 연결 복구본을 자동 탐색·승계합니다. 비밀키는 앱이나 GitHub에 포함하지 않습니다. 0.81.02의 SDGs·로컬 생기부 검증과 기존 완료 기능을 모두 보존합니다.'
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.04 - 선택과목·SDGs·세특 검증' --notes '06A 학생별 선택과목을 기반으로 오류검증, 과목별 신청인원·명단·예상등수·예상등급·예상분반과 학생 보완 문자메시지를 제공합니다. 과목 명단에는 현재 학사생을 표시하고 전출·자퇴 학생은 제외합니다. SDGs 근거지도와 세특 로컬 오류검증을 각각 독립 메뉴로 제공합니다. 실험 중인 담임 공용읽기 API는 포함하지 않습니다.'
           }
           gh release upload $tag UEP-update.zip --repo $env:GITHUB_REPOSITORY --clobber
 
@@ -136,30 +169,31 @@ jobs:
           SHA256: ${{ steps.package.outputs.sha }}
         run: |
           $ErrorActionPreference='Stop'
-          $tag='v0.81.03'
+          $tag='v0.81.04'
           $asset=(gh release view $tag --repo $env:GITHUB_REPOSITORY --json assets | ConvertFrom-Json).assets | Where-Object {$_.name -eq 'UEP-update.zip'} | Select-Object -First 1
           if(-not $asset){throw 'Release asset not found'}
           $current=Get-Content 'uep-policy.json' -Raw -Encoding UTF8 | ConvertFrom-Json
           $oauthClientId=[string]$current.googleOAuthClientId
           $policy=[ordered]@{
             channel='homeroom-stable'
-            latestVersion='0.81.03'
+            latestVersion='0.81.04'
             minimumAllowedVersion='0.80.64'
             blockedVersions=@()
             forceUpdate=$false
             updateEnabled=$true
             downloadUrl=$asset.url
             sha256=$env:SHA256
-            message='UEP 0.81.03 담임 학교 공용 연결 자동 복구'
+            message='UEP 0.81.04 선택과목·SDGs·세특 검증 기능 업데이트'
             offlineGraceHours=72
             googleOAuthClientId=$oauthClientId
           } | ConvertTo-Json -Depth 4
           $info=gh api "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json?ref=main" | ConvertFrom-Json
           $encoded=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($policy))
-          $body=@{message='Enable UEP 0.81.03 automatic update';content=$encoded;sha=$info.sha;branch='main'} | ConvertTo-Json
+          $body=@{message='Enable UEP 0.81.04 automatic update';content=$encoded;sha=$info.sha;branch='main'} | ConvertTo-Json
           $body | gh api --method PUT -H 'Accept: application/vnd.github+json' "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json" --input -
 
       - uses: actions/upload-artifact@v4
         with:
-          name: UEP-0.81.03-Update-Package
+          name: UEP-0.81.04-Update-Package
           path: UEP-update.zip
+
