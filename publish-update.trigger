@@ -7,3 +7,5 @@ Clear: explicit clear button and beforeunload memory reset.
 Preserve: school/service data connection, login identity/roles, 06_선택과목이력 direct final connection and validation, meal duty, dorm outing, approval line, privacy masking, dashboard and all completed features.
 Build script: scripts/build-update-0.81.02.ps1
 Visible version: v0.81.02
+
+Retry: bounded build diagnostics enabled at 2026-08-21 KST.
