@@ -37,11 +37,10 @@ const chips=[...map.values()].map(x=>{
     return `<article class="growth-sdg-evidence-card ${cls}"><header><div><b>${x.no}</b><span>${escapeHtml(x.name)}</span></div><small>${label}</small></header>${evidenceMarkup}</article>`;
   }).join('');
   const detail=null;
-  '
 '@
 $g=$g.Substring(0,$chipsStart)+$newChips.TrimEnd()+$g.Substring($returnStart)
 
-# Keep the purpose badge once only. Remove duplicated identical span badges if a later UI patch added one.
+# Keep the purpose badge once only.
 $purposeBadge='<span>SDGs 17개를 채우는 것이 목적이 아닙니다.</span>'
 $firstBadge=$g.IndexOf($purposeBadge,[System.StringComparison]::Ordinal)
 if($firstBadge -ge 0){
@@ -51,8 +50,6 @@ if($firstBadge -ge 0){
     $nextBadge=$g.IndexOf($purposeBadge,$firstBadge+$purposeBadge.Length,[System.StringComparison]::Ordinal)
   }
 }
-
-# The cards now contain their evidence, so the old click-detail region remains disabled by detail=null.
 
 $cssPatch=@'
 
@@ -85,7 +82,6 @@ Set-Content $css $c -Encoding UTF8
 node --check $gyo
 if($LASTEXITCODE -ne 0){throw 'gyomuon syntax failed'}
 
-# Gates: clickless evidence cards and one purpose badge, with prior selection fix preserved.
 $checkG=Get-Content $gyo -Raw -Encoding UTF8
 $checkC=Get-Content $css -Raw -Encoding UTF8
 $purposeCount=([regex]::Matches($checkG,[regex]::Escape('SDGs 17개를 채우는 것이 목적이 아닙니다.'))).Count
