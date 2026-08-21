@@ -11,3 +11,5 @@ Build script: scripts/build-update-0.81.06.ps1
 Visible version: v0.81.06
 
 Retry: line-ending-safe removal of legacy 06A range.
+
+Retry 2: rebuild canonical selection range map.
