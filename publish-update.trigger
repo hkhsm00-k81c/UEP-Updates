@@ -11,3 +11,5 @@ Visible version: v0.81.02
 Retry: bounded build diagnostics enabled at 2026-08-21 KST.
 
 Retry: exception capture corrected.
+
+Retry: corrected stylesheet path to gyomuon.css.
