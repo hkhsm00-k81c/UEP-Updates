@@ -18,8 +18,12 @@ if(-not $g.Contains($oldFiltered)){throw 'NEIS filtered anchor not found'};$g=$g
 $oldRender='const render=root=>{const records=filtered(),attention=records.filter(r=>activeIssues(r).length),classes=[...new Set(session.records.map(r=>r.classNo))].sort(),subjects=[...new Set(session.records.map(r=>r.subject))].sort((a,b)=>a.localeCompare(b,"ko")),box=root.querySelector(''[data-neis-results]'');'
 $newRender='const render=root=>{const records=filtered(),attention=records.filter(r=>activeIssues(r).length),classes=[...new Set(session.records.map(r=>r.classNo))].sort(),subjects=[...new Set(session.records.map(r=>r.subject))].sort((a,b)=>a.localeCompare(b,"ko")),students=[...new Map(session.records.filter(r=>r.studentNo).map(r=>[r.studentNo,{studentNo:r.studentNo,name:r.name}])).values()].sort((a,b)=>String(a.studentNo).localeCompare(String(b.studentNo))),box=root.querySelector(''[data-neis-results]'');'
 if(-not $g.Contains($oldRender)){throw 'NEIS render anchor not found'};$g=$g.Replace($oldRender,$newRender)
-$oldSubject='</select></label><button class="btn ${session.scope===''issues''?''primary'':''secondary''}" data-neis-errors-only>오류 표시만</button>'
-$newSubject='</select></label><label class="neis-student-filter">개인별<select data-neis-student><option value="all">전체 학생</option>${students.map(x=>`<option value="${esc(x.studentNo)}" ${session.student===x.studentNo?''selected'':''}>${esc(x.studentNo)} ${esc(x.name)}</option>`).join('''')}</select></label><button class="btn ${session.scope===''issues''?''primary'':''secondary''}" data-neis-errors-only>오류 표시만</button>'
+$oldSubject=@'
+</select></label><button class="btn ${session.scope==='issues'?'primary':'secondary'}" data-neis-errors-only>오류 표시만</button>
+'@
+$newSubject=@'
+</select></label><label class="neis-student-filter">개인별<select data-neis-student><option value="all">전체 학생</option>${students.map(x=>`<option value="${esc(x.studentNo)}" ${session.student===x.studentNo?'selected':''}>${esc(x.studentNo)} ${esc(x.name)}</option>`).join('')}</select></label><button class="btn ${session.scope==='issues'?'primary':'secondary'}" data-neis-errors-only>오류 표시만</button>
+'@
 if(-not $g.Contains($oldSubject)){throw 'NEIS subject filter anchor not found'};$g=$g.Replace($oldSubject,$newSubject)
 $oldBind='box.querySelector(''[data-neis-subject]'').onchange=e=>{session.subject=e.target.value;render(root);};box.querySelector(''[data-neis-errors-only]'')'
 $newBind='box.querySelector(''[data-neis-subject]'').onchange=e=>{session.subject=e.target.value;render(root);};box.querySelector(''[data-neis-student]'').onchange=e=>{session.student=e.target.value;render(root);};box.querySelector(''[data-neis-errors-only]'')'
