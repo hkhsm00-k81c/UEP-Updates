@@ -40,14 +40,15 @@ const chips=[...map.values()].map(x=>{
 '@
 $g=$g.Substring(0,$chipsStart)+$newChips.TrimEnd()+$g.Substring($returnStart)
 
-# Keep the purpose badge once only.
-$purposeBadge='<span>SDGs 17개를 채우는 것이 목적이 아닙니다.</span>'
-$firstBadge=$g.IndexOf($purposeBadge,[System.StringComparison]::Ordinal)
-if($firstBadge -ge 0){
-  $nextBadge=$g.IndexOf($purposeBadge,$firstBadge+$purposeBadge.Length,[System.StringComparison]::Ordinal)
-  while($nextBadge -ge 0){
-    $g=$g.Remove($nextBadge,$purposeBadge.Length)
-    $nextBadge=$g.IndexOf($purposeBadge,$firstBadge+$purposeBadge.Length,[System.StringComparison]::Ordinal)
+# Keep the purpose sentence visible only once regardless of wrapper differences from older patches.
+$purposeText='SDGs 17개를 채우는 것이 목적이 아닙니다.'
+$firstPurpose=$g.IndexOf($purposeText,[System.StringComparison]::Ordinal)
+if($firstPurpose -ge 0){
+  $scan=$firstPurpose+$purposeText.Length
+  $nextPurpose=$g.IndexOf($purposeText,$scan,[System.StringComparison]::Ordinal)
+  while($nextPurpose -ge 0){
+    $g=$g.Remove($nextPurpose,$purposeText.Length)
+    $nextPurpose=$g.IndexOf($purposeText,$scan,[System.StringComparison]::Ordinal)
   }
 }
 
@@ -84,13 +85,13 @@ if($LASTEXITCODE -ne 0){throw 'gyomuon syntax failed'}
 
 $checkG=Get-Content $gyo -Raw -Encoding UTF8
 $checkC=Get-Content $css -Raw -Encoding UTF8
-$purposeCount=([regex]::Matches($checkG,[regex]::Escape('SDGs 17개를 채우는 것이 목적이 아닙니다.'))).Count
+$purposeCount=([regex]::Matches($checkG,[regex]::Escape($purposeText))).Count
 $checks=[ordered]@{
   'evidence card markup'=$checkG.Contains('growth-sdg-evidence-card')
   'evidence list markup'=$checkG.Contains('growth-sdg-evidence-list')
   'confirmed possible empty sorting'=$checkG.Contains('priority:confirmedEvidence.length?0:possibleEvidence.length?1:2')
   'click detail disabled'=$checkG.Contains('const detail=null;')
-  'purpose badge not duplicated'=($purposeCount -le 1)
+  'purpose sentence single'=($purposeCount -eq 1)
   'card css marker'=$checkC.Contains('__UEP_SDGS_EVIDENCE_CARDS_08098__')
   'selection 06 fix preserved'=$checkG.Contains('for(const raw of (readonlyCache?.subjectSelections||[]))')
 }
