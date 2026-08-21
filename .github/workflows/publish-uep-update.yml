@@ -203,6 +203,11 @@ jobs:
           $checks['recordcheck report']=$g.Contains('data-neis-print')
           if($checks.Values -contains $false){throw 'UEP 0.81.06 final verification failed'}
 
+      - name: Apply and verify 0.81.07 refinement
+        shell: pwsh
+        run: |
+          & ./scripts/build-update-0.81.07.ps1
+
       - name: Build update package
         id: package
         shell: pwsh
@@ -213,15 +218,15 @@ jobs:
           $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
           "sha=$sha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-      - name: Publish v0.81.06 release
+      - name: Publish v0.81.07 release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag='v0.81.06'
+          $tag='v0.81.07'
           gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
           if($LASTEXITCODE -ne 0){
-            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.06 - 선택과목·SDGs·세특 운영 완성' --notes '새 06 선택과목 학생별 구조 하나만 사용합니다. 생활기록부 교육과정에서 학생신청과 오류·보완문자를 통합하고, 학기별 과목 카드에서 신청인원·분반·폐강위기를 먼저 본 뒤 명단·예상성적·등급·학사를 확인합니다. SDGs 실제 근거를 활동·봉사·프로그램·보고서·선택과목에서 연결하고 보완은 하단에 배치합니다. 세특검증은 반·과목·오류 필터, 확인·해제, 오류리포트 출력을 제공합니다.'
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.07 - 선택과목·SDGs·세특 조회 개선' --notes '교육과정 전체·반별·개인별 조회 순서와 학생 이동을 정리하고, 오류를 상단 및 관련 과목에 표시합니다. 네 학기 카드를 데스크톱 4열로 배치하며 과목 명단의 예상등급 열을 복구합니다. SDGs 중복 근거지도를 제거하고 실제 근거연결 중심으로 정리합니다. 나이스 엑셀 병합형 학급·과목을 이어받아 학번·이름·과목을 표시하고 검증규칙 관리 팝업을 제공합니다.'
           }
           gh release upload $tag UEP-update.zip --repo $env:GITHUB_REPOSITORY --clobber
 
@@ -232,32 +237,32 @@ jobs:
           SHA256: ${{ steps.package.outputs.sha }}
         run: |
           $ErrorActionPreference='Stop'
-          $tag='v0.81.06'
+          $tag='v0.81.07'
           $asset=(gh release view $tag --repo $env:GITHUB_REPOSITORY --json assets | ConvertFrom-Json).assets | Where-Object {$_.name -eq 'UEP-update.zip'} | Select-Object -First 1
           if(-not $asset){throw 'Release asset not found'}
           $current=Get-Content 'uep-policy.json' -Raw -Encoding UTF8 | ConvertFrom-Json
           $oauthClientId=[string]$current.googleOAuthClientId
           $policy=[ordered]@{
             channel='homeroom-stable'
-            latestVersion='0.81.06'
+            latestVersion='0.81.07'
             minimumAllowedVersion='0.80.64'
             blockedVersions=@()
             forceUpdate=$false
             updateEnabled=$true
             downloadUrl=$asset.url
             sha256=$env:SHA256
-            message='UEP 0.81.06 선택과목·SDGs 근거·세특검증 운영 업데이트'
+            message='UEP 0.81.07 선택과목·SDGs·세특 조회 개선 업데이트'
             offlineGraceHours=72
             googleOAuthClientId=$oauthClientId
           } | ConvertTo-Json -Depth 4
           $info=gh api "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json?ref=main" | ConvertFrom-Json
           $encoded=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($policy))
-          $body=@{message='Enable UEP 0.81.06 automatic update';content=$encoded;sha=$info.sha;branch='main'} | ConvertTo-Json
+          $body=@{message='Enable UEP 0.81.07 automatic update';content=$encoded;sha=$info.sha;branch='main'} | ConvertTo-Json
           $body | gh api --method PUT -H 'Accept: application/vnd.github+json' "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json" --input -
 
       - uses: actions/upload-artifact@v4
         with:
-          name: UEP-0.81.06-Update-Package
+          name: UEP-0.81.07-Update-Package
           path: UEP-update.zip
 
 
