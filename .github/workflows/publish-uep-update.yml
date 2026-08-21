@@ -28,26 +28,33 @@ jobs:
           Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
           if(-not (Test-Path 'app/UEP.exe')){throw 'UEP.exe not found in 0.80.97 update'}
 
-      - name: Apply 0.81.00 login identity gateway and SDGs fix
+      - name: Apply 0.81.01 bounds-safe login identity build
         shell: pwsh
-        run: ./scripts/build-update-0.81.00.ps1
+        run: ./scripts/build-update-0.81.01.ps1
 
-      - name: Verify 0.81.00 requested fixes
+      - name: Verify 0.81.01 requested fixes
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
           $g=Get-Content 'app/resources/app/gyomuon.js' -Raw -Encoding UTF8
           $m=Get-Content 'app/resources/app/electron/main.cjs' -Raw -Encoding UTF8
+          $d=Get-Content 'app/resources/app/electron/google-data.cjs' -Raw -Encoding UTF8
           $checks=[ordered]@{
             'login identity gateway'=$m.Contains('mode:"login_identity"')
-            'Google OAuth not prerequisite'=$m.Contains('별도 Google 계정 연결은 필요하지 않습니다.')
+            'school service account path'=$m.Contains('mode:"service_account"')
+            'approval disabled'=$m.Contains('approvalRequired:false')
+            'token exchange disabled'=$m.Contains('tokenExchangeRequired:false')
+            'authorize bypassed'=$m.Contains('skipped:true')
             'SDGs evidence cards'=$g.Contains('growth-sdg-evidence-card')
             'SDGs evidence list'=$g.Contains('growth-sdg-evidence-list')
             'SDGs rendered marker'=$g.Contains('sdgsEvidenceCardsRendered=true')
-            'selection 06 preserved'=$g.Contains('for(const raw of (readonlyCache?.subjectSelections||[]))')
+            'selection 06 UI preserved'=$g.Contains('for(const raw of (readonlyCache?.subjectSelections||[]))')
+            'selection 06 range preserved'=$d.Contains('"06_선택과목이력": "''06_선택과목이력''!A1:X6000"')
+            'selection final rows preserved'=$d.Contains("const selectedSubjectRows = legacySelectedSubjectRows.filter(row=>String(row.final||'').trim()==='Y');")
+            'selection export preserved'=$d.Contains('subjectSelections:selectedSubjects')
           }
           $checks.GetEnumerator() | ForEach-Object { Write-Host ("CHECK {0} = {1}" -f $_.Key,$_.Value) }
-          if($checks.Values -contains $false){throw 'UEP 0.81.00 requested feature verification failed'}
+          if($checks.Values -contains $false){throw 'UEP 0.81.01 requested feature verification failed'}
 
       - name: Build update package
         id: package
@@ -59,15 +66,15 @@ jobs:
           $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
           "sha=$sha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-      - name: Publish v0.81.00 release
+      - name: Publish v0.81.01 release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag='v0.81.00'
+          $tag='v0.81.01'
           gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
           if($LASTEXITCODE -ne 0){
-            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.00 - 로그인 기반 담임 연결 + SDGs 근거지도' --notes '담임별 Google OAuth 토큰 교환을 정상 사용 경로에서 제거하고 UEP 로그인 이름·이메일을 담임 권한의 기준으로 사용합니다. SDGs 근거 카드 렌더링을 함께 보완하며 선택과목 06_선택과목이력 직접 연결 등 완료 기능은 보존합니다.'
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.01 - 공용 시트 자동연결 안정화' --notes '0.81.00 빌드 검증의 음수 Substring 오류를 범위 안전 검증으로 교체했습니다. 학교 공용 Google/시트 연결은 유지하고 UEP 로그인 이름·이메일로 교사·담임·권한을 식별합니다. 담임 PC별 Google OAuth 승인·토큰 교환·refresh token 의존은 정상 경로에서 제거하며 SDGs 근거 카드, 06_선택과목이력 직접연결과 검증 및 기존 완료 기능을 보존합니다.'
           }
           gh release upload $tag UEP-update.zip --repo $env:GITHUB_REPOSITORY --clobber
 
@@ -78,30 +85,30 @@ jobs:
           SHA256: ${{ steps.package.outputs.sha }}
         run: |
           $ErrorActionPreference='Stop'
-          $tag='v0.81.00'
+          $tag='v0.81.01'
           $asset=(gh release view $tag --repo $env:GITHUB_REPOSITORY --json assets | ConvertFrom-Json).assets | Where-Object {$_.name -eq 'UEP-update.zip'} | Select-Object -First 1
           if(-not $asset){throw 'Release asset not found'}
           $current=Get-Content 'uep-policy.json' -Raw -Encoding UTF8 | ConvertFrom-Json
           $oauthClientId=[string]$current.googleOAuthClientId
           $policy=[ordered]@{
             channel='homeroom-stable'
-            latestVersion='0.81.00'
+            latestVersion='0.81.01'
             minimumAllowedVersion='0.80.64'
             blockedVersions=@()
             forceUpdate=$false
             updateEnabled=$true
             downloadUrl=$asset.url
             sha256=$env:SHA256
-            message='UEP 0.81.00 로그인 기반 담임 연결 및 SDGs 근거지도 개선'
+            message='UEP 0.81.01 공용 시트 자동연결 및 로그인 권한 안정화'
             offlineGraceHours=72
             googleOAuthClientId=$oauthClientId
           } | ConvertTo-Json -Depth 4
           $info=gh api "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json?ref=main" | ConvertFrom-Json
           $encoded=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($policy))
-          $body=@{message='Enable UEP 0.81.00 automatic update';content=$encoded;sha=$info.sha;branch='main'} | ConvertTo-Json
+          $body=@{message='Enable UEP 0.81.01 automatic update';content=$encoded;sha=$info.sha;branch='main'} | ConvertTo-Json
           $body | gh api --method PUT -H 'Accept: application/vnd.github+json' "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json" --input -
 
       - uses: actions/upload-artifact@v4
         with:
-          name: UEP-0.81.00-Update-Package
+          name: UEP-0.81.01-Update-Package
           path: UEP-update.zip
