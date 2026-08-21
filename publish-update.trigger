@@ -37,3 +37,7 @@ Scope: remove the stale selectionView startup reference and route legacy selecti
 Publish requested: UEP 0.81.11 integrated view registry recovery
 Requested: 2026-08-22
 Scope: remove all stale standalone selection and SDGs view references, retain safe standalone record validation.
+
+Publish requested: UEP 0.81.12 curriculum SDGs recordcheck interaction recovery
+Requested: 2026-08-22
+Scope: restore integrated records interactions and standalone NEIS record validation mount.
