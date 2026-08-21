@@ -17,7 +17,7 @@ $checks=[ordered]@{
  'expected grade column'=$g.Contains('expected-grade-cell')
  'legacy SDGs map removed'=$g.Contains("textContent.trim()==='SDGs 근거 지도'")
  'record rule manager'=$g.Contains('오류규칙·금지어 관리')
- 'record merged subject carry'=$g.Contains('currentSubject=by(/과목명|과\\s*목/)||currentSubject')
+ 'record merged subject carry'=$g.Contains('currentSubject=by(/과목명|과\s*목/)||currentSubject')
  'record student number restore'=$g.Contains('String(rawNo).padStart(2,"0")')
 }
 $checks.GetEnumerator()|ForEach-Object{Write-Host ("CHECK {0} = {1}" -f $_.Key,$_.Value)}
