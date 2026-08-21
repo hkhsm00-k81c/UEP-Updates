@@ -64,20 +64,14 @@ if(-not $m.Contains('if (isUepGatewayToken(token)) return uepGatewayBatchRead'))
   $m=$m.Replace($readAnchor,$readReplacement)
 }
 
-$fetchOld=@'
-  const account = credentials || await resolveSchoolServiceAccount();
-  if (!validateServiceAccount(account)) throw new Error("저장된 Google 서비스 계정 인증정보가 올바르지 않습니다.");
-  const token = await getSheetsToken(account);
-'@
-$fetchNew=@'
-  const gatewaySession = credentials ? null : await verifiedUepGatewaySession();
-  const account = credentials || (gatewaySession ? null : await resolveSchoolServiceAccount());
-  if (!gatewaySession && !validateServiceAccount(account)) throw new Error("UEP 로그인이 필요합니다.");
-  const token = gatewaySession ? {__uepGateway:true,token:gatewaySession.token,deviceId:gatewaySession.deviceId} : await getSheetsToken(account);
-'@
 if(-not $m.Contains('const gatewaySession = credentials ? null : await verifiedUepGatewaySession();')){
-  if(-not $m.Contains($fetchOld)){throw 'fetchLiveData gateway anchor not found'}
-  $m=$m.Replace($fetchOld,$fetchNew)
+  $fetchAccount='  const account = credentials || await resolveSchoolServiceAccount();'
+  $fetchValidate='  if (!validateServiceAccount(account)) throw new Error("저장된 Google 서비스 계정 인증정보가 올바르지 않습니다.");'
+  $fetchToken='  const token = await getSheetsToken(account);'
+  if(-not $m.Contains($fetchAccount) -or -not $m.Contains($fetchValidate) -or -not $m.Contains($fetchToken)){throw 'fetchLiveData gateway anchor not found'}
+  $m=$m.Replace($fetchAccount,"  const gatewaySession = credentials ? null : await verifiedUepGatewaySession();`r`n  const account = credentials || (gatewaySession ? null : await resolveSchoolServiceAccount());")
+  $m=$m.Replace($fetchValidate,'  if (!gatewaySession && !validateServiceAccount(account)) throw new Error("UEP 로그인이 필요합니다.");')
+  $m=$m.Replace($fetchToken,'  const token = gatewaySession ? {__uepGateway:true,token:gatewaySession.token,deviceId:gatewaySession.deviceId} : await getSheetsToken(account);')
 }
 $m=$m.Replace('  await ensureSelectedReportNormalization(token);','  if (!isUepGatewayToken(token)) await ensureSelectedReportNormalization(token);')
 $m=$m.Replace('    account: account.client_email,','    account: gatewaySession?.user?.email || account?.client_email || "UEP 학교 공용읽기",')
