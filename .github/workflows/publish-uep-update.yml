@@ -28,27 +28,26 @@ jobs:
           Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
           if(-not (Test-Path 'app/UEP.exe')){throw 'UEP.exe not found in 0.80.97 update'}
 
-      - name: Apply 0.80.99 SDGs and Google connection fix
+      - name: Apply 0.81.00 login identity gateway and SDGs fix
         shell: pwsh
-        run: ./scripts/build-update-0.80.99.ps1
+        run: ./scripts/build-update-0.81.00.ps1
 
-      - name: Verify 0.80.99 requested fixes
+      - name: Verify 0.81.00 requested fixes
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
           $g=Get-Content 'app/resources/app/gyomuon.js' -Raw -Encoding UTF8
-          $c=Get-Content 'app/resources/app/gyomuon.css' -Raw -Encoding UTF8
           $m=Get-Content 'app/resources/app/electron/main.cjs' -Raw -Encoding UTF8
           $checks=[ordered]@{
+            'login identity gateway'=$m.Contains('mode:"login_identity"')
+            'Google OAuth not prerequisite'=$m.Contains('별도 Google 계정 연결은 필요하지 않습니다.')
             'SDGs evidence cards'=$g.Contains('growth-sdg-evidence-card')
-            'SDGs evidence lists'=$g.Contains('growth-sdg-evidence-list')
-            'SDGs card CSS'=$c.Contains('__UEP_SDGS_EVIDENCE_CARDS_08098__')
+            'SDGs evidence list'=$g.Contains('growth-sdg-evidence-list')
+            'SDGs rendered marker'=$g.Contains('sdgsEvidenceCardsRendered=true')
             'selection 06 preserved'=$g.Contains('for(const raw of (readonlyCache?.subjectSelections||[]))')
-            'OAuth serialized body'=$m.Contains('body:body.toString()')
-            'OAuth auto refresh'=$m.Contains('autoConnected:true')
           }
           $checks.GetEnumerator() | ForEach-Object { Write-Host ("CHECK {0} = {1}" -f $_.Key,$_.Value) }
-          if($checks.Values -contains $false){throw 'UEP 0.80.99 requested feature verification failed'}
+          if($checks.Values -contains $false){throw 'UEP 0.81.00 requested feature verification failed'}
 
       - name: Build update package
         id: package
@@ -60,15 +59,15 @@ jobs:
           $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
           "sha=$sha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-      - name: Publish v0.80.99 release
+      - name: Publish v0.81.00 release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag='v0.80.99'
+          $tag='v0.81.00'
           gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
           if($LASTEXITCODE -ne 0){
-            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.80.99 - SDGs 근거지도 + 담임 Google 연결 개선' --notes 'v0.80.97을 기준으로 SDGs 근거 카드의 클릭 없는 실제 근거 표시를 반영하고, Google OAuth 토큰 교환 body 직렬화 및 저장 토큰 자동 갱신을 적용합니다. 최초 연결 성공 후에는 다음 UEP 로그인부터 별도 Google 계정 연결 버튼 없이 자동 연결되도록 합니다. 선택과목 06_선택과목이력 직접 연결 등 완료 기능은 보존합니다.'
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.00 - 로그인 기반 담임 연결 + SDGs 근거지도' --notes '담임별 Google OAuth 토큰 교환을 정상 사용 경로에서 제거하고 UEP 로그인 이름·이메일을 담임 권한의 기준으로 사용합니다. SDGs 근거 카드 렌더링을 함께 보완하며 선택과목 06_선택과목이력 직접 연결 등 완료 기능은 보존합니다.'
           }
           gh release upload $tag UEP-update.zip --repo $env:GITHUB_REPOSITORY --clobber
 
@@ -79,30 +78,30 @@ jobs:
           SHA256: ${{ steps.package.outputs.sha }}
         run: |
           $ErrorActionPreference='Stop'
-          $tag='v0.80.99'
+          $tag='v0.81.00'
           $asset=(gh release view $tag --repo $env:GITHUB_REPOSITORY --json assets | ConvertFrom-Json).assets | Where-Object {$_.name -eq 'UEP-update.zip'} | Select-Object -First 1
           if(-not $asset){throw 'Release asset not found'}
           $current=Get-Content 'uep-policy.json' -Raw -Encoding UTF8 | ConvertFrom-Json
           $oauthClientId=[string]$current.googleOAuthClientId
           $policy=[ordered]@{
             channel='homeroom-stable'
-            latestVersion='0.80.99'
+            latestVersion='0.81.00'
             minimumAllowedVersion='0.80.64'
             blockedVersions=@()
             forceUpdate=$false
             updateEnabled=$true
             downloadUrl=$asset.url
             sha256=$env:SHA256
-            message='UEP 0.80.99 SDGs 및 담임 Google 연결 개선'
+            message='UEP 0.81.00 로그인 기반 담임 연결 및 SDGs 근거지도 개선'
             offlineGraceHours=72
             googleOAuthClientId=$oauthClientId
           } | ConvertTo-Json -Depth 4
           $info=gh api "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json?ref=main" | ConvertFrom-Json
           $encoded=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($policy))
-          $body=@{message='Enable UEP 0.80.99 automatic update';content=$encoded;sha=$info.sha;branch='main'} | ConvertTo-Json
+          $body=@{message='Enable UEP 0.81.00 automatic update';content=$encoded;sha=$info.sha;branch='main'} | ConvertTo-Json
           $body | gh api --method PUT -H 'Accept: application/vnd.github+json' "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json" --input -
 
       - uses: actions/upload-artifact@v4
         with:
-          name: UEP-0.80.99-Update-Package
+          name: UEP-0.81.00-Update-Package
           path: UEP-update.zip
