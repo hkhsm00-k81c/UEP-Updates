@@ -29,8 +29,24 @@ jobs:
           if(-not (Test-Path 'app/UEP.exe')){throw 'UEP.exe not found in 0.81.01 update'}
 
       - name: Apply 0.81.02 SDGs and local recordbook validation
+        id: apply08102
+        continue-on-error: true
         shell: pwsh
-        run: ./scripts/build-update-0.81.02.ps1
+        run: |
+          ./scripts/build-update-0.81.02.ps1 *>&1 | Tee-Object -FilePath build-08102-status.txt
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+
+      - name: Commit bounded failure status
+        if: steps.apply08102.outcome == 'failure'
+        shell: pwsh
+        run: |
+          Add-Content build-08102-status.txt 'BUILD_FAILED_BEFORE_RELEASE'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- build-08102-status.txt
+          git commit -m 'Record UEP 0.81.02 build failure'
+          git push
+          throw 'UEP 0.81.02 apply failed; bounded status committed'
 
       - name: Verify 0.81.02 requested fixes
         shell: pwsh
