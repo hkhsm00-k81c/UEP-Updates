@@ -13,3 +13,5 @@ Visible version: v0.81.06
 Retry: line-ending-safe removal of legacy 06A range.
 
 Retry 2: rebuild canonical selection range map.
+
+Retry 3: align release verification with canonical A1:AI1000 wide-row source; require legacy 06A absence.
