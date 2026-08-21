@@ -27,7 +27,7 @@ if(-not $g.Contains($oldBind)){throw 'NEIS filter binding anchor not found'};$g=
 
 # 2) Professional dorm supervisor report: home-going students grouped by departure time.
 $reportStart=$g.IndexOf('  const supervisorReportText=()=>')
-$reportEnd=if($reportStart -ge 0){$g.IndexOf(';',$reportStart)+1}else{-1}
+$reportEnd=$g.IndexOf('  const smsCards=', $reportStart)
 if($reportStart -lt 0 -or $reportEnd -lt 0){throw 'supervisor report anchors not found'}
 $report=@'
   const supervisorReportText=()=>{const homeItems=items.filter(item=>/퇴소|귀가/.test(String(item.category||''))),groups=new Map();homeItems.forEach(item=>{const time=String(item.outTime||item.returnTime||'시간 미정');if(!groups.has(time))groups.set(time,[]);groups.get(time).push(item);});const body=[...groups.entries()].sort((a,b)=>a[0].localeCompare(b[0])).map(([time,list])=>`■ ${time} 귀가\n${list.sort((a,b)=>String(outingStudentNo(a)).localeCompare(String(outingStudentNo(b)))).map(item=>`${outingStudentNo(item)} ${item.name}`).join('\n')}`).join('\n\n');return `[오늘의 1학년 학사 귀가 학생]\n\n${body||'금일 귀가 학생 없음'}\n\n이상입니다.`;};
