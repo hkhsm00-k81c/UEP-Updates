@@ -1,0 +1,38 @@
+name: Validate UEP 0.81.08 candidate
+
+on:
+  pull_request:
+    paths:
+      - 'patches/uep-0.81.08-*'
+      - 'scripts/build-update-0.81.08.ps1'
+      - '.github/workflows/publish-uep-update.yml'
+      - '.github/workflows/validate-uep-08108.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download 0.81.01 base
+        shell: pwsh
+        run: |
+          gh release download v0.81.01 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip'
+          Expand-Archive UEP-update.zip -DestinationPath app
+      - name: Apply update chain through 0.81.08
+        shell: pwsh
+        run: |
+          2..8 | ForEach-Object {
+            $version = '0.81.{0:d2}' -f $_
+            $script = "scripts/build-update-$version.ps1"
+            if (Test-Path $script) { & $script }
+          }
+      - name: Verify package
+        shell: pwsh
+        run: |
+          $app = Get-ChildItem app -Recurse -Filter gyomuon.js | Select-Object -First 1
+          if (-not $app) { throw 'gyomuon.js not found' }
+          $text = Get-Content $app.FullName -Raw -Encoding UTF8
+          @('__UEP_OPERATIONS_08108__','const APP_VERSION = "0.81.08"','data-neis-student','dashboard-counsel-student-grid') | ForEach-Object {
+            if (-not $text.Contains($_)) { throw "missing marker: $_" }
+          }
