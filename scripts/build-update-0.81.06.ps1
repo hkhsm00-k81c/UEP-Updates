@@ -2,7 +2,8 @@ $ErrorActionPreference='Stop'
 $main='app/resources/app/electron/main.cjs';$data='app/resources/app/electron/google-data.cjs';$gyo='app/resources/app/gyomuon.js';$css='app/resources/app/gyomuon.css';$index='app/resources/app/index.html';$pkg='app/resources/app/package.json'
 $m=Get-Content $main -Raw -Encoding UTF8;$d=Get-Content $data -Raw -Encoding UTF8;$g=Get-Content $gyo -Raw -Encoding UTF8;$c=Get-Content $css -Raw -Encoding UTF8;$i=Get-Content $index -Raw -Encoding UTF8
 $g=$g.Replace('const APP_VERSION = "0.81.05";','const APP_VERSION = "0.81.06";').Replace('v0.81.05','v0.81.06')
-$d=$d.Replace('"06_선택과목이력": "''06_선택과목이력''!A1:X6000",','"06_선택과목이력": "''06_선택과목이력''!A1:AI1000",').Replace('  "06A_학생별선택과목": "''06A_학생별선택과목''!A1:AI1000",'+"`r`n",'')
+$d=$d.Replace('"06_선택과목이력": "''06_선택과목이력''!A1:X6000",','"06_선택과목이력": "''06_선택과목이력''!A1:AI1000",')
+$d=[regex]::Replace($d,'(?m)^\s*"06A_학생별선택과목"\s*:\s*"''06A_학생별선택과목''!A1:AI1000",?\r?\n?','')
 $d=$d.Replace('selectionStudentRows: rowsFrom("06A_학생별선택과목")','selectionStudentRows: rowsFrom("06_선택과목이력")')
 $start=$d.IndexOf('  const legacySelectedSubjectRows = rowsFrom("06_선택과목이력")')
 $end=$d.IndexOf('  const selectionSubjectErrors = [];',$start)
