@@ -89,15 +89,11 @@ if(-not $m.Contains('ipcMain.handle("uep:login"')){
   if(-not $m.Contains($ipcAnchor)){throw 'credential status IPC anchor not found'}
   $m=$m.Replace($ipcAnchor,$ipcInsert+"`r`n"+$ipcAnchor)
 }
-$statusAnchor=@'
-  ipcMain.handle("google:credentialStatus", async () => {
-    try {
-'@
+$statusAnchor='  ipcMain.handle("google:credentialStatus", async () => {'
 $statusReplacement=@'
   ipcMain.handle("google:credentialStatus", async () => {
     const gatewaySession=await verifiedUepGatewaySession();
     if(gatewaySession)return {ok:true,encryption:safeStorage.isEncryptionAvailable(),local:false,account:gatewaySession.user?.email||"",sourceName:UEP_SPREADSHEET_NAME,sourceUrl:UEP_SPREADSHEET_URL,mode:"uep_readonly_gateway",approvalRequired:false,tokenExchangeRequired:false};
-    try {
 '@
 if(-not $m.Contains('mode:"uep_readonly_gateway"')){
   if(-not $m.Contains($statusAnchor)){throw 'credential status gateway anchor not found'}
