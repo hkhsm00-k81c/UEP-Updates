@@ -1,11 +1,9 @@
-Publish requested: UEP 0.81.01 bounds-safe ZIP-era connection model + login identity
+Publish requested: UEP 0.81.02 SDGs primary evidence map + local-only NEIS recordbook validator
 Requested at: 2026-08-21 KST
-Retry after publisher workflow was advanced to v0.81.01.
-Fix: replace unsafe Substring verification with required-anchor and bounds checks so missing/replaced handlers fail with a clear anchor error instead of a negative length.
-Base: build from the last known-good 0.80.99 prerequisite; do not invoke the failed 0.81.00 post-build verification.
-Core: school/service connection supplies Google Sheet data immediately. UEP login name+email identifies teacher, homeroom, and role permissions.
-REMOVE from normal runtime: per-PC Google approval, per-teacher Google OAuth, browser authorization, token exchange, refresh-token requirement.
-Preserve: SDGs evidence-only cards/map, 06_선택과목이력 direct connection and validation, lunch/dinner meal duty, dorm outing, approval line, privacy masking, dashboard and completed features.
-Pre-release checks: node syntax checks plus bounded feature-marker checks.
-Build script: scripts/build-update-0.81.01.ps1
-Visible version: v0.81.01
+SDGs: move the full 17-card evidence map directly under the compact intro, before CORE STORY. Always show confirmed, possible, and no-evidence states. Keep detail evidence click behavior.
+Recordbook: select NEIS subject-specific-notes XLSX/XLS/CSV locally, parse read-only, validate forbidden expressions, recordbook guidance flags, repeated text, formula/symbol, English and self-narration.
+Privacy boundary: source text and findings stay only in renderer memory for the current run. No Google Sheets, input-center, state save, localStorage, auto-sync, or upload.
+Clear: explicit clear button and beforeunload memory reset.
+Preserve: school/service data connection, login identity/roles, 06_선택과목이력 direct final connection and validation, meal duty, dorm outing, approval line, privacy masking, dashboard and all completed features.
+Build script: scripts/build-update-0.81.02.ps1
+Visible version: v0.81.02
