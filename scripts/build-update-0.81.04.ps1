@@ -111,7 +111,11 @@ if(-not $m.Contains('mode:"uep_readonly_gateway"')){
 }
 
 $preloadAnchor='  googleCredentialStatus: () => ipcRenderer.invoke("google:credentialStatus"),'
-$preloadNew=$preloadAnchor+"`r`n  uepLogin: (payload) => ipcRenderer.invoke(\"uep:login\", payload),`r`n  uepVerifySession: () => ipcRenderer.invoke(\"uep:verifySession\"),"
+$preloadNew=@'
+  googleCredentialStatus: () => ipcRenderer.invoke("google:credentialStatus"),
+  uepLogin: (payload) => ipcRenderer.invoke("uep:login", payload),
+  uepVerifySession: () => ipcRenderer.invoke("uep:verifySession"),
+'@
 if(-not $p.Contains('uepLogin:')){
   if(-not $p.Contains($preloadAnchor)){throw 'preload gateway anchor not found'}
   $p=$p.Replace($preloadAnchor,$preloadNew)
