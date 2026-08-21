@@ -25,18 +25,14 @@ ipcMain.handle("google:credentialStatus", async () => {
     const credentials = await readEncrypted(credentialPath());
     if (validateServiceAccount(credentials)) return {ok:true,encryption:safeStorage.isEncryptionAvailable(),local:false,mode:"service_account",account:credentials.client_email||"",loginIdentityGateway:true};
   } catch (error) {}
-  return {ok:true,local:true,mode:"login_identity",account:"",userOAuth:false,autoConnected:true,loginIdentityGateway:true,reason:"UEP 로그인 이름·이메일을 기준으로 담임 권한을 적용합니다."};
+  return {ok:true,local:true,mode:"login_identity",account:"",userOAuth:false,autoConnected:true,loginIdentityGateway:true,reason:"UEP 로그인 이름·이메일을 기준으로 담임 권한을 적용합니다. 별도 Google 계정 연결은 필요하지 않습니다."};
 });
 '@
 $m=$m.Substring(0,$statusStart)+$statusNew.TrimEnd()+"`n"+$m.Substring($statusEnd)
 
-# Keep manual OAuth only as a recovery/legacy path; normal login no longer depends on it.
-$m=$m.Replace('최초 1회 Google 계정 연결이 필요합니다. 연결 성공 후에는 다음 로그인부터 자동 연결됩니다.','UEP 로그인 이름·이메일 기준으로 연결합니다. 별도 Google 계정 연결은 필요하지 않습니다.')
+# Manual OAuth handlers remain only as legacy/recovery code; credentialStatus no longer invokes token exchange.
 
-# SDGs: the UI already reports possible evidence counts; always render the generated card markup.
-# Remove the stale detail-only branch if it survived older rendering code.
-$g=$g.Replace('${chips}</div>${detail?`<div class="growth-sdg-detail">','${chips}</div>${detail?`<div class="growth-sdg-detail">')
-# Add a runtime marker and explicit empty-state only when chips truly contains no cards.
+# SDGs evidence rendering marker.
 $returnAnchor='const detail=null;'
 if(-not $g.Contains($returnAnchor)){throw 'SDGs detail anchor not found'}
 $g=$g.Replace($returnAnchor,"const detail=null;`n  const sdgsEvidenceCardsRendered=true;")
@@ -50,10 +46,14 @@ if($LASTEXITCODE -ne 0){throw 'gyomuon syntax failed'}
 
 $checkM=Get-Content $main -Raw -Encoding UTF8
 $checkG=Get-Content $gyo -Raw -Encoding UTF8
+$statusStart2=$checkM.IndexOf($statusStartNeedle,[System.StringComparison]::Ordinal)
+$statusEnd2=$checkM.IndexOf($statusEndNeedle,$statusStart2,[System.StringComparison]::Ordinal)
+$statusBlock=$checkM.Substring($statusStart2,$statusEnd2-$statusStart2)
 $checks=[ordered]@{
-  'login identity gateway'=$checkM.Contains('mode:"login_identity"')
-  'oauth no longer required'=$checkM.Contains('별도 Google 계정 연결은 필요하지 않습니다.')
-  'automatic connection marker'=$checkM.Contains('loginIdentityGateway:true')
+  'login identity gateway'=$statusBlock.Contains('mode:"login_identity"')
+  'oauth no longer required'=(-not $statusBlock.Contains('getGoogleUserSheetsToken'))
+  'automatic connection marker'=$statusBlock.Contains('loginIdentityGateway:true')
+  'no oauth token exchange in status'=(-not $statusBlock.Contains('refresh_token'))
   'sdgs evidence cards'=$checkG.Contains('growth-sdg-evidence-card')
   'sdgs evidence list'=$checkG.Contains('growth-sdg-evidence-list')
   'sdgs rendered marker'=$checkG.Contains('sdgsEvidenceCardsRendered=true')
