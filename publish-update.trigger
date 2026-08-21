@@ -9,3 +9,5 @@ Build script: scripts/build-update-0.81.02.ps1
 Visible version: v0.81.02
 
 Retry: bounded build diagnostics enabled at 2026-08-21 KST.
+
+Retry: exception capture corrected.
