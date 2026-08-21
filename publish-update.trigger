@@ -1,10 +1,14 @@
-Publish requested: UEP 0.81.03 homeroom school connection recovery
+Publish requested: UEP 0.81.04 operational selection, SDGs, and record validation update
 Requested at: 2026-08-21 KST
-Priority: restore homeroom teacher data connection before other UI work.
-Connection: use an already provisioned school service-account recovery on the same Windows user/PC; search stable and legacy UEP APPDATA roots.
-OAuth: no per-teacher Google approval, account-link button, token exchange, or refresh-token dependency.
-Security: do not embed or commit a private key. Same-PC AES-GCM recovery only; persist recovered account with Windows safeStorage.
-Login: preserve name+email identity and role/class mapping.
-Preserve: 0.81.02 SDGs and local-only NEIS recordbook validator, 06_선택과목이력, meal duty, dorm outing, approval line, privacy masking, dashboard, and all completed features.
-Build script: scripts/build-update-0.81.03.ps1
-Visible version: v0.81.03
+Priority: provide the administrator's daily operational features independently of the experimental homeroom shared-read API.
+Selection source: 06A_학생별선택과목.
+Selection scope: exclude transfer, dropout, expulsion, and removed-enrollment students; current active target is 260.
+Validation: humanities/science crossing, science hierarchy, Chinese/Japanese continuity, and music/art continuity across grade 2 semesters.
+Analysis: applicant counts, rosters, first-year-grade-based expected rank and grade, and expected class sections.
+Dormitory: show current 학사 badge only in course applicant rosters.
+Correction: provide per-student error correction SMS at the bottom selection tab.
+Pages: separate 선택과목, SDGs 근거지도·근거보완, and 세특 오류검증 pages.
+Distribution: existing GitHub automatic updater only; do not distribute the full original ZIP to teachers.
+Security: do not include the experimental readonly gateway or any embedded key.
+Build script: scripts/build-update-0.81.04.ps1
+Visible version: v0.81.04
