@@ -16,12 +16,15 @@ $dead=Import-Csv (Join-Path $OutDir 'dead-function-candidates.csv')
 $deadReview=@()
 foreach($d in $dead){
  $n=$d.name
- $gyoRefs=([regex]::Matches($gyo,"\\b$(Esc $n)\\b")).Count
- $runtimeRefs=([regex]::Matches($runtimeText,"\\b$(Esc $n)\\b")).Count
- $repoRefs=([regex]::Matches($repoText,"\\b$(Esc $n)\\b")).Count
- $stringRefs=([regex]::Matches($runtimeText,"['\"]$(Esc $n)['\"]")).Count
- $windowRefs=([regex]::Matches($runtimeText,"window\\.$(Esc $n)\\b")).Count
- $dataRefs=([regex]::Matches($runtimeText,"data-[^=\s]+=['\"][^'\"]*$(Esc $n)[^'\"]*['\"]")).Count
+ $escaped=Esc $n
+ $gyoRefs=([regex]::Matches($gyo,"\b$escaped\b")).Count
+ $runtimeRefs=([regex]::Matches($runtimeText,"\b$escaped\b")).Count
+ $repoRefs=([regex]::Matches($repoText,"\b$escaped\b")).Count
+ $stringPattern='[\x27\x22]'+$escaped+'[\x27\x22]'
+ $dataPattern='data-[^=\s]+=[\x27\x22][^\x27\x22]*'+$escaped+'[^\x27\x22]*[\x27\x22]'
+ $stringRefs=([regex]::Matches($runtimeText,$stringPattern)).Count
+ $windowRefs=([regex]::Matches($runtimeText,"window\.$escaped\b")).Count
+ $dataRefs=([regex]::Matches($runtimeText,$dataPattern)).Count
  $classification=if($runtimeRefs -le 1 -and $repoRefs -le 1 -and $stringRefs -eq 0 -and $windowRefs -eq 0 -and $dataRefs -eq 0){'SAFE_DELETE_AFTER_SMOKE'}else{'KEEP_OR_MANUAL_REVIEW'}
  $deadReview += [pscustomobject]@{name=$n;line=$d.line;gyoRefs=$gyoRefs;runtimeRefs=$runtimeRefs;repoRefs=$repoRefs;stringRefs=$stringRefs;windowRefs=$windowRefs;dataRefs=$dataRefs;classification=$classification}
 }
@@ -30,7 +33,8 @@ $deadReview|Export-Csv (Join-Path $OutDir 'fourth-pass-dead-review.csv') -NoType
 $shadowNames=@('sdgsDashboard','findPopupRoot','applyFix','uepStudentApplicationDetail','uepStudentApplicationView','uepSubjectApplicationView')
 $shadow=@()
 foreach($n in $shadowNames){
- $matches=[regex]::Matches($gyo,"(?ms)^\\s*function\\s+$(Esc $n)\\s*\\([^)]*\\)\\s*\\{.*?^\\}")
+ $escaped=Esc $n
+ $matches=[regex]::Matches($gyo,"(?ms)^\s*function\s+$escaped\s*\([^)]*\)\s*\{.*?^\}")
  for($i=0;$i -lt $matches.Count;$i++){
   $m=$matches[$i];$line=1+([regex]::Matches($gyo.Substring(0,$m.Index),"`n")).Count
   $hash=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($m.Value))).Substring(0,12).ToLower()
