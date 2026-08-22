@@ -1,0 +1,91 @@
+name: UEP 0.81.18 JS Cleanup1 Candidate
+
+'on':
+  push:
+    branches:
+      - candidate/0.81.18-js-cleanup1
+    paths:
+      - tools/apply-js-cleanup1-0.81.18.js
+      - .github/workflows/uep-0.81.18-js-cleanup1-candidate.yml
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  verify-cleanup1:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download shipped 0.81.01 base
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.81.01 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
+
+      - name: Reconstruct production through 0.81.17
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $scripts=Get-ChildItem scripts/build-update-*.ps1 | ForEach-Object {
+            if($_.BaseName -match 'build-update-(\d+)\.(\d+)\.(\d+)'){
+              [pscustomobject]@{File=$_.FullName;Major=[int]$matches[1];Minor=[int]$matches[2];Patch=[int]$matches[3]}
+            }
+          } | Sort-Object Major,Minor,Patch
+          foreach($s in $scripts){
+            if($s.Major -eq 0 -and $s.Minor -eq 81 -and $s.Patch -ge 2 -and $s.Patch -le 17){ & $s.File }
+          }
+
+      - name: Snapshot 0.81.17 runtime
+        shell: pwsh
+        run: |
+          Copy-Item app/resources/app/gyomuon.js cleanup1-before-gyomuon.js
+          Copy-Item app/resources/app/electron/main.cjs cleanup1-before-main.cjs
+          Copy-Item app/resources/app/electron/google-data.cjs cleanup1-before-google-data.cjs
+
+      - name: Apply conservative cleanup1
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node ./tools/apply-js-cleanup1-0.81.18.js app
+          if($LASTEXITCODE-ne 0){throw 'cleanup1 applicator failed'}
+
+      - name: Verify syntax and removed references
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check app/resources/app/gyomuon.js
+          node --check app/resources/app/electron/main.cjs
+          node --check app/resources/app/electron/google-data.cjs
+          $names=@('calendarTitleFromRow','dateFromYmd','emptyModule','formatTaskCompletedAt','getReadonlySheetsAuth','internalNineGradeReferenceMap','parseSchoolCalendarMatrix','sheetNameFromRange','sortUniversitiesByPriority','workItemReadByCurrentUser')
+          $all=(Get-Content app/resources/app/gyomuon.js -Raw)+(Get-Content app/resources/app/electron/main.cjs -Raw)+(Get-Content app/resources/app/electron/google-data.cjs -Raw)
+          foreach($n in $names){if($all -match ('\b'+[regex]::Escape($n)+'\b')){throw "Residual cleanup1 reference: $n"}}
+
+      - name: Verify critical runtime anchors
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $g=Get-Content app/resources/app/gyomuon.js -Raw
+          $anchors=@('bindPage','bindInputCenter','sdgsDashboard','uepStudentApplicationView','uepSubjectApplicationView','recordcheck','curriculum','openStudentTimetableDrawer','openStudentCounselEdit','retryGoogleConnection')
+          foreach($a in $anchors){if(-not $g.Contains($a)){throw "Critical anchor missing: $a"}}
+
+      - name: Produce non-deploy candidate report
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $before=(Get-Item cleanup1-before-gyomuon.js).Length+(Get-Item cleanup1-before-main.cjs).Length+(Get-Item cleanup1-before-google-data.cjs).Length
+          $after=(Get-Item app/resources/app/gyomuon.js).Length+(Get-Item app/resources/app/electron/main.cjs).Length+(Get-Item app/resources/app/electron/google-data.cjs).Length
+          "beforeBytes=$before`nafterBytes=$after`nremovedBytes=$($before-$after)" | Set-Content cleanup1-output/size-summary.txt
+          Compress-Archive -Path app/* -DestinationPath cleanup1-output/UEP-0.81.18-JS-CLEANUP1-NONDEPLOY.zip -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UEP-0.81.18-JS-CLEANUP1-NONDEPLOY
+          path: cleanup1-output/
