@@ -1,0 +1,139 @@
+name: UEP 0.81.17 Final Regression Candidate
+
+on:
+  push:
+    branches:
+      - candidate/0.81.17-css-cleanup
+    paths:
+      - scripts/apply-css-cleanup-0.81.17.js
+      - scripts/verify-css-cleanup-0.81.17.js
+      - scripts/build-update-0.81.17.ps1
+      - .github/workflows/uep-0.81.17-final-regression.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  final-regression:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download shipped 0.81.01 base
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,final-output | Out-Null
+          gh release download v0.81.01 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          if(-not (Test-Path 'source/UEP-update.zip')){throw 'UEP 0.81.01 base ZIP not found'}
+          Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
+
+      - name: Reconstruct production runtime through 0.81.16
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $scripts=Get-ChildItem scripts/build-update-*.ps1 | ForEach-Object {
+            if($_.BaseName -match 'build-update-(\d+)\.(\d+)\.(\d+)'){
+              [pscustomobject]@{File=$_.FullName;Major=[int]$matches[1];Minor=[int]$matches[2];Patch=[int]$matches[3]}
+            }
+          } | Sort-Object Major,Minor,Patch
+          foreach($s in $scripts){
+            if($s.Major -eq 0 -and $s.Minor -eq 81 -and $s.Patch -ge 2 -and $s.Patch -le 16){ & $s.File }
+          }
+          Copy-Item app/resources/app/gyomuon.js final-output/gyomuon-0.81.16.js
+          Copy-Item app/resources/app/gyomuon.css final-output/gyomuon-0.81.16.css
+          Copy-Item app/resources/app/package.json final-output/package-0.81.16.json
+
+      - name: Apply 0.81.17 candidate
+        shell: pwsh
+        run: ./scripts/build-update-0.81.17.ps1
+
+      - name: Verify version-only JS and package changes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $beforeJs=Get-Content final-output/gyomuon-0.81.16.js -Raw -Encoding UTF8
+          $afterJs=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          $expected=$beforeJs.Replace('const APP_VERSION = "0.81.16";','const APP_VERSION = "0.81.17";').Replace('v0.81.16','v0.81.17')
+          $expected=$expected.TrimStart([char]0xFEFF)
+          $afterJs=$afterJs.TrimStart([char]0xFEFF)
+          if($afterJs -ne $expected){throw 'Unexpected gyomuon.js change beyond version bump'}
+          $beforePkg=Get-Content final-output/package-0.81.16.json -Raw -Encoding UTF8|ConvertFrom-Json
+          $afterPkg=Get-Content app/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json
+          if($afterPkg.version -ne '0.81.17'){throw 'package version not 0.81.17'}
+          $beforePkg.version='0.81.17'
+          if(($beforePkg|ConvertTo-Json -Depth 20) -ne ($afterPkg|ConvertTo-Json -Depth 20)){throw 'Unexpected package.json change'}
+
+      - name: Verify structural CSS cleanup and critical anchors
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node ./scripts/verify-css-cleanup-0.81.17.js app
+          if($LASTEXITCODE-ne 0){throw 'structural CSS verification failed'}
+          node --check app/resources/app/gyomuon.js
+          if($LASTEXITCODE-ne 0){throw 'renderer syntax failed'}
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          $anchors=@(
+            'function uepCurriculumFinalView()',
+            'function uepActiveSelectionRows()',
+            'function uepSelectionErrors(',
+            'function uepSelectionTermSubjects(',
+            'function uepSdgsEvidenceBridge()',
+            'function uepSdgsSupplementPanel()',
+            'function uepSelectionSms(',
+            'window.uepMountRecordbookValidator',
+            'standaloneRecordcheckMount',
+            'classIndex=findIndex(/^반$|^학급$|^반명$/)',
+            'if(!/^([1-9]|1[0-4])$/.test(String(classNo||"")))classNo=""'
+          )
+          foreach($a in $anchors){if(-not $g.Contains($a)){throw "Missing critical runtime anchor: $a"}}
+
+      - name: Verify CSS reduction envelope
+        shell: pwsh
+        run: |
+          $beforeCss=Get-Content final-output/gyomuon-0.81.16.css -Raw -Encoding UTF8
+          $afterCss=Get-Content app/resources/app/gyomuon.css -Raw -Encoding UTF8
+          if($beforeCss.Length -ne 40019){throw "Unexpected 0.81.16 CSS baseline $($beforeCss.Length)"}
+          if($afterCss.Length -ne 36029){throw "Unexpected 0.81.17 CSS size $($afterCss.Length)"}
+          if(($beforeCss.Length-$afterCss.Length) -ne 3990){throw 'Unexpected CSS reduction amount'}
+          Write-Host "CSS reduction verified: $($beforeCss.Length) -> $($afterCss.Length)"
+
+      - name: Build non-deploy candidate package and report
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          @"
+          # UEP 0.81.17 FINAL REGRESSION CANDIDATE
+
+          - source base: shipped v0.81.01 reconstructed through 0.81.16
+          - target: 0.81.17
+          - deployment: disabled
+          - gyomuon.js: version markers only
+          - package.json: version only
+          - CSS: 40019 -> 36029 chars (-3990)
+          - unused CSS selector rules removed: 34
+          - structural CSS verifier: passed
+          - protected override groups: passed
+          - curriculum anchors: passed
+          - SDGs anchors: passed
+          - recordcheck/NEIS parser anchors: passed
+          - renderer syntax: passed
+          - publish/updater workflow: untouched
+          "@ | Set-Content final-output/FINAL-REGRESSION-REPORT.md -Encoding UTF8
+          Copy-Item app/resources/app/gyomuon.js final-output/gyomuon-0.81.17.js
+          Copy-Item app/resources/app/gyomuon.css final-output/gyomuon-0.81.17.css
+          Copy-Item app/resources/app/package.json final-output/package-0.81.17.json
+          Compress-Archive -Path app/* -DestinationPath final-output/UEP-0.81.17-NONDEPLOY-CANDIDATE.zip -Force
+          Get-FileHash final-output/UEP-0.81.17-NONDEPLOY-CANDIDATE.zip -Algorithm SHA256 | Format-List | Out-String | Set-Content final-output/SHA256.txt -Encoding UTF8
+          Get-Content final-output/FINAL-REGRESSION-REPORT.md
+          Get-Content final-output/SHA256.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UEP-0.81.17-FINAL-REGRESSION-CANDIDATE
+          path: final-output/
