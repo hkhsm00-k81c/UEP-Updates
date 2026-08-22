@@ -1,3 +1,3 @@
-Publish requested: UEP 0.81.15 runtime dependency recovery
+Publish requested: UEP 0.81.16 curriculum entry + strict class parsing
 Requested: 2026-08-22 KST
-Scope: restore missing uepActiveSelectionRows selection helper chain and uepSdgsSupplementPanel required by the integrated curriculum/SDGs views; retain 0.81.14 NEIS record parser refinement.
+Scope: restore missing uepSelectionSms dependency used by curriculum detail; prevent NEIS record checker from treating student number column as class by removing positional class fallback and accepting class only from 4-digit student numbers or explicit 학년·반 headings.
