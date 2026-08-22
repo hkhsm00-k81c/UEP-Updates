@@ -9,6 +9,9 @@ on:
       - .github/workflows/uep-0.81.19-performance-audit.yml
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   performance-audit:
     runs-on: windows-latest
@@ -44,6 +47,20 @@ jobs:
           node --check app/resources/app/gyomuon.js
           $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
           if(-not $g.Contains('const APP_VERSION = "0.81.18";')){throw 'runtime version changed by audit'}
+      - name: Persist audit results on audit branch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force 'audit-output/performance-0.81.19' | Out-Null
+          Copy-Item 'performance-audit-output/performance-bindings.json' 'audit-output/performance-0.81.19/performance-bindings.json' -Force
+          Copy-Item 'performance-audit-output/PERFORMANCE-BINDING-AUDIT.md' 'audit-output/performance-0.81.19/PERFORMANCE-BINDING-AUDIT.md' -Force
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add audit-output/performance-0.81.19
+          if(-not (git diff --cached --quiet)){
+            git commit -m 'Persist 0.81.19 performance audit results'
+            git push origin HEAD:audit/0.81.19-performance
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: UEP-0.81.19-Performance-Audit
