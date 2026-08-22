@@ -1,21 +1,23 @@
 # UEP CSS CLEANUP AUDIT
 
-- CSS chars: 38756
-- parsed rule blocks: 351
-- duplicate selector groups: 6
+- CSS chars: 38971
+- parsed rule blocks: 354
+- duplicate selector groups: 8
 - EXACT_DUPLICATE: 0
-- OVERRIDE_CONFLICT: 6
+- OVERRIDE_CONFLICT: 8
 - UNUSED_SELECTOR_CANDIDATE: 10
 
 ## Exact duplicates
 
 ## Override conflicts — merge manually
-- .input-method-row [root] x3 lines=6|51|97
-- .input-method-row>b [root] x3 lines=7|59|97
-- .input-center-compact-setup label [root] x3 lines=11|24|94
-- .dashboard-report-program-row [root] x2 lines=106|114
-- .growth-sdg-detail article [root] x2 lines=202|211
-- .curriculum-filter-bar .record-class-cards [root] x2 lines=278|282
+- .input-method-row [root] x3 lines=6|57|92
+- .input-method-row>b [root] x3 lines=7|65|92
+- .input-center-compact-setup [root] x3 lines=10|23|92
+- .input-center-compact-setup label [root] x3 lines=11|30|92
+- .input-center-compact-setup label.grow [root] x2 lines=31|92
+- .dashboard-report-program-row [root] x2 lines=101|109
+- .growth-sdg-detail article [root] x2 lines=197|206
+- .curriculum-filter-bar .record-class-cards [root] x2 lines=273|277
 
 ## Unused selector candidates
 - class input-title-field cssRefs=2
