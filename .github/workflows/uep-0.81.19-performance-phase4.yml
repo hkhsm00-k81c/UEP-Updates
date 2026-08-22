@@ -1,0 +1,65 @@
+name: UEP 0.81.19 Performance Phase4
+
+on:
+  push:
+    branches: [audit/0.81.19-performance]
+    paths:
+      - tools/select-performance-phase4-candidates-0.81.19.js
+      - .github/workflows/uep-0.81.19-performance-phase4.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  select-phase4-candidates:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download shipped 0.81.01 base
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.81.01 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
+      - name: Reconstruct production through 0.81.18
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          2..18 | ForEach-Object { $version='0.81.{0:d2}' -f $_; $script="scripts/build-update-$version.ps1"; if(-not (Test-Path $script)){throw "missing $script"}; & $script }
+      - name: Apply verified performance phase1
+        shell: pwsh
+        run: |
+          node ./tools/apply-performance1-0.81.19.js app
+          if($LASTEXITCODE -ne 0){throw 'phase1 applicator failed'}
+      - name: Re-run phase3 hotspot audit
+        shell: pwsh
+        run: |
+          node ./tools/audit-render-refresh-hotspots-0.81.19.js app
+          if($LASTEXITCODE -ne 0){throw 'phase3 audit failed'}
+      - name: Select bounded phase4 candidates
+        shell: pwsh
+        run: |
+          node ./tools/select-performance-phase4-candidates-0.81.19.js
+          if($LASTEXITCODE -ne 0){throw 'phase4 candidate selection failed'}
+      - name: Persist phase4 candidates
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force 'audit-output/performance-0.81.19' | Out-Null
+          Copy-Item 'performance-phase4-output/candidates.json' 'audit-output/performance-0.81.19/phase4-candidates.json' -Force
+          Copy-Item 'performance-phase4-output/CANDIDATES.md' 'audit-output/performance-0.81.19/PHASE4-CANDIDATES.md' -Force
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add audit-output/performance-0.81.19
+          if(-not (git diff --cached --quiet)){
+            git commit -m 'Persist 0.81.19 performance phase4 candidates'
+            git push origin HEAD:audit/0.81.19-performance
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UEP-0.81.19-Performance-Phase4
+          path: performance-phase4-output
