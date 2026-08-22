@@ -1,0 +1,115 @@
+name: UEP 0.81.18 JS Cleanup2 Candidate
+
+'on':
+  push:
+    branches:
+      - candidate/0.81.18-js-cleanup2
+    paths:
+      - tools/apply-js-cleanup2-0.81.18.js
+      - .github/workflows/uep-0.81.18-js-cleanup2-candidate.yml
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  verify-cleanup2:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download shipped 0.81.01 base
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.81.01 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
+
+      - name: Reconstruct production through 0.81.17
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $scripts=Get-ChildItem scripts/build-update-*.ps1 | ForEach-Object {
+            if($_.BaseName -match 'build-update-(\d+)\.(\d+)\.(\d+)'){
+              [pscustomobject]@{File=$_.FullName;Major=[int]$matches[1];Minor=[int]$matches[2];Patch=[int]$matches[3]}
+            }
+          } | Sort-Object Major,Minor,Patch
+          foreach($s in $scripts){
+            if($s.Major -eq 0 -and $s.Minor -eq 81 -and $s.Patch -ge 2 -and $s.Patch -le 17){ & $s.File }
+          }
+
+      - name: Snapshot 0.81.17 runtime
+        shell: pwsh
+        run: |
+          Copy-Item app/resources/app/gyomuon.js cleanup2-before-gyomuon.js
+          Copy-Item app/resources/app/electron/main.cjs cleanup2-before-main.cjs
+          Copy-Item app/resources/app/electron/google-data.cjs cleanup2-before-google-data.cjs
+
+      - name: Reapply verified cleanup1
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node ./tools/apply-js-cleanup1-0.81.18.js app
+          if($LASTEXITCODE-ne 0){throw 'cleanup1 applicator failed'}
+
+      - name: Apply conservative cleanup2
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node ./tools/apply-js-cleanup2-0.81.18.js app
+          if($LASTEXITCODE-ne 0){throw 'cleanup2 applicator failed'}
+
+      - name: Verify syntax and actual cleanup2 removals
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check app/resources/app/gyomuon.js
+          node --check app/resources/app/electron/main.cjs
+          node --check app/resources/app/electron/google-data.cjs
+          $report=Get-Content cleanup2-output/cleanup2-report.json -Raw | ConvertFrom-Json
+          $removed=@($report | Where-Object {$_.status -eq 'REMOVED'})
+          $all=(Get-Content app/resources/app/gyomuon.js -Raw)+(Get-Content app/resources/app/electron/main.cjs -Raw)+(Get-Content app/resources/app/electron/google-data.cjs -Raw)
+          foreach($r in $removed){
+            if($all -match ('\b'+[regex]::Escape($r.name)+'\b')){throw "Residual cleanup2 removed-function reference: $($r.name)"}
+          }
+          if($removed.Count -eq 0){throw 'cleanup2 removed zero functions; no candidate produced'}
+          Write-Host "Verified cleanup2 removed functions: $($removed.Count)"
+
+      - name: Verify critical runtime anchors
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $g=Get-Content app/resources/app/gyomuon.js -Raw
+          $anchors=@('bindPage','bindInputCenter','sdgsDashboard','uepStudentApplicationView','uepSubjectApplicationView','recordcheck','curriculum','openStudentTimetableDrawer','openStudentCounselEdit','retryGoogleConnection','sendProgramEmailNotice','prepareProgramSmsNotice')
+          foreach($a in $anchors){if(-not $g.Contains($a)){throw "Critical anchor missing: $a"}}
+
+      - name: Produce and persist cleanup2 report
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $before=(Get-Item cleanup2-before-gyomuon.js).Length+(Get-Item cleanup2-before-main.cjs).Length+(Get-Item cleanup2-before-google-data.cjs).Length
+          $after=(Get-Item app/resources/app/gyomuon.js).Length+(Get-Item app/resources/app/electron/main.cjs).Length+(Get-Item app/resources/app/electron/google-data.cjs).Length
+          $r1=Get-Content cleanup1-output/cleanup1-report.json -Raw | ConvertFrom-Json
+          $r2=Get-Content cleanup2-output/cleanup2-report.json -Raw | ConvertFrom-Json
+          $removed1=@($r1 | Where-Object {$_.status -eq 'REMOVED'})
+          $removed2=@($r2 | Where-Object {$_.status -eq 'REMOVED'})
+          $skipped2=@($r2 | Where-Object {$_.status -ne 'REMOVED'})
+          New-Item -ItemType Directory -Force audit-output/js-cleanup2-0.81.18 | Out-Null
+          Copy-Item cleanup2-output/cleanup2-report.json audit-output/js-cleanup2-0.81.18/cleanup2-report.json -Force
+          "baselineBytes=$before`nafterCleanup1And2Bytes=$after`ncumulativeRemovedBytes=$($before-$after)`ncleanup1RemovedFunctions=$($removed1.Count)`ncleanup2RemovedFunctions=$($removed2.Count)`ncleanup2SkippedFunctions=$($skipped2.Count)" | Set-Content audit-output/js-cleanup2-0.81.18/size-summary.txt
+          Compress-Archive -Path app/* -DestinationPath cleanup2-output/UEP-0.81.18-JS-CLEANUP2-NONDEPLOY.zip -Force
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add audit-output/js-cleanup2-0.81.18/cleanup2-report.json audit-output/js-cleanup2-0.81.18/size-summary.txt
+          git commit -m 'Persist 0.81.18 cleanup2 verified results' || exit 0
+          git push
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UEP-0.81.18-JS-CLEANUP2-NONDEPLOY
+          path: cleanup2-output/
