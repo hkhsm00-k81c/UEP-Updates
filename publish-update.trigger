@@ -51,3 +51,7 @@ Retry UEP 0.81.13 after correcting integrated curriculum/SDGs verification names
 Retry UEP 0.81.13 from current main after verification-fix commit.
 Retry UEP 0.81.13 after restoring canonical 0.81.06 curriculum and SDGs bodies.
 Retry UEP 0.81.13 after fixing final release gates to canonical 0.81.06 view functions.
+
+Publish requested: UEP 0.81.14 records tabs + record parser refinement
+Requested: 2026-08-22
+Scope: restore direct entry to 생활기록부 SDGs/교육과정 tabs; improve NEIS 세특 grade/class/number/subject parsing using 4-digit student number priority, merged grade/class headings and guarded subject inference.
