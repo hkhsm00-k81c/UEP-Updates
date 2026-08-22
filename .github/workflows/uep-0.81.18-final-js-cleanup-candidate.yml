@@ -1,0 +1,131 @@
+name: UEP 0.81.18 Final JS Cleanup Candidate
+
+'on':
+  push:
+    branches:
+      - candidate/0.81.18-js-cleanup2
+    paths:
+      - scripts/build-update-0.81.18.ps1
+      - tools/apply-js-cleanup1-0.81.18.js
+      - tools/apply-js-cleanup2-0.81.18.js
+      - .github/workflows/uep-0.81.18-final-js-cleanup-candidate.yml
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  verify-final-candidate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download shipped 0.81.01 base
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.81.01 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
+
+      - name: Reconstruct production through 0.81.17
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $scripts=Get-ChildItem scripts/build-update-*.ps1 | ForEach-Object {
+            if($_.BaseName -match 'build-update-(\d+)\.(\d+)\.(\d+)'){
+              [pscustomobject]@{File=$_.FullName;Major=[int]$matches[1];Minor=[int]$matches[2];Patch=[int]$matches[3]}
+            }
+          } | Sort-Object Major,Minor,Patch
+          foreach($s in $scripts){
+            if($s.Major -eq 0 -and $s.Minor -eq 81 -and $s.Patch -ge 2 -and $s.Patch -le 17){ & $s.File }
+          }
+
+      - name: Snapshot production baseline
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $files=@(
+            'app/resources/app/gyomuon.js',
+            'app/resources/app/electron/main.cjs',
+            'app/resources/app/electron/google-data.cjs',
+            'app/resources/app/gyomuon.css',
+            'app/resources/app/package.json'
+          )
+          $hashes=@{}
+          foreach($f in $files){$hashes[$f]=(Get-FileHash $f -Algorithm SHA256).Hash}
+          $hashes|ConvertTo-Json|Set-Content final-before-hashes.json
+          $bytes=(Get-Item 'app/resources/app/gyomuon.js').Length+(Get-Item 'app/resources/app/electron/main.cjs').Length+(Get-Item 'app/resources/app/electron/google-data.cjs').Length
+          Set-Content final-before-bytes.txt $bytes
+
+      - name: Apply 0.81.18 cumulative JS cleanup
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          & ./scripts/build-update-0.81.18.ps1
+
+      - name: Verify version and JS-only change scope
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $pkg=Get-Content app/resources/app/package.json -Raw|ConvertFrom-Json
+          if($pkg.version -ne '0.81.18'){throw "package version mismatch: $($pkg.version)"}
+          $before=Get-Content final-before-hashes.json -Raw|ConvertFrom-Json
+          $cssAfter=(Get-FileHash 'app/resources/app/gyomuon.css' -Algorithm SHA256).Hash
+          if($before.'app/resources/app/gyomuon.css' -ne $cssAfter){throw 'Unexpected CSS change'}
+          $changed=@()
+          foreach($f in @('app/resources/app/gyomuon.js','app/resources/app/electron/main.cjs','app/resources/app/electron/google-data.cjs','app/resources/app/package.json')){
+            if($before.$f -ne (Get-FileHash $f -Algorithm SHA256).Hash){$changed+=$f}
+          }
+          if(-not ($changed -contains 'app/resources/app/gyomuon.js')){throw 'gyomuon.js did not change'}
+          if(-not ($changed -contains 'app/resources/app/package.json')){throw 'package.json did not change'}
+          Write-Host ('Changed intended files: '+($changed -join ', '))
+
+      - name: Verify critical runtime anchors
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $g=Get-Content app/resources/app/gyomuon.js -Raw
+          $anchors=@(
+            'function uepCurriculumFinalView()',
+            'function uepSdgsEvidenceBridge()',
+            'function uepSelectionSms(',
+            'window.uepMountRecordbookValidator',
+            'standaloneRecordcheckMount',
+            'bindPage','bindInputCenter','sdgsDashboard',
+            'uepStudentApplicationView','uepSubjectApplicationView',
+            'openStudentTimetableDrawer','openStudentCounselEdit','retryGoogleConnection',
+            'sendProgramEmailNotice','prepareProgramSmsNotice','openProgramAttendanceQr','openMealDutyDrawer'
+          )
+          foreach($a in $anchors){if(-not $g.Contains($a)){throw "Critical anchor missing: $a"}}
+
+      - name: Produce final non-deploy candidate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force final-candidate-output,audit-output/js-cleanup-final-0.81.18 | Out-Null
+          $before=[int64](Get-Content final-before-bytes.txt)
+          $after=(Get-Item 'app/resources/app/gyomuon.js').Length+(Get-Item 'app/resources/app/electron/main.cjs').Length+(Get-Item 'app/resources/app/electron/google-data.cjs').Length
+          $r1=Get-Content cleanup1-output/cleanup1-report.json -Raw|ConvertFrom-Json
+          $r2=Get-Content cleanup2-output/cleanup2-report.json -Raw|ConvertFrom-Json
+          $removed1=@($r1|Where-Object {$_.status -eq 'REMOVED'})
+          $removed2=@($r2|Where-Object {$_.status -eq 'REMOVED'})
+          "version=0.81.18`nbaselineBytes=$before`nfinalBytes=$after`ncumulativeRemovedBytes=$($before-$after)`ncleanup1Removed=$($removed1.Count)`ncleanup2Removed=$($removed2.Count)`ntotalRemovedFunctions=$($removed1.Count+$removed2.Count)" | Set-Content final-candidate-output/final-summary.txt
+          Copy-Item final-candidate-output/final-summary.txt audit-output/js-cleanup-final-0.81.18/final-summary.txt -Force
+          Copy-Item cleanup1-output/cleanup1-report.json audit-output/js-cleanup-final-0.81.18/cleanup1-report.json -Force
+          Copy-Item cleanup2-output/cleanup2-report.json audit-output/js-cleanup-final-0.81.18/cleanup2-report.json -Force
+          Compress-Archive -Path app/* -DestinationPath final-candidate-output/UEP-0.81.18-JS-CLEANUP-FINAL-NONDEPLOY.zip -Force
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add audit-output/js-cleanup-final-0.81.18
+          git commit -m 'Persist 0.81.18 final JS cleanup candidate results' || exit 0
+          git push
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UEP-0.81.18-JS-CLEANUP-FINAL-NONDEPLOY
+          path: final-candidate-output/
