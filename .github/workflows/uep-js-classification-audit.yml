@@ -1,0 +1,83 @@
+name: UEP 0.81.17 JS Cleanup Classification
+
+'on':
+  push:
+    branches:
+      - audit/js-classify-0.81.17
+    paths:
+      - tools/classify-js-cleanup-0.81.17.js
+      - .github/workflows/uep-js-classification-audit.yml
+      - audit-output/js-rendering-0.81.17/**
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  classify-js:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download shipped 0.81.01 base
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.81.01 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          if(-not (Test-Path 'source/UEP-update.zip')){throw 'UEP 0.81.01 base ZIP not found'}
+          Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
+
+      - name: Reconstruct production through 0.81.17
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $scripts=Get-ChildItem scripts/build-update-*.ps1 | ForEach-Object {
+            if($_.BaseName -match 'build-update-(\d+)\.(\d+)\.(\d+)'){
+              [pscustomobject]@{File=$_.FullName;Major=[int]$matches[1];Minor=[int]$matches[2];Patch=[int]$matches[3]}
+            }
+          } | Sort-Object Major,Minor,Patch
+          foreach($s in $scripts){
+            if($s.Major -eq 0 -and $s.Minor -eq 81 -and $s.Patch -ge 2 -and $s.Patch -le 17){ & $s.File }
+          }
+
+      - name: Run JS cleanup classification
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node ./tools/classify-js-cleanup-0.81.17.js app audit-output/js-rendering-0.81.17 js-classification-output
+          if($LASTEXITCODE-ne 0){throw 'JS cleanup classification failed'}
+          Get-Content js-classification-output/JS-CLEANUP-CLASSIFICATION.md
+
+      - name: Verify classification is non-invasive
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check app/resources/app/gyomuon.js
+          if($LASTEXITCODE-ne 0){throw 'renderer syntax failed'}
+          if(-not (Test-Path 'js-classification-output/classification-summary.json')){throw 'classification summary missing'}
+
+      - name: Persist classification results on audit branch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $dest='audit-output/js-classification-0.81.17'
+          New-Item -ItemType Directory -Force $dest | Out-Null
+          Copy-Item js-classification-output/* $dest -Force
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add $dest
+          git diff --cached --quiet
+          if($LASTEXITCODE-ne 0){
+            git commit -m 'Persist 0.81.17 JS cleanup classification results'
+            git push
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UEP-0.81.17-JS-CLEANUP-CLASSIFICATION
+          path: js-classification-output/
