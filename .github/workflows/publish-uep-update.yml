@@ -19,219 +19,48 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: v0.81.01
         run: |
           $ErrorActionPreference='Stop'
           New-Item -ItemType Directory -Force source,app | Out-Null
-          gh release download $env:TAG --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          gh release download v0.81.01 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
           if(-not (Test-Path 'source/UEP-update.zip')){throw 'UEP 0.81.01 update ZIP not found'}
           Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
-          if(-not (Test-Path 'app/UEP.exe')){throw 'UEP.exe not found in 0.81.01 update'}
+          if(-not (Test-Path 'app/UEP.exe')){throw 'UEP.exe not found in shipped base'}
 
-      - name: Apply 0.81.02 SDGs and local recordbook validation
-        id: apply08102
-        continue-on-error: true
+      - name: Reconstruct through 0.81.13
         shell: pwsh
         run: |
-          try {
-            & ./scripts/build-update-0.81.02.ps1 *>&1 | Tee-Object -FilePath build-08102-status.txt
-          } catch {
-            ($_ | Out-String) | Add-Content build-08102-status.txt
-            exit 1
+          $ErrorActionPreference='Stop'
+          2..13 | ForEach-Object {
+            $version='0.81.{0:d2}' -f $_
+            $script="scripts/build-update-$version.ps1"
+            if(-not (Test-Path $script)){throw "missing $script"}
+            & $script
           }
 
-      - name: Commit bounded failure status
-        if: steps.apply08102.outcome == 'failure'
-        shell: pwsh
-        run: |
-          Add-Content build-08102-status.txt 'BUILD_FAILED_BEFORE_RELEASE'
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -- build-08102-status.txt
-          git commit -m 'Record UEP 0.81.02 build failure'
-          git push
-          throw 'UEP 0.81.02 apply failed; bounded status committed'
-
-      - name: Apply 0.81.03 school connection recovery
-        id: apply08103
-        continue-on-error: true
-        shell: pwsh
-        run: |
-          try {
-            & ./scripts/build-update-0.81.03.ps1 *>&1 | Tee-Object -FilePath build-08103-status.txt
-          } catch {
-            ($_ | Out-String) | Add-Content build-08103-status.txt
-            exit 1
-          }
-
-      - name: Commit bounded 0.81.03 failure status
-        if: steps.apply08103.outcome == 'failure'
-        shell: pwsh
-        run: |
-          Add-Content build-08103-status.txt 'BUILD_FAILED_BEFORE_RELEASE'
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -- build-08103-status.txt
-          git commit -m 'Record UEP 0.81.03 build failure'
-          git push
-          throw 'UEP 0.81.03 apply failed; bounded status committed'
-
-      - name: Apply 0.81.04 operational features
-        id: apply08104
-        continue-on-error: true
-        shell: pwsh
-        run: |
-          try {
-            & ./scripts/build-update-0.81.04.ps1 *>&1 | Tee-Object -FilePath build-08104-status.txt
-          } catch {
-            ($_ | Out-String) | Add-Content build-08104-status.txt
-            exit 1
-          }
-
-      - name: Commit bounded 0.81.04 failure status
-        if: steps.apply08104.outcome == 'failure'
-        shell: pwsh
-        run: |
-          Add-Content build-08104-status.txt 'BUILD_FAILED_BEFORE_RELEASE'
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -- build-08104-status.txt
-          git commit -m 'Record UEP 0.81.04 build failure'
-          git push
-          throw 'UEP 0.81.04 apply failed; bounded status committed'
-
-      - name: Apply 0.81.05 curriculum and SDGs integration
-        id: apply08105
-        continue-on-error: true
-        shell: pwsh
-        run: |
-          try {
-            & ./scripts/build-update-0.81.05.ps1 *>&1 | Tee-Object -FilePath build-08105-status.txt
-          } catch {
-            ($_ | Out-String) | Add-Content build-08105-status.txt
-            exit 1
-          }
-
-      - name: Commit bounded 0.81.05 failure status
-        if: steps.apply08105.outcome == 'failure'
-        shell: pwsh
-        run: |
-          Add-Content build-08105-status.txt 'BUILD_FAILED_BEFORE_RELEASE'
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -- build-08105-status.txt
-          git commit -m 'Record UEP 0.81.05 build failure'
-          git push
-          throw 'UEP 0.81.05 apply failed; bounded status committed'
-
-      - name: Apply 0.81.06 final workflow
-        id: apply08106
-        continue-on-error: true
-        shell: pwsh
-        run: |
-          try {
-            & ./scripts/build-update-0.81.06.ps1 *>&1 | Tee-Object -FilePath build-08106-status.txt
-          } catch {
-            ($_ | Out-String) | Add-Content build-08106-status.txt
-            exit 1
-          }
-
-      - name: Commit bounded 0.81.06 failure status
-        if: steps.apply08106.outcome == 'failure'
-        shell: pwsh
-        run: |
-          Add-Content build-08106-status.txt 'BUILD_FAILED_BEFORE_RELEASE'
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -- build-08106-status.txt
-          git commit -m 'Record UEP 0.81.06 build failure'
-          git push
-          throw 'UEP 0.81.06 apply failed; bounded status committed'
-
-      - name: Verify 0.81.06 final workflow
+      - name: Verify 0.81.13 release gates
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
           $g=Get-Content 'app/resources/app/gyomuon.js' -Raw -Encoding UTF8
-          $m=Get-Content 'app/resources/app/electron/main.cjs' -Raw -Encoding UTF8
           $d=Get-Content 'app/resources/app/electron/google-data.cjs' -Raw -Encoding UTF8
+          $m=Get-Content 'app/resources/app/electron/main.cjs' -Raw -Encoding UTF8
+          node --check 'app/resources/app/gyomuon.js'
+          node --check 'app/resources/app/electron/main.cjs'
+          node --check 'app/resources/app/electron/google-data.cjs'
           $checks=[ordered]@{
-            'login identity gateway'=$m.Contains('mode:"login_identity"')
-            'school recovery marker'=$m.Contains('__UEP_SCHOOL_CONNECTION_RECOVERY_08103__')
-            'legacy UEP roots'=$m.Contains('schoolConnectionLegacyRoots')
-            'same-PC recovery only'=$m.Contains('readCredentialRecoveryFrom')
-            'live data uses school resolver'=$m.Contains('credentials || await resolveSchoolServiceAccount()')
-            'school service account path'=$m.Contains('mode:"service_account"')
-            'approval disabled'=$m.Contains('approvalRequired:false')
-            'token exchange disabled'=$m.Contains('tokenExchangeRequired:false')
-            'authorize bypassed'=$m.Contains('skipped:true')
-            'SDGs evidence cards'=$g.Contains('growth-sdg-evidence-card')
-            'SDGs evidence list'=$g.Contains('growth-sdg-evidence-list')
-            'SDGs rendered marker'=$g.Contains('sdgsEvidenceCardsRendered=true')
-            'selection 06 UI preserved'=$g.Contains('for(const raw of (readonlyCache?.subjectSelections||[]))')
-            'selection 06 wide range'=$d.Contains('"06_선택과목이력": "''06_선택과목이력''!A1:AI1000"')
-            'selection wide rows parsed'=$d.Contains('const selectionStudentRows = rowsFrom("06_선택과목이력")') -and $d.Contains('const selectedSubjectRows = legacySelectedSubjectRows;')
-            'selection export preserved'=$d.Contains('subjectSelections:selectedSubjects')
-            'SDGs primary evidence map'=$g.Contains('data-neis-local-validator')
-            'NEIS local IPC'=$m.Contains('recordbook:inspectNeisExcel')
-            'NEIS no sheet write'=$g.Contains('Google 시트 연결·입력센터 저장·자동동기화 없음')
+            version=$g.Contains('const APP_VERSION = "0.81.13";')
+            single06=$d.Contains('"06_선택과목이력"') -and (-not $d.Contains('06A_학생별선택과목'))
+            curriculum=$g.Contains('function uepCurriculumFinalView')
+            sdgs=$g.Contains('function uepSdgsEvidenceBridge')
+            recordcheck=$g.Contains('window.uepMountRecordbookValidator') -and $g.Contains('standaloneRecordcheckMount')
+            schoolResolver=$m.Contains('resolveSchoolServiceAccount')
+            noGlobalObserver=(-not $g.Contains('observer.observe(document.documentElement,{subtree:true,childList:true})'))
+            noSectionScan=(-not $g.Contains("document.querySelectorAll('section').forEach"))
+            selectionCache=$g.Contains('__UEP_SELECTION_CACHE_08113__')
           }
-          $checks.GetEnumerator() | ForEach-Object { Write-Host ("CHECK {0} = {1}" -f $_.Key,$_.Value) }
-          $checks['06A selection range removed']=(-not $d.Contains('"06A_학생별선택과목"'))
-          $checks['06A selection export removed']=(-not $d.Contains('selectionStudentRows: rowsFrom("06A_학생별선택과목")'))
-          $checks['selection page']=$g.Contains('function selectionView()')
-          $checks['active student filter']=$g.Contains('/전출|자퇴|퇴학|제적/')
-          $checks['dorm roster badge']=$g.Contains('dorm-badge')
-          $checks['selection error SMS']=$g.Contains('보완 문자메시지')
-          $checks['SDGs standalone page']=$g.Contains('function sdgsView()')
-          $checks['recordcheck standalone page']=$g.Contains('function recordcheckView()')
-          $checks['recordcheck separated']=(-not $g.Contains('if(sdgs)sdgs.dataset.primaryEvidenceMap="1";mountValidator(profile);'))
-          $checks['four semester analysis']=$g.Contains('["2-1","2-2","3-1","3-2"]')
-          $checks['curriculum internal tabs']=$g.Contains('반별·학생별 신청이력')
-          $checks['cross-term duplicates']=$g.Contains('학기간 동일과목 중복')
-          $checks['SDGs evidence supplement']=$g.Contains('function uepSdgsSupplementPanel')
-          $checks['selection nav removed']=(-not (Get-Content 'app/resources/app/index.html' -Raw -Encoding UTF8).Contains('data-page="selection"'))
-          $checks['sdgs nav removed']=(-not (Get-Content 'app/resources/app/index.html' -Raw -Encoding UTF8).Contains('data-page="sdgs"'))
-          $checks['NEIS UTF8']=$m.Contains('[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)')
-          $checks['single wide selection source']=$d.Contains('"06_선택과목이력": "''06_선택과목이력''!A1:AI1000"') -and (-not $d.Contains('06A_학생별선택과목'))
-          $checks['student application workspace']=$g.Contains('function uepStudentApplicationView')
-          $checks['subject card drilldown']=$g.Contains('function uepSubjectApplicationView')
-          $checks['subject privacy']=$g.Contains('privacyModeEnabled()')
-          $checks['SDGs live evidence']=$g.Contains('function uepSdgsEvidenceBridge')
-          $checks['SDGs supplement bottom']=$g.Contains('uepSdgsEvidenceBridge()+supplement')
-          $checks['recordcheck decisions']=$g.Contains('data-neis-confirm') -and $g.Contains('data-neis-dismiss')
-          $checks['recordcheck report']=$g.Contains('data-neis-print')
-          if($checks.Values -contains $false){throw 'UEP 0.81.06 final verification failed'}
-
-      - name: Apply and verify 0.81.07 refinement
-        shell: pwsh
-        run: |
-          & ./scripts/build-update-0.81.07.ps1
-
-      - name: Apply and verify 0.81.08 operations and NEIS parser
-        shell: pwsh
-        run: |
-          & ./scripts/build-update-0.81.08.ps1
-
-      - name: Apply and verify 0.81.09 startup recovery
-        shell: pwsh
-        run: |
-          & ./scripts/build-update-0.81.09.ps1
-
-      - name: Apply and verify 0.81.10 selection compatibility recovery
-        shell: pwsh
-        run: |
-          & ./scripts/build-update-0.81.10.ps1
-
-      - name: Apply and verify 0.81.11 integrated view recovery
-        shell: pwsh
-        run: |
-          & ./scripts/build-update-0.81.11.ps1
-
-      - name: Apply and verify 0.81.12 page interaction recovery
-        shell: pwsh
-        run: |
-          & ./scripts/build-update-0.81.12.ps1
+          $checks.GetEnumerator() | ForEach-Object { Write-Host ("RELEASE GATE {0} = {1}" -f $_.Key,$_.Value) }
+          if($checks.Values -contains $false){throw 'UEP 0.81.13 release gate failed'}
 
       - name: Build update package
         id: package
@@ -243,15 +72,15 @@ jobs:
           $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
           "sha=$sha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-      - name: Publish v0.81.12 release
+      - name: Publish v0.81.13 release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag='v0.81.12'
+          $tag='v0.81.13'
           gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
           if($LASTEXITCODE -ne 0){
-            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.12 - 생활기록부·세특 화면 연결 복구' --notes '생활기록부 교육과정·SDGs 클릭 이벤트와 세특 오류검증 전용 화면 연결을 복구합니다.'
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.13 - 화면 연결 복구 및 응답속도 개선' --notes '생활기록부 교육과정·SDGs·세특 화면 연결을 복구하고 전역 DOM 감시와 불필요한 전체 스캔을 제거하며 선택과목 파생 데이터 캐시를 적용합니다.'
           }
           gh release upload $tag UEP-update.zip --repo $env:GITHUB_REPOSITORY --clobber
 
@@ -262,31 +91,27 @@ jobs:
           SHA256: ${{ steps.package.outputs.sha }}
         run: |
           $ErrorActionPreference='Stop'
-          $tag='v0.81.12'
-          $asset=(gh release view $tag --repo $env:GITHUB_REPOSITORY --json assets | ConvertFrom-Json).assets | Where-Object {$_.name -eq 'UEP-update.zip'} | Select-Object -First 1
-          if(-not $asset){throw 'Release asset not found'}
           $current=Get-Content 'uep-policy.json' -Raw -Encoding UTF8 | ConvertFrom-Json
           $oauthClientId=[string]$current.googleOAuthClientId
           $policy=[ordered]@{
             channel='homeroom-stable'
-            latestVersion='0.81.12'
+            latestVersion='0.81.13'
             minimumAllowedVersion='0.80.64'
             blockedVersions=@()
             forceUpdate=$false
             updateEnabled=$true
-            downloadUrl=$asset.url
+            downloadUrl="https://github.com/$env:GITHUB_REPOSITORY/releases/download/v0.81.13/UEP-update.zip"
             sha256=$env:SHA256
-            message='UEP 0.81.12 생활기록부·세특 화면 연결 복구 업데이트'
+            message='UEP 0.81.13 화면 연결 복구 및 응답속도 개선 업데이트'
             offlineGraceHours=72
             googleOAuthClientId=$oauthClientId
           } | ConvertTo-Json -Depth 4
           $info=gh api "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json?ref=main" | ConvertFrom-Json
           $encoded=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($policy))
-          $body=@{message='Enable UEP 0.81.12 automatic update';content=$encoded;sha=$info.sha;branch='main'} | ConvertTo-Json
+          $body=@{message='Enable UEP 0.81.13 automatic update';content=$encoded;sha=$info.sha;branch='main'} | ConvertTo-Json
           $body | gh api --method PUT -H 'Accept: application/vnd.github+json' "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json" --input -
 
       - uses: actions/upload-artifact@v4
         with:
-          name: UEP-0.81.12-Update-Package
+          name: UEP-0.81.13-Update-Package
           path: UEP-update.zip
-
