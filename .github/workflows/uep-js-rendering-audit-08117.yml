@@ -1,0 +1,69 @@
+name: UEP 0.81.17 JS Rendering Audit
+
+on:
+  push:
+    branches:
+      - audit/js-rendering-0.81.17
+    paths:
+      - tools/audit-js-rendering-0.81.17.js
+      - .github/workflows/uep-js-rendering-audit-08117.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  js-render-audit:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download shipped 0.81.01 base
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,js-audit-output | Out-Null
+          gh release download v0.81.01 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          if(-not (Test-Path 'source/UEP-update.zip')){throw 'UEP 0.81.01 base ZIP not found'}
+          Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
+
+      - name: Reconstruct current production through 0.81.17
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          2..17 | ForEach-Object {
+            $version='0.81.{0:d2}' -f $_
+            $script="scripts/build-update-$version.ps1"
+            if(-not (Test-Path $script)){throw "missing $script"}
+            & $script
+          }
+          $g=Get-Content 'app/resources/app/gyomuon.js' -Raw -Encoding UTF8
+          if(-not $g.Contains('const APP_VERSION = "0.81.17";')){throw '0.81.17 runtime reconstruction failed'}
+          node --check app/resources/app/gyomuon.js
+          if($LASTEXITCODE-ne 0){throw 'gyomuon.js syntax failed before audit'}
+
+      - name: Run full JS and rendering static audit
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node ./tools/audit-js-rendering-0.81.17.js app js-audit-output
+          if($LASTEXITCODE-ne 0){throw 'JS rendering audit failed'}
+          Get-Content js-audit-output/JS-RENDER-AUDIT.md
+
+      - name: Verify audit is non-invasive
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $g=Get-Content 'app/resources/app/gyomuon.js' -Raw -Encoding UTF8
+          if(-not $g.Contains('const APP_VERSION = "0.81.17";')){throw 'audit mutated runtime version'}
+          node --check app/resources/app/gyomuon.js
+          if($LASTEXITCODE-ne 0){throw 'runtime syntax changed during audit'}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UEP-0.81.17-JS-RENDER-AUDIT
+          path: js-audit-output/
