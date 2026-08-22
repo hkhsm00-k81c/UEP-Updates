@@ -1,0 +1,88 @@
+name: UEP Cleanup Phase 1
+
+on:
+  push:
+    branches:
+      - cleanup/codebase-phase1-20260822
+    paths:
+      - tools/cleanup-phase1.js
+      - .github/workflows/cleanup-phase1.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cleanup-check:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download shipped base
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,cleanup-output | Out-Null
+          gh release download v0.81.01 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          if(-not (Test-Path 'source/UEP-update.zip')){throw 'UEP 0.81.01 base ZIP not found'}
+          Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
+
+      - name: Reconstruct runtime through 0.81.16
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $scripts=Get-ChildItem scripts/build-update-*.ps1 | ForEach-Object {
+            if($_.BaseName -match 'build-update-(\d+)\.(\d+)\.(\d+)'){
+              [pscustomobject]@{File=$_.FullName;Major=[int]$matches[1];Minor=[int]$matches[2];Patch=[int]$matches[3]}
+            }
+          } | Sort-Object Major,Minor,Patch
+          foreach($s in $scripts){
+            if($s.Major -eq 0 -and $s.Minor -eq 81 -and $s.Patch -ge 2 -and $s.Patch -le 16){
+              & $s.File
+            }
+          }
+
+      - name: Apply cleanup phase 1
+        shell: pwsh
+        run: node ./tools/cleanup-phase1.js app cleanup-output
+
+      - name: Syntax verification
+        shell: pwsh
+        run: |
+          node --check app/resources/app/gyomuon.js
+          node --check app/resources/app/electron/main.cjs
+          node --check app/resources/app/electron/google-data.cjs
+          node --check app/resources/app/electron/preload.cjs
+
+      - name: Static regression gates
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          $checks=[ordered]@{
+            recordsView=$g.Contains('recordsView')
+            sdgsDashboard=$g.Contains('sdgsDashboard')
+            curriculumDetail=$g.Contains('uepStudentApplicationDetail')
+            curriculumView=$g.Contains('uepStudentApplicationView')
+            curriculumSubject=$g.Contains('uepSubjectApplicationView')
+            selectionDataset=$g.Contains('uepSelectionDataset')
+            recordbook=$g.Contains('uepMountRecordbookValidator')
+            no06A=(-not $g.Contains('06A'))
+          }
+          $checks.GetEnumerator() | ForEach-Object { Write-Host ('CHECK '+$_.Key+' = '+$_.Value) }
+          if($checks.Values -contains $false){throw 'Cleanup phase1 regression gate failed'}
+
+      - name: Show cleanup report
+        shell: pwsh
+        run: Get-Content cleanup-output/CLEANUP-PHASE1.md -Encoding UTF8
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UEP-CLEANUP-PHASE1
+          path: |
+            cleanup-output/
+            app/resources/app/gyomuon.js
