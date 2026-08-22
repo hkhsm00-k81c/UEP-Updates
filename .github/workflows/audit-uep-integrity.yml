@@ -1,0 +1,45 @@
+name: Audit UEP 0.81.16 Integrity
+
+on:
+  push:
+    paths:
+      - audit-integrity.trigger
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit-integrity:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download 0.81.01 shipped base
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.81.01 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          if(-not (Test-Path 'source/UEP-update.zip')){throw 'UEP 0.81.01 update ZIP not found'}
+          Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
+          if(-not (Test-Path 'app/UEP.exe')){throw 'UEP.exe not found in shipped base'}
+      - name: Reconstruct current 0.81.16 without publishing
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          2..16 | ForEach-Object {
+            $version='0.81.{0:d2}' -f $_
+            $script="scripts/build-update-$version.ps1"
+            if(-not (Test-Path $script)){throw "missing $script"}
+            & $script
+          }
+      - name: Run full integrity audit
+        shell: pwsh
+        run: |
+          & ./scripts/audit-uep-0.81.16.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UEP-0.81.16-Full-Integrity-Audit
+          path: UEP-0.81.16-FULL-AUDIT.md
