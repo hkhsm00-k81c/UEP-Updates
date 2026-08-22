@@ -64,11 +64,38 @@ jobs:
           $beforeJs=Get-Content candidate-output/gyomuon-0.81.16.js -Raw -Encoding UTF8
           $afterJs=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
           $expectedJs=$beforeJs.Replace('const APP_VERSION = "0.81.16";','const APP_VERSION = "0.81.17";').Replace('v0.81.16','v0.81.17')
-          # PowerShell Set-Content and Node fs.writeFileSync differ only in a leading UTF-8 BOM here.
-          # Compare normalized text so this guard detects semantic/runtime changes rather than encoding metadata.
           $expectedJs=$expectedJs.TrimStart([char]0xFEFF)
           $afterJs=$afterJs.TrimStart([char]0xFEFF)
-          if($afterJs -ne $expectedJs){throw 'Unexpected gyomuon.js changes beyond version bump'}
+          if($afterJs -ne $expectedJs){
+            $min=[Math]::Min($expectedJs.Length,$afterJs.Length)
+            $first=-1
+            for($i=0;$i -lt $min;$i++){
+              if($expectedJs[$i] -ne $afterJs[$i]){$first=$i;break}
+            }
+            if($first -lt 0 -and $expectedJs.Length -ne $afterJs.Length){$first=$min}
+            $start=[Math]::Max(0,$first-120)
+            $expLen=[Math]::Min(240,$expectedJs.Length-$start)
+            $actLen=[Math]::Min(240,$afterJs.Length-$start)
+            $expCtx=if($expLen -gt 0){$expectedJs.Substring($start,$expLen).Replace("`r",'<CR>').Replace("`n",'<LF>')}else{''}
+            $actCtx=if($actLen -gt 0){$afterJs.Substring($start,$actLen).Replace("`r",'<CR>').Replace("`n",'<LF>')}else{''}
+            $expCode=if($first -lt $expectedJs.Length){[int][char]$expectedJs[$first]}else{-1}
+            $actCode=if($first -lt $afterJs.Length){[int][char]$afterJs[$first]}else{-1}
+            $expCrlf=([regex]::Matches($expectedJs,"`r`n")).Count
+            $actCrlf=([regex]::Matches($afterJs,"`r`n")).Count
+            $expLf=([regex]::Matches($expectedJs,"(?<!`r)`n")).Count
+            $actLf=([regex]::Matches($afterJs,"(?<!`r)`n")).Count
+            Write-Host '=== GYOMUON.JS EXACT DIFF DIAGNOSTIC ==='
+            Write-Host "expected length = $($expectedJs.Length)"
+            Write-Host "actual length   = $($afterJs.Length)"
+            Write-Host "first diff index = $first"
+            Write-Host "expected char code = $expCode"
+            Write-Host "actual char code   = $actCode"
+            Write-Host "expected CRLF=$expCrlf bareLF=$expLf"
+            Write-Host "actual   CRLF=$actCrlf bareLF=$actLf"
+            Write-Host "EXPECTED CONTEXT: $expCtx"
+            Write-Host "ACTUAL CONTEXT:   $actCtx"
+            throw 'Unexpected gyomuon.js changes beyond version bump'
+          }
           $beforePkg=Get-Content candidate-output/package-0.81.16.json -Raw -Encoding UTF8|ConvertFrom-Json
           $afterPkg=Get-Content app/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json
           if($afterPkg.version -ne '0.81.17'){throw 'package version not 0.81.17'}
@@ -110,7 +137,7 @@ jobs:
 
           - base: reconstructed production 0.81.16
           - deployment: disabled
-          - gyomuon.js: version bump only (UTF-8 BOM normalized for comparison)
+          - gyomuon.js: version bump only (verified character-for-character after BOM normalization)
           - package.json: version bump only
           - CSS chars before: $($beforeCss.Length)
           - CSS chars after: $($afterCss.Length)
