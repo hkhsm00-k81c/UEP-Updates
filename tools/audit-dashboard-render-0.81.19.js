@@ -1,0 +1,13 @@
+const fs=require('fs'),path=require('path');
+const root=process.argv[2]||'app';
+const file=path.join(root,'resources/app/gyomuon.js');
+const text=fs.readFileSync(file,'utf8');
+function extract(name){const sig=`function ${name}(`;const s=text.indexOf(sig);if(s<0)return null;const b=text.indexOf('{',s);let d=1,q=null,com=null;for(let i=b+1;i<text.length;i++){const c=text[i],n=text[i+1];if(com==='line'){if(c==='\n')com=null;continue}if(com==='block'){if(c==='*'&&n==='/'){com=null;i++}continue}if(q){if(c==='\\'){i++;continue}if(c===q)q=null;continue}if(c==='/'&&n==='/'){com='line';i++;continue}if(c==='/'&&n==='*'){com='block';i++;continue}if(c==='"'||c==="'"||c==='`'){q=c;continue}if(c==='{')d++;else if(c==='}'&&--d===0)return text.slice(s,i+1)}throw new Error(`${name} unterminated`)}
+const names=['renderDashboard','dashboardView','renderHome','render'];
+const found=[];
+for(const name of names){const body=extract(name);if(!body)continue;const report={name,chars:body.length,queryAll:(body.match(/querySelectorAll\s*\(/g)||[]).length,queryOne:(body.match(/querySelector\s*\(/g)||[]).length,map:(body.match(/\.map\s*\(/g)||[]).length,filter:(body.match(/\.filter\s*\(/g)||[]).length,reduce:(body.match(/\.reduce\s*\(/g)||[]).length,sort:(body.match(/\.sort\s*\(/g)||[]).length,jsonParse:(body.match(/JSON\.parse\s*\(/g)||[]).length,renderCalls:(body.match(/\brender\s*\(/g)||[]).length,refreshCalls:(body.match(/refreshReadonlyCacheSilently\s*\(/g)||[]).length};report.score=report.queryAll*3+report.map*2+report.filter*2+report.reduce*3+report.sort*3+report.jsonParse*2+report.renderCalls*5+report.refreshCalls*7;found.push(report)}
+found.sort((a,b)=>b.score-a.score||b.chars-a.chars);
+const repeated=[];for(const f of found){if(f.score>=8)repeated.push(f)}
+const report={candidates:found,priority:repeated,note:'Static dashboard rendering audit only. No production code modified.'};
+fs.mkdirSync('performance-phase11-output',{recursive:true});fs.writeFileSync('performance-phase11-output/dashboard-render-audit.json',JSON.stringify(report,null,2));
+let md='# UEP 0.81.19 Dashboard Render Audit\n\n';for(const r of found)md+=`- ${r.name}: score ${r.score}, chars ${r.chars}, queryAll ${r.queryAll}, map ${r.map}, filter ${r.filter}, reduce ${r.reduce}, sort ${r.sort}, render ${r.renderCalls}, refresh ${r.refreshCalls}\n`;fs.writeFileSync('performance-phase11-output/DASHBOARD-RENDER-AUDIT.md',md);console.log(JSON.stringify(report,null,2));if(!found.length)throw new Error('No dashboard/render function candidates found');
