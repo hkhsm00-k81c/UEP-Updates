@@ -1,0 +1,97 @@
+name: UEP CSS Cleanup Phase 6
+
+on:
+  push:
+    branches:
+      - cleanup/codebase-phase1-20260822
+    paths:
+      - tools/css-cleanup-phase6-unused.js
+      - .github/workflows/uep-css-cleanup-phase6.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  css-cleanup-phase6:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download shipped base
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,cleanup-phase6-output | Out-Null
+          gh release download v0.81.01 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          if(-not (Test-Path 'source/UEP-update.zip')){throw 'UEP 0.81.01 base ZIP not found'}
+          Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
+
+      - name: Reconstruct runtime through 0.81.16
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $scripts=Get-ChildItem scripts/build-update-*.ps1 | ForEach-Object {
+            if($_.BaseName -match 'build-update-(\d+)\.(\d+)\.(\d+)'){
+              [pscustomobject]@{File=$_.FullName;Major=[int]$matches[1];Minor=[int]$matches[2];Patch=[int]$matches[3]}
+            }
+          } | Sort-Object Major,Minor,Patch
+          foreach($s in $scripts){if($s.Major -eq 0 -and $s.Minor -eq 81 -and $s.Patch -ge 2 -and $s.Patch -le 16){ & $s.File }}
+
+      - name: Apply CSS cleanup phases 1 and 2
+        shell: pwsh
+        run: |
+          node ./tools/css-cleanup-phase1.js app cleanup-phase6-output/phase1
+          node ./tools/css-cleanup-phase2.js app cleanup-phase6-output/phase2
+
+      - name: Generate live phase3 and apply phase4 safe merges
+        shell: pwsh
+        run: |
+          node ./tools/css-cleanup-audit.js app cleanup-phase6-output/live-baseline
+          node ./tools/css-cleanup-phase3-audit.js app cleanup-phase6-output/phase3 cleanup-phase6-output/live-baseline/css-duplicate-groups.csv
+          node ./tools/css-cleanup-phase4.js app cleanup-phase6-output/phase4 cleanup-phase6-output/phase3/css-phase3-merge-safety.csv
+
+      - name: Run live phase5 deep audit
+        shell: pwsh
+        run: node ./tools/css-cleanup-phase5-audit.js app cleanup-phase6-output/phase5
+
+      - name: Apply phase6 strong-unused cleanup
+        shell: pwsh
+        run: node ./tools/css-cleanup-phase6-unused.js app cleanup-phase6-output cleanup-phase6-output/phase5/css-phase5-unused-trace.csv
+
+      - name: Re-audit cleaned CSS
+        shell: pwsh
+        run: node ./tools/css-cleanup-audit.js app cleanup-phase6-output/after
+
+      - name: Verify phase6 safety
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $report=Get-Content cleanup-phase6-output/CSS-CLEANUP-PHASE6.md -Raw -Encoding UTF8
+          if($report -notmatch 'strong unused classes removed: 10'){throw 'Phase6 did not remove exactly 10 strong-unused classes'}
+          $after=Import-Csv cleanup-phase6-output/after/css-duplicate-groups.csv
+          $protected=@('.input-method-row','.input-method-row>b','.input-center-compact-setup label','.dashboard-report-program-row','.growth-sdg-detail article','.curriculum-filter-bar .record-class-cards')
+          foreach($s in $protected){if(-not ($after.selector -contains $s)){throw "Protected override group missing after phase6: $s"}}
+          Get-Content cleanup-phase6-output/CSS-CLEANUP-PHASE6.md -Encoding UTF8
+          Get-Content cleanup-phase6-output/after/CSS-CLEANUP-AUDIT.md -Encoding UTF8
+
+      - name: Persist phase6 results
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f cleanup-phase6-output
+          git diff --cached --quiet
+          if($LASTEXITCODE -ne 0){
+            git commit -m "Store CSS cleanup phase6 results"
+            git push origin HEAD:cleanup/codebase-phase1-20260822
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UEP-CSS-CLEANUP-PHASE6
+          path: cleanup-phase6-output/
