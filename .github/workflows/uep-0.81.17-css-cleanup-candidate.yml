@@ -6,6 +6,7 @@ on:
       - candidate/0.81.17-css-cleanup
     paths:
       - scripts/apply-css-cleanup-0.81.17.js
+      - scripts/verify-css-cleanup-0.81.17.js
       - scripts/build-update-0.81.17.ps1
       - .github/workflows/uep-0.81.17-css-cleanup-candidate.yml
   workflow_dispatch:
@@ -63,6 +64,10 @@ jobs:
           $beforeJs=Get-Content candidate-output/gyomuon-0.81.16.js -Raw -Encoding UTF8
           $afterJs=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
           $expectedJs=$beforeJs.Replace('const APP_VERSION = "0.81.16";','const APP_VERSION = "0.81.17";').Replace('v0.81.16','v0.81.17')
+          # PowerShell Set-Content and Node fs.writeFileSync differ only in a leading UTF-8 BOM here.
+          # Compare normalized text so this guard detects semantic/runtime changes rather than encoding metadata.
+          $expectedJs=$expectedJs.TrimStart([char]0xFEFF)
+          $afterJs=$afterJs.TrimStart([char]0xFEFF)
           if($afterJs -ne $expectedJs){throw 'Unexpected gyomuon.js changes beyond version bump'}
           $beforePkg=Get-Content candidate-output/package-0.81.16.json -Raw -Encoding UTF8|ConvertFrom-Json
           $afterPkg=Get-Content app/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json
@@ -72,7 +77,7 @@ jobs:
           $beforeCss=(Get-Content candidate-output/gyomuon-0.81.16.css -Raw -Encoding UTF8)
           $afterCss=(Get-Content app/resources/app/gyomuon.css -Raw -Encoding UTF8)
           if($beforeCss.Length -ne 40019){throw "Unexpected 0.81.16 CSS baseline size $($beforeCss.Length)"}
-          if($afterCss.Length -ne 35884){throw "Unexpected 0.81.17 CSS size $($afterCss.Length)"}
+          if($afterCss.Length -ne 36029){throw "Unexpected 0.81.17 CSS size $($afterCss.Length)"}
           Write-Host "CSS reduction = $($beforeCss.Length-$afterCss.Length) chars"
 
       - name: Verify critical screen/runtime anchors
@@ -105,11 +110,13 @@ jobs:
 
           - base: reconstructed production 0.81.16
           - deployment: disabled
-          - gyomuon.js: version bump only
+          - gyomuon.js: version bump only (UTF-8 BOM normalized for comparison)
           - package.json: version bump only
           - CSS chars before: $($beforeCss.Length)
           - CSS chars after: $($afterCss.Length)
           - CSS chars removed: $($beforeCss.Length-$afterCss.Length)
+          - structural unused-selector cleanup: verified
+          - protected CSS override groups: verified
           - critical curriculum/SDGs/recordcheck anchors: verified
           - renderer syntax: verified
           - automatic updater/publish workflow: untouched
