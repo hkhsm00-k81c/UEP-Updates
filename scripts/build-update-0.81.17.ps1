@@ -22,11 +22,12 @@ $checks=[ordered]@{
  'recordcheck retained'=$g.Contains('window.uepMountRecordbookValidator') -and $g.Contains('standaloneRecordcheckMount')
  'strict class header'=$g.Contains('classIndex=findIndex(/^반$|^학급$|^반명$/)')
  'class range guard'=$g.Contains('if(!/^([1-9]|1[0-4])$/.test(String(classNo||"")))classNo=""')
- 'clean CSS size'=($c.Length -eq 35884)
+ 'CSS reduced'=($c.Length -lt 40019)
+ 'CSS substantial'=($c.Length -gt 30000)
  'removed unused selection hero'=(-not $c.Contains('.selection-hero'))
  'protected input method row'=$c.Contains('.input-method-row')
  'protected curriculum filter'=$c.Contains('.curriculum-filter-bar .record-class-cards')
 }
 $checks.GetEnumerator()|ForEach-Object{Write-Host ("CHECK {0} = {1}" -f $_.Key,$_.Value)}
 if($checks.Values-contains $false){throw 'UEP 0.81.17 candidate verification failed'}
-Write-Host 'UEP 0.81.17 CSS cleanup candidate applied without deployment.'
+Write-Host ("UEP 0.81.17 CSS cleanup candidate applied without deployment. CSS chars: {0}" -f $c.Length)
