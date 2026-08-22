@@ -6,10 +6,12 @@ const runtimeFiles=['resources/app/gyomuon.js','resources/app/electron/main.cjs'
 function esc(s){return s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');}
 function findFunctions(text,name){
   const out=[];
-  const re=new RegExp('\\bfunction\\s+'+esc(name)+'\\s*\\(','g');
+  const re=new RegExp('(^|[;{}]\\s*)function\\s+'+esc(name)+'\\s*\\(','gm');
   let m;
   while((m=re.exec(text))){
-    const open=text.indexOf('{',m.index); if(open<0)continue;
+    const prefix=m[1]||'';
+    const fnStart=m.index+prefix.length;
+    const open=text.indexOf('{',fnStart); if(open<0)continue;
     let d=1,q=null,comment=null,end=-1;
     for(let i=open+1;i<text.length;i++){
       const c=text[i],n=text[i+1];
@@ -21,7 +23,7 @@ function findFunctions(text,name){
       if(c==='"'||c==="'"||c==='`'){q=c;continue;}
       if(c==='{')d++; else if(c==='}'&&--d===0){end=i+1;while(end<text.length&&(text[end]==='\r'||text[end]==='\n'))end++;break;}
     }
-    if(end>0)out.push({start:m.index,end});
+    if(end>0)out.push({start:fnStart,end});
   }
   return out;
 }
