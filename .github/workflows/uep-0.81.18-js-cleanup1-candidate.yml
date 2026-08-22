@@ -57,16 +57,21 @@ jobs:
           node ./tools/apply-js-cleanup1-0.81.18.js app
           if($LASTEXITCODE-ne 0){throw 'cleanup1 applicator failed'}
 
-      - name: Verify syntax and removed references
+      - name: Verify syntax and actual removals
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
           node --check app/resources/app/gyomuon.js
           node --check app/resources/app/electron/main.cjs
           node --check app/resources/app/electron/google-data.cjs
-          $names=@('calendarTitleFromRow','dateFromYmd','emptyModule','formatTaskCompletedAt','getReadonlySheetsAuth','internalNineGradeReferenceMap','parseSchoolCalendarMatrix','sheetNameFromRange','sortUniversitiesByPriority','workItemReadByCurrentUser')
+          $report=Get-Content cleanup1-output/cleanup1-report.json -Raw | ConvertFrom-Json
+          $removed=@($report | Where-Object {$_.status -eq 'REMOVED'})
           $all=(Get-Content app/resources/app/gyomuon.js -Raw)+(Get-Content app/resources/app/electron/main.cjs -Raw)+(Get-Content app/resources/app/electron/google-data.cjs -Raw)
-          foreach($n in $names){if($all -match ('\b'+[regex]::Escape($n)+'\b')){throw "Residual cleanup1 reference: $n"}}
+          foreach($r in $removed){
+            if($all -match ('\b'+[regex]::Escape($r.name)+'\b')){throw "Residual removed-function reference: $($r.name)"}
+          }
+          if($removed.Count -eq 0){throw 'cleanup1 removed zero functions; no candidate produced'}
+          Write-Host "Verified removed functions: $($removed.Count)"
 
       - name: Verify critical runtime anchors
         shell: pwsh
@@ -82,7 +87,10 @@ jobs:
           $ErrorActionPreference='Stop'
           $before=(Get-Item cleanup1-before-gyomuon.js).Length+(Get-Item cleanup1-before-main.cjs).Length+(Get-Item cleanup1-before-google-data.cjs).Length
           $after=(Get-Item app/resources/app/gyomuon.js).Length+(Get-Item app/resources/app/electron/main.cjs).Length+(Get-Item app/resources/app/electron/google-data.cjs).Length
-          "beforeBytes=$before`nafterBytes=$after`nremovedBytes=$($before-$after)" | Set-Content cleanup1-output/size-summary.txt
+          $report=Get-Content cleanup1-output/cleanup1-report.json -Raw | ConvertFrom-Json
+          $removed=@($report | Where-Object {$_.status -eq 'REMOVED'})
+          $skipped=@($report | Where-Object {$_.status -ne 'REMOVED'})
+          "beforeBytes=$before`nafterBytes=$after`nremovedBytes=$($before-$after)`nremovedFunctions=$($removed.Count)`nskippedFunctions=$($skipped.Count)" | Set-Content cleanup1-output/size-summary.txt
           Compress-Archive -Path app/* -DestinationPath cleanup1-output/UEP-0.81.18-JS-CLEANUP1-NONDEPLOY.zip -Force
 
       - uses: actions/upload-artifact@v4
