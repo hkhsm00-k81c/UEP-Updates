@@ -1,0 +1,89 @@
+name: UEP CSS Cleanup Phase 4
+
+on:
+  push:
+    branches:
+      - cleanup/codebase-phase1-20260822
+    paths:
+      - tools/css-cleanup-phase4.js
+      - .github/workflows/uep-css-cleanup-phase4.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  css-cleanup-phase4:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download shipped base
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,cleanup-phase4-output | Out-Null
+          gh release download v0.81.01 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          if(-not (Test-Path 'source/UEP-update.zip')){throw 'UEP 0.81.01 base ZIP not found'}
+          Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
+
+      - name: Reconstruct runtime through 0.81.16
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $scripts=Get-ChildItem scripts/build-update-*.ps1 | ForEach-Object {
+            if($_.BaseName -match 'build-update-(\d+)\.(\d+)\.(\d+)'){
+              [pscustomobject]@{File=$_.FullName;Major=[int]$matches[1];Minor=[int]$matches[2];Patch=[int]$matches[3]}
+            }
+          } | Sort-Object Major,Minor,Patch
+          foreach($s in $scripts){
+            if($s.Major -eq 0 -and $s.Minor -eq 81 -and $s.Patch -ge 2 -and $s.Patch -le 16){ & $s.File }
+          }
+
+      - name: Apply CSS cleanup phase 1
+        shell: pwsh
+        run: node ./tools/css-cleanup-phase1.js app cleanup-phase4-output/phase1
+
+      - name: Apply CSS cleanup phase 2
+        shell: pwsh
+        run: node ./tools/css-cleanup-phase2.js app cleanup-phase4-output/phase2
+
+      - name: Apply CSS cleanup phase 4 safe merges
+        shell: pwsh
+        run: node ./tools/css-cleanup-phase4.js app cleanup-phase4-output
+
+      - name: Re-audit cleaned CSS
+        shell: pwsh
+        run: node ./tools/css-cleanup-audit.js app cleanup-phase4-output/after
+
+      - name: Verify safe selectors collapsed
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $css=Get-Content app/resources/app/gyomuon.css -Raw -Encoding UTF8
+          @('.input-center-compact-setup label.grow','.dashboard-report-program-row>.btn.compact','.dorm-outing-editor-grid','.dorm-outing-editor-grid .wide','.neis-decision-actions') | ForEach-Object {
+            if(-not $css.Contains($_)){throw "Missing safe selector $_"}
+          }
+          Get-Content cleanup-phase4-output/CSS-CLEANUP-PHASE4.md -Encoding UTF8
+          Get-Content cleanup-phase4-output/after/CSS-CLEANUP-AUDIT.md -Encoding UTF8
+
+      - name: Persist phase4 results
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f cleanup-phase4-output
+          git diff --cached --quiet
+          if($LASTEXITCODE -ne 0){
+            git commit -m "Store CSS cleanup phase4 results"
+            git push origin HEAD:cleanup/codebase-phase1-20260822
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UEP-CSS-CLEANUP-PHASE4
+          path: cleanup-phase4-output/
