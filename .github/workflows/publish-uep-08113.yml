@@ -1,0 +1,115 @@
+name: Publish UEP 0.81.13
+
+on:
+  push:
+    paths:
+      - publish-08113.trigger
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download shipped 0.81.01 base
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force app | Out-Null
+          gh release download v0.81.01 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip'
+          Expand-Archive UEP-update.zip -DestinationPath app -Force
+          if(-not (Test-Path 'app/resources/app/gyomuon.js')){throw 'gyomuon.js missing from shipped base'}
+
+      - name: Reconstruct and apply 0.81.13
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          2..13 | ForEach-Object {
+            $version='0.81.{0:d2}' -f $_
+            $script="scripts/build-update-$version.ps1"
+            if(-not (Test-Path $script)){throw "missing $script"}
+            & $script
+          }
+
+      - name: Final release gates
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $g=Get-Content 'app/resources/app/gyomuon.js' -Raw -Encoding UTF8
+          $d=Get-Content 'app/resources/app/electron/google-data.cjs' -Raw -Encoding UTF8
+          $m=Get-Content 'app/resources/app/electron/main.cjs' -Raw -Encoding UTF8
+          node --check 'app/resources/app/gyomuon.js'
+          node --check 'app/resources/app/electron/main.cjs'
+          node --check 'app/resources/app/electron/google-data.cjs'
+          $checks=[ordered]@{
+            version=$g.Contains('const APP_VERSION = "0.81.13";')
+            single06=$d.Contains('"06_선택과목이력"') -and (-not $d.Contains('06A_학생별선택과목'))
+            curriculum=$g.Contains('function uepCurriculumFinalView')
+            sdgs=$g.Contains('function uepSdgsEvidenceBridge')
+            recordcheck=$g.Contains('window.uepMountRecordbookValidator') -and $g.Contains('standaloneRecordcheckMount')
+            schoolResolver=$m.Contains('resolveSchoolServiceAccount')
+            noGlobalObserver=(-not $g.Contains('observer.observe(document.documentElement,{subtree:true,childList:true})'))
+            noSectionScan=(-not $g.Contains("document.querySelectorAll('section').forEach"))
+            selectionCache=$g.Contains('__UEP_SELECTION_CACHE_08113__')
+          }
+          $checks.GetEnumerator() | ForEach-Object { Write-Host ("RELEASE GATE {0} = {1}" -f $_.Key,$_.Value) }
+          if($checks.Values -contains $false){throw 'UEP 0.81.13 release gate failed'}
+
+      - name: Build update package
+        id: package
+        shell: pwsh
+        run: |
+          Compress-Archive -Path app/* -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "sha=$sha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Publish v0.81.13 release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag='v0.81.13'
+          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+          if($LASTEXITCODE -ne 0){
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.13 - 화면 연결 복구 및 응답속도 개선' --notes '생활기록부 교육과정·SDGs·세특 화면 연결을 복구하고, 전역 DOM 감시와 불필요한 전체 스캔을 제거하며 선택과목 파생 데이터 캐시를 적용합니다.'
+          }
+          gh release upload $tag UEP-update.zip --repo $env:GITHUB_REPOSITORY --clobber
+
+      - name: Enable 0.81.13 automatic update
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA256: ${{ steps.package.outputs.sha }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $current=Get-Content 'uep-policy.json' -Raw -Encoding UTF8 | ConvertFrom-Json
+          $oauthClientId=[string]$current.googleOAuthClientId
+          $downloadUrl="https://github.com/$env:GITHUB_REPOSITORY/releases/download/v0.81.13/UEP-update.zip"
+          $policy=[ordered]@{
+            channel='homeroom-stable'
+            latestVersion='0.81.13'
+            minimumAllowedVersion='0.80.64'
+            blockedVersions=@()
+            forceUpdate=$false
+            updateEnabled=$true
+            downloadUrl=$downloadUrl
+            sha256=$env:SHA256
+            message='UEP 0.81.13 화면 연결 복구 및 응답속도 개선 업데이트'
+            offlineGraceHours=72
+            googleOAuthClientId=$oauthClientId
+          } | ConvertTo-Json -Depth 4
+          $info=gh api "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json?ref=main" | ConvertFrom-Json
+          $encoded=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($policy))
+          $body=@{message='Enable UEP 0.81.13 automatic update';content=$encoded;sha=$info.sha;branch='main'} | ConvertTo-Json
+          $body | gh api --method PUT -H 'Accept: application/vnd.github+json' "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json" --input -
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UEP-0.81.13-Update-Package
+          path: UEP-update.zip
