@@ -1,0 +1,10 @@
+const fs=require('fs'),path=require('path');
+const root=process.argv[2]||'app';
+const file=path.join(root,'resources/app/gyomuon.js');
+let text=fs.readFileSync(file,'utf8');
+const before=`function startReadonlyAutoRefresh(){\n  if(readonlyAutoRefreshTimer) clearInterval(readonlyAutoRefreshTimer);\n  if(!googleConnectionStatus?.ok) return;\n  readonlyAutoRefreshTimer=setInterval(()=>refreshReadonlyCacheSilently({force:true,rerender:true}),READONLY_AUTO_REFRESH_MS);\n}`;
+const after=`function startReadonlyAutoRefresh(){\n  if(readonlyAutoRefreshTimer) clearInterval(readonlyAutoRefreshTimer);\n  if(!googleConnectionStatus?.ok) return;\n  readonlyAutoRefreshTimer=setInterval(()=>{\n    if(document.hidden) return;\n    refreshReadonlyCacheSilently({force:true,rerender:true});\n  },READONLY_AUTO_REFRESH_MS);\n}`;
+if(!text.includes(before)) throw new Error('startReadonlyAutoRefresh expected shape not found');
+text=text.replace(before,after);
+fs.writeFileSync(file,text);
+console.log('Applied readonly auto-refresh visibility guard');
