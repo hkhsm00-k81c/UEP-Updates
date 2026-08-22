@@ -47,3 +47,4 @@ Requested: 2026-08-22
 Scope: restore canonical records/SDGs/recordcheck wiring, remove document-wide DOM observer and full-section scan, memoize selection analysis, and keep 06_선택과목이력 as the only selection source.
 
 Retry UEP 0.81.13 after hardened observer/section-scan cleanup.
+Retry UEP 0.81.13 after correcting integrated curriculum/SDGs verification names.
