@@ -1,5 +1,5 @@
-$ErrorActionPreference='Stop'
 param([string]$AppRoot='app',[string]$OutDir='audit-output')
+$ErrorActionPreference='Stop'
 New-Item -ItemType Directory -Force $OutDir | Out-Null
 
 function ReadText($path){ if(Test-Path $path){ return Get-Content $path -Raw -Encoding UTF8 }; return '' }
@@ -67,7 +67,6 @@ $inspectFlows=$workflowFiles|Where-Object {$_.Name -match '^inspect-|audit-|prob
 AddFinding $findings 'repository' 'workflow-count' 'all-workflows' $workflowFiles.Count 'INFO' '저장소 workflow 총수'
 AddFinding $findings 'repository' 'diagnostic-workflow-count' 'inspect/audit/probe' $inspectFlows.Count 'MEDIUM' '실사용 배포와 무관한 점검 workflow 누적'
 
-# Historical verification labels. Use a single-quoted PowerShell regex so embedded double quotes are literal.
 $historical=@()
 $historicalPattern='(?m)^\s*["'']([^"'']{3,80})["'']\s*=\s*'
 foreach($f in ($sourceFiles|Where-Object {$_.Name -like 'build-update-*.ps1'})){
