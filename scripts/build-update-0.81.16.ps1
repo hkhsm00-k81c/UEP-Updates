@@ -30,8 +30,8 @@ $checks=[ordered]@{
  'SDGs body'=$g.Contains('function uepSdgsEvidenceBridge()') -and $g.Contains('function uepSdgsSupplementPanel()')
  'strict class header'=$g.Contains('classIndex=findIndex(/^반$|^학급$|^반명$/)')
  'no positional class fallback'=(-not $g.Contains('classIndex=indexOf(/^반$|학급|반명/,3)'))
- 'explicit section parse'=$g.Contains('([1-9]|1[0-4])\\s*반')
- 'class range guard'=$g.Contains("if(!/^([1-9]|1[0-4])$/.test(String(classNo||\"\")))classNo=\"\"")
+ 'explicit section parse'=$g.Contains('([1-9]|1[0-4])\s*반')
+ 'class range guard'=$g.Contains('if(!/^([1-9]|1[0-4])$/.test(String(classNo||"")))classNo=""')
  'recordcheck retained'=$g.Contains('window.uepMountRecordbookValidator') -and $g.Contains('standaloneRecordcheckMount')
 }
 $checks.GetEnumerator()|ForEach-Object{Write-Host ("CHECK {0} = {1}" -f $_.Key,$_.Value)}
