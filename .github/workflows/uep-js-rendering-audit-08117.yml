@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   js-render-audit:
@@ -62,6 +62,23 @@ jobs:
           if(-not $g.Contains('const APP_VERSION = "0.81.17";')){throw 'audit mutated runtime version'}
           node --check app/resources/app/gyomuon.js
           if($LASTEXITCODE-ne 0){throw 'runtime syntax changed during audit'}
+
+      - name: Persist audit results on audit branch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $dest='audit-output/js-rendering-0.81.17'
+          New-Item -ItemType Directory -Force $dest | Out-Null
+          Copy-Item js-audit-output/* $dest -Force
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add $dest
+          if(-not (git diff --cached --quiet)){
+            git commit -m 'Persist 0.81.17 JS rendering audit results'
+            git push origin HEAD:audit/js-rendering-0.81.17
+          } else {
+            Write-Host 'Audit results unchanged; nothing to commit.'
+          }
 
       - uses: actions/upload-artifact@v4
         with:
