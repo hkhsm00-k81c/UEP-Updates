@@ -9,8 +9,11 @@ $data=ReadText (Join-Path $AppRoot 'resources/app/electron/google-data.cjs')
 $preload=ReadText (Join-Path $AppRoot 'resources/app/electron/preload.cjs')
 $index=ReadText (Join-Path $AppRoot 'resources/app/index.html')
 $css=ReadText (Join-Path $AppRoot 'resources/app/gyomuon.css')
-$repoText=(Get-ChildItem -Recurse -File | Where-Object {$_.FullName -notmatch '\\.git\\|\\node_modules\\|\\audit-output\\|\\app\\'} | ForEach-Object { try { Get-Content $_.FullName -Raw -Encoding UTF8 } catch { '' } }) -join "`n"
 $runtimeText=@($gyo,$main,$data,$preload,$index,$css) -join "`n"
+
+# Historical references are evidence only. Audit tools/workflows must never affect liveness classification.
+$historyFiles=Get-ChildItem scripts,patches -Recurse -File -ErrorAction SilentlyContinue
+$historyText=($historyFiles | ForEach-Object { try { Get-Content $_.FullName -Raw -Encoding UTF8 } catch { '' } }) -join "`n"
 
 $dead=Import-Csv (Join-Path $OutDir 'dead-function-candidates.csv')
 $deadReview=@()
@@ -19,14 +22,14 @@ foreach($d in $dead){
  $escaped=Esc $n
  $gyoRefs=([regex]::Matches($gyo,"\b$escaped\b")).Count
  $runtimeRefs=([regex]::Matches($runtimeText,"\b$escaped\b")).Count
- $repoRefs=([regex]::Matches($repoText,"\b$escaped\b")).Count
+ $historyRefs=([regex]::Matches($historyText,"\b$escaped\b")).Count
  $stringPattern='[\x27\x22]'+$escaped+'[\x27\x22]'
  $dataPattern='data-[^=\s]+=[\x27\x22][^\x27\x22]*'+$escaped+'[^\x27\x22]*[\x27\x22]'
  $stringRefs=([regex]::Matches($runtimeText,$stringPattern)).Count
  $windowRefs=([regex]::Matches($runtimeText,"window\.$escaped\b")).Count
  $dataRefs=([regex]::Matches($runtimeText,$dataPattern)).Count
- $classification=if($runtimeRefs -le 1 -and $repoRefs -le 1 -and $stringRefs -eq 0 -and $windowRefs -eq 0 -and $dataRefs -eq 0){'SAFE_DELETE_AFTER_SMOKE'}else{'KEEP_OR_MANUAL_REVIEW'}
- $deadReview += [pscustomobject]@{name=$n;line=$d.line;gyoRefs=$gyoRefs;runtimeRefs=$runtimeRefs;repoRefs=$repoRefs;stringRefs=$stringRefs;windowRefs=$windowRefs;dataRefs=$dataRefs;classification=$classification}
+ $classification=if($runtimeRefs -le 1 -and $stringRefs -eq 0 -and $windowRefs -eq 0 -and $dataRefs -eq 0){'SAFE_DELETE_AFTER_SMOKE'}else{'KEEP_OR_MANUAL_REVIEW'}
+ $deadReview += [pscustomobject]@{name=$n;line=$d.line;gyoRefs=$gyoRefs;runtimeRefs=$runtimeRefs;historyRefs=$historyRefs;stringRefs=$stringRefs;windowRefs=$windowRefs;dataRefs=$dataRefs;classification=$classification}
 }
 $deadReview|Export-Csv (Join-Path $OutDir 'fourth-pass-dead-review.csv') -NoTypeInformation -Encoding UTF8
 
@@ -52,9 +55,9 @@ $manual=($deadReview|Where-Object classification -ne 'SAFE_DELETE_AFTER_SMOKE')
 $report=@('# UEP CODEBASE AUDIT — FOURTH PASS SAFE CLASSIFICATION','',"- dead candidates reviewed: $($deadReview.Count)","- SAFE_DELETE_AFTER_SMOKE: $($safe.Count)","- KEEP_OR_MANUAL_REVIEW: $($manual.Count)","- shadowed declaration groups: $($shadowNames.Count)",'','## Shadowed declarations')
 foreach($g in ($shadow|Group-Object name)){ $report += "- $($g.Name): "+(($g.Group|ForEach-Object{"#$($_.ordinal) line $($_.line) hash $($_.hash) chars $($_.chars) last=$($_.isLast)"}) -join ' | ') }
 $report += ''; $report += '## SAFE_DELETE_AFTER_SMOKE'
-foreach($x in $safe){$report += "- $($x.name) @ $($x.line) runtimeRefs=$($x.runtimeRefs) repoRefs=$($x.repoRefs)"}
+foreach($x in $safe){$report += "- $($x.name) @ $($x.line) runtimeRefs=$($x.runtimeRefs) historyRefs=$($x.historyRefs)"}
 $report += ''; $report += '## KEEP_OR_MANUAL_REVIEW'
-foreach($x in $manual){$report += "- $($x.name) @ $($x.line) runtimeRefs=$($x.runtimeRefs) repoRefs=$($x.repoRefs) string=$($x.stringRefs) window=$($x.windowRefs) data=$($x.dataRefs)"}
-$report += ''; $report += '## Rule';$report += '- No production deletion in this pass.';$report += '- Shadowed declarations may be removed only after preserving the final declaration and smoke testing relevant routes.';$report += '- SAFE_DELETE_AFTER_SMOKE means static analysis found no other repo/runtime reference; still require route smoke test before deletion.'
+foreach($x in $manual){$report += "- $($x.name) @ $($x.line) runtimeRefs=$($x.runtimeRefs) historyRefs=$($x.historyRefs) string=$($x.stringRefs) window=$($x.windowRefs) data=$($x.dataRefs)"}
+$report += ''; $report += '## Rule';$report += '- Audit tools and workflows are excluded from liveness classification to prevent self-contamination.';$report += '- Historical scripts/patches are tracked as historyRefs only and do not keep a runtime function alive.';$report += '- No production deletion in this pass.';$report += '- SAFE_DELETE_AFTER_SMOKE still requires route/function smoke verification before removal.'
 $report|Set-Content (Join-Path $OutDir 'FOURTH-PASS-SAFE-CLASSIFICATION.md') -Encoding UTF8
 Write-Host "FOURTH PASS COMPLETE safe=$($safe.Count) manual=$($manual.Count)"
