@@ -1,8 +1,8 @@
 const fs=require('fs');
 const path=require('path');
 const root=process.argv[2]||'app';
-const files=['resources/app/gyomuon.js','resources/app/electron/main.cjs','resources/app/electron/google-data.cjs'];
-const names=['calendarTitleFromRow','dateFromYmd','emptyModule','formatTaskCompletedAt','getReadonlySheetsAuth','internalNineGradeReferenceMap','parseSchoolCalendarMatrix','sheetNameFromRange','sortUniversitiesByPriority','workItemReadByCurrentUser'];
+const targets=['calendarTitleFromRow','dateFromYmd','emptyModule','formatTaskCompletedAt','getReadonlySheetsAuth','internalNineGradeReferenceMap','parseSchoolCalendarMatrix','sheetNameFromRange','sortUniversitiesByPriority','workItemReadByCurrentUser'];
+const runtimeFiles=['resources/app/gyomuon.js','resources/app/electron/main.cjs','resources/app/electron/google-data.cjs'];
 function esc(s){return s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');}
 function findFunction(text,name){
   const re=new RegExp('\\bfunction\\s+'+esc(name)+'\\s*\\(','g');
@@ -21,20 +21,33 @@ function findFunction(text,name){
   }
   return null;
 }
-const texts=new Map(files.map(rel=>[rel,fs.readFileSync(path.join(root,rel),'utf8')]));
+const files=new Map(runtimeFiles.map(rel=>[rel,fs.readFileSync(path.join(root,rel),'utf8')]));
 const report=[];
-for(const name of names){
+for(const name of targets){
   const hits=[];
-  for(const rel of files){const span=findFunction(texts.get(rel),name);if(span)hits.push({rel,span});}
-  if(hits.length!==1)throw new Error(`${name}: expected one declaration across runtime files, found ${hits.length}`);
-  const {rel,span}=hits[0]; let text=texts.get(rel);
-  let totalRefs=0; for(const t of texts.values())totalRefs+=(t.match(new RegExp('\\b'+esc(name)+'\\b','g'))||[]).length;
-  if(totalRefs!==1)throw new Error(`${name}: expected exactly one identifier occurrence across runtime before removal, got ${totalRefs}`);
-  const removed=text.slice(span.start,span.end); text=text.slice(0,span.start)+text.slice(span.end); texts.set(rel,text);
-  report.push({file:rel,name,removedChars:removed.length});
+  let totalRefs=0;
+  for(const rel of runtimeFiles){
+    const text=files.get(rel);
+    totalRefs+=(text.match(new RegExp('\\b'+esc(name)+'\\b','g'))||[]).length;
+    const span=findFunction(text,name);
+    if(span)hits.push({rel,span});
+  }
+  if(hits.length===0){
+    if(totalRefs!==0)throw new Error(`${name}: no declaration but ${totalRefs} residual identifier reference(s) found`);
+    report.push({name,status:'ALREADY_ABSENT',removedChars:0});
+    continue;
+  }
+  if(hits.length!==1)throw new Error(`${name}: expected at most one declaration across runtime files, found ${hits.length}`);
+  if(totalRefs!==1)throw new Error(`${name}: expected exactly one identifier occurrence before removal, got ${totalRefs}`);
+  const {rel,span}=hits[0];
+  let text=files.get(rel);
+  const removed=text.slice(span.start,span.end);
+  text=text.slice(0,span.start)+text.slice(span.end);
+  if(new RegExp('\\b'+esc(name)+'\\b').test(text))throw new Error(`${name}: residual reference remains in ${rel}`);
+  files.set(rel,text);
+  report.push({name,file:rel,status:'REMOVED',removedChars:removed.length});
 }
-for(const name of names){let refs=0;for(const t of texts.values())refs+=(t.match(new RegExp('\\b'+esc(name)+'\\b','g'))||[]).length;if(refs)throw new Error(`${name}: residual reference remains (${refs})`);}
-for(const [rel,text] of texts)fs.writeFileSync(path.join(root,rel),text,'utf8');
+for(const [rel,text] of files)fs.writeFileSync(path.join(root,rel),text,'utf8');
 fs.mkdirSync('cleanup1-output',{recursive:true});
 fs.writeFileSync('cleanup1-output/cleanup1-report.json',JSON.stringify(report,null,2),'utf8');
 console.log(JSON.stringify(report,null,2));
