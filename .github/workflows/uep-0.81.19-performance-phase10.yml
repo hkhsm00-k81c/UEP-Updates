@@ -1,0 +1,60 @@
+name: UEP 0.81.19 Performance Phase10
+on:
+  push:
+    branches: [audit/0.81.19-performance]
+    paths:
+      - tools/capture-connectgoogleuser-context-0.81.19.js
+      - .github/workflows/uep-0.81.19-performance-phase10.yml
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  capture-connectgoogleuser-context:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download shipped 0.81.01 base
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.81.01 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
+      - name: Reconstruct production through 0.81.18
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          2..18 | ForEach-Object { $version='0.81.{0:d2}' -f $_; $script="scripts/build-update-$version.ps1"; if(-not (Test-Path $script)){throw "missing $script"}; & $script }
+      - name: Apply verified performance patches
+        shell: pwsh
+        run: |
+          node ./tools/apply-performance1-0.81.19.js app
+          if($LASTEXITCODE -ne 0){throw 'phase1 applicator failed'}
+          node ./tools/apply-performance2-0.81.19.js app
+          if($LASTEXITCODE -ne 0){throw 'phase2 applicator failed'}
+      - name: Capture connectGoogleUser render context
+        shell: pwsh
+        run: |
+          node ./tools/capture-connectgoogleuser-context-0.81.19.js app
+          if($LASTEXITCODE -ne 0){throw 'phase10 context capture failed'}
+          node --check app/resources/app/gyomuon.js
+      - name: Persist phase10 context
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force 'audit-output/performance-0.81.19' | Out-Null
+          Copy-Item 'performance-phase10-output/connect-google-user-context.json' 'audit-output/performance-0.81.19/connect-google-user-context.json' -Force
+          Copy-Item 'performance-phase10-output/CONNECT-GOOGLE-USER-CONTEXT.md' 'audit-output/performance-0.81.19/CONNECT-GOOGLE-USER-CONTEXT.md' -Force
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add audit-output/performance-0.81.19
+          if(-not (git diff --cached --quiet)){
+            git commit -m 'Persist 0.81.19 phase10 connectGoogleUser context'
+            git push origin HEAD:audit/0.81.19-performance
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UEP-0.81.19-Performance-Phase10
+          path: performance-phase10-output
