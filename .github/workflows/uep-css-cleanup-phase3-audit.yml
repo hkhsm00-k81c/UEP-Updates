@@ -26,7 +26,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference='Stop'
-          New-Item -ItemType Directory -Force source,app,cleanup-phase3-output,tmp-p1,tmp-p2 | Out-Null
+          New-Item -ItemType Directory -Force source,app,cleanup-phase3-output,tmp-p1,tmp-p2,cleanup-phase3-output/baseline | Out-Null
           gh release download v0.81.01 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
           Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
 
@@ -46,9 +46,13 @@ jobs:
           node ./tools/css-cleanup-phase1.js app tmp-p1
           node ./tools/css-cleanup-phase2.js app tmp-p2
 
-      - name: Run phase3 structural safety audit
+      - name: Capture actual post-phase2 CSS baseline
         shell: pwsh
-        run: node ./tools/css-cleanup-phase3-audit.js app cleanup-phase3-output
+        run: node ./tools/css-cleanup-audit.js app cleanup-phase3-output/baseline
+
+      - name: Run baseline-aligned phase3 structural safety audit
+        shell: pwsh
+        run: node ./tools/css-cleanup-phase3-audit.js app cleanup-phase3-output cleanup-phase3-output/baseline/css-duplicate-groups.csv
 
       - name: Show report
         shell: pwsh
@@ -62,7 +66,7 @@ jobs:
           git add -f cleanup-phase3-output
           git diff --cached --quiet
           if($LASTEXITCODE -ne 0){
-            git commit -m "Store CSS cleanup phase3 audit results"
+            git commit -m "Store baseline-aligned CSS cleanup phase3 results"
             git push origin HEAD:cleanup/codebase-phase1-20260822
           }
 
