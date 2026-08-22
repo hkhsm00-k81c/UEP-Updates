@@ -1,0 +1,44 @@
+name: UEP 0.81.19 Performance Phase9
+on:
+  push:
+    branches: [audit/0.81.19-performance]
+    paths:
+      - tools/analyze-connectgoogleuser-render-0.81.19.js
+      - .github/workflows/uep-0.81.19-performance-phase9.yml
+  workflow_dispatch:
+jobs:
+  analyze-connectgoogleuser:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download shipped 0.81.01 base
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.81.01 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
+      - name: Reconstruct production through 0.81.18
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          2..18 | ForEach-Object { $version='0.81.{0:d2}' -f $_; $script="scripts/build-update-$version.ps1"; if(-not (Test-Path $script)){throw "missing $script"}; & $script }
+      - name: Apply verified performance patches
+        shell: pwsh
+        run: |
+          node ./tools/apply-performance1-0.81.19.js app
+          if($LASTEXITCODE -ne 0){throw 'phase1 applicator failed'}
+          node ./tools/apply-performance2-0.81.19.js app
+          if($LASTEXITCODE -ne 0){throw 'phase2 applicator failed'}
+      - name: Analyze connectGoogleUser render flow
+        shell: pwsh
+        run: |
+          node ./tools/analyze-connectgoogleuser-render-0.81.19.js app
+          if($LASTEXITCODE -ne 0){throw 'phase9 analysis failed'}
+          node --check app/resources/app/gyomuon.js
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UEP-0.81.19-Performance-Phase9
+          path: performance-phase9-output
