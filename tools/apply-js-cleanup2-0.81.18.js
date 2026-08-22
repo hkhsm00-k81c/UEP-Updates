@@ -5,9 +5,11 @@ const targets=['admissionCutLimit','admissionPairCompatible','autoInferCareerDat
 const runtimeFiles=['resources/app/gyomuon.js','resources/app/electron/main.cjs','resources/app/electron/google-data.cjs'];
 function esc(s){return s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');}
 function findFunction(text,name){
-  const re=new RegExp('\\bfunction\\s+'+esc(name)+'\\s*\\(','g');
+  const re=new RegExp('(^|[;{}]\\s*)function\\s+'+esc(name)+'\\s*\\(','gm');
   const m=re.exec(text); if(!m)return null;
-  const open=text.indexOf('{',m.index); if(open<0)return null;
+  const prefix=m[1]||'';
+  const fnStart=m.index+prefix.length;
+  const open=text.indexOf('{',fnStart); if(open<0)return null;
   let d=1,q=null,comment=null;
   for(let i=open+1;i<text.length;i++){
     const c=text[i],n=text[i+1];
@@ -17,7 +19,7 @@ function findFunction(text,name){
     if(c==='/'&&n==='/'){comment='line';i++;continue;}
     if(c==='/'&&n==='*'){comment='block';i++;continue;}
     if(c==='"'||c==="'"||c==='`'){q=c;continue;}
-    if(c==='{')d++; else if(c==='}'&&--d===0){let end=i+1;while(end<text.length&&(text[end]==='\r'||text[end]==='\n'))end++;return {start:m.index,end};}
+    if(c==='{')d++; else if(c==='}'&&--d===0){let end=i+1;while(end<text.length&&(text[end]==='\r'||text[end]==='\n'))end++;return {start:fnStart,end};}
   }
   return null;
 }
