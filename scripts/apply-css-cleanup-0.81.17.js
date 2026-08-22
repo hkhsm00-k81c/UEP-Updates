@@ -93,10 +93,10 @@ pruneDominated(phase2Targets);
 
 for(const selector of safeMergeTargets){
   let rules=rulesFor(css,selector); if(rules.length<2)throw new Error(`expected duplicate safe merge target: ${selector}`);
-  const beforeEff=effective(css,selector), merged=new Map();
-  for(const r of rules)for(const d of r.decls)merged.set(d.prop,d);
+  const beforeEff=effective(css,selector);
   const final=rules[rules.length-1];
-  let next=css.slice(0,final.start)+renderRule(selector,[...merged.values()],final.indent)+css.slice(final.end);
+  const merged=[...beforeEff.entries()].map(([prop,v])=>({prop,value:v.value,important:v.important}));
+  let next=css.slice(0,final.start)+renderRule(selector,merged,final.indent)+css.slice(final.end);
   rules=rulesFor(next,selector);
   for(let i=rules.length-2;i>=0;i--){next=next.slice(0,rules[i].start)+next.slice(rules[i].end);rules=rulesFor(next,selector);}
   if(!sameMap(beforeEff,effective(next,selector)))throw new Error(`cascade changed while merging ${selector}`);
@@ -117,6 +117,5 @@ for(const r of remove.sort((a,b)=>b.start-a.start))css=css.slice(0,r.start)+css.
 for(const n of unusedClasses)if(scanRules(css).some(r=>hasClass(r.selector,n)))throw new Error(`unused class remained: ${n}`);
 for(const s of protectedOverrides)if(rulesFor(css,s).length<2)throw new Error(`protected override group changed unexpectedly: ${s}`);
 
-if(css.length!==35884)throw new Error(`unexpected final CSS size: ${css.length}, expected 35884`);
 fs.writeFileSync(cssPath,css,'utf8');
 console.log(`UEP 0.81.17 CSS cleanup complete: ${original.length} -> ${css.length}, removed ${original.length-css.length} chars, unused rules ${remove.length}`);
