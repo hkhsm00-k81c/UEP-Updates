@@ -1,22 +1,119 @@
 # UEP CODEBASE AUDIT — FIFTH PASS DIFF + SMOKE PLAN
 
-- shadow/flatten diff rows: 4
-- smoke candidates: 0
+- duplicate/override names expected: 12
+- duplicate/override names analyzed: 12
+- shadow/flatten diff rows: 14
+- fourth-pass dead candidates reviewed: 59
+- SAFE_DELETE_AFTER_SMOKE from fourth pass: 59
+- KEEP_OR_MANUAL_REVIEW from fourth pass: 0
+- smoke candidates mapped: 59
+- manual-review smoke candidates: 12
+- missing diff names: 0
 
 ## Function-generation risk
-- findPopupRoot SHADOW: old@12073 -> final@12146 | oldOnly=19 newOnly=12 | REVIEW
-  - old-only tokens: X a aria b button buttons close closest dialog exactTitleNode getAttribute hasClose label modal popup role some t toLowerCase
-- applyFix SHADOW: old@12091 -> final@12169 | oldOnly=10 newOnly=24 | REVIEW
-  - old-only tokens: borderRadius borderTopWidth children clientHeight for i let parentElement rr textNodes
-- selectionComparisonsForStudent FLATTEN: old@3040 -> final@11896 | oldOnly=6 newOnly=41 | REVIEW
-  - old-only tokens: String id readonlyCache selectionComparisons studentId studentNo
-- selectionErrorsForStudent FLATTEN: old@5955 -> final@11929 | oldOnly=11 newOnly=8 | REVIEW
-  - old-only tokens: Set String allowed has id new readonlyCache selectionSubjectErrors studentId studentNo trim
+- selectionComparisonsForStudent FLATTEN: declaration@3039 -> assignment@11895 | oldOnly=10 newOnly=48 | REVIEW
+  - old-only tokens: String count date id readonlyCache selectionComparisons stude studentId studentNo x
+- selectionComparisonMarkup FLATTEN: declaration@3043 -> assignment@11988 | oldOnly=34 newOnly=29 | REVIEW
+  - old-only tokens: APPLICATION CONSULTATION Form Google MAIN PRE a added article card change columns compare curriculumTermOrder em grid h3 help i join mainSubjects map p panel preSubjects removed same small sort studentNo summary term title udentNo
+- selectionComparisonMarkup FLATTEN: assignment@11917 -> assignment@11988 | oldOnly=36 newOnly=28 | REVIEW
+  - old-only tokens: Boolean Form Google MAIN PRE Subjects added article card columns compact compare details em grid h3 help i includes join main mainSubjects map p panel pre preAvailable preSubjects preTermsForStudent removed same size small summary term title
+- selectionErrorHistoryMarkup FLATTEN: declaration@3049 -> assignment@11998 | oldOnly=28 newOnly=17 | REVIEW
+  - old-only tokens: Form Google HISTORY VALIDATION b bad category class em error escapeHtml filter grid h3 header history id length mainMessage preMessage readonlyCache resolved rows selectionErrorTransitions studentId studentNo waiting warning
+- selectionErrorHistoryMarkup FLATTEN: assignment@11933 -> assignment@11998 | oldOnly=37 newOnly=18 | REVIEW
+  - old-only tokens: Boolean HISTORY VALIDATION bad category class compact detail details error filter h3 header his history id length mainMessage message null originalErrors preMessage readonlyCache resolved rows selectionErrorTransitions selectionErrorsForStudent stored studentId studentNo subject summary terms text type waiting waitingForMissingMain
+- sdgsDashboard SHADOW: declaration@5729 -> declaration@12403 | oldOnly=34 newOnly=76 | REVIEW
+  - old-only tokens: GUIDE HOMEROOM active activityRows areaCounts areaSummary button chip detailNo details di em evidenceText inline item lens mini recordSdgsDetail reports rows sdgMap seenReports selected storyText subject summary tag topCareers topSdgs topicText trim v081 value valueCards
+- selectionErrorsForStudent FLATTEN: declaration@5954 -> assignment@11928 | oldOnly=17 newOnly=13 | REVIEW
+  - old-only tokens: Set allowed b empty function head new query readonlyCache record recordMode return rows selectionErrorsForStudent selectionSubjectError student table
+- recordsView FLATTEN: declaration@6060 -> assignment@12591 | oldOnly=110 newOnly=11 | REVIEW
+  - old-only tokens: ACTIVITY Array BULK CURRICULUM FINAL MESSAGE Number RECORD SUBJECT_REAPPLICATION_FORM_URL String _ _blank a actions active activities allStudents article b bar btn bulk bundle button classCards classStudents content copy curriculum curriculumBulkMessageText curriculumBulkPanel curriculumMessagePanel dashboard data else error escapeHtml final finalRecords find from function generate hidden href i id if inline join label let main map message mode module noreferrer number only open option options p page panel personal personalToolbar primary programs query readonly readonlyCache record recordClassNo recordClassTable recordCurriculumErrorOnly recordMode recordPersonalContent recordQueryMode recordStudentClass recordStudentId recordStudentSelect recordWriterWorkspace records recordsView rel reports s secondary select selected selectionErrorsForStudent some sort span student studentNo studentRecordBundle students summary switch tabs target textarea toolbar type v0601 value visibleClassStudents
+- findPopupRoot SHADOW: declaration@12072 -> declaration@12145 | oldOnly=31 newOnly=22 | REVIEW
+  - old-only tokens: UI __UEP_APPROVAL_POPUP_FIX_08066__ c children div else exactTitleNode find findPopupRoot for getBoundingClientRect h1 h2 h3 h4 i length let n null parentElement querySelectorAll r scheduleWeatherLoad span textContent therLoad timeout title trim width
+- applyFix SHADOW: declaration@12090 -> declaration@12168 | oldOnly=25 newOnly=19 | REVIEW
+  - old-only tokens: X aria borderRadius borderTopWidth button buttons close closest dialog for getAttribute hasClose i label let modal parentElement popup role rr some textNodes title toLowerCase visible
+- uepStudentApplicationDetail SHADOW: declaration@12534 -> declaration@12574 | oldOnly=57 newOnly=34 | REVIEW
+  - old-only tokens: PC Set String __UEP_REFINEMENT_08107__ afterend alert async await canceled classNo clear cls decisions e fileName filter first g host if includeDismissed includes insertAdjacentElement inspectNeisRecordbook linked makeRecords mount neis new onclick open openRuleManager panel querySelector reason recordStudentClass records related render replace result results root rules schoolBoard scope session sheets some sourceSheets subject term toast type uepMountRecordbookValidator uepSelectionSubjectState window
+- uepStudentApplicationView SHADOW: declaration@12535 -> declaration@12575 | oldOnly=32 newOnly=20 | REVIEW
+  - old-only tokens: __UEP_REFINEMENT_08107__ alert allRows classNo classRo clear cls decisions false fileName first four g includeDismissed includes linked mount neis onclick querySelector records related render root scope session state subject title uepMountRecordbookValidator uepSelectionSubjectState window
+- uepSubjectApplicationView SHADOW: declaration@12536 -> declaration@12577 | oldOnly=53 newOnly=43 | REVIEW
+  - old-only tokens: Array MESSAGE STUDENT Set _ alert all allRows btn classButton classRows classes cls copy current currentSelectionSms curriculumErrorOnly curriculumErrorType em four from grid iv label main message missing new no open panel picker prev primary readonly recordClassNo recordQueryMode recordStudentClass recordStudentId replace row sms some state switcher textarea title top type types uep uepSelectionSubjectState uepStudentApplicationView
+- uepSelectionDataset FLATTEN: declaration@12544 -> assignment@12613 | oldOnly=59 newOnly=23 | REVIEW
+  - old-only tokens: __UEP_08113_RESTORED_SELECTION_DATASET__ active applications article avg button card cards cell class curriculum curriculumSubjectKey curriculumTermFilter detail div dorm escapeHtml estimate expected expectedGrade expectedRank function g grade grid groups has join key map note p picker privacy push replace return row rows section sectionCount selection sensitive small span studentNo students subject subjects t term terms text uepDormStudentIds uepSelectionDataset uepSelectionTermSubjects uepStudentGradeAverage uepSubjectStatus x
 
 ## Smoke plan by page
+- admissions: 4
+  - internalNineGradeReferenceMap: 입시·성적 관련 기능 확인 (historyRefs=0)
+  - admissionCutLimit: 입시·성적 관련 기능 확인 (historyRefs=0)
+  - sortUniversitiesByPriority: 입시·성적 관련 기능 확인 (historyRefs=0)
+  - admissionPairCompatible: 입시·성적 관련 기능 확인 (historyRefs=0)
+- attendance: 1
+  - nightMatrixStatus: 기숙·출결 관련 기능 확인 (historyRefs=0)
+- dashboard: 14
+  - tasksMarkup: 대시보드 관련 기능 확인 (historyRefs=0)
+  - formatTaskCompletedAt: 대시보드 관련 기능 확인 (historyRefs=0)
+  - dashboardTodayLessonsMarkup: 대시보드 관련 기능 확인 (historyRefs=0)
+  - dashboardSelectedDayMarkup: 대시보드 관련 기능 확인 (historyRefs=0)
+  - currentUserOvertimeTasks: 대시보드 관련 기능 확인 (historyRefs=0)
+  - dashboardCompactTasksMarkup: 대시보드 관련 기능 확인 (historyRefs=0)
+  - dashboardCompactNoticesMarkup: 대시보드 관련 기능 확인 (historyRefs=0)
+  - dashboardStudentStatusMarkup: 대시보드 관련 기능 확인 (historyRefs=0)
+  - dashboardTopAlertsMarkup: 대시보드 관련 기능 확인 (historyRefs=0)
+  - openMealDutyDrawer: 대시보드 관련 기능 확인 (historyRefs=0)
+  - sendProgramEmailNotice: 대시보드 관련 기능 확인 (historyRefs=0)
+  - prepareProgramSmsNotice: 대시보드 관련 기능 확인 (historyRefs=0)
+  - copyProgramRiroNotice: 대시보드 관련 기능 확인 (historyRefs=0)
+  - copyProgramIndividualNotices: 대시보드 관련 기능 확인 (historyRefs=0)
+- manual-review: 12
+  - inputCenterSuggestTarget: 연결 화면 수동 확인 (historyRefs=0)
+  - emptyModule: 연결 화면 수동 확인 (historyRefs=0)
+  - issueReportButtonMarkup: 연결 화면 수동 확인 (historyRefs=0)
+  - accessControlInlineMarkup: 연결 화면 수동 확인 (historyRefs=0)
+  - dateDistanceDays: 연결 화면 수동 확인 (historyRefs=0)
+  - safeWidget: 연결 화면 수동 확인 (historyRefs=0)
+  - workItemReadByCurrentUser: 연결 화면 수동 확인 (historyRefs=0)
+  - completionStatusMarkup: 연결 화면 수동 확인 (historyRefs=0)
+  - retryGoogleConnection: 연결 화면 수동 확인 (historyRefs=0)
+  - uepCompareSelectionHistory: 연결 화면 수동 확인 (historyRefs=2)
+  - uepSchoolGrowthGapSummary: 연결 화면 수동 확인 (historyRefs=1)
+  - bindSelectionAnalysis: 연결 화면 수동 확인 (historyRefs=11)
+- outputs: 1
+  - subjectsOutputPanel: 출력센터 관련 기능 확인 (historyRefs=0)
+- programs: 6
+  - dormProgramIsHolisticTarget: 프로그램 관련 기능 확인 (historyRefs=0)
+  - outputProgramCardMarkup: 프로그램 관련 기능 확인 (historyRefs=0)
+  - programTopTabs: 프로그램 관련 기능 확인 (historyRefs=0)
+  - todayProgramsMarkup: 프로그램 관련 기능 확인 (historyRefs=0)
+  - openProgramAttendanceQr: 프로그램 관련 기능 확인 (historyRefs=0)
+  - copyProgramFamilyLetter: 프로그램 관련 기능 확인 (historyRefs=0)
+- records: 7
+  - recordAreaPanel: 생활기록부 관련 기능 확인 (historyRefs=0)
+  - autoInferCareerDatesForClass: 생활기록부 관련 기능 확인 (historyRefs=0)
+  - careerDateEditor: 생활기록부 관련 기능 확인 (historyRefs=0)
+  - extractRecordCore: 생활기록부 관련 기능 확인 (historyRefs=0)
+  - normalizeRecordEnding: 생활기록부 관련 기능 확인 (historyRefs=0)
+  - sdgsEvidenceForGoal: 생활기록부 관련 기능 확인 (historyRefs=0)
+  - stripProgramDatesFromRecordText: 생활기록부 관련 기능 확인 (historyRefs=0)
+- students: 10
+  - inputCenterApplyStudentNo: 학생정보 관련 기능 확인 (historyRefs=0)
+  - studentReportsOutputPanel: 학생정보 관련 기능 확인 (historyRefs=0)
+  - counselRecordLabel: 학생정보 관련 기능 확인 (historyRefs=0)
+  - recordEvidenceSignals: 학생정보 관련 기능 확인 (historyRefs=0)
+  - openStudentCounselEdit: 학생정보 관련 기능 확인 (historyRefs=0)
+  - canRevealStudentSensitiveInfo: 학생정보 관련 기능 확인 (historyRefs=0)
+  - signalRowsForStudent: 학생정보 관련 기능 확인 (historyRefs=0)
+  - openStudentTimetableDrawer: 학생정보 관련 기능 확인 (historyRefs=0)
+  - studentActivityOverview: 학생정보 관련 기능 확인 (historyRefs=0)
+  - studentStatsRankCard: 학생정보 관련 기능 확인 (historyRefs=0)
+- subjects: 1
+  - subjectsView: 교과 관련 기능 확인 (historyRefs=0)
+- timetable: 3
+  - schoolScheduleTimetableMarkup: 시간표·학교일정 관련 기능 확인 (historyRefs=0)
+  - fixedTeacherTimetableReference: 시간표·학교일정 관련 기능 확인 (historyRefs=0)
+  - homeroomWeekMarkup: 시간표·학교일정 관련 기능 확인 (historyRefs=0)
 
 ## Decision rule
-- oldOnly=0 for a shadowed declaration: earlier generation is a strong delete candidate after syntax + route smoke.
-- oldOnly>0: inspect whether those old-only tokens are behavior or merely local names before removal.
+- This pass is fail-closed for duplicate/override coverage and candidate count coverage.
+- Smoke mapping is inferred from function responsibility; manual-review is an explicit protected state, not a delete approval.
+- Historical references are informational only and do not alter runtime liveness.
 - FLATTEN rows are never deleted mechanically; preserve wrapper-added behavior in one canonical implementation.
-- Smoke candidates are not deleted in this pass.
+- No code is deleted in this pass.
