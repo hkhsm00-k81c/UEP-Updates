@@ -2,22 +2,20 @@ $ErrorActionPreference='Stop'
 $gyo='app/resources/app/gyomuon.js';$pkg='app/resources/app/package.json'
 $g=Get-Content $gyo -Raw -Encoding UTF8
 
-# 0.81.13 candidate: flatten late recovery wrappers and remove global DOM watchers
 $g=$g.Replace('const APP_VERSION = "0.81.12";','const APP_VERSION = "0.81.13";').Replace('v0.81.12','v0.81.13')
 
-# Remove the 0.81.02 document-wide observer and delayed SDGs promotion hooks.
-$g=[regex]::Replace($g,'(?s)\s*const observer=new MutationObserver\(\(\)=>requestAnimationFrame\(promoteSdgs\)\);observer\.observe\(document\.documentElement,\{subtree:true,childList:true\}\);document\.addEventListener\("DOMContentLoaded",promoteSdgs\);setTimeout\(promoteSdgs,300\);','')
+# Remove 0.81.02 promoteSdgs global watcher hooks one statement at a time so CRLF/LF/spacing do not matter.
+$g=[regex]::Replace($g,'(?s)const\s+observer\s*=\s*new\s+MutationObserver\s*\(\s*\(\)\s*=>\s*requestAnimationFrame\s*\(\s*promoteSdgs\s*\)\s*\)\s*;?','')
+$g=[regex]::Replace($g,'(?s)observer\.observe\s*\(\s*document\.documentElement\s*,\s*\{\s*subtree\s*:\s*true\s*,\s*childList\s*:\s*true\s*\}\s*\)\s*;?','')
+$g=[regex]::Replace($g,'(?s)document\.addEventListener\s*\(\s*["'']DOMContentLoaded["'']\s*,\s*promoteSdgs\s*\)\s*;?','')
+$g=[regex]::Replace($g,'(?s)setTimeout\s*\(\s*promoteSdgs\s*,\s*300\s*\)\s*;?','')
 
-# Remove the 0.81.07 post-render full-section scan wrapper when still present.
-$g=[regex]::Replace($g,'(?s)const __uepRecordsBefore08107=recordsView;\s*recordsView=function\(\)\{const html=__uepRecordsBefore08107\(\);if\(recordMode===\x27sdgs\x27\)queueMicrotask\(\(\)=>document\.querySelectorAll\(\x27section\x27\)\.forEach\(s=>\{.*?return html;\};','')
+# Remove only the 0.81.07 wrapper that performs a full section scan. Preserve the previous canonical recordsView body.
+$g=[regex]::Replace($g,'(?s)const\s+__uepRecordsBefore08107\s*=\s*recordsView\s*;\s*recordsView\s*=\s*function\s*\(\s*\)\s*\{\s*const\s+html\s*=\s*__uepRecordsBefore08107\s*\(\s*\)\s*;\s*if\s*\(\s*recordMode\s*===\s*["'']sdgs["'']\s*\)\s*queueMicrotask\s*\(\s*\(\)\s*=>\s*document\.querySelectorAll\s*\(\s*["'']section["'']\s*\)\.forEach\s*\(.*?\)\s*\)\s*;?\s*return\s+html\s*;\s*\}\s*;','')
 
-# Remove obsolete standalone selection/SDGs page registry targets. Current product structure is records internal tabs.
 $g=$g.Replace('    selection: recordsView,','').Replace('    sdgs: recordsView,','')
-
-# Normalize legacy 06A UI text remnants without touching current 06_ source identifiers.
 $g=$g.Replace('06A · LIVE APPLICATION','06 · LIVE APPLICATION').Replace('06A 학생별 선택과목','06 선택과목 이력')
 
-# Add memoized selection analysis: expensive score averages, applications, subjects and errors are rebuilt only when source references change.
 if(-not $g.Contains('__UEP_SELECTION_CACHE_08113__')){
 $cache=@'
 
@@ -43,8 +41,9 @@ node --check $gyo;if($LASTEXITCODE-ne 0){throw 'renderer syntax failed'}
 $checks=[ordered]@{
  'version 0.81.13'=$g.Contains('const APP_VERSION = "0.81.13";')
  'no 06A source text'=(-not $g.Contains('06A 학생별 선택과목'))
- 'no document-wide mutation observer'=(-not $g.Contains('observer.observe(document.documentElement,{subtree:true,childList:true})'))
- 'no SDGs full-section microtask scan'=(-not $g.Contains("document.querySelectorAll('section').forEach"))
+ 'no document-wide mutation observer'=(-not [regex]::IsMatch($g,'observer\.observe\s*\(\s*document\.documentElement'))
+ 'no promoteSdgs mutation observer'=(-not [regex]::IsMatch($g,'new\s+MutationObserver[^\r\n]*promoteSdgs'))
+ 'no SDGs full-section microtask scan'=(-not [regex]::IsMatch($g,'queueMicrotask[\s\S]{0,500}querySelectorAll\s*\(\s*["'']section["'']'))
  'selection dataset cache'=$g.Contains('__UEP_SELECTION_CACHE_08113__')
  'curriculum body exists'=$g.Contains('function uepCurriculumFinalView')
  'SDGs body exists'=$g.Contains('function uepSdgsEvidenceBridge')
@@ -54,4 +53,4 @@ $checks=[ordered]@{
 }
 $checks.GetEnumerator()|ForEach-Object{Write-Host ("CHECK {0} = {1}" -f $_.Key,$_.Value)}
 if($checks.Values-contains $false){throw 'UEP 0.81.13 integrated recovery verification failed'}
-Write-Host 'UEP 0.81.13 integrated recovery candidate applied.'
+Write-Host 'UEP 0.81.13 integrated recovery applied.'
