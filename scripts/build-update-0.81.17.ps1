@@ -1,9 +1,12 @@
 $ErrorActionPreference='Stop'
 $gyo='app/resources/app/gyomuon.js';$pkg='app/resources/app/package.json';$css='app/resources/app/gyomuon.css'
-$g=Get-Content $gyo -Raw -Encoding UTF8
+# Preserve gyomuon.js byte-for-byte except for the two ASCII version markers.
+# Set-Content appends a trailing newline, which previously made the candidate one CRLF longer.
+$utf8NoBom=New-Object System.Text.UTF8Encoding($false)
+$g=[System.IO.File]::ReadAllText($gyo,$utf8NoBom)
 if(-not $g.Contains('const APP_VERSION = "0.81.16";')){throw '0.81.16 base version marker missing'}
 $g=$g.Replace('const APP_VERSION = "0.81.16";','const APP_VERSION = "0.81.17";').Replace('v0.81.16','v0.81.17')
-Set-Content $gyo $g -Encoding UTF8
+[System.IO.File]::WriteAllText($gyo,$g,$utf8NoBom)
 $package=Get-Content $pkg -Raw -Encoding UTF8|ConvertFrom-Json;$package.version='0.81.17';$package|ConvertTo-Json -Depth 20|Set-Content $pkg -Encoding UTF8
 
 node ./scripts/apply-css-cleanup-0.81.17.js app
