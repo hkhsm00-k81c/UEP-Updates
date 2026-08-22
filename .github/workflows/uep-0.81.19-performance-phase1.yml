@@ -1,0 +1,72 @@
+name: UEP 0.81.19 Performance Phase1
+
+on:
+  push:
+    branches:
+      - audit/0.81.19-performance
+    paths:
+      - tools/apply-performance1-0.81.19.js
+      - .github/workflows/uep-0.81.19-performance-phase1.yml
+  workflow_dispatch:
+
+jobs:
+  verify-performance1:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download shipped 0.81.01 base
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.81.01 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
+      - name: Reconstruct production through 0.81.18
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          2..18 | ForEach-Object {
+            $version='0.81.{0:d2}' -f $_
+            $script="scripts/build-update-$version.ps1"
+            if(-not (Test-Path $script)){throw "missing $script"}
+            & $script
+          }
+      - name: Snapshot runtime
+        shell: pwsh
+        run: |
+          Copy-Item app/resources/app/gyomuon.js before-gyomuon.js
+      - name: Apply performance phase1
+        shell: pwsh
+        run: |
+          node ./tools/apply-performance1-0.81.19.js app
+          if($LASTEXITCODE -ne 0){throw 'performance phase1 patch failed'}
+      - name: Verify syntax and nine guarded bindings
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check app/resources/app/gyomuon.js
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          if(-not $g.Contains('function uepBindOnce(el,key,event,handler)')){throw 'bindOnce helper missing'}
+          @('settingsDiagnostics','settingsInfo','fiveGradeApply','fiveGradeEnrollment','officialAttendanceAdd','lateAttendanceAdd','scoreQueryButton','admissionQueryButton','dutyReset') | ForEach-Object {
+            if(-not $g.Contains(('uepBindOnce(')) -or -not $g.Contains(('"'+$_+'"'))){throw "guard key missing: $_"}
+          }
+          if(-not $g.Contains('function bindPage(')){throw 'bindPage missing'}
+          if(-not $g.Contains('function openStudentDrawer(')){throw 'student drawer missing'}
+          if(-not $g.Contains('function bindInputCenter(')){throw 'input center binding missing'}
+      - name: Re-audit binding metrics
+        shell: pwsh
+        run: |
+          node ./tools/audit-performance-0.81.19.js app
+          if($LASTEXITCODE -ne 0){throw 'post-patch audit failed'}
+          $j=Get-Content performance-audit-output/performance-bindings.json -Raw | ConvertFrom-Json
+          $b=$j | Where-Object {$_.name -eq 'bindPage'}
+          Write-Host "POST bindPage addEventListener=$($b.addEventListener), directHandlers=$($b.directHandlers)"
+          if([int]$b.addEventListener -gt 59){throw 'bindPage addEventListener count did not drop by expected amount'}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UEP-0.81.19-Performance-Phase1
+          path: |
+            performance-phase1-output
+            performance-audit-output
