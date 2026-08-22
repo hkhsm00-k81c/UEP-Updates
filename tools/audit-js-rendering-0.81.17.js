@@ -36,7 +36,7 @@ const duplicates=[...byName.entries()].filter(([,v])=>v.length>1).map(([name,v])
 const unused=[];
 for(const [name,v] of byName){
   const refs=count(new RegExp(`\\b${esc(name)}\\b`,'g'),allText);
-  const stringRefs=count(new RegExp(`["'\\`]${esc(name)}["'\\`]`,'g'),allText);
+  const stringRefs=['"'+name+'"',"'"+name+"'",'`'+name+'`'].reduce((sum,needle)=>sum+(allText.split(needle).length-1),0);
   if(refs<=v.length && stringRefs===0)unused.push({name,definitions:v.length,identifierRefs:refs,stringRefs,locations:v.map(x=>`${x.file}:${x.index}`).join(' | ')});
 }
 unused.sort((a,b)=>a.identifierRefs-b.identifierRefs||a.name.localeCompare(b.name));
