@@ -27,18 +27,18 @@ jobs:
           Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
           if(-not (Test-Path 'app/UEP.exe')){throw 'UEP.exe not found in shipped base'}
 
-      - name: Reconstruct through 0.81.13
+      - name: Reconstruct through 0.81.14
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          2..13 | ForEach-Object {
+          2..14 | ForEach-Object {
             $version='0.81.{0:d2}' -f $_
             $script="scripts/build-update-$version.ps1"
             if(-not (Test-Path $script)){throw "missing $script"}
             & $script
           }
 
-      - name: Verify 0.81.13 release gates
+      - name: Verify 0.81.14 release gates
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
@@ -49,13 +49,16 @@ jobs:
           node --check 'app/resources/app/electron/main.cjs'
           node --check 'app/resources/app/electron/google-data.cjs'
           $checks=[ordered]@{
-            version=$g.Contains('const APP_VERSION = "0.81.13";')
+            version=$g.Contains('const APP_VERSION = "0.81.14";')
             single06=$d.Contains('"06_선택과목이력"') -and (-not $d.Contains('06A_학생별선택과목'))
             selectionDataset=$g.Contains('function uepSelectionDataset')
             curriculumFinal=$g.Contains('function uepCurriculumFinalView')
             curriculumStudent=$g.Contains('function uepStudentApplicationView')
             curriculumSubject=$g.Contains('function uepSubjectApplicationView')
             sdgsLive=$g.Contains('function uepSdgsEvidenceBridge')
+            recordModeBinding=$g.Contains('__UEP_RECORD_MAIN_TAB_BIND_08114__')
+            recordParser4Digit=$g.Contains('fourDigitCell') -and $g.Contains('studentNo,name,grade,classNo,number,subject,text,issues')
+            recordParserSubjectGuard=$g.Contains('validSubject') -and $g.Contains('cleanSheetSubject')
             recordcheck=$g.Contains('window.uepMountRecordbookValidator') -and $g.Contains('standaloneRecordcheckMount')
             schoolResolver=$m.Contains('resolveSchoolServiceAccount')
             noGlobalObserver=(-not [regex]::IsMatch($g,'observer\.observe\s*\(\s*document\.documentElement'))
@@ -63,7 +66,7 @@ jobs:
             selectionCache=$g.Contains('__UEP_SELECTION_CACHE_08113__')
           }
           $checks.GetEnumerator() | ForEach-Object { Write-Host ("RELEASE GATE {0} = {1}" -f $_.Key,$_.Value) }
-          if($checks.Values -contains $false){throw 'UEP 0.81.13 release gate failed'}
+          if($checks.Values -contains $false){throw 'UEP 0.81.14 release gate failed'}
 
       - name: Build update package
         id: package
@@ -75,15 +78,15 @@ jobs:
           $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
           "sha=$sha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-      - name: Publish v0.81.13 release
+      - name: Publish v0.81.14 release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag='v0.81.13'
+          $tag='v0.81.14'
           gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
           if($LASTEXITCODE -ne 0){
-            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.13 - 화면 연결 복구 및 응답속도 개선' --notes '생활기록부 교육과정·SDGs·세특 화면 연결을 복구하고 전역 DOM 감시와 불필요한 전체 스캔을 제거하며 선택과목 파생 데이터 캐시를 적용합니다.'
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.14 - 생활기록부 탭 진입 및 세특 파싱 개선' --notes '생활기록부 SDGs·교육과정 탭 진입 이벤트를 복구하고, 세특 오류검증의 학번·반·번호·과목 파싱 정확도를 개선합니다.'
           }
           gh release upload $tag UEP-update.zip --repo $env:GITHUB_REPOSITORY --clobber
 
@@ -98,23 +101,23 @@ jobs:
           $oauthClientId=[string]$current.googleOAuthClientId
           $policy=[ordered]@{
             channel='homeroom-stable'
-            latestVersion='0.81.13'
+            latestVersion='0.81.14'
             minimumAllowedVersion='0.80.64'
             blockedVersions=@()
             forceUpdate=$false
             updateEnabled=$true
-            downloadUrl="https://github.com/$env:GITHUB_REPOSITORY/releases/download/v0.81.13/UEP-update.zip"
+            downloadUrl="https://github.com/$env:GITHUB_REPOSITORY/releases/download/v0.81.14/UEP-update.zip"
             sha256=$env:SHA256
-            message='UEP 0.81.13 화면 연결 복구 및 응답속도 개선 업데이트'
+            message='UEP 0.81.14 생활기록부 탭 진입 및 세특 파싱 개선 업데이트'
             offlineGraceHours=72
             googleOAuthClientId=$oauthClientId
           } | ConvertTo-Json -Depth 4
           $info=gh api "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json?ref=main" | ConvertFrom-Json
           $encoded=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($policy))
-          $body=@{message='Enable UEP 0.81.13 automatic update';content=$encoded;sha=$info.sha;branch='main'} | ConvertTo-Json
+          $body=@{message='Enable UEP 0.81.14 automatic update';content=$encoded;sha=$info.sha;branch='main'} | ConvertTo-Json
           $body | gh api --method PUT -H 'Accept: application/vnd.github+json' "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json" --input -
 
       - uses: actions/upload-artifact@v4
         with:
-          name: UEP-0.81.13-Update-Package
+          name: UEP-0.81.14-Update-Package
           path: UEP-update.zip
