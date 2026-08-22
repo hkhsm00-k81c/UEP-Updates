@@ -1,0 +1,98 @@
+name: UEP 0.81.18 Release Candidate
+
+'on':
+  push:
+    branches:
+      - candidate/0.81.18-js-cleanup2
+    paths:
+      - scripts/build-update-0.81.18.ps1
+      - tools/apply-js-cleanup1-0.81.18.js
+      - tools/apply-js-cleanup2-0.81.18.js
+      - .github/workflows/uep-0.81.18-release-candidate.yml
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  build-release-candidate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download shipped 0.81.01 base
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.81.01 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
+          if(-not (Test-Path 'app/UEP.exe')){throw 'UEP.exe not found in shipped base'}
+
+      - name: Reconstruct production through 0.81.17
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          2..17 | ForEach-Object {
+            $version='0.81.{0:d2}' -f $_
+            $script="scripts/build-update-$version.ps1"
+            if(-not (Test-Path $script)){throw "missing $script"}
+            & $script
+          }
+
+      - name: Apply verified 0.81.18 JS cleanup
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          & ./scripts/build-update-0.81.18.ps1
+
+      - name: Verify 0.81.18 release gates
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $g=Get-Content 'app/resources/app/gyomuon.js' -Raw -Encoding UTF8
+          $c=Get-Content 'app/resources/app/gyomuon.css' -Raw -Encoding UTF8
+          $d=Get-Content 'app/resources/app/electron/google-data.cjs' -Raw -Encoding UTF8
+          $m=Get-Content 'app/resources/app/electron/main.cjs' -Raw -Encoding UTF8
+          $pkg=Get-Content 'app/resources/app/package.json' -Raw -Encoding UTF8|ConvertFrom-Json
+          node --check 'app/resources/app/gyomuon.js'
+          node --check 'app/resources/app/electron/main.cjs'
+          node --check 'app/resources/app/electron/google-data.cjs'
+          $checks=[ordered]@{
+            version=($pkg.version -eq '0.81.18') -and $g.Contains('const APP_VERSION = "0.81.18";')
+            single06=$d.Contains('"06_선택과목이력"') -and (-not $d.Contains('06A_학생별선택과목'))
+            curriculum=$g.Contains('function uepCurriculumFinalView()') -and $g.Contains('function uepStudentApplicationView()') -and $g.Contains('function uepSubjectApplicationView()')
+            sdgs=$g.Contains('function uepSdgsEvidenceBridge()') -and $g.Contains('function uepSdgsSupplementPanel()')
+            recordcheck=$g.Contains('window.uepMountRecordbookValidator') -and $g.Contains('standaloneRecordcheckMount')
+            binders=$g.Contains('bindPage') -and $g.Contains('bindInputCenter')
+            studentRuntime=$g.Contains('openStudentTimetableDrawer') -and $g.Contains('openStudentCounselEdit')
+            googleRuntime=$g.Contains('retryGoogleConnection') -and $m.Contains('resolveSchoolServiceAccount')
+            programRuntime=$g.Contains('sendProgramEmailNotice') -and $g.Contains('prepareProgramSmsNotice') -and $g.Contains('openProgramAttendanceQr')
+            duties=$g.Contains('openMealDutyDrawer')
+            noGlobalObserver=(-not [regex]::IsMatch($g,'observer\.observe\s*\(\s*document\.documentElement'))
+            cssPreserved=($c.Length -eq 36029)
+          }
+          $checks.GetEnumerator()|ForEach-Object{Write-Host ("RC GATE {0} = {1}" -f $_.Key,$_.Value)}
+          if($checks.Values-contains $false){throw 'UEP 0.81.18 release candidate gate failed'}
+
+      - name: Build release candidate package
+        id: package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force release-candidate-output | Out-Null
+          Compress-Archive -Path app/* -DestinationPath release-candidate-output/UEP-update.zip -CompressionLevel Optimal
+          $sha=(Get-FileHash release-candidate-output/UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          $size=(Get-Item release-candidate-output/UEP-update.zip).Length
+          "version=0.81.18`nsha256=$sha`npackageBytes=$size`npublishState=NOT_PUBLISHED`npolicyState=UNCHANGED" | Set-Content release-candidate-output/release-candidate-summary.txt
+          Write-Host "RC SHA256: $sha"
+          Write-Host "RC bytes: $size"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UEP-0.81.18-RELEASE-CANDIDATE-NONDEPLOY
+          path: release-candidate-output/
