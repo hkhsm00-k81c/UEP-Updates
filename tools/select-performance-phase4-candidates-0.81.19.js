@@ -1,0 +1,15 @@
+const fs=require('fs');
+const p='performance-phase3-output/render-refresh-hotspots.json';
+if(!fs.existsSync(p))throw new Error('phase3 hotspot report not found');
+const report=JSON.parse(fs.readFileSync(p,'utf8'));
+const risky=/^(bindPage|bindInputCenter|render|boot|init|loadData|refreshReadonlyCacheSilently)$/i;
+const candidates=(report.topHotspots||[]).filter(x=>!risky.test(x.name)&&x.chars<18000&&x.score>=4).map(x=>({...x,reason:x.cacheRefreshes?'cache-refresh':x.renders?'render-heavy':x.queryAll?'dom-query-heavy':x.timers?'timer':x.observers?'observer':'mixed'})).slice(0,12);
+const out={phase3Counts:report.counts,candidates,selectionRule:'Exclude global/high-risk functions; prefer bounded functions under 18k chars with hotspot score >=4.'};
+fs.mkdirSync('performance-phase4-output',{recursive:true});
+fs.writeFileSync('performance-phase4-output/candidates.json',JSON.stringify(out,null,2));
+let md='# UEP 0.81.19 Performance Phase4 Candidates\n\n';
+md+=`Selected ${candidates.length} bounded candidates.\n\n`;
+for(const [i,c] of candidates.entries())md+=`${i+1}. **${c.name}** — score ${c.score}, chars ${c.chars}, renders ${c.renders}, cache ${c.cacheRefreshes}, queryAll ${c.queryAll}, timers ${c.timers}, observers ${c.observers} — ${c.reason}\n`;
+fs.writeFileSync('performance-phase4-output/CANDIDATES.md',md);
+console.log(JSON.stringify(out,null,2));
+if(!candidates.length)throw new Error('No bounded phase4 candidates found');
