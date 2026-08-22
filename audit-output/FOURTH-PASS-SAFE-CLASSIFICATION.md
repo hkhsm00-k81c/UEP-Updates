@@ -1,8 +1,8 @@
 # UEP CODEBASE AUDIT — FOURTH PASS SAFE CLASSIFICATION
 
 - dead candidates reviewed: 59
-- SAFE_DELETE_AFTER_SMOKE: 42
-- KEEP_OR_MANUAL_REVIEW: 17
+- SAFE_DELETE_AFTER_SMOKE: 22
+- KEEP_OR_MANUAL_REVIEW: 37
 - shadowed declaration groups: 6
 
 ## Shadowed declarations
@@ -14,64 +14,64 @@
 - uepSubjectApplicationView: #1 line 12537 hash e503bdc55fba chars 3934 last=False | #2 line 12578 hash 2dc52cd03d10 chars 5048 last=True
 
 ## SAFE_DELETE_AFTER_SMOKE
-- tasksMarkup @ 1289 runtimeRefs=1 repoRefs=0
-- dormProgramIsHolisticTarget @ 1902 runtimeRefs=1 repoRefs=0
-- nightMatrixStatus @ 2242 runtimeRefs=1 repoRefs=0
-- schoolScheduleTimetableMarkup @ 2591 runtimeRefs=1 repoRefs=1
-- outputProgramCardMarkup @ 3149 runtimeRefs=1 repoRefs=1
-- internalNineGradeReferenceMap @ 4346 runtimeRefs=1 repoRefs=1
-- admissionCutLimit @ 4626 runtimeRefs=1 repoRefs=0
-- counselRecordLabel @ 4780 runtimeRefs=1 repoRefs=0
-- recordAreaPanel @ 5125 runtimeRefs=1 repoRefs=0
-- autoInferCareerDatesForClass @ 5292 runtimeRefs=1 repoRefs=1
-- dateDistanceDays @ 5335 runtimeRefs=1 repoRefs=0
-- careerDateEditor @ 5428 runtimeRefs=1 repoRefs=0
-- normalizeRecordEnding @ 5534 runtimeRefs=1 repoRefs=1
-- recordEvidenceSignals @ 5540 runtimeRefs=1 repoRefs=0
-- sdgsEvidenceForGoal @ 5697 runtimeRefs=1 repoRefs=1
-- stripProgramDatesFromRecordText @ 5923 runtimeRefs=1 repoRefs=0
-- programTopTabs @ 6177 runtimeRefs=1 repoRefs=0
-- formatTaskCompletedAt @ 6860 runtimeRefs=1 repoRefs=0
-- fixedTeacherTimetableReference @ 6958 runtimeRefs=1 repoRefs=0
-- homeroomWeekMarkup @ 7114 runtimeRefs=1 repoRefs=0
-- safeWidget @ 7168 runtimeRefs=1 repoRefs=1
-- dashboardTodayLessonsMarkup @ 7173 runtimeRefs=1 repoRefs=1
-- dashboardSelectedDayMarkup @ 7201 runtimeRefs=1 repoRefs=1
-- dashboardCompactTasksMarkup @ 7252 runtimeRefs=1 repoRefs=1
-- dashboardStudentStatusMarkup @ 7799 runtimeRefs=1 repoRefs=1
-- workItemReadByCurrentUser @ 7955 runtimeRefs=1 repoRefs=0
-- completionStatusMarkup @ 8066 runtimeRefs=1 repoRefs=1
-- todayProgramsMarkup @ 8394 runtimeRefs=1 repoRefs=1
-- canRevealStudentSensitiveInfo @ 8434 runtimeRefs=1 repoRefs=0
-- signalRowsForStudent @ 8440 runtimeRefs=1 repoRefs=0
-- openMealDutyDrawer @ 8453 runtimeRefs=1 repoRefs=1
-- openStudentTimetableDrawer @ 9205 runtimeRefs=1 repoRefs=0
-- studentActivityOverview @ 9217 runtimeRefs=1 repoRefs=1
-- sortUniversitiesByPriority @ 9355 runtimeRefs=1 repoRefs=0
-- admissionPairCompatible @ 9425 runtimeRefs=1 repoRefs=1
-- studentStatsRankCard @ 9555 runtimeRefs=1 repoRefs=0
-- sendProgramEmailNotice @ 10964 runtimeRefs=1 repoRefs=1
-- prepareProgramSmsNotice @ 10972 runtimeRefs=1 repoRefs=1
-- openProgramAttendanceQr @ 10977 runtimeRefs=1 repoRefs=1
-- copyProgramRiroNotice @ 11022 runtimeRefs=1 repoRefs=1
-- copyProgramIndividualNotices @ 11026 runtimeRefs=1 repoRefs=0
-- copyProgramFamilyLetter @ 11037 runtimeRefs=1 repoRefs=0
+- tasksMarkup @ 1289 runtimeRefs=1 repoRefs=1
+- dormProgramIsHolisticTarget @ 1902 runtimeRefs=1 repoRefs=1
+- nightMatrixStatus @ 2242 runtimeRefs=1 repoRefs=1
+- admissionCutLimit @ 4626 runtimeRefs=1 repoRefs=1
+- counselRecordLabel @ 4780 runtimeRefs=1 repoRefs=1
+- recordAreaPanel @ 5125 runtimeRefs=1 repoRefs=1
+- dateDistanceDays @ 5335 runtimeRefs=1 repoRefs=1
+- careerDateEditor @ 5428 runtimeRefs=1 repoRefs=1
+- recordEvidenceSignals @ 5540 runtimeRefs=1 repoRefs=1
+- stripProgramDatesFromRecordText @ 5923 runtimeRefs=1 repoRefs=1
+- programTopTabs @ 6177 runtimeRefs=1 repoRefs=1
+- formatTaskCompletedAt @ 6860 runtimeRefs=1 repoRefs=1
+- fixedTeacherTimetableReference @ 6958 runtimeRefs=1 repoRefs=1
+- homeroomWeekMarkup @ 7114 runtimeRefs=1 repoRefs=1
+- workItemReadByCurrentUser @ 7955 runtimeRefs=1 repoRefs=1
+- canRevealStudentSensitiveInfo @ 8434 runtimeRefs=1 repoRefs=1
+- signalRowsForStudent @ 8440 runtimeRefs=1 repoRefs=1
+- openStudentTimetableDrawer @ 9205 runtimeRefs=1 repoRefs=1
+- sortUniversitiesByPriority @ 9355 runtimeRefs=1 repoRefs=1
+- studentStatsRankCard @ 9555 runtimeRefs=1 repoRefs=1
+- copyProgramIndividualNotices @ 11026 runtimeRefs=1 repoRefs=1
+- copyProgramFamilyLetter @ 11037 runtimeRefs=1 repoRefs=1
 
 ## KEEP_OR_MANUAL_REVIEW
 - subjectsView @ 2587 runtimeRefs=1 repoRefs=2 string=0 window=0 data=0
+- schoolScheduleTimetableMarkup @ 2591 runtimeRefs=1 repoRefs=2 string=0 window=0 data=0
 - inputCenterApplyStudentNo @ 2899 runtimeRefs=1 repoRefs=4 string=0 window=0 data=0
 - inputCenterSuggestTarget @ 2957 runtimeRefs=1 repoRefs=3 string=0 window=0 data=0
+- outputProgramCardMarkup @ 3149 runtimeRefs=1 repoRefs=2 string=0 window=0 data=0
 - subjectsOutputPanel @ 3180 runtimeRefs=1 repoRefs=3 string=0 window=0 data=0
 - studentReportsOutputPanel @ 3220 runtimeRefs=1 repoRefs=2 string=0 window=0 data=0
 - emptyModule @ 3459 runtimeRefs=1 repoRefs=5 string=0 window=0 data=0
 - issueReportButtonMarkup @ 3901 runtimeRefs=1 repoRefs=3 string=0 window=0 data=0
 - accessControlInlineMarkup @ 4008 runtimeRefs=1 repoRefs=5 string=0 window=0 data=0
+- internalNineGradeReferenceMap @ 4346 runtimeRefs=1 repoRefs=2 string=0 window=0 data=0
+- autoInferCareerDatesForClass @ 5292 runtimeRefs=1 repoRefs=2 string=0 window=0 data=0
 - extractRecordCore @ 5524 runtimeRefs=1 repoRefs=2 string=0 window=0 data=0
+- normalizeRecordEnding @ 5534 runtimeRefs=1 repoRefs=2 string=0 window=0 data=0
+- sdgsEvidenceForGoal @ 5697 runtimeRefs=1 repoRefs=2 string=0 window=0 data=0
+- safeWidget @ 7168 runtimeRefs=1 repoRefs=2 string=0 window=0 data=0
+- dashboardTodayLessonsMarkup @ 7173 runtimeRefs=1 repoRefs=2 string=0 window=0 data=0
+- dashboardSelectedDayMarkup @ 7201 runtimeRefs=1 repoRefs=2 string=0 window=0 data=0
 - currentUserOvertimeTasks @ 7222 runtimeRefs=1 repoRefs=2 string=0 window=0 data=0
+- dashboardCompactTasksMarkup @ 7252 runtimeRefs=1 repoRefs=2 string=0 window=0 data=0
 - dashboardCompactNoticesMarkup @ 7274 runtimeRefs=1 repoRefs=2 string=0 window=0 data=0
+- dashboardStudentStatusMarkup @ 7799 runtimeRefs=1 repoRefs=2 string=0 window=0 data=0
 - dashboardTopAlertsMarkup @ 8013 runtimeRefs=1 repoRefs=2 string=0 window=0 data=0
+- completionStatusMarkup @ 8066 runtimeRefs=1 repoRefs=2 string=0 window=0 data=0
 - openStudentCounselEdit @ 8261 runtimeRefs=1 repoRefs=2 string=0 window=0 data=0
+- todayProgramsMarkup @ 8394 runtimeRefs=1 repoRefs=2 string=0 window=0 data=0
+- openMealDutyDrawer @ 8453 runtimeRefs=1 repoRefs=2 string=0 window=0 data=0
 - retryGoogleConnection @ 9109 runtimeRefs=1 repoRefs=3 string=0 window=0 data=0
+- studentActivityOverview @ 9217 runtimeRefs=1 repoRefs=2 string=0 window=0 data=0
+- admissionPairCompatible @ 9425 runtimeRefs=1 repoRefs=2 string=0 window=0 data=0
+- sendProgramEmailNotice @ 10964 runtimeRefs=1 repoRefs=2 string=0 window=0 data=0
+- prepareProgramSmsNotice @ 10972 runtimeRefs=1 repoRefs=2 string=0 window=0 data=0
+- openProgramAttendanceQr @ 10977 runtimeRefs=1 repoRefs=2 string=0 window=0 data=0
+- copyProgramRiroNotice @ 11022 runtimeRefs=1 repoRefs=2 string=0 window=0 data=0
 - uepCompareSelectionHistory @ 12356 runtimeRefs=1 repoRefs=3 string=0 window=0 data=0
 - uepSchoolGrowthGapSummary @ 12448 runtimeRefs=1 repoRefs=6 string=0 window=0 data=0
 - bindSelectionAnalysis @ 12593 runtimeRefs=1 repoRefs=14 string=0 window=0 data=0
