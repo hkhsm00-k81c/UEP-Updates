@@ -41,3 +41,7 @@ Scope: remove all stale standalone selection and SDGs view references, retain sa
 Publish requested: UEP 0.81.12 curriculum SDGs recordcheck interaction recovery
 Requested: 2026-08-22
 Scope: restore integrated records interactions and standalone NEIS record validation mount.
+
+Publish requested: UEP 0.81.13 integrated recovery
+Requested: 2026-08-22
+Scope: restore canonical records/SDGs/recordcheck wiring, remove document-wide DOM observer and full-section scan, memoize selection analysis, and keep 06_선택과목이력 as the only selection source.
