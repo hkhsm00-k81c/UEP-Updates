@@ -1,0 +1,124 @@
+name: Verify UEP 0.81.17 CSS Cleanup Candidate
+
+on:
+  push:
+    branches:
+      - candidate/0.81.17-css-cleanup
+    paths:
+      - scripts/apply-css-cleanup-0.81.17.js
+      - scripts/build-update-0.81.17.ps1
+      - .github/workflows/uep-0.81.17-css-cleanup-candidate.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-candidate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download shipped base
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,candidate-output | Out-Null
+          gh release download v0.81.01 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          if(-not (Test-Path 'source/UEP-update.zip')){throw 'UEP 0.81.01 base ZIP not found'}
+          Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
+
+      - name: Reconstruct production runtime through 0.81.16
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $scripts=Get-ChildItem scripts/build-update-*.ps1 | ForEach-Object {
+            if($_.BaseName -match 'build-update-(\d+)\.(\d+)\.(\d+)'){
+              [pscustomobject]@{File=$_.FullName;Major=[int]$matches[1];Minor=[int]$matches[2];Patch=[int]$matches[3]}
+            }
+          } | Sort-Object Major,Minor,Patch
+          foreach($s in $scripts){
+            if($s.Major -eq 0 -and $s.Minor -eq 81 -and $s.Patch -ge 2 -and $s.Patch -le 16){ & $s.File }
+          }
+
+      - name: Snapshot 0.81.16 runtime
+        shell: pwsh
+        run: |
+          Copy-Item app/resources/app/gyomuon.js candidate-output/gyomuon-0.81.16.js
+          Copy-Item app/resources/app/gyomuon.css candidate-output/gyomuon-0.81.16.css
+          Copy-Item app/resources/app/package.json candidate-output/package-0.81.16.json
+
+      - name: Apply 0.81.17 cleanup candidate
+        shell: pwsh
+        run: ./scripts/build-update-0.81.17.ps1
+
+      - name: Verify only intended runtime files changed
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $beforeJs=Get-Content candidate-output/gyomuon-0.81.16.js -Raw -Encoding UTF8
+          $afterJs=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          $expectedJs=$beforeJs.Replace('const APP_VERSION = "0.81.16";','const APP_VERSION = "0.81.17";').Replace('v0.81.16','v0.81.17')
+          if($afterJs -ne $expectedJs){throw 'Unexpected gyomuon.js changes beyond version bump'}
+          $beforePkg=Get-Content candidate-output/package-0.81.16.json -Raw -Encoding UTF8|ConvertFrom-Json
+          $afterPkg=Get-Content app/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json
+          if($afterPkg.version -ne '0.81.17'){throw 'package version not 0.81.17'}
+          $beforePkg.version='0.81.17'
+          if(($beforePkg|ConvertTo-Json -Depth 20) -ne ($afterPkg|ConvertTo-Json -Depth 20)){throw 'Unexpected package.json changes'}
+          $beforeCss=(Get-Content candidate-output/gyomuon-0.81.16.css -Raw -Encoding UTF8)
+          $afterCss=(Get-Content app/resources/app/gyomuon.css -Raw -Encoding UTF8)
+          if($beforeCss.Length -ne 40019){throw "Unexpected 0.81.16 CSS baseline size $($beforeCss.Length)"}
+          if($afterCss.Length -ne 35884){throw "Unexpected 0.81.17 CSS size $($afterCss.Length)"}
+          Write-Host "CSS reduction = $($beforeCss.Length-$afterCss.Length) chars"
+
+      - name: Verify critical screen/runtime anchors
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          $anchors=@(
+            'function uepCurriculumFinalView()',
+            'function uepActiveSelectionRows()',
+            'function uepSelectionErrors(',
+            'function uepSelectionTermSubjects(',
+            'function uepSdgsEvidenceBridge()',
+            'function uepSdgsSupplementPanel()',
+            'function uepSelectionSms(',
+            'window.uepMountRecordbookValidator',
+            'standaloneRecordcheckMount'
+          )
+          foreach($a in $anchors){if(-not $g.Contains($a)){throw "Missing critical runtime anchor: $a"}}
+          node --check app/resources/app/gyomuon.js
+          if($LASTEXITCODE-ne 0){throw 'renderer syntax failed'}
+
+      - name: Produce candidate diff report
+        shell: pwsh
+        run: |
+          $beforeCss=Get-Content candidate-output/gyomuon-0.81.16.css -Raw -Encoding UTF8
+          $afterCss=Get-Content app/resources/app/gyomuon.css -Raw -Encoding UTF8
+          @"
+          # UEP 0.81.17 CSS CLEANUP CANDIDATE
+
+          - base: reconstructed production 0.81.16
+          - deployment: disabled
+          - gyomuon.js: version bump only
+          - package.json: version bump only
+          - CSS chars before: $($beforeCss.Length)
+          - CSS chars after: $($afterCss.Length)
+          - CSS chars removed: $($beforeCss.Length-$afterCss.Length)
+          - critical curriculum/SDGs/recordcheck anchors: verified
+          - renderer syntax: verified
+          - automatic updater/publish workflow: untouched
+          "@ | Set-Content candidate-output/CANDIDATE-REPORT.md -Encoding UTF8
+          Copy-Item app/resources/app/gyomuon.css candidate-output/gyomuon-0.81.17.css
+          Copy-Item app/resources/app/gyomuon.js candidate-output/gyomuon-0.81.17.js
+          Get-Content candidate-output/CANDIDATE-REPORT.md
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UEP-0.81.17-CSS-CLEANUP-CANDIDATE
+          path: candidate-output/
