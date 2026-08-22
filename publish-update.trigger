@@ -50,3 +50,4 @@ Retry UEP 0.81.13 after hardened observer/section-scan cleanup.
 Retry UEP 0.81.13 after correcting integrated curriculum/SDGs verification names.
 Retry UEP 0.81.13 from current main after verification-fix commit.
 Retry UEP 0.81.13 after restoring canonical 0.81.06 curriculum and SDGs bodies.
+Retry UEP 0.81.13 after fixing final release gates to canonical 0.81.06 view functions.
