@@ -24,21 +24,23 @@ jobs:
           gh release download v0.81.01 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
           Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
           if(-not (Test-Path 'app/UEP.exe')){throw 'UEP.exe not found in shipped base'}
-      - name: Reconstruct through 0.81.16
+      - name: Reconstruct through 0.81.17
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          2..16 | ForEach-Object { $version='0.81.{0:d2}' -f $_; $script="scripts/build-update-$version.ps1"; if(-not (Test-Path $script)){throw "missing $script"}; & $script }
-      - name: Verify 0.81.16 release gates
+          2..17 | ForEach-Object { $version='0.81.{0:d2}' -f $_; $script="scripts/build-update-$version.ps1"; if(-not (Test-Path $script)){throw "missing $script"}; & $script }
+      - name: Verify 0.81.17 release gates
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
           $g=Get-Content 'app/resources/app/gyomuon.js' -Raw -Encoding UTF8
+          $c=Get-Content 'app/resources/app/gyomuon.css' -Raw -Encoding UTF8
           $d=Get-Content 'app/resources/app/electron/google-data.cjs' -Raw -Encoding UTF8
           $m=Get-Content 'app/resources/app/electron/main.cjs' -Raw -Encoding UTF8
           node --check 'app/resources/app/gyomuon.js'
+          node ./scripts/verify-css-cleanup-0.81.17.js app
           $checks=[ordered]@{
-            version=$g.Contains('const APP_VERSION = "0.81.16";')
+            version=$g.Contains('const APP_VERSION = "0.81.17";')
             single06=$d.Contains('"06_선택과목이력"') -and (-not $d.Contains('06A_학생별선택과목'))
             activeSelectionRows=$g.Contains('function uepActiveSelectionRows()')
             selectionHelpers=$g.Contains('function uepDormStudentIds()') -and $g.Contains('function uepSelectionTermSubjects(') -and $g.Contains('function uepStudentGradeAverage(') -and $g.Contains('function uepSelectionErrors(') -and $g.Contains('function uepSelectionSms(')
@@ -49,22 +51,23 @@ jobs:
             recordcheck=$g.Contains('window.uepMountRecordbookValidator') -and $g.Contains('standaloneRecordcheckMount')
             schoolResolver=$m.Contains('resolveSchoolServiceAccount')
             noGlobalObserver=(-not [regex]::IsMatch($g,'observer\.observe\s*\(\s*document\.documentElement'))
+            cssSize=($c.Length -eq 36029)
           }
           $checks.GetEnumerator()|ForEach-Object{Write-Host ("RELEASE GATE {0} = {1}" -f $_.Key,$_.Value)}
-          if($checks.Values-contains $false){throw 'UEP 0.81.16 release gate failed'}
+          if($checks.Values-contains $false){throw 'UEP 0.81.17 release gate failed'}
       - name: Build update package
         id: package
         shell: pwsh
         run: |
           Compress-Archive -Path app/* -DestinationPath UEP-update.zip -CompressionLevel Optimal
           $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower(); "sha=$sha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-      - name: Publish v0.81.16 release
+      - name: Publish v0.81.17 release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag='v0.81.16'; gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
-          if($LASTEXITCODE -ne 0){gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.16 - 교육과정 진입 및 세특 반 파싱 복구' --notes '교육과정 화면의 누락된 선택과목 문자 helper를 복구하고, 세특 오류검증이 번호열을 반으로 오인하지 않도록 반 파싱을 학번·명시적 학년반 기준으로 제한합니다.'}
+          $tag='v0.81.17'; gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+          if($LASTEXITCODE -ne 0){gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.17 - 전체 코드 점검 후 CSS 안전 정리' --notes '전체 코드 감사 결과를 바탕으로 실제 런타임 미사용 CSS 규칙 34개를 제거하고, 교육과정·SDGs·세특 오류검증·recordcheck/NEIS 파서 핵심 기능을 유지한 안정화 버전입니다.'}
           gh release upload $tag UEP-update.zip --repo $env:GITHUB_REPOSITORY --clobber
       - name: Enable automatic update policy
         shell: pwsh
@@ -73,11 +76,11 @@ jobs:
           SHA256: ${{ steps.package.outputs.sha }}
         run: |
           $current=Get-Content 'uep-policy.json' -Raw -Encoding UTF8 | ConvertFrom-Json
-          $policy=[ordered]@{channel='homeroom-stable';latestVersion='0.81.16';minimumAllowedVersion='0.80.64';blockedVersions=@();forceUpdate=$false;updateEnabled=$true;downloadUrl="https://github.com/$env:GITHUB_REPOSITORY/releases/download/v0.81.16/UEP-update.zip";sha256=$env:SHA256;message='UEP 0.81.16 교육과정 진입 및 세특 반 파싱 복구';offlineGraceHours=72;googleOAuthClientId=[string]$current.googleOAuthClientId}|ConvertTo-Json -Depth 4
+          $policy=[ordered]@{channel='homeroom-stable';latestVersion='0.81.17';minimumAllowedVersion='0.80.64';blockedVersions=@();forceUpdate=$false;updateEnabled=$true;downloadUrl="https://github.com/$env:GITHUB_REPOSITORY/releases/download/v0.81.17/UEP-update.zip";sha256=$env:SHA256;message='UEP 0.81.17 전체 코드 점검 및 CSS 안전 정리';offlineGraceHours=72;googleOAuthClientId=[string]$current.googleOAuthClientId}|ConvertTo-Json -Depth 4
           $info=gh api "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json?ref=main"|ConvertFrom-Json
-          $encoded=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($policy)); $body=@{message='Enable UEP 0.81.16 automatic update';content=$encoded;sha=$info.sha;branch='main'}|ConvertTo-Json
+          $encoded=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($policy)); $body=@{message='Enable UEP 0.81.17 automatic update';content=$encoded;sha=$info.sha;branch='main'}|ConvertTo-Json
           $body|gh api --method PUT -H 'Accept: application/vnd.github+json' "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json" --input -
       - uses: actions/upload-artifact@v4
         with:
-          name: UEP-0.81.16-Update-Package
+          name: UEP-0.81.17-Update-Package
           path: UEP-update.zip
