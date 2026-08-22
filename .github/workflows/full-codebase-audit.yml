@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   audit:
@@ -42,7 +42,7 @@ jobs:
             }
           } | Sort-Object Major,Minor,Patch
           foreach($s in $scripts){
-            if($s.Major -eq 0 -and (($s.Minor -eq 81 -and $s.Patch -ge 2 -and $s.Patch -le 16))){
+            if($s.Major -eq 0 -and ($s.Minor -eq 81 -and $s.Patch -ge 2 -and $s.Patch -le 16)){
               Write-Host ('APPLY '+$s.File)
               & $s.File
             }
@@ -50,12 +50,23 @@ jobs:
 
       - name: Run full repository and runtime audit
         shell: pwsh
-        run: |
-          ./tools/full-codebase-audit.ps1 -AppRoot app -OutDir audit-output
+        run: ./tools/full-codebase-audit.ps1 -AppRoot app -OutDir audit-output
 
       - name: Show audit summary
         shell: pwsh
         run: Get-Content audit-output/FULL-CODEBASE-AUDIT.md -Encoding UTF8
+
+      - name: Persist audit results to audit branch
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f audit-output
+          git diff --cached --quiet
+          if($LASTEXITCODE -ne 0){
+            git commit -m "Store full codebase audit results"
+            git push origin HEAD:audit/full-codebase-20260822
+          }
 
       - uses: actions/upload-artifact@v4
         with:
