@@ -1,0 +1,66 @@
+name: UEP CSS Cleanup Phase 1
+
+on:
+  push:
+    branches:
+      - cleanup/codebase-phase1-20260822
+    paths:
+      - tools/css-cleanup-phase1.js
+      - .github/workflows/uep-css-cleanup-phase1.yml
+  workflow_dispatch:
+
+jobs:
+  css-cleanup-phase1:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download shipped base
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,cleanup-output | Out-Null
+          gh release download v0.81.01 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          if(-not (Test-Path 'source/UEP-update.zip')){throw 'UEP 0.81.01 base ZIP not found'}
+          Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
+
+      - name: Reconstruct runtime through 0.81.16
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $scripts=Get-ChildItem scripts/build-update-*.ps1 | ForEach-Object {
+            if($_.BaseName -match 'build-update-(\d+)\.(\d+)\.(\d+)'){
+              [pscustomobject]@{File=$_.FullName;Major=[int]$matches[1];Minor=[int]$matches[2];Patch=[int]$matches[3]}
+            }
+          } | Sort-Object Major,Minor,Patch
+          foreach($s in $scripts){
+            if($s.Major -eq 0 -and $s.Minor -eq 81 -and $s.Patch -ge 2 -and $s.Patch -le 16){ & $s.File }
+          }
+
+      - name: Apply cascade-safe CSS phase 1 cleanup
+        shell: pwsh
+        run: node ./tools/css-cleanup-phase1.js app cleanup-output
+
+      - name: Re-audit cleaned CSS
+        shell: pwsh
+        run: node ./tools/css-cleanup-audit.js app cleanup-output/after
+
+      - name: Verify input-center selectors remain present
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $css=Get-Content app/resources/app/gyomuon.css -Raw -Encoding UTF8
+          @('.input-method-row','.input-center-compact-setup','.input-center-compact-setup label.grow') | ForEach-Object {
+            if(-not $css.Contains($_)){throw "Missing required selector $_"}
+          }
+          Get-Content cleanup-output/CSS-CLEANUP-PHASE1.md -Encoding UTF8
+          Get-Content cleanup-output/after/CSS-CLEANUP-AUDIT.md -Encoding UTF8
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UEP-CSS-CLEANUP-PHASE1
+          path: cleanup-output/
