@@ -17,26 +17,20 @@ $css=ReadText (Join-Path $AppRoot 'resources/app/gyomuon.css')
 $index=ReadText (Join-Path $AppRoot 'resources/app/index.html')
 $allRuntime=@($gyo,$main,$data,$preload,$css,$index) -join "`n"
 
-# Syntax checks for every runtime JS/CJS file.
 $syntax=@()
 foreach($p in @((Join-Path $AppRoot 'resources/app/gyomuon.js'),(Join-Path $AppRoot 'resources/app/electron/main.cjs'),(Join-Path $AppRoot 'resources/app/electron/google-data.cjs'),(Join-Path $AppRoot 'resources/app/electron/preload.cjs'))){
   if(Test-Path $p){ node --check $p 2>&1 | Out-String | ForEach-Object { $syntax += [pscustomobject]@{file=$p;ok=($LASTEXITCODE -eq 0);output=$_.Trim()} }; if($LASTEXITCODE-ne 0){$global:LASTEXITCODE=0} }
 }
 
 $findings=New-Object System.Collections.Generic.List[object]
-
-# Function declarations and later assignments/overrides.
 $decl=[regex]::Matches($gyo,'(?m)^\s*(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(') | ForEach-Object {$_.Groups[1].Value}
 $declGroups=$decl | Group-Object | Sort-Object Count -Descending
 foreach($g in $declGroups){ if($g.Count -gt 1){AddFinding $findings 'renderer' 'duplicate-function-declaration' $g.Name $g.Count 'HIGH' '같은 함수명이 여러 번 선언됨'} }
 $assign=[regex]::Matches($gyo,'(?m)^\s*([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?function\s*\(') | ForEach-Object {$_.Groups[1].Value}
 foreach($g in ($assign|Group-Object|Sort-Object Count -Descending)){ if($g.Count -gt 1 -or $decl -contains $g.Name){AddFinding $findings 'renderer' 'function-override' $g.Name $g.Count 'HIGH' '기존 함수 뒤에서 재대입/override 가능'} }
-
-# Wrapper chains: const old=fn; fn=function...
 $wrappers=[regex]::Matches($gyo,'(?ms)const\s+([A-Za-z_$][\w$]*)\s*=\s*([A-Za-z_$][\w$]*)\s*;\s*\2\s*=\s*function\s*\(')
 foreach($m in $wrappers){AddFinding $findings 'renderer' 'wrapper-chain' $m.Groups[2].Value 1 'HIGH' ('captured as '+$m.Groups[1].Value)}
 
-# Global listeners, observers, timers and rerenders.
 $metrics=[ordered]@{
  addEventListener=CountRx $gyo 'addEventListener\s*\('
  onclickAssignments=CountRx $gyo '\.onclick\s*='
@@ -50,48 +44,37 @@ $metrics=[ordered]@{
  fullSectionScans=CountRx $gyo 'querySelectorAll\s*\(\s*["'']section["'']\s*\)'
 }
 foreach($k in $metrics.Keys){ if($metrics[$k]-gt 0){ $risk=if($k -in 'mutationObserver','fullSectionScans','setInterval'){'HIGH'}elseif($k -in 'renderCalls','addEventListener','requestAnimationFrame','setTimeout'){'MEDIUM'}else{'INFO'}; AddFinding $findings 'renderer' 'runtime-metric' $k $metrics[$k] $risk '전체 실행코드 발생 횟수'} }
-
-# Render targets and repeated full-page rerenders.
 $renderTargets=[regex]::Matches($gyo,'render\s*\(\s*["'']([^"'']+)["'']\s*\)') | ForEach-Object {$_.Groups[1].Value} | Group-Object | Sort-Object Count -Descending
 foreach($g in $renderTargets){ if($g.Count -ge 3){AddFinding $findings 'renderer' 'frequent-full-render' $g.Name $g.Count 'MEDIUM' '동일 페이지 전체 render 반복 호출'} }
-
-# Legacy/stale route and sheet strings.
 $legacy=@('selectionView','sdgsView','06A_학생별선택과목','06A 학생별 선택과목','selection: selectionView','sdgs: sdgsView')
 foreach($x in $legacy){$c=([regex]::Matches($allRuntime,[regex]::Escape($x))).Count;if($c){AddFinding $findings 'runtime' 'legacy-reference' $x $c 'HIGH' '폐기/통합된 과거 구조 참조 가능'}}
 
-# Source patch markers and whether they survive in runtime.
 $markers=@()
 foreach($f in ($sourceFiles|Where-Object {$_.DirectoryName -match 'patches'})){
   $t=ReadText $f.FullName
   foreach($m in [regex]::Matches($t,'__[A-Z0-9_]{6,}__')){ $markers += [pscustomobject]@{marker=$m.Value;source=$f.FullName.Substring((Get-Location).Path.Length+1);present=$allRuntime.Contains($m.Value)} }
 }
-
-# Build-script mutation inventory: replacements, regex replacements, patch append operations.
 $mutations=@()
 foreach($f in ($sourceFiles|Where-Object {$_.Name -like 'build-update-*.ps1'})){
  $t=ReadText $f.FullName
  $mutations += [pscustomobject]@{file=$f.Name;replace=CountRx $t '\.Replace\s*\(';regexReplace=CountRx $t '\[regex\]::Replace\s*\(';appendPatch=CountRx $t 'Get-Content\s+["'']?\.?/?patches/|Get-Content\s+["'']?\.\\patches\\';substringSplice=CountRx $t '\.Substring\s*\(';containsGuards=CountRx $t '\.Contains\s*\('}
 }
-
-# Duplicate CSS selectors (rough but useful).
 $selectors=[regex]::Matches($css,'(?m)(^|\})\s*([^@}{][^{}]*)\{')|ForEach-Object {$_.Groups[2].Value.Trim()}|Where-Object {$_ -and $_.Length -lt 200}
 $selectorGroups=$selectors|Group-Object|Sort-Object Count -Descending
 foreach($g in $selectorGroups){if($g.Count-gt 1){AddFinding $findings 'css' 'duplicate-selector' $g.Name $g.Count 'MEDIUM' '동일 selector가 여러 위치에 정의됨'}}
-
-# Workflow/diagnostic accumulation inventory.
 $workflowFiles=$repoFiles|Where-Object {$_.FullName -match '\\.github\\workflows\\'}
 $inspectFlows=$workflowFiles|Where-Object {$_.Name -match '^inspect-|audit-|probe-|diagnostic'}
 AddFinding $findings 'repository' 'workflow-count' 'all-workflows' $workflowFiles.Count 'INFO' '저장소 workflow 총수'
 AddFinding $findings 'repository' 'diagnostic-workflow-count' 'inspect/audit/probe' $inspectFlows.Count 'MEDIUM' '실사용 배포와 무관한 점검 workflow 누적'
 
-# Feature signatures from all build scripts: capture verification labels as historical intent inventory.
+# Historical verification labels. Use a single-quoted PowerShell regex so embedded double quotes are literal.
 $historical=@()
+$historicalPattern='(?m)^\s*["'']([^"'']{3,80})["'']\s*=\s*'
 foreach($f in ($sourceFiles|Where-Object {$_.Name -like 'build-update-*.ps1'})){
  $t=ReadText $f.FullName
- foreach($m in [regex]::Matches($t,"(?m)^\s*['\"]([^'\"]{3,80})['\"]\s*=\s*")){ $historical += [pscustomobject]@{build=$f.Name;check=$m.Groups[1].Value} }
+ foreach($m in [regex]::Matches($t,$historicalPattern)){ $historical += [pscustomobject]@{build=$f.Name;check=$m.Groups[1].Value} }
 }
 
-# Route/nav inventory.
 $navPages=[regex]::Matches($index,'data-page=["'']([^"'']+)["'']')|ForEach-Object {$_.Groups[1].Value}|Sort-Object -Unique
 $viewMap=[regex]::Matches($gyo,'(?m)^\s*([A-Za-z0-9_-]+)\s*:\s*([A-Za-z_$][\w$]*)\s*,?\s*$')|ForEach-Object{[pscustomobject]@{page=$_.Groups[1].Value;view=$_.Groups[2].Value}}
 
@@ -102,7 +85,6 @@ $historical|Export-Csv (Join-Path $OutDir 'historical-checks.csv') -NoTypeInform
 $syntax|Export-Csv (Join-Path $OutDir 'syntax.csv') -NoTypeInformation -Encoding UTF8
 $viewMap|Export-Csv (Join-Path $OutDir 'route-map.csv') -NoTypeInformation -Encoding UTF8
 $navPages|Set-Content (Join-Path $OutDir 'nav-pages.txt') -Encoding UTF8
-
 $high=($findings|Where-Object risk -eq 'HIGH').Count;$med=($findings|Where-Object risk -eq 'MEDIUM').Count
 $missingMarkers=($markers|Where-Object {-not $_.present}).Count
 $report=@()
