@@ -5,6 +5,10 @@ on:
     branches:
       - cleanup/codebase-phase1-20260822
     paths:
+      - tools/css-cleanup-phase1.js
+      - tools/css-cleanup-phase2.js
+      - tools/css-cleanup-audit.js
+      - tools/css-cleanup-phase3-audit.js
       - tools/css-cleanup-phase4.js
       - .github/workflows/uep-css-cleanup-phase4.yml
   workflow_dispatch:
@@ -52,23 +56,34 @@ jobs:
         shell: pwsh
         run: node ./tools/css-cleanup-phase2.js app cleanup-phase4-output/phase2
 
-      - name: Apply CSS cleanup phase 4 safe merges
+      - name: Generate live post-phase2 audit baseline
         shell: pwsh
-        run: node ./tools/css-cleanup-phase4.js app cleanup-phase4-output
+        run: node ./tools/css-cleanup-audit.js app cleanup-phase4-output/live-baseline
+
+      - name: Run live phase3 structural safety audit
+        shell: pwsh
+        run: node ./tools/css-cleanup-phase3-audit.js app cleanup-phase4-output/phase3 cleanup-phase4-output/live-baseline/css-duplicate-groups.csv
+
+      - name: Apply CSS cleanup phase 4 live safe merges
+        shell: pwsh
+        run: node ./tools/css-cleanup-phase4.js app cleanup-phase4-output cleanup-phase4-output/phase3/css-phase3-merge-safety.csv
 
       - name: Re-audit cleaned CSS
         shell: pwsh
         run: node ./tools/css-cleanup-audit.js app cleanup-phase4-output/after
 
-      - name: Verify safe selectors collapsed
+      - name: Verify live chain
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          $css=Get-Content app/resources/app/gyomuon.css -Raw -Encoding UTF8
-          @('.input-center-compact-setup label.grow','.dashboard-report-program-row>.btn.compact','.dorm-outing-editor-grid','.dorm-outing-editor-grid .wide','.neis-decision-actions') | ForEach-Object {
-            if(-not $css.Contains($_)){throw "Missing safe selector $_"}
+          $safe = Import-Csv cleanup-phase4-output/phase3/css-phase3-merge-safety.csv | Where-Object { $_.classification -in @('SAFE_MOVE_TO_FINAL','SAFE_COLLAPSE') }
+          if(-not $safe){throw 'No live phase3 safe candidates'}
+          $after = Import-Csv cleanup-phase4-output/after/css-duplicate-groups.csv
+          foreach($row in $safe){
+            if($after.selector -contains $row.selector){throw "Safe selector still duplicated after phase4: $($row.selector)"}
           }
           Get-Content cleanup-phase4-output/CSS-CLEANUP-PHASE4.md -Encoding UTF8
+          Get-Content cleanup-phase4-output/phase3/CSS-CLEANUP-PHASE3-AUDIT.md -Encoding UTF8
           Get-Content cleanup-phase4-output/after/CSS-CLEANUP-AUDIT.md -Encoding UTF8
 
       - name: Persist phase4 results
@@ -79,7 +94,7 @@ jobs:
           git add -f cleanup-phase4-output
           git diff --cached --quiet
           if($LASTEXITCODE -ne 0){
-            git commit -m "Store CSS cleanup phase4 results"
+            git commit -m "Store CSS cleanup phase4 live-chain results"
             git push origin HEAD:cleanup/codebase-phase1-20260822
           }
 
