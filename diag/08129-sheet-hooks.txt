@@ -1,585 +1,1436 @@
-===== schoolRead =====
-  // NEIS가 Google 캐시 완료를 기다리지 않도록 먼저 예약한다.
-  setTimeout(() => loadNeisDashboard(false), 0);
-  const credentialTask = window.schoolBoard?.schoolReadSessionStatus
-    ? withStartupTimeout(window.schoolBoard.schoolReadSessionStatus({verify:true}), 5000, null)
+
+######## app\resources\app\gyomuon.js ########
+===== readReadonlyCache @438 =====
         .then((status) => { if (status) googleConnectionStatus = {ok:Boolean(status.authenticated),encryption:true,mode:'school_read_api',endpointReady:status.endpointReady!==false}; })
+        .catch((error) => console.warn("[UEP] School Read API 세션 확인 실패", error))
+    : Promise.resolve();
+  const cacheTask = window.schoolBoard?.readReadonlyCache
+    ? withStartupTimeout(window.schoolBoard.readReadonlyCache(), 8000, null)
+        .then((cached) => {
+          if (cached?.ok) { readonlyCache=uep08123NormalizeReadonlyCache(cached.data); googleConnectionError = ""; }
 ---
+===== readReadonlyCache @439 =====
+        .catch((error) => console.warn("[UEP] School Read API 세션 확인 실패", error))
+    : Promise.resolve();
+  const cacheTask = window.schoolBoard?.readReadonlyCache
+    ? withStartupTimeout(window.schoolBoard.readReadonlyCache(), 8000, null)
+        .then((cached) => {
+          if (cached?.ok) { readonlyCache=uep08123NormalizeReadonlyCache(cached.data); googleConnectionError = ""; }
+          else if (cached) googleConnectionError = cached.reason || "학교 데이터 동기화를 확인하세요. 마지막 저장 자료는 계속 사용할 수 있습니다.";
+---
+===== readReadonlyCache @514 =====
+async function refreshReadonlyCacheSilently({force=true, rerender=true}={}) {
+  if(readonlyRefreshInFlight)return readonlyRefreshInFlight;
+  readonlyRefreshInFlight=(async()=>{
+  if(!googleConnectionStatus?.ok || !window.schoolBoard?.previewReadonlySync || !window.schoolBoard?.readReadonlyCache) return false;
+  try {
+    if(force){
+      const sync=await window.schoolBoard.previewReadonlySync();
+---
+===== readReadonlyCache @520 =====
+      const sync=await window.schoolBoard.previewReadonlySync();
+      if(!sync?.ok) throw new Error(sync?.reason||'UEP 학교 데이터 자동 갱신 실패');
+    }
+    const cached=await window.schoolBoard.readReadonlyCache();
+    if(!cached?.ok) throw new Error(cached?.reason||'UEP 학교 데이터를 읽지 못했습니다.');
+    readonlyCache=uep08123NormalizeReadonlyCache(cached.data);
+    googleConnectionError='';
+---
+===== readReadonlyCache @3569 =====
+  document.getElementById('useDifferentUser')?.addEventListener('click',()=>renderUserAuthGate({locked:false,switchUser:true}));
+  document.getElementById('userAuthExit')?.addEventListener('click',async()=>{if(confirm('UEP를 종료할까요?'))await window.schoolBoard?.close?.();});
+  document.getElementById('rememberedUserContinue')?.addEventListener('click',async()=>{const status=await window.schoolBoard?.schoolReadSessionStatus?.({verify:true});if(!status?.authenticated)return renderUserAuthGate({switchUser:true});const a=status.user||{},account={id:String(a.userId||remembered.id||''),email:String(a.email||remembered.email||'').trim(),name:uep08125PickTeacherName(a.name,remembered.name),role:String(a.role||''),admin:a.isAdmin?'Y':'N',grade:String(a.grade||'1'),classNo:String(a.homeroom||''),department:String(a.department||((a.grade||1)+'학년부')),active:true,activeRaw:'Y'};state.auth.user=accountToSession(account);googleConnectionStatus={ok:true,encryption:true,mode:'school_read_api'};await save();hideUserAuthGate();refreshReadonlyCacheSilently({force:true,rerender:false}).catch(()=>{});navigate(state.activePage||'dashboard');});
+  document.getElementById('userAuthForm')?.addEventListener('submit',async event=>{event.preventDefault();const name=document.getElementById('userAuthName')?.value,email=document.getElementById('userAuthEmail')?.value;const submit=event.submitter||document.querySelector('#userAuthForm button[type="submit"]');if(submit){submit.disabled=true;submit.textContent='확인 중…';}try{if(!window.schoolBoard?.schoolReadLogin)throw new Error('이 UEP 빌드에는 School Read API 로그인이 없습니다.');const result=await window.schoolBoard.schoolReadLogin({name,email});if(!result?.ok){authGateMessage(result?.message||'UEP 로그인에 실패했습니다.');return;}const a=result.user||{};const account={id:String(a.userId||''),email:String(a.email||email||'').trim(),name:uep08125PickTeacherName(a.name,name),role:String(a.role||''),admin:a.isAdmin?'Y':'N',grade:String(a.grade||'1'),classNo:String(a.homeroom||''),department:String(a.department||((a.grade||1)+'학년부')),active:true,activeRaw:'Y'};const user=accountToSession(account),remember=Boolean(document.getElementById('userAuthRemember')?.checked);state.auth.user=user;state.auth.rememberUser=remember;state.auth.rememberedUser=remember?{id:user.id,name:user.name,email:user.email}:null;state.settings.userProfile={...state.settings.userProfile,...user};state.settings.loginUserName=user.name;state.settings.teacherName=user.name;googleConnectionStatus={ok:true,encryption:true,mode:'school_read_api'};await save();hideUserAuthGate();const synced=await window.schoolBoard?.previewReadonlySync?.();if(synced?.ok){const cached=await window.schoolBoard?.readReadonlyCache?.();if(cached?.ok){readonlyCache=uep08123NormalizeReadonlyCache(cached.data);googleConnectionError='';}}else if(synced){googleConnectionError=synced.reason||'학교 데이터 동기화에 실패했습니다.';}startReadonlyAutoRefresh();navigate(state.activePage||'dashboard');}catch(error){authGateMessage(error?.message||'UEP 로그인에 실패했습니다.');}finally{if(submit){submit.disabled=false;submit.textContent='UEP 시작';}}});
+}
+async function restoreRememberedSessionImmediately(){
+  const remembered=state?.auth?.rememberUser?state?.auth?.rememberedUser:null;
+---
+===== readReadonlyCache @3796 =====
+    $("#wizardSecondaryRole").value="grade_head";
+  });
+  $("[data-wizard-google]")?.addEventListener("click",async()=>{await selectGoogleCredential();renderSetupWizard();});
+  $("[data-wizard-sync]")?.addEventListener("click",async()=>{const button=$("[data-wizard-sync]");if(button){button.disabled=true;button.textContent="새로고침 중…";}const result=await window.schoolBoard?.previewReadonlySync?.();if(result?.ok){const cached=await window.schoolBoard?.readReadonlyCache?.();if(cached?.ok){readonlyCache=uep08123NormalizeReadonlyCache(cached.data);googleConnectionError="";}}else if(result){googleConnectionError=result.reason||"학교 데이터 동기화를 확인하세요. 마지막 저장 자료는 계속 사용할 수 있습니다.";}renderSetupWizard();});
+  $("[data-wizard-neis-load]")?.addEventListener("click",async()=>{
+    const school=$("#wizardNeisSchool")?.value.trim()||"운호고등학교";
+    const grade=$("#wizardNeisGrade")?.value||currentUserProfile().grade||"1";
+---
+===== readReadonlyCache @3955 =====
+  <div class="modal-actions"><button class="btn secondary" data-access-refresh>계정표 새로고침</button><button class="btn secondary" data-access-close>닫기</button></div></div>`;
+  document.body.appendChild(layer);
+  const close=()=>layer.remove(); layer.querySelectorAll('[data-access-close]').forEach(b=>b.onclick=close); layer.onclick=e=>{if(e.target===layer)close();};
+  layer.querySelector('[data-access-refresh]')?.addEventListener('click',async()=>{const result=await window.schoolBoard?.readReadonlyCache?.();if(result?.ok){readonlyCache=result.data;layer.remove();openAccessControlPanel();}else toast(result?.reason||'사용자 계정표를 새로고침하지 못했습니다.');});
+  if(isAdmin){
+    layer.querySelectorAll('[data-access-user]').forEach(row=>{
+      const id=row.dataset.accessUser, account=accounts.find(a=>String(a.id)===String(id)); if(!account)return;
+---
+===== readReadonlyCache @3963 =====
+        if(account.active!==false && String(account.id)===String(p.id)) return toast('현재 로그인한 관리자 계정은 자기 자신을 중지할 수 없습니다.');
+        const active=account.active===false; const result=await window.schoolBoard?.updateUserAccount?.({id,active});
+        if(!result?.ok)return toast(result?.reason||'사용자 승인 상태를 저장하지 못했습니다.');
+        const refreshed=await window.schoolBoard?.readReadonlyCache?.(); if(refreshed?.ok)readonlyCache=refreshed.data; layer.remove();openAccessControlPanel();toast(active?'사용 승인을 완료했습니다.':'사용을 중지했습니다.');
+      });
+      row.querySelector('[data-access-save]')?.addEventListener('click',async()=>{
+        const role=row.querySelector('[data-access-role]')?.value||'', grade=row.querySelector('[data-access-grade]')?.value||'1', classNo=row.querySelector('[data-access-class]')?.value||'';
+---
+===== readReadonlyCache @3970 =====
+        const admin=role==='관리자'; const storedRole=admin?'관리자':role;
+        const result=await window.schoolBoard?.updateUserAccount?.({id,role:storedRole,admin,grade,classNo,active:account.active!==false});
+        if(!result?.ok)return toast(result?.reason||'권한을 저장하지 못했습니다.');
+        const refreshed=await window.schoolBoard?.readReadonlyCache?.(); if(refreshed?.ok)readonlyCache=refreshed.data; layer.remove();openAccessControlPanel();toast('사용자 권한을 저장했습니다.');
+      });
+    });
+  }
+---
+===== readReadonlyCache @8810 =====
+  $("#drawerBody").innerHTML = `<form class="calendar-single-editor calendar-single-editor-v426" id="singleCalendarForm"><div class="calendar-editor-grid"><label>날짜<input id="singleCalendarDate" type="date" required value="${dateKey(today)}"></label><label>상태<select id="singleCalendarStatus"><option>확정</option><option>예정</option><option>예약</option><option>미정</option></select></label><label>시작시각<input id="singleCalendarStart" type="time"></label><label>종료시각<input id="singleCalendarEnd" type="time"></label><label class="wide">일정명<input id="singleCalendarTitle" required placeholder="예: 1학년 학부모 상담"></label><label>대상<input id="singleCalendarTarget" placeholder="예: 1학년 담임"></label><label>장소<input id="singleCalendarPlace" placeholder="예: 세미나실"></label><label>부서<input id="singleCalendarDepartment" placeholder="예: 1학년부"></label><label>담당자<input id="singleCalendarManager" placeholder="예: 홍석민"></label><label class="wide">비고<textarea id="singleCalendarNote" rows="3" placeholder="준비물·연락사항 등"></textarea></label></div><div class="calendar-editor-actions"><button type="button" class="btn secondary" id="singleCalendarCancel">취소</button><button class="btn primary">41_학교캘린더에 저장</button></div><p class="safe-note">개인 일정도 UEP 연결시트의 41_학교캘린더에 저장되고, 학교일정 메뉴와 대시보드에 함께 표시됩니다.</p></form>`;
+  $("#drawer").classList.remove("hidden"); $("#drawerBackdrop").classList.remove("hidden");
+  $("#singleCalendarCancel").onclick=closeDrawer;
+  $("#singleCalendarForm").onsubmit=async event=>{event.preventDefault();const payload={date:$("#singleCalendarDate").value,start:$("#singleCalendarStart").value,end:$("#singleCalendarEnd").value,title:$("#singleCalendarTitle").value.trim(),target:$("#singleCalendarTarget").value.trim(),place:$("#singleCalendarPlace").value.trim(),department:$("#singleCalendarDepartment").value.trim(),manager:$("#singleCalendarManager").value.trim(),status:$("#singleCalendarStatus").value,note:$("#singleCalendarNote").value.trim()};const result=await window.schoolBoard?.savePersonalCalendar?.(payload);if(!result?.ok)return toast(result?.reason||"개인 일정을 저장하지 못했습니다.");const refreshed=await window.schoolBoard?.readReadonlyCache?.();if(refreshed?.ok)readonlyCache=refreshed.data;closeDrawer();render(state.activePage==="calendar"?"calendar":"dashboard");toast("41_학교캘린더에 개인 일정을 저장했습니다.");};
+}
+
+
+---
+===== readReadonlyCache @8823 =====
+  const ownerParts=String(event.owner||"").split(" · ");
+  $("#drawerBody").innerHTML=`<form class="calendar-single-editor calendar-single-editor-v430" id="calendarEditForm"><input type="hidden" id="calendarEditId" value="${escapeHtml(event.id)}"><div class="calendar-editor-grid"><label>날짜<input id="calendarEditDate" type="date" required value="${escapeHtml(event.date||dateKey(today))}"></label><label>상태<select id="calendarEditStatus">${["확정","예정","예약","미정","취소"].map(x=>`<option ${x===(event.status||"")?"selected":""}>${x}</option>`).join("")}</select></label><label>시작시각<input id="calendarEditStart" type="time" value="${escapeHtml(start||"")}"></label><label>종료시각<input id="calendarEditEnd" type="time" value="${escapeHtml(end||"")}"></label><label class="wide">일정명<input id="calendarEditTitle" required value="${escapeHtml(event.title||"")}"></label><label>대상<input id="calendarEditTarget" value="${escapeHtml(event.target||"")}"></label><label>장소<input id="calendarEditPlace" value="${escapeHtml(event.place||"")}"></label><label>부서<input id="calendarEditDepartment" value="${escapeHtml(ownerParts[0]||"")}"></label><label>담당자<input id="calendarEditManager" value="${escapeHtml(ownerParts.slice(1).join(" · ")||"")}"></label><label class="wide">보완 내용<textarea id="calendarEditNote" rows="3">${escapeHtml(event.detail||"")}</textarea></label><label class="calendar-check"><input id="calendarEditLock" type="checkbox" ${event.correctionLocked?"checked":""}> 원본 재동기화 때 이 보정값 보호</label><label class="calendar-check"><input id="calendarEditGrade1" type="checkbox" ${event.firstGradeTarget?"checked":""}> 1학년 대상</label><label class="calendar-check"><input id="calendarEditTodayProgram" type="checkbox" ${event.showTodayProgram?"checked":""}> 오늘의 프로그램에 표시</label><label class="calendar-check"><input id="calendarEditProgramLink" type="checkbox" ${event.programLinked?"checked":""}> 프로그램 모듈과 연동</label></div><div class="calendar-editor-actions"><button type="button" class="btn secondary" id="calendarEditCancel">취소</button><button class="btn primary">전체 화면에 저장</button></div><p class="safe-note">41_학교캘린더에 저장하며, 수정자·수정시각과 변경 이력을 남깁니다.</p></form>`;
+  $("#calendarEditCancel").onclick=closeDrawer;
+  $("#calendarEditForm").onsubmit=async(e)=>{e.preventDefault();const payload={id:$("#calendarEditId").value,date:$("#calendarEditDate").value,start:$("#calendarEditStart").value,end:$("#calendarEditEnd").value,title:$("#calendarEditTitle").value.trim(),target:$("#calendarEditTarget").value.trim(),place:$("#calendarEditPlace").value.trim(),department:$("#calendarEditDepartment").value.trim(),manager:$("#calendarEditManager").value.trim(),status:$("#calendarEditStatus").value,note:$("#calendarEditNote").value.trim(),correctionLocked:$("#calendarEditLock").checked,firstGradeTarget:$("#calendarEditGrade1").checked,showTodayProgram:$("#calendarEditTodayProgram").checked,programLinked:$("#calendarEditProgramLink").checked,expectedModifiedAt:event.modifiedAt||""};const result=await window.schoolBoard?.updateCalendar?.(payload);if(!result?.ok)return toast(result?.reason||"일정을 저장하지 못했습니다.");const refreshed=await window.schoolBoard?.readReadonlyCache?.();if(refreshed?.ok)readonlyCache=refreshed.data;closeDrawer();render(state.activePage);toast("일정 수정사항을 전체 화면에 반영했습니다.");};
+}
+
+function openManualCalendarEditor() {
+---
+===== readReadonlyCache @8988 =====
+  if (!result?.ok) { googleConnectionError = result?.reason || "Google 서비스 계정 인증을 연결하지 못했습니다."; updateTopSyncStatus(); return toast(googleConnectionError); }
+  googleConnectionError = "";
+  googleConnectionStatus = await window.schoolBoard.googleCredentialStatus();
+  const cached = await window.schoolBoard.readReadonlyCache();
+  if (cached?.ok) { readonlyCache=uep08123NormalizeReadonlyCache(cached.data); googleConnectionError = ""; }
+  else googleConnectionError = cached?.reason || "UEP 학교 데이터를 읽지 못했습니다.";
+  updateTopSyncStatus();
+---
+===== readReadonlyCache @9025 =====
+  $("#drawer").classList.remove("hidden");
+  $("#drawerBackdrop").classList.remove("hidden");
+  toast("UEP 구글시트를 다시 읽었습니다.");
+  if (window.schoolBoard?.readReadonlyCache) {
+    const cached = await window.schoolBoard.readReadonlyCache();
+    if (cached?.ok) readonlyCache=uep08123NormalizeReadonlyCache(cached.data);
+  }
+---
+===== readReadonlyCache @9026 =====
+  $("#drawerBackdrop").classList.remove("hidden");
+  toast("UEP 구글시트를 다시 읽었습니다.");
+  if (window.schoolBoard?.readReadonlyCache) {
+    const cached = await window.schoolBoard.readReadonlyCache();
+    if (cached?.ok) readonlyCache=uep08123NormalizeReadonlyCache(cached.data);
+  }
+  closeDrawer();
+---
+===== readReadonlyCache @9044 =====
+    render("dashboard");
+    return;
+  }
+  const cached = await window.schoolBoard.readReadonlyCache();
+  if (cached?.ok) {
+    readonlyCache=uep08123NormalizeReadonlyCache(cached.data);
+    googleConnectionError = "";
+---
+===== readReadonlyCache @10306 =====
+      button.textContent = original;
+      return toast(result?.reason || "학교일정을 동기화하지 못했습니다.");
+    }
+    const refreshed = await window.schoolBoard?.readReadonlyCache?.();
+    if (refreshed?.ok) readonlyCache = refreshed.data;
+    button.disabled = false;
+    button.textContent = original;
+---
+===== readReadonlyCache @10548 =====
+  $$('[data-open-issue-manager]').forEach(button=>button.onclick=()=>{if(currentRoleId()!=='admin')return toast('관리자만 신고 관리 화면을 열 수 있습니다.');openIssueManager();});
+  $$('[data-run-health-check]').forEach(button=>button.onclick=async()=>{button.disabled=true;button.textContent='진단 중…';const result=await window.schoolBoard?.previewReadonlySync?.().catch(()=>null);if(result?.ok){readonlyCache=result.data;googleConnectionError='';}else if(result?.reason){googleConnectionError=result.reason;}button.disabled=false;render('settings');toast(googleConnectionError?'연결 진단에서 확인할 항목이 있습니다.':'필수 연결이 정상입니다.');});
+  $$('[data-access-control]').forEach(button=>button.onclick=()=>openAccessControlPanel());
+  $$('[data-inline-access-refresh]').forEach(button=>button.onclick=async()=>{const result=await window.schoolBoard?.readReadonlyCache?.();if(result?.ok){readonlyCache=result.data;render('settings');toast('사용자 계정표를 새로고침했습니다.');}else toast(result?.reason||'사용자 계정표를 새로고침하지 못했습니다.');});
+  $$('[data-inline-access-user]').forEach(row=>{const id=row.dataset.inlineAccessUser,account=(readonlyCache?.userAccounts||[]).find(a=>String(a.id)===String(id));if(!account)return;row.querySelector('[data-inline-access-toggle]')?.addEventListener('click',async()=>{const p=currentUserProfile();if(account.active!==false&&String(account.id)===String(p.id))return toast('현재 로그인한 관리자 계정은 자기 자신을 중지할 수 없습니다.');const active=account.active===false;const result=await window.schoolBoard?.updateUserAccount?.({id,active});if(!result?.ok)return toast(result?.reason||'사용자 승인 상태를 저장하지 못했습니다.');const refreshed=await window.schoolBoard?.readReadonlyCache?.();if(refreshed?.ok)readonlyCache=refreshed.data;render('settings');toast(active?'사용 승인을 완료했습니다.':'사용을 중지했습니다.');});row.querySelector('[data-inline-access-save]')?.addEventListener('click',async()=>{const role=row.querySelector('[data-inline-access-role]')?.value||'',grade=row.querySelector('[data-inline-access-grade]')?.value||'1',classNo=row.querySelector('[data-inline-access-class]')?.value||'';const admin=role==='관리자';const result=await window.schoolBoard?.updateUserAccount?.({id,role:admin?'관리자':role,admin,grade,classNo,active:account.active!==false});if(!result?.ok)return toast(result?.reason||'권한을 저장하지 못했습니다.');const refreshed=await window.schoolBoard?.readReadonlyCache?.();if(refreshed?.ok)readonlyCache=refreshed.data;render('settings');toast('사용자 권한을 저장했습니다.');});});
+  $$('[data-check-update]').forEach(button=>button.onclick=async()=>{const url=$("#updateManifestUrl")?.value.trim()||state.settings.updateManifestUrl||"";if(!url)return toast("업데이트 정보 JSON 주소를 먼저 입력하세요.");button.disabled=true;button.textContent="확인 중…";const result=await window.schoolBoard?.checkUpdate?.(url,APP_VERSION);button.disabled=false;button.textContent="업데이트 확인";const box=$("#updateCheckResult");if(!result?.ok){if(box)box.innerHTML=`<b>확인 실패</b><small>${escapeHtml(result?.reason||'업데이트 정보를 읽지 못했습니다.')}</small>`;return;}if(box)box.innerHTML=result.updateAvailable?`<b>새 버전 ${escapeHtml(result.version)} 사용 가능</b><small>${escapeHtml(result.notes||'새 버전이 있습니다.')} · 확인경로 ${escapeHtml(result.source||'자동')}</small><button class="btn primary" data-apply-update>업데이트 적용</button>`:`<b>최신 버전입니다</b><small>현재 ${APP_VERSION} · 확인경로 ${escapeHtml(result.source||'자동')}</small>`;const apply=$("[data-apply-update]");if(apply)apply.onclick=async()=>{if(!result.sha256)return toast("업데이트 정보에 SHA-256이 없어 자동 적용할 수 없습니다.");if(!confirm(`UEP ${result.version} 업데이트를 적용할까요?\n\n현재 설정·인증·연결 정보는 그대로 유지됩니다. 적용 후 UEP가 자동으로 다시 실행됩니다.`))return;apply.disabled=true;apply.textContent="다운로드·검증 중…";const applied=await window.schoolBoard?.applyUpdate?.({version:result.version,downloadUrl:result.downloadUrl,sha256:result.sha256});if(!applied?.ok){apply.disabled=false;apply.textContent="업데이트 적용";return toast(applied?.reason||"업데이트 적용에 실패했습니다.");}toast("업데이트 검증 완료 · UEP를 재시작하여 적용합니다.");};});
+  const timetableForm = $("#timetableNeisForm");
+---
+===== readReadonlyCache @10549 =====
+  $$('[data-run-health-check]').forEach(button=>button.onclick=async()=>{button.disabled=true;button.textContent='진단 중…';const result=await window.schoolBoard?.previewReadonlySync?.().catch(()=>null);if(result?.ok){readonlyCache=result.data;googleConnectionError='';}else if(result?.reason){googleConnectionError=result.reason;}button.disabled=false;render('settings');toast(googleConnectionError?'연결 진단에서 확인할 항목이 있습니다.':'필수 연결이 정상입니다.');});
+  $$('[data-access-control]').forEach(button=>button.onclick=()=>openAccessControlPanel());
+  $$('[data-inline-access-refresh]').forEach(button=>button.onclick=async()=>{const result=await window.schoolBoard?.readReadonlyCache?.();if(result?.ok){readonlyCache=result.data;render('settings');toast('사용자 계정표를 새로고침했습니다.');}else toast(result?.reason||'사용자 계정표를 새로고침하지 못했습니다.');});
+  $$('[data-inline-access-user]').forEach(row=>{const id=row.dataset.inlineAccessUser,account=(readonlyCache?.userAccounts||[]).find(a=>String(a.id)===String(id));if(!account)return;row.querySelector('[data-inline-access-toggle]')?.addEventListener('click',async()=>{const p=currentUserProfile();if(account.active!==false&&String(account.id)===String(p.id))return toast('현재 로그인한 관리자 계정은 자기 자신을 중지할 수 없습니다.');const active=account.active===false;const result=await window.schoolBoard?.updateUserAccount?.({id,active});if(!result?.ok)return toast(result?.reason||'사용자 승인 상태를 저장하지 못했습니다.');const refreshed=await window.schoolBoard?.readReadonlyCache?.();if(refreshed?.ok)readonlyCache=refreshed.data;render('settings');toast(active?'사용 승인을 완료했습니다.':'사용을 중지했습니다.');});row.querySelector('[data-inline-access-save]')?.addEventListener('click',async()=>{const role=row.querySelector('[data-inline-access-role]')?.value||'',grade=row.querySelector('[data-inline-access-grade]')?.value||'1',classNo=row.querySelector('[data-inline-access-class]')?.value||'';const admin=role==='관리자';const result=await window.schoolBoard?.updateUserAccount?.({id,role:admin?'관리자':role,admin,grade,classNo,active:account.active!==false});if(!result?.ok)return toast(result?.reason||'권한을 저장하지 못했습니다.');const refreshed=await window.schoolBoard?.readReadonlyCache?.();if(refreshed?.ok)readonlyCache=refreshed.data;render('settings');toast('사용자 권한을 저장했습니다.');});});
+  $$('[data-check-update]').forEach(button=>button.onclick=async()=>{const url=$("#updateManifestUrl")?.value.trim()||state.settings.updateManifestUrl||"";if(!url)return toast("업데이트 정보 JSON 주소를 먼저 입력하세요.");button.disabled=true;button.textContent="확인 중…";const result=await window.schoolBoard?.checkUpdate?.(url,APP_VERSION);button.disabled=false;button.textContent="업데이트 확인";const box=$("#updateCheckResult");if(!result?.ok){if(box)box.innerHTML=`<b>확인 실패</b><small>${escapeHtml(result?.reason||'업데이트 정보를 읽지 못했습니다.')}</small>`;return;}if(box)box.innerHTML=result.updateAvailable?`<b>새 버전 ${escapeHtml(result.version)} 사용 가능</b><small>${escapeHtml(result.notes||'새 버전이 있습니다.')} · 확인경로 ${escapeHtml(result.source||'자동')}</small><button class="btn primary" data-apply-update>업데이트 적용</button>`:`<b>최신 버전입니다</b><small>현재 ${APP_VERSION} · 확인경로 ${escapeHtml(result.source||'자동')}</small>`;const apply=$("[data-apply-update]");if(apply)apply.onclick=async()=>{if(!result.sha256)return toast("업데이트 정보에 SHA-256이 없어 자동 적용할 수 없습니다.");if(!confirm(`UEP ${result.version} 업데이트를 적용할까요?\n\n현재 설정·인증·연결 정보는 그대로 유지됩니다. 적용 후 UEP가 자동으로 다시 실행됩니다.`))return;apply.disabled=true;apply.textContent="다운로드·검증 중…";const applied=await window.schoolBoard?.applyUpdate?.({version:result.version,downloadUrl:result.downloadUrl,sha256:result.sha256});if(!applied?.ok){apply.disabled=false;apply.textContent="업데이트 적용";return toast(applied?.reason||"업데이트 적용에 실패했습니다.");}toast("업데이트 검증 완료 · UEP를 재시작하여 적용합니다.");};});
+  const timetableForm = $("#timetableNeisForm");
+  if (timetableForm) timetableForm.onsubmit = async (event) => {
+---
+===== readReadonlyCache @11207 =====
+    const sync=await window.schoolBoard?.previewReadonlySync?.();
+    if(sync?.ok&&sync.data){readonlyCache=sync.data;return;}
+  }
+  const refreshed=await window.schoolBoard?.readReadonlyCache?.();
+  if(refreshed?.ok)readonlyCache=refreshed.data;
+}
+async function saveCurrentNoticeReceipt(item,change){
+---
+===== readReadonlyCache @12238 =====
+        googleConnectionError='';
+        if(typeof toast==='function')toast('학교 공용 읽기 연결 및 학교 시트 동기화가 완료되었습니다.');
+      }
+      if(window.schoolBoard?.readReadonlyCache){const cached=await window.schoolBoard.readReadonlyCache();if(cached?.ok)readonlyCache=uep08123NormalizeReadonlyCache(cached.data);}
+      if(typeof refreshReadonlyCacheSilently==='function')await refreshReadonlyCacheSilently({force:true,rerender:true});
+      if(typeof updateTopSyncStatus==='function')updateTopSyncStatus();
+      if(typeof startReadonlyAutoRefresh==='function')startReadonlyAutoRefresh();
+---
+===== previewReadonlySync @514 =====
+async function refreshReadonlyCacheSilently({force=true, rerender=true}={}) {
+  if(readonlyRefreshInFlight)return readonlyRefreshInFlight;
+  readonlyRefreshInFlight=(async()=>{
+  if(!googleConnectionStatus?.ok || !window.schoolBoard?.previewReadonlySync || !window.schoolBoard?.readReadonlyCache) return false;
+  try {
+    if(force){
+      const sync=await window.schoolBoard.previewReadonlySync();
+---
+===== previewReadonlySync @517 =====
+  if(!googleConnectionStatus?.ok || !window.schoolBoard?.previewReadonlySync || !window.schoolBoard?.readReadonlyCache) return false;
+  try {
+    if(force){
+      const sync=await window.schoolBoard.previewReadonlySync();
+      if(!sync?.ok) throw new Error(sync?.reason||'UEP 학교 데이터 자동 갱신 실패');
+    }
+    const cached=await window.schoolBoard.readReadonlyCache();
+---
+===== previewReadonlySync @3569 =====
+  document.getElementById('useDifferentUser')?.addEventListener('click',()=>renderUserAuthGate({locked:false,switchUser:true}));
+  document.getElementById('userAuthExit')?.addEventListener('click',async()=>{if(confirm('UEP를 종료할까요?'))await window.schoolBoard?.close?.();});
+  document.getElementById('rememberedUserContinue')?.addEventListener('click',async()=>{const status=await window.schoolBoard?.schoolReadSessionStatus?.({verify:true});if(!status?.authenticated)return renderUserAuthGate({switchUser:true});const a=status.user||{},account={id:String(a.userId||remembered.id||''),email:String(a.email||remembered.email||'').trim(),name:uep08125PickTeacherName(a.name,remembered.name),role:String(a.role||''),admin:a.isAdmin?'Y':'N',grade:String(a.grade||'1'),classNo:String(a.homeroom||''),department:String(a.department||((a.grade||1)+'학년부')),active:true,activeRaw:'Y'};state.auth.user=accountToSession(account);googleConnectionStatus={ok:true,encryption:true,mode:'school_read_api'};await save();hideUserAuthGate();refreshReadonlyCacheSilently({force:true,rerender:false}).catch(()=>{});navigate(state.activePage||'dashboard');});
+  document.getElementById('userAuthForm')?.addEventListener('submit',async event=>{event.preventDefault();const name=document.getElementById('userAuthName')?.value,email=document.getElementById('userAuthEmail')?.value;const submit=event.submitter||document.querySelector('#userAuthForm button[type="submit"]');if(submit){submit.disabled=true;submit.textContent='확인 중…';}try{if(!window.schoolBoard?.schoolReadLogin)throw new Error('이 UEP 빌드에는 School Read API 로그인이 없습니다.');const result=await window.schoolBoard.schoolReadLogin({name,email});if(!result?.ok){authGateMessage(result?.message||'UEP 로그인에 실패했습니다.');return;}const a=result.user||{};const account={id:String(a.userId||''),email:String(a.email||email||'').trim(),name:uep08125PickTeacherName(a.name,name),role:String(a.role||''),admin:a.isAdmin?'Y':'N',grade:String(a.grade||'1'),classNo:String(a.homeroom||''),department:String(a.department||((a.grade||1)+'학년부')),active:true,activeRaw:'Y'};const user=accountToSession(account),remember=Boolean(document.getElementById('userAuthRemember')?.checked);state.auth.user=user;state.auth.rememberUser=remember;state.auth.rememberedUser=remember?{id:user.id,name:user.name,email:user.email}:null;state.settings.userProfile={...state.settings.userProfile,...user};state.settings.loginUserName=user.name;state.settings.teacherName=user.name;googleConnectionStatus={ok:true,encryption:true,mode:'school_read_api'};await save();hideUserAuthGate();const synced=await window.schoolBoard?.previewReadonlySync?.();if(synced?.ok){const cached=await window.schoolBoard?.readReadonlyCache?.();if(cached?.ok){readonlyCache=uep08123NormalizeReadonlyCache(cached.data);googleConnectionError='';}}else if(synced){googleConnectionError=synced.reason||'학교 데이터 동기화에 실패했습니다.';}startReadonlyAutoRefresh();navigate(state.activePage||'dashboard');}catch(error){authGateMessage(error?.message||'UEP 로그인에 실패했습니다.');}finally{if(submit){submit.disabled=false;submit.textContent='UEP 시작';}}});
+}
+async function restoreRememberedSessionImmediately(){
+  const remembered=state?.auth?.rememberUser?state?.auth?.rememberedUser:null;
+---
+===== previewReadonlySync @3796 =====
+    $("#wizardSecondaryRole").value="grade_head";
+  });
+  $("[data-wizard-google]")?.addEventListener("click",async()=>{await selectGoogleCredential();renderSetupWizard();});
+  $("[data-wizard-sync]")?.addEventListener("click",async()=>{const button=$("[data-wizard-sync]");if(button){button.disabled=true;button.textContent="새로고침 중…";}const result=await window.schoolBoard?.previewReadonlySync?.();if(result?.ok){const cached=await window.schoolBoard?.readReadonlyCache?.();if(cached?.ok){readonlyCache=uep08123NormalizeReadonlyCache(cached.data);googleConnectionError="";}}else if(result){googleConnectionError=result.reason||"학교 데이터 동기화를 확인하세요. 마지막 저장 자료는 계속 사용할 수 있습니다.";}renderSetupWizard();});
+  $("[data-wizard-neis-load]")?.addEventListener("click",async()=>{
+    const school=$("#wizardNeisSchool")?.value.trim()||"운호고등학교";
+    const grade=$("#wizardNeisGrade")?.value||currentUserProfile().grade||"1";
+---
+===== previewReadonlySync @8997 =====
+  render("settings");
+}
+
+async function previewReadonlySync() {
+  if (!googleConnectionStatus.ok || !window.schoolBoard?.previewReadonlySync)
+    return toast("먼저 Google 연결 인증을 등록하세요.");
+  const button = $("[data-readonly-sync]");
+---
+===== previewReadonlySync @8998 =====
+}
+
+async function previewReadonlySync() {
+  if (!googleConnectionStatus.ok || !window.schoolBoard?.previewReadonlySync)
+    return toast("먼저 Google 연결 인증을 등록하세요.");
+  const button = $("[data-readonly-sync]");
+  if (button) {
+---
+===== previewReadonlySync @9005 =====
+    button.disabled = true;
+    button.textContent = "읽는 중…";
+  }
+  const result = await window.schoolBoard.previewReadonlySync();
+  if (!result?.ok) {
+    if (button) {
+      button.disabled = false;
+---
+===== previewReadonlySync @9034 =====
+}
+
+async function retryGoogleConnection() {
+  if (!window.schoolBoard?.previewReadonlySync) return navigate("settings");
+  toast("UEP 구글시트를 다시 읽는 중입니다.");
+  const result = await window.schoolBoard.previewReadonlySync();
+  if (!result?.ok) {
+---
+===== previewReadonlySync @9036 =====
+async function retryGoogleConnection() {
+  if (!window.schoolBoard?.previewReadonlySync) return navigate("settings");
+  toast("UEP 구글시트를 다시 읽는 중입니다.");
+  const result = await window.schoolBoard.previewReadonlySync();
+  if (!result?.ok) {
+    googleConnectionError = result?.reason || "UEP 구글시트 연결에 실패했습니다.";
+    updateTopSyncStatus();
+---
+===== previewReadonlySync @10432 =====
+    (x) => (x.onclick = () => openConnectionDetail(x.dataset.connectionDetail)),
+  );
+  $$("[data-oauth-guide]").forEach((x) => (x.onclick = selectGoogleCredential));
+  $$("[data-readonly-sync]").forEach((x) => (x.onclick = previewReadonlySync));
+  $$("[data-setting]").forEach(
+    (x) =>
+      (x.onclick = async () => {
+---
+===== previewReadonlySync @10546 =====
+  if(updateForm) updateForm.onsubmit=async event=>{event.preventDefault();state.settings.updateManifestUrl=$("#updateManifestUrl").value.trim();await save();toast("업데이트 정보 주소를 저장했습니다.");};
+  $$('[data-open-issue-report]').forEach(button=>button.onclick=openIssueReportDialog);
+  $$('[data-open-issue-manager]').forEach(button=>button.onclick=()=>{if(currentRoleId()!=='admin')return toast('관리자만 신고 관리 화면을 열 수 있습니다.');openIssueManager();});
+  $$('[data-run-health-check]').forEach(button=>button.onclick=async()=>{button.disabled=true;button.textContent='진단 중…';const result=await window.schoolBoard?.previewReadonlySync?.().catch(()=>null);if(result?.ok){readonlyCache=result.data;googleConnectionError='';}else if(result?.reason){googleConnectionError=result.reason;}button.disabled=false;render('settings');toast(googleConnectionError?'연결 진단에서 확인할 항목이 있습니다.':'필수 연결이 정상입니다.');});
+  $$('[data-access-control]').forEach(button=>button.onclick=()=>openAccessControlPanel());
+  $$('[data-inline-access-refresh]').forEach(button=>button.onclick=async()=>{const result=await window.schoolBoard?.readReadonlyCache?.();if(result?.ok){readonlyCache=result.data;render('settings');toast('사용자 계정표를 새로고침했습니다.');}else toast(result?.reason||'사용자 계정표를 새로고침하지 못했습니다.');});
+  $$('[data-inline-access-user]').forEach(row=>{const id=row.dataset.inlineAccessUser,account=(readonlyCache?.userAccounts||[]).find(a=>String(a.id)===String(id));if(!account)return;row.querySelector('[data-inline-access-toggle]')?.addEventListener('click',async()=>{const p=currentUserProfile();if(account.active!==false&&String(account.id)===String(p.id))return toast('현재 로그인한 관리자 계정은 자기 자신을 중지할 수 없습니다.');const active=account.active===false;const result=await window.schoolBoard?.updateUserAccount?.({id,active});if(!result?.ok)return toast(result?.reason||'사용자 승인 상태를 저장하지 못했습니다.');const refreshed=await window.schoolBoard?.readReadonlyCache?.();if(refreshed?.ok)readonlyCache=refreshed.data;render('settings');toast(active?'사용 승인을 완료했습니다.':'사용을 중지했습니다.');});row.querySelector('[data-inline-access-save]')?.addEventListener('click',async()=>{const role=row.querySelector('[data-inline-access-role]')?.value||'',grade=row.querySelector('[data-inline-access-grade]')?.value||'1',classNo=row.querySelector('[data-inline-access-class]')?.value||'';const admin=role==='관리자';const result=await window.schoolBoard?.updateUserAccount?.({id,role:admin?'관리자':role,admin,grade,classNo,active:account.active!==false});if(!result?.ok)return toast(result?.reason||'권한을 저장하지 못했습니다.');const refreshed=await window.schoolBoard?.readReadonlyCache?.();if(refreshed?.ok)readonlyCache=refreshed.data;render('settings');toast('사용자 권한을 저장했습니다.');});});
+---
+===== previewReadonlySync @11204 =====
+async function refreshReadonlyAfterNotice({force=false}={}){
+  // 확인/승인 상태는 먼저 로컬 캐시에 즉시 반영한다. 매 클릭마다 전체 시트를 다시 읽지 않는다.
+  if(force){
+    const sync=await window.schoolBoard?.previewReadonlySync?.();
+    if(sync?.ok&&sync.data){readonlyCache=sync.data;return;}
+  }
+  const refreshed=await window.schoolBoard?.readReadonlyCache?.();
+---
+===== previewReadonlySync @11330 =====
+  const settingsButton = $("[data-sync-settings]");
+  if (settingsButton) settingsButton.onclick = () => { closeDrawer(); navigate("settings"); };
+  const googleRetry = $("[data-sync-google-retry]");
+  if (googleRetry) googleRetry.onclick = async () => { closeDrawer(); await previewReadonlySync(); };
+  const neisRetry = $("[data-sync-neis-retry]");
+  if (neisRetry) neisRetry.onclick = async () => { closeDrawer(); await loadNeisDashboard(true); };
+}
+---
+===== subjectSelections @3860 =====
+    ["02_학생마스터",(readonlyCache?.students||[]).length>0],
+    ["04_학생연락식별정보",(readonlyCache?.students||[]).some(s=>s.phone&&s.phone!=="-")],
+    ["05_대학적성데이터",!String(googleConnectionError||"").includes("05_대학적성데이터")&&!String(googleConnectionError||"").includes("05_진로희망이력")],
+    ["06_선택과목이력",Array.isArray(readonlyCache?.subjectSelections)],
+    ["20_학사생마스터",Array.isArray(readonlyCache?.dormStudents)],
+    ["41_학교캘린더",Array.isArray(readonlyCache?.calendarEvents)],
+    ["42_급식지도계획",Array.isArray(readonlyCache?.lunchDuties)],
+---
+===== subjectSelections @4852 =====
+  });
+  const selected=(()=>{
+  const out=[],seen=new Set();
+  for(const raw of (readonlyCache?.subjectSelections||[])){
+    if(!studentMatches(raw,student)||!studentRecordWithinEnrollment(raw,student)) continue;
+    const item={...raw,
+      term:raw.term||raw.semester||raw.학기||raw.이수학기||'',
+---
+===== 06_선택과목이력 @3860 =====
+    ["02_학생마스터",(readonlyCache?.students||[]).length>0],
+    ["04_학생연락식별정보",(readonlyCache?.students||[]).some(s=>s.phone&&s.phone!=="-")],
+    ["05_대학적성데이터",!String(googleConnectionError||"").includes("05_대학적성데이터")&&!String(googleConnectionError||"").includes("05_진로희망이력")],
+    ["06_선택과목이력",Array.isArray(readonlyCache?.subjectSelections)],
+    ["20_학사생마스터",Array.isArray(readonlyCache?.dormStudents)],
+    ["41_학교캘린더",Array.isArray(readonlyCache?.calendarEvents)],
+    ["42_급식지도계획",Array.isArray(readonlyCache?.lunchDuties)],
+---
+===== schoolRead @433 =====
+  // 외부 연결은 UI 초기화와 분리하고 서로 독립적인 작업은 병렬로 시작한다.
+  // NEIS가 Google 캐시 완료를 기다리지 않도록 먼저 예약한다.
   setTimeout(() => loadNeisDashboard(false), 0);
   const credentialTask = window.schoolBoard?.schoolReadSessionStatus
     ? withStartupTimeout(window.schoolBoard.schoolReadSessionStatus({verify:true}), 5000, null)
         .then((status) => { if (status) googleConnectionStatus = {ok:Boolean(status.authenticated),encryption:true,mode:'school_read_api',endpointReady:status.endpointReady!==false}; })
         .catch((error) => console.warn("[UEP] School Read API 세션 확인 실패", error))
 ---
-  document.getElementById('useDifferentUser')?.addEventListener('click',()=>renderUserAuthGate({locked:false,switchUser:true}));
-  document.getElementById('userAuthExit')?.addEventListener('click',async()=>{if(confirm('UEP를 종료할까요?'))await window.schoolBoard?.close?.();});
-  document.getElementById('rememberedUserContinue')?.addEventListener('click',async()=>{const status=await window.schoolBoard?.schoolReadSessionStatus?.({verify:true});if(!status?.authenticated)return renderUserAuthGate({switchUser:true});const a=status.user||{},account={id:String(a.userId||remembered.id||''),email:String(a.email||remembered.email||'').trim(),name:uep08125PickTeacherName(a.name,remembered.name),role:String(a.role||''),admin:a.isAdmin?'Y':'N',grade:String(a.grade||'1'),classNo:String(a.homeroom||''),department:String(a.department||((a.grade||1)+'학년부')),active:true,activeRaw:'Y'};state.auth.user=accountToSession(account);googleConnectionStatus={ok:true,encryption:true,mode:'school_read_api'};await save();hideUserAuthGate();refreshReadonlyCacheSilently({force:true,rerender:false}).catch(()=>{});navigate(state.activePage||'dashboard');});
-  document.getElementById('userAuthForm')?.addEventListener('submit',async event=>{event.preventDefault();const name=document.getElementById('userAuthName')?.value,email=document.getElementById('userAuthEmail')?.value;const submit=event.submitter||document.querySelector('#userAuthForm button[type="submit"]');if(submit){submit.disabled=true;submit.textContent='확인 중…';}try{if(!window.schoolBoard?.schoolReadLogin)throw new Error('이 UEP 빌드에는 School Read API 로그인이 없습니다.');const result=await window.schoolBoard.schoolReadLogin({name,email});if(!result?.ok){authGateMessage(result?.message||'UEP 로그인에 실패했습니다.');return;}const a=result.user||{};const account={id:String(a.userId||''),email:String(a.email||email||'').trim(),name:uep08125PickTeacherName(a.name,name),role:String(a.role||''),admin:a.isAdmin?'Y':'N',grade:String(a.grade||'1'),classNo:String(a.homeroom||''),department:String(a.department||((a.grade||1)+'학년부')),active:true,activeRaw:'Y'};const user=accountToSession(account),remember=Boolean(document.getElementById('userAuthRemember')?.checked);state.auth.user=user;state.auth.rememberUser=remember;state.auth.rememberedUser=remember?{id:user.id,name:user.name,email:user.email}:null;state.settings.userProfile={...state.settings.userProfile,...user};state.settings.loginUserName=user.name;state.settings.teacherName=user.name;googleConnectionStatus={ok:true,encryption:true,mode:'school_read_api'};await save();hideUserAuthGate();const synced=await window.schoolBoard?.previewReadonlySync?.();if(synced?.ok){const cached=await window.schoolBoard?.readReadonlyCache?.();if(cached?.ok){readonlyCache=uep08123NormalizeReadonlyCache(cached.data);googleConnectionError='';}}else if(synced){googleConnectionError=synced.reason||'학교 데이터 동기화에 실패했습니다.';}startReadonlyAutoRefresh();navigate(state.activePage||'dashboard');}catch(error){authGateMessage(error?.message||'UEP 로그인에 실패했습니다.');}finally{if(submit){submit.disabled=false;submit.textContent='UEP 시작';}}});
-}
+===== schoolRead @434 =====
+  // NEIS가 Google 캐시 완료를 기다리지 않도록 먼저 예약한다.
+  setTimeout(() => loadNeisDashboard(false), 0);
+  const credentialTask = window.schoolBoard?.schoolReadSessionStatus
+    ? withStartupTimeout(window.schoolBoard.schoolReadSessionStatus({verify:true}), 5000, null)
+        .then((status) => { if (status) googleConnectionStatus = {ok:Boolean(status.authenticated),encryption:true,mode:'school_read_api',endpointReady:status.endpointReady!==false}; })
+        .catch((error) => console.warn("[UEP] School Read API 세션 확인 실패", error))
+    : Promise.resolve();
 ---
+===== schoolRead @3568 =====
+  gate.innerHTML=`<section class="user-auth-card"><div class="user-auth-brand"><span>U</span><div><small>UNHO EDUCATION PLATFORM</small><h2>${locked?'UEP 화면 잠금':'사용자 확인'}</h2><p>${locked?'학생정보 보호를 위해 현재 화면을 잠갔습니다.':'학교에 등록된 이메일을 기준으로 사용자를 확인합니다. 최고관리자는 신규 PC에서도 안전하게 진입할 수 있습니다.'}</p></div></div>${canContinue?`<button class="user-auth-remembered" id="rememberedUserContinue"><b>${escapeHtml(remembered.name)}</b><span>${escapeHtml(maskEmail(remembered.email))}</span><small>${locked?'계속 사용':'자동 로그인 사용자'}</small></button><button class="user-auth-text" id="useDifferentUser">다른 사용자로 로그인</button>`:`<form id="userAuthForm"><label>교사 이름<input id="userAuthName" autocomplete="name" required placeholder="예: 홍석민"></label><label>교사 이메일<input id="userAuthEmail" type="email" autocomplete="email" required placeholder="학교에 등록된 이메일"></label><label class="user-auth-check"><input id="userAuthRemember" type="checkbox"> 이 PC에서 자동 로그인</label><p id="userAuthMessage" class="user-auth-message"></p><button class="btn primary" type="submit">UEP 시작</button></form>`}<div class="user-auth-exit-row"><button type="button" class="user-auth-text danger" id="userAuthExit">UEP 종료</button></div><footer>PC 인증과 사용자 확인은 별도입니다. 상담 메모와 개인 권한은 현재 로그인 교사를 기준으로 표시됩니다.</footer></section>`;
+  document.getElementById('useDifferentUser')?.addEventListener('click',()=>renderUserAuthGate({locked:false,switchUser:true}));
   document.getElementById('userAuthExit')?.addEventListener('click',async()=>{if(confirm('UEP를 종료할까요?'))await window.schoolBoard?.close?.();});
   document.getElementById('rememberedUserContinue')?.addEventListener('click',async()=>{const status=await window.schoolBoard?.schoolReadSessionStatus?.({verify:true});if(!status?.authenticated)return renderUserAuthGate({switchUser:true});const a=status.user||{},account={id:String(a.userId||remembered.id||''),email:String(a.email||remembered.email||'').trim(),name:uep08125PickTeacherName(a.name,remembered.name),role:String(a.role||''),admin:a.isAdmin?'Y':'N',grade:String(a.grade||'1'),classNo:String(a.homeroom||''),department:String(a.department||((a.grade||1)+'학년부')),active:true,activeRaw:'Y'};state.auth.user=accountToSession(account);googleConnectionStatus={ok:true,encryption:true,mode:'school_read_api'};await save();hideUserAuthGate();refreshReadonlyCacheSilently({force:true,rerender:false}).catch(()=>{});navigate(state.activePage||'dashboard');});
   document.getElementById('userAuthForm')?.addEventListener('submit',async event=>{event.preventDefault();const name=document.getElementById('userAuthName')?.value,email=document.getElementById('userAuthEmail')?.value;const submit=event.submitter||document.querySelector('#userAuthForm button[type="submit"]');if(submit){submit.disabled=true;submit.textContent='확인 중…';}try{if(!window.schoolBoard?.schoolReadLogin)throw new Error('이 UEP 빌드에는 School Read API 로그인이 없습니다.');const result=await window.schoolBoard.schoolReadLogin({name,email});if(!result?.ok){authGateMessage(result?.message||'UEP 로그인에 실패했습니다.');return;}const a=result.user||{};const account={id:String(a.userId||''),email:String(a.email||email||'').trim(),name:uep08125PickTeacherName(a.name,name),role:String(a.role||''),admin:a.isAdmin?'Y':'N',grade:String(a.grade||'1'),classNo:String(a.homeroom||''),department:String(a.department||((a.grade||1)+'학년부')),active:true,activeRaw:'Y'};const user=accountToSession(account),remember=Boolean(document.getElementById('userAuthRemember')?.checked);state.auth.user=user;state.auth.rememberUser=remember;state.auth.rememberedUser=remember?{id:user.id,name:user.name,email:user.email}:null;state.settings.userProfile={...state.settings.userProfile,...user};state.settings.loginUserName=user.name;state.settings.teacherName=user.name;googleConnectionStatus={ok:true,encryption:true,mode:'school_read_api'};await save();hideUserAuthGate();const synced=await window.schoolBoard?.previewReadonlySync?.();if(synced?.ok){const cached=await window.schoolBoard?.readReadonlyCache?.();if(cached?.ok){readonlyCache=uep08123NormalizeReadonlyCache(cached.data);googleConnectionError='';}}else if(synced){googleConnectionError=synced.reason||'학교 데이터 동기화에 실패했습니다.';}startReadonlyAutoRefresh();navigate(state.activePage||'dashboard');}catch(error){authGateMessage(error?.message||'UEP 로그인에 실패했습니다.');}finally{if(submit){submit.disabled=false;submit.textContent='UEP 시작';}}});
 }
 async function restoreRememberedSessionImmediately(){
 ---
-  const sameEmail=String(savedUser.email).trim().toLowerCase()===String(remembered.email).trim().toLowerCase();
-  if(!sameName||!sameEmail)return false;
-  if(!window.schoolBoard?.schoolReadSessionStatus)return false;
-  const status=await window.schoolBoard.schoolReadSessionStatus({verify:true});
-  if(!status?.authenticated)return false;
+===== schoolRead @3569 =====
+  document.getElementById('useDifferentUser')?.addEventListener('click',()=>renderUserAuthGate({locked:false,switchUser:true}));
+  document.getElementById('userAuthExit')?.addEventListener('click',async()=>{if(confirm('UEP를 종료할까요?'))await window.schoolBoard?.close?.();});
+  document.getElementById('rememberedUserContinue')?.addEventListener('click',async()=>{const status=await window.schoolBoard?.schoolReadSessionStatus?.({verify:true});if(!status?.authenticated)return renderUserAuthGate({switchUser:true});const a=status.user||{},account={id:String(a.userId||remembered.id||''),email:String(a.email||remembered.email||'').trim(),name:uep08125PickTeacherName(a.name,remembered.name),role:String(a.role||''),admin:a.isAdmin?'Y':'N',grade:String(a.grade||'1'),classNo:String(a.homeroom||''),department:String(a.department||((a.grade||1)+'학년부')),active:true,activeRaw:'Y'};state.auth.user=accountToSession(account);googleConnectionStatus={ok:true,encryption:true,mode:'school_read_api'};await save();hideUserAuthGate();refreshReadonlyCacheSilently({force:true,rerender:false}).catch(()=>{});navigate(state.activePage||'dashboard');});
+  document.getElementById('userAuthForm')?.addEventListener('submit',async event=>{event.preventDefault();const name=document.getElementById('userAuthName')?.value,email=document.getElementById('userAuthEmail')?.value;const submit=event.submitter||document.querySelector('#userAuthForm button[type="submit"]');if(submit){submit.disabled=true;submit.textContent='확인 중…';}try{if(!window.schoolBoard?.schoolReadLogin)throw new Error('이 UEP 빌드에는 School Read API 로그인이 없습니다.');const result=await window.schoolBoard.schoolReadLogin({name,email});if(!result?.ok){authGateMessage(result?.message||'UEP 로그인에 실패했습니다.');return;}const a=result.user||{};const account={id:String(a.userId||''),email:String(a.email||email||'').trim(),name:uep08125PickTeacherName(a.name,name),role:String(a.role||''),admin:a.isAdmin?'Y':'N',grade:String(a.grade||'1'),classNo:String(a.homeroom||''),department:String(a.department||((a.grade||1)+'학년부')),active:true,activeRaw:'Y'};const user=accountToSession(account),remember=Boolean(document.getElementById('userAuthRemember')?.checked);state.auth.user=user;state.auth.rememberUser=remember;state.auth.rememberedUser=remember?{id:user.id,name:user.name,email:user.email}:null;state.settings.userProfile={...state.settings.userProfile,...user};state.settings.loginUserName=user.name;state.settings.teacherName=user.name;googleConnectionStatus={ok:true,encryption:true,mode:'school_read_api'};await save();hideUserAuthGate();const synced=await window.schoolBoard?.previewReadonlySync?.();if(synced?.ok){const cached=await window.schoolBoard?.readReadonlyCache?.();if(cached?.ok){readonlyCache=uep08123NormalizeReadonlyCache(cached.data);googleConnectionError='';}}else if(synced){googleConnectionError=synced.reason||'학교 데이터 동기화에 실패했습니다.';}startReadonlyAutoRefresh();navigate(state.activePage||'dashboard');}catch(error){authGateMessage(error?.message||'UEP 로그인에 실패했습니다.');}finally{if(submit){submit.disabled=false;submit.textContent='UEP 시작';}}});
+}
+async function restoreRememberedSessionImmediately(){
+  const remembered=state?.auth?.rememberUser?state?.auth?.rememberedUser:null;
 ---
+===== schoolRead @3578 =====
+  const sameName=String(savedUser.name).trim()===String(remembered.name).trim();
+  const sameEmail=String(savedUser.email).trim().toLowerCase()===String(remembered.email).trim().toLowerCase();
   if(!sameName||!sameEmail)return false;
   if(!window.schoolBoard?.schoolReadSessionStatus)return false;
   const status=await window.schoolBoard.schoolReadSessionStatus({verify:true});
   if(!status?.authenticated)return false;
   const a=status.user||{};const account={id:String(a.userId||remembered?.id||savedUser?.id||''),email:String(a.email||remembered?.email||savedUser?.email||'').trim(),name:uep08125PickTeacherName(a.name,remembered?.name,savedUser?.name),role:String(a.role||''),admin:a.isAdmin?'Y':'N',grade:String(a.grade||'1'),classNo:String(a.homeroom||''),department:String(a.department||((a.grade||1)+'학년부')),active:true,activeRaw:'Y'};state.auth.user=accountToSession(account);state.settings.userProfile={...state.settings.userProfile,...state.auth.user};state.settings.loginUserName=state.auth.user.name;state.settings.teacherName=state.auth.user.name;googleConnectionStatus={ok:true,encryption:true,mode:'school_read_api'};
 ---
+===== schoolRead @3579 =====
+  const sameEmail=String(savedUser.email).trim().toLowerCase()===String(remembered.email).trim().toLowerCase();
+  if(!sameName||!sameEmail)return false;
+  if(!window.schoolBoard?.schoolReadSessionStatus)return false;
+  const status=await window.schoolBoard.schoolReadSessionStatus({verify:true});
+  if(!status?.authenticated)return false;
+  const a=status.user||{};const account={id:String(a.userId||remembered?.id||savedUser?.id||''),email:String(a.email||remembered?.email||savedUser?.email||'').trim(),name:uep08125PickTeacherName(a.name,remembered?.name,savedUser?.name),role:String(a.role||''),admin:a.isAdmin?'Y':'N',grade:String(a.grade||'1'),classNo:String(a.homeroom||''),department:String(a.department||((a.grade||1)+'학년부')),active:true,activeRaw:'Y'};state.auth.user=accountToSession(account);state.settings.userProfile={...state.settings.userProfile,...state.auth.user};state.settings.loginUserName=state.auth.user.name;state.settings.teacherName=state.auth.user.name;googleConnectionStatus={ok:true,encryption:true,mode:'school_read_api'};
+  const gate=document.getElementById('userAuthGate');
+---
+===== schoolRead @3595 =====
+async function initializeUserSessionGate(){
   const remembered=state?.auth?.rememberUser?state?.auth?.rememberedUser:null;
   const savedUser=state?.auth?.user;
   if(uep08125ValidTeacherName(remembered?.name)&&remembered?.email&&window.schoolBoard?.schoolReadSessionStatus){
     try{
       const status=await window.schoolBoard.schoolReadSessionStatus({verify:true});
+      if(status?.authenticated){
 ---
+===== schoolRead @3597 =====
+  const savedUser=state?.auth?.user;
   if(uep08125ValidTeacherName(remembered?.name)&&remembered?.email&&window.schoolBoard?.schoolReadSessionStatus){
     try{
       const status=await window.schoolBoard.schoolReadSessionStatus({verify:true});
       if(status?.authenticated){
         const a=status.user||{};const account={id:String(a.userId||remembered?.id||savedUser?.id||''),email:String(a.email||remembered?.email||savedUser?.email||'').trim(),name:uep08125PickTeacherName(a.name,remembered?.name,savedUser?.name),role:String(a.role||''),admin:a.isAdmin?'Y':'N',grade:String(a.grade||'1'),classNo:String(a.homeroom||''),department:String(a.department||((a.grade||1)+'학년부')),active:true,activeRaw:'Y'};state.auth.user=accountToSession(account);state.settings.userProfile={...state.settings.userProfile,...state.auth.user};state.settings.loginUserName=state.auth.user.name;state.settings.teacherName=state.auth.user.name;googleConnectionStatus={ok:true,encryption:true,mode:'school_read_api'};
+        await save();
 ---
+===== schoolRead @3614 =====
+  return false;
 }
-async function lockCurrentUser(){state.auth.locked=true;await save();closeAccountPopover();renderUserAuthGate({locked:true});}
-async function switchCurrentUser(){await window.schoolBoard?.schoolReadLogout?.();googleConnectionStatus={ok:false,encryption:true,mode:'school_read_api'};state.auth.user=null;state.auth.locked=true;await save();closeAccountPopover();renderUserAuthGate({switchUser:true});}
-async function logoutCurrentUser(){await window.schoolBoard?.schoolReadLogout?.();googleConnectionStatus={ok:false,encryption:true,mode:'school_read_api'};state.auth.user=null;state.auth.rememberUser=false;state.auth.rememberedUser=null;state.auth.locked=true;await save();closeAccountPopover();renderUserAuthGate({switchUser:true});}
-function closeAccountPopover(){document.querySelector('.account-popover')?.remove();}
----
 async function lockCurrentUser(){state.auth.locked=true;await save();closeAccountPopover();renderUserAuthGate({locked:true});}
 async function switchCurrentUser(){await window.schoolBoard?.schoolReadLogout?.();googleConnectionStatus={ok:false,encryption:true,mode:'school_read_api'};state.auth.user=null;state.auth.locked=true;await save();closeAccountPopover();renderUserAuthGate({switchUser:true});}
 async function logoutCurrentUser(){await window.schoolBoard?.schoolReadLogout?.();googleConnectionStatus={ok:false,encryption:true,mode:'school_read_api'};state.auth.user=null;state.auth.rememberUser=false;state.auth.rememberedUser=null;state.auth.locked=true;await save();closeAccountPopover();renderUserAuthGate({switchUser:true});}
 function closeAccountPopover(){document.querySelector('.account-popover')?.remove();}
 function openAccountPopover(){
 ---
+===== schoolRead @3615 =====
+}
+async function lockCurrentUser(){state.auth.locked=true;await save();closeAccountPopover();renderUserAuthGate({locked:true});}
+async function switchCurrentUser(){await window.schoolBoard?.schoolReadLogout?.();googleConnectionStatus={ok:false,encryption:true,mode:'school_read_api'};state.auth.user=null;state.auth.locked=true;await save();closeAccountPopover();renderUserAuthGate({switchUser:true});}
+async function logoutCurrentUser(){await window.schoolBoard?.schoolReadLogout?.();googleConnectionStatus={ok:false,encryption:true,mode:'school_read_api'};state.auth.user=null;state.auth.rememberUser=false;state.auth.rememberedUser=null;state.auth.locked=true;await save();closeAccountPopover();renderUserAuthGate({switchUser:true});}
+function closeAccountPopover(){document.querySelector('.account-popover')?.remove();}
+function openAccountPopover(){
+  closeAccountPopover();const p=currentUserProfile(),profile=document.querySelector('.profile');if(!profile||!authSessionReady)return;const pop=document.createElement('div');pop.className='account-popover';pop.innerHTML=`<div class="account-popover-head"><span>${escapeHtml((p.name||'U').slice(0,1))}</span><div><b>${escapeHtml(p.name||'사용자')}</b><small>${escapeHtml([p.department,currentRoleDisplay()].filter(Boolean).join(' · '))}</small><em>${escapeHtml(maskEmail(p.email))}</em></div></div><button data-account-lock>화면 잠금<small>현재 화면을 가립니다</small></button><button data-account-switch>다른 사용자로 전환<small>교사명·이메일 다시 입력</small></button><button class="danger" data-account-logout>로그아웃<small>자동 로그인도 해제</small></button>`;document.body.appendChild(pop);const r=profile.getBoundingClientRect();pop.style.left=`${Math.max(12,r.left)}px`;pop.style.bottom=`${Math.max(12,window.innerHeight-r.top+8)}px`;pop.querySelector('[data-account-lock]').onclick=lockCurrentUser;pop.querySelector('[data-account-switch]').onclick=switchCurrentUser;pop.querySelector('[data-account-logout]').onclick=logoutCurrentUser;setTimeout(()=>document.addEventListener('pointerdown',accountPopoverOutside,{once:true}),0);
+---
+===== schoolRead @12635 =====
+
 
 // __UEP_SCHOOL_READ_BADGE_08122__
 (function installSchoolReadAuthBadgeSync(){
   async function syncSchoolReadAuthBadge(){
     try{
+      if(!window.schoolBoard?.schoolReadSessionStatus)return;
 ---
+===== schoolRead @12636 =====
+
 // __UEP_SCHOOL_READ_BADGE_08122__
 (function installSchoolReadAuthBadgeSync(){
   async function syncSchoolReadAuthBadge(){
     try{
       if(!window.schoolBoard?.schoolReadSessionStatus)return;
----
-  async function syncSchoolReadAuthBadge(){
-    try{
-      if(!window.schoolBoard?.schoolReadSessionStatus)return;
       const status=await window.schoolBoard.schoolReadSessionStatus({verify:false});
-      const authenticated=Boolean(status?.authenticated);
 ---
+===== schoolRead @12638 =====
+(function installSchoolReadAuthBadgeSync(){
+  async function syncSchoolReadAuthBadge(){
     try{
       if(!window.schoolBoard?.schoolReadSessionStatus)return;
       const status=await window.schoolBoard.schoolReadSessionStatus({verify:false});
       const authenticated=Boolean(status?.authenticated);
       const nodes=[...document.querySelectorAll('button,span,div,a')];
 ---
+===== schoolRead @12639 =====
+  async function syncSchoolReadAuthBadge(){
+    try{
+      if(!window.schoolBoard?.schoolReadSessionStatus)return;
+      const status=await window.schoolBoard.schoolReadSessionStatus({verify:false});
+      const authenticated=Boolean(status?.authenticated);
+      const nodes=[...document.querySelectorAll('button,span,div,a')];
+      for(const node of nodes){
+---
+===== schoolRead @12645 =====
+      for(const node of nodes){
         const text=String(node.textContent||'').trim();
         if(authenticated && text==='인증 필요'){
           node.dataset.uepSchoolReadAuthBadge='1';
           node.textContent='연결됨';
           node.title='UEP School Read API 인증 정상';
----
-          node.textContent='연결됨';
-          node.title='UEP School Read API 인증 정상';
         }else if(!authenticated && node.dataset?.uepSchoolReadAuthBadge==='1' && text==='연결됨'){
-          node.textContent='인증 필요';
-          node.title='UEP 로그인이 필요합니다.';
 ---
-    }catch(error){console.warn('[UEP] School Read auth badge sync failed',error);}
-  }
-  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>{syncSchoolReadAuthBadge();setInterval(syncSchoolReadAuthBadge,5000);},{once:true});
-  else {syncSchoolReadAuthBadge();setInterval(syncSchoolReadAuthBadge,5000);}
-})();
----
-  }
-  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>{syncSchoolReadAuthBadge();setInterval(syncSchoolReadAuthBadge,5000);},{once:true});
-  else {syncSchoolReadAuthBadge();setInterval(syncSchoolReadAuthBadge,5000);}
-})();
-
----
-===== school read =====
-    ? withStartupTimeout(window.schoolBoard.schoolReadSessionStatus({verify:true}), 5000, null)
-        .then((status) => { if (status) googleConnectionStatus = {ok:Boolean(status.authenticated),encryption:true,mode:'school_read_api',endpointReady:status.endpointReady!==false}; })
-        .catch((error) => console.warn("[UEP] School Read API 세션 확인 실패", error))
-    : Promise.resolve();
-  const cacheTask = window.schoolBoard?.readReadonlyCache
----
-    new Promise(resolve=>setTimeout(()=>{
-      try{
-        /* 0.81.20: local remembered state never bypasses School Read session verification */
-      }catch{}
-      resolve(true);
----
-  document.getElementById('userAuthExit')?.addEventListener('click',async()=>{if(confirm('UEP를 종료할까요?'))await window.schoolBoard?.close?.();});
-  document.getElementById('rememberedUserContinue')?.addEventListener('click',async()=>{const status=await window.schoolBoard?.schoolReadSessionStatus?.({verify:true});if(!status?.authenticated)return renderUserAuthGate({switchUser:true});const a=status.user||{},account={id:String(a.userId||remembered.id||''),email:String(a.email||remembered.email||'').trim(),name:uep08125PickTeacherName(a.name,remembered.name),role:String(a.role||''),admin:a.isAdmin?'Y':'N',grade:String(a.grade||'1'),classNo:String(a.homeroom||''),department:String(a.department||((a.grade||1)+'학년부')),active:true,activeRaw:'Y'};state.auth.user=accountToSession(account);googleConnectionStatus={ok:true,encryption:true,mode:'school_read_api'};await save();hideUserAuthGate();refreshReadonlyCacheSilently({force:true,rerender:false}).catch(()=>{});navigate(state.activePage||'dashboard');});
-  document.getElementById('userAuthForm')?.addEventListener('submit',async event=>{event.preventDefault();const name=document.getElementById('userAuthName')?.value,email=document.getElementById('userAuthEmail')?.value;const submit=event.submitter||document.querySelector('#userAuthForm button[type="submit"]');if(submit){submit.disabled=true;submit.textContent='확인 중…';}try{if(!window.schoolBoard?.schoolReadLogin)throw new Error('이 UEP 빌드에는 School Read API 로그인이 없습니다.');const result=await window.schoolBoard.schoolReadLogin({name,email});if(!result?.ok){authGateMessage(result?.message||'UEP 로그인에 실패했습니다.');return;}const a=result.user||{};const account={id:String(a.userId||''),email:String(a.email||email||'').trim(),name:uep08125PickTeacherName(a.name,name),role:String(a.role||''),admin:a.isAdmin?'Y':'N',grade:String(a.grade||'1'),classNo:String(a.homeroom||''),department:String(a.department||((a.grade||1)+'학년부')),active:true,activeRaw:'Y'};const user=accountToSession(account),remember=Boolean(document.getElementById('userAuthRemember')?.checked);state.auth.user=user;state.auth.rememberUser=remember;state.auth.rememberedUser=remember?{id:user.id,name:user.name,email:user.email}:null;state.settings.userProfile={...state.settings.userProfile,...user};state.settings.loginUserName=user.name;state.settings.teacherName=user.name;googleConnectionStatus={ok:true,encryption:true,mode:'school_read_api'};await save();hideUserAuthGate();const synced=await window.schoolBoard?.previewReadonlySync?.();if(synced?.ok){const cached=await window.schoolBoard?.readReadonlyCache?.();if(cached?.ok){readonlyCache=uep08123NormalizeReadonlyCache(cached.data);googleConnectionError='';}}else if(synced){googleConnectionError=synced.reason||'학교 데이터 동기화에 실패했습니다.';}startReadonlyAutoRefresh();navigate(state.activePage||'dashboard');}catch(error){authGateMessage(error?.message||'UEP 로그인에 실패했습니다.');}finally{if(submit){submit.disabled=false;submit.textContent='UEP 시작';}}});
-}
-async function restoreRememberedSessionImmediately(){
----
-        return true;
-      }
-    }catch(error){console.warn('[UEP] 저장된 School Read 세션 확인 실패',error);}
-  }
-  state.auth.user=null;
----
+===== schoolRead @12648 =====
           node.dataset.uepSchoolReadAuthBadge='1';
           node.textContent='연결됨';
           node.title='UEP School Read API 인증 정상';
         }else if(!authenticated && node.dataset?.uepSchoolReadAuthBadge==='1' && text==='연결됨'){
           node.textContent='인증 필요';
----
+          node.title='UEP 로그인이 필요합니다.';
         }
+---
+===== schoolRead @12655 =====
       }
     }catch(error){console.warn('[UEP] School Read auth badge sync failed',error);}
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>{syncSchoolReadAuthBadge();setInterval(syncSchoolReadAuthBadge,5000);},{once:true});
+  else {syncSchoolReadAuthBadge();setInterval(syncSchoolReadAuthBadge,5000);}
+})();
+
 ---
-===== sheetName =====
+===== schoolRead @12656 =====
+    }catch(error){console.warn('[UEP] School Read auth badge sync failed',error);}
+  }
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>{syncSchoolReadAuthBadge();setInterval(syncSchoolReadAuthBadge,5000);},{once:true});
+  else {syncSchoolReadAuthBadge();setInterval(syncSchoolReadAuthBadge,5000);}
+})();
+
+---
+===== sheetName @103 =====
+    manualCalendar: [],
     updateManifestUrl: "",
     programSheetUrl: "",
     programSheetName: "프로그램",
     referenceData: structuredClone(SOURCE_REFERENCE_DATA),
     dataConnections: {
+      studentMaster: {
 ---
+===== sheetName @110 =====
+        label: "학생 기본정보",
         fileTitle: "2026. 운호고 입학생 기초자료",
         spreadsheetId: "1IxBIpw3CKzVqWVaPPhFfdBC5DV8mMzQrXmN6o9KUavQ",
         sheetName: "기본자료",
         headerRow: 5,
         joinKey: "학급 + 번호 + 성명",
+        status: "auth-required",
 ---
+===== sheetName @120 =====
+        label: "학사 현황·외출",
         fileTitle: "UEP 표준시트",
         spreadsheetId: "",
         sheetName: "기본정보 20_학사생마스터 / 데이터처리 02_학사외출_일자별",
         headerRow: 3,
         joinKey: "학생ID 우선 · 학번 보조",
+        status: "auth-required",
 ---
+===== sheetName @130 =====
+        label: "학교 캘린더",
         fileTitle: "2026 운호고 업무 일정 계획",
         spreadsheetId: "1PJgeeaXUssZIkQiyL79RyYhN7tQGX-JaTIuO5M3b9XU",
         sheetName: "현재 월 탭",
         headerRow: 1,
         joinKey: "날짜",
+        status: "auth-required",
 ---
+===== sheetName @2657 =====
+      if(st){draft.studentId=st.id||'';draft.studentNo=st.studentNo||studentNo;draft.name=st.name||name;draft.grade=st.grade||studentNo.slice(0,1);draft.className=String(st.className||classNumberOf(st)||'').replace(/반/g,'');draft.matchStatus=String(st.name||'')===String(name||'')?'표 구조 자동매칭':'학번매칭·이름확인필요';}
       else{draft.studentNo=studentNo;draft.name=name;draft.matchStatus=studentNo?'학번 인식·학생DB 확인필요':'이름 인식·학번 확인필요';}
       const submittedIdx=headers.findIndex(h=>/제출.*(일시|시간)|타임스탬프/.test(h));const identityCols=new Set([idx.g,idx.c,idx.n,idx.nm,idx.sn,submittedIdx].filter(x=>x>=0));
       draft.structuredRow=true;draft.ocrStatus='구조분석완료';draft.ocrEngine='Excel 셀 직접분석';draft.sheetName=section.name;draft.rowNo=r+1;draft.sheetHeaders=headers;draft.structuredCells=cells;draft.submittedAt=submittedIdx>=0?cells[submittedIdx]:'';draft.reportFields=headers.map((h,i)=>({label:h,value:cells[i]||'',index:i})).filter(x=>x.label&&x.value&&!identityCols.has(x.index));draft.text=draft.reportFields.map(x=>`${x.label}: ${x.value}`).join('\n');out.push(draft);
     }
     if(out.length)return out;
+  }
 ---
+===== sheetName @2667 =====
+  const raw=String(file?.text||'').replace(/\r/g,'');
   const structured=inputCenterSpreadsheetRows(file,raw);
   const classification=inputCenterClassifyMaterial(file,raw);
   if(structured){structured.forEach(d=>{const q=(d.sheetHeaders||[]).filter(h=>/^\s*\d+[.)]/.test(String(h||''))).length;const isReport=q>=3||/보고서|제출내역_텍스트/.test(String(d.sheetName||''));d.detectedType=isReport?'보고서·탐구보고서':classification.type;d.detectedConfidence=isReport?'높음':classification.confidence;d.detectedReason=isReport?`Excel 문항형 보고서 · ${q}개 문항 직접 인식`:classification.reason;});return structured;}
   if(!raw.trim()){const d=inputCenterDraftFromPayload(file,'');d.detectedType=classification.type;d.detectedConfidence=classification.confidence;d.detectedReason=classification.reason;return [d];}
   const lines=raw.split('\n').filter(x=>x.trim());
+  const studentLines=lines.filter(line=>/(?:^|[^0-9])[123][0-9]{3}(?![0-9])/.test(line));
 ---
+===== sheetName @8954 =====
+    : "학급 · 번호 · 성명 · 학사 방 · 퇴사 · 입사 · 학기별 변동";
   $("#drawerKicker").textContent = "READ ONLY SOURCE";
   $("#drawerTitle").textContent = item.label;
   $("#drawerBody").innerHTML = `<div class="connection-detail"><div><b>원본 파일</b><span>${escapeHtml(item.fileTitle)}</span></div><div><b>대상 탭</b><span>${escapeHtml(item.sheetName)}</span></div><div><b>머리글 행</b><span>${item.headerRow}행</span></div><div><b>결합 기준</b><span>${escapeHtml(item.joinKey)}</span></div><div><b>확인된 열</b><span>${columns}</span></div></div><div class="readonly-rule"><b>현재 상태</b><span>구조 확인 완료 · OAuth 인증 전 · 실제 행 미저장</span></div><p class="drawer-note">동기화 시 학급+번호가 같더라도 성명이 다르면 자동 결합하지 않고 오류 목록으로 분리합니다.</p>`;
   $("#drawer").classList.remove("hidden");
   $("#drawerBackdrop").classList.remove("hidden");
+}
 ---
+===== sheetName @10311 =====
+    button.disabled = false;
     button.textContent = original;
     render(state.activePage);
     toast(`${result.sheetName} 3월~다음 해 2월 일정 ${result.count}건을 반영했습니다.${result.failedSheets?.length?` (${result.failedSheets.length}개 월 확인 필요)`:""}`);
   }));
   $$("[data-calendar-mode]").forEach(
+    (x) =>
 ---
+===== sheetName @11171 =====
+  $("#drawerKicker").textContent = "GOOGLE SHEETS";
   $("#drawerTitle").textContent = "프로그램 시트 연결 준비";
   $("#drawerBody").innerHTML =
     `<form class="site-editor" id="programSheetForm"><label>구글시트 주소<input id="programSheetUrl" type="url" value="${escapeHtml(state.settings.programSheetUrl || "")}" placeholder="https://docs.google.com/spreadsheets/..."></label><label>프로그램 탭 이름<input id="programSheetName" value="${escapeHtml(state.settings.programSheetName || "프로그램")}"></label><div class="sheet-schema"><b>권장 열 구조</b><span>운영일 · 프로그램명 · 시작시간 · 종료시간 · 장소 · 담당교사 · 학번 · 이름 · 안내</span></div><button class="btn primary">연결 정보 저장</button><p class="safe-note">여기서는 주소와 탭 이름만 저장합니다. 실제 읽기·쓰기는 권한 확인과 선생님 승인 후 연결합니다.</p></form>`;
   $("#drawer").classList.remove("hidden");
   $("#drawerBackdrop").classList.remove("hidden");
+  $("#programSheetForm").onsubmit = async (event) => {
 ---
+===== sheetName @11177 =====
+  $("#programSheetForm").onsubmit = async (event) => {
     event.preventDefault();
     state.settings.programSheetUrl = $("#programSheetUrl").value.trim();
     state.settings.programSheetName = $("#programSheetName").value.trim() || "프로그램";
     await save();
     toast("시트 연결 정보를 저장했습니다.");
+    closeDrawer();
 ---
-===== sheetData =====
-===== basicInfo =====
-  return `<button class="dorm-growth-card" data-dorm-growth-student="${escapeHtml(student.id)}"><header><div><small>${escapeHtml(student.studentNo||row.studentNo||'')} · ${escapeHtml(classNumberOf(student)||String(student.className||row.className||'').replace(/\D/g,'')||'-')}반 ${escapeHtml(student.number||row.number||'')}번</small><h4>${escapeHtml(student.name||row.name||'')}</h4></div>${manage.label?`<em>${escapeHtml(manage.label)}</em>`:''}</header><div class="dorm-card-grade"><span><small>내신 5 / 9</small><b>${base.avg5==null?'-':base.avg5.toFixed(2)} <i>/ ${base.actual9==null?'-':base.actual9.toFixed(2)}</i></b></span><span><small>대입 관리</small><b>${escapeHtml(dormAdmissionLine(student))}</b></span></div><div class="dorm-card-trends"><div><small>${internal.length>1?'내신 추세':'내신 단건'}</small>${dormSparkline(internal)}${internalValue}</div><div><small>${mock.length>1?'모의 추세':'모의 현황'}</small>${dormSparkline(mock)}${mockValue}</div></div><div class="dorm-card-foot"><span>프로그램 ${programs} · 보고서 ${reports}</span><strong>${escapeHtml(manage.reason)}</strong></div></button>`;
-}
-function dormStudentBasicInfoMarkup(student,termMode){
-  const roster=dormTermRoster(termMode); const dormRow=roster.find(r=>String(r.studentId||'')===String(student.id||'')||String(r.studentNo||'')===String(student.studentNo||''))||{};
-  const room=student.dormRoom||dormRow.dormRoom||dormRow.room||dormRow.roomNo||dormRow.roomName||'-';
----
-  $('#drawerBody').innerHTML=`<div class="dorm-deep dorm-deep-v3">
-    <div class="dorm-deep-summary"><span><small>내신 5등급</small><b>${base.avg5==null?'-':base.avg5.toFixed(2)}</b></span><span><small>9등급 환산</small><b>${base.actual9==null?'-':base.actual9.toFixed(2)}</b></span><span><small>대입관리</small><b>${escapeHtml(dormAdmissionLine(student))}</b></span><span><small>관리포인트</small><b>${escapeHtml(manage.reason)}</b></span></div>
-    <div class="dorm-deep-primary-grid"><aside>${dormStudentBasicInfoMarkup(student,termMode)}</aside><main>${dormComprehensiveCounselMarkup(student,termMode,bundle)}</main></div>
-    <section class="dorm-deep-section dorm-score-section"><header><div><small>GRADE · CORE</small><h4>성적 상세</h4></div><span>내신 5등급 기준 · 모의고사 9등급 기준</span></header>
-      <div class="dorm-score-top"><article><h5>내신 누적 추세</h5>${dormAxisChart(internal,5)}</article><article><h5>모의고사 누적 추세</h5>${dormAxisChart(mock,9)}</article></div>
----
-===== 규칙로그 =====
-    {id:'expected-20261230-break',category:'vacation',name:'겨울방학 중 학원외출 허용',start:'2026-12-31T00:00',end:'2027-02-28T23:59',days:'월,화,수,목,금',effect:'방학 중 학원외출 특별허용(월~금 복귀형 + 금요일 귀가형)',lateEntry:'22:30',earlyExit:'금요일 야간 학원 후 귀가 가능',reason:'학원',priorNightAcademyHome:true,priority:30,active:true,note:'12/30 방학식 후 겨울방학 학사운영으로 전환. 실제 겨울방학 미운영기간은 학년 협의 후 별도 등록하세요.',operationState:'개인외출허용',formRequired:true,individualOutingAllowed:true},
-    {id:'DORM-RULE-1786567642135',category:'vacation',name:'여름방학 중 학원외출 허용',start:'2026-07-22T08:30',end:'2026-08-07T23:59',days:'월,화,수,목,금',effect:'방학 중 학원외출 특별허용(월~금 복귀형 + 금요일 귀가형)',lateEntry:'22:30',earlyExit:'금요일 야간 학원 후 귀가 가능',reason:'학원',priorNightAcademyHome:true,priority:30,active:true,note:'',operationState:'개인외출허용',formRequired:true,individualOutingAllowed:true}
-  ].map(x=>({entryTime:'',exitTime:'',lateEntry:'',earlyExit:'',reason:'',locked:false,actualExit:'',actualReentry:'',priorNightAcademyHome:false,formRequired:false,individualOutingAllowed:false,...x,source:'규칙로그 검증 미러(v0.76.99)'}));
-}
-function dormRuleHistory(){
----
-async function deleteDormRule(ruleId){
-  const rules=dormRuleHistory(), rule=rules.find(x=>String(x.id)===String(ruleId));if(!rule)return;
-  if(!confirm(`${rule.name} 규칙을 규칙로그 시트에서도 삭제할까요?`))return;
-  try{
-    const result=await window.schoolBoard?.deleteDormRule?.(ruleId);
----
-  }).join('');
-  const closed=outings.filter(x=>dormOutingExcludedByRule(x)).length;
-  const directState=''?`<div class="setting-card warn"><h3>규칙로그 권한 연결 필요 · 검증 미러 ${rules.length}건 표시 중</h3><p>${escapeHtml('')} · 상단의 ‘권한 연결’을 눌러 서비스계정 이메일을 편집자로 공유하면 원본 양방향 연결로 전환됩니다.</p></div>`:'';
-  return `<div class="dorm-rule-page"><div class="module-intro pastel-mint"><span>03</span><div><h3>학사운영규칙</h3><p>학사 전체 운영변경과 학원외출 예외를 관리합니다. 병원 외출은 운영규칙과 무관하게 신청 가능하며, 신청이 있으면 오늘의 학사외출현황에 항상 표시됩니다. 실제 학생 외출기록은 구글폼 신청으로 생성됩니다.</p></div><div class="module-intro-actions"><button class="btn primary" id="dormOutingStatusOpen">학사외출현황</button><button class="btn secondary" id="dormRuleReload">규칙 동기화 확인</button><span class="state positive">규칙로그 · 40_학사운영규칙</span></div></div>
-  <div class="student-summary"><span><b>${currentStudents.length}</b> 현재 학사생</span><span><b>${rules.length}</b> 전체 규칙</span><span><b>${rules.filter(x=>x.active).length}</b> 사용중 규칙</span><span><b>${outings.length}</b> 원본 외출기록</span><span><b>${closed}</b> 미운영기간 기록</span></div>
----
-  const closed=outings.filter(x=>dormOutingExcludedByRule(x)).length;
-  const directState=''?`<div class="setting-card warn"><h3>규칙로그 권한 연결 필요 · 검증 미러 ${rules.length}건 표시 중</h3><p>${escapeHtml('')} · 상단의 ‘권한 연결’을 눌러 서비스계정 이메일을 편집자로 공유하면 원본 양방향 연결로 전환됩니다.</p></div>`:'';
-  return `<div class="dorm-rule-page"><div class="module-intro pastel-mint"><span>03</span><div><h3>학사운영규칙</h3><p>학사 전체 운영변경과 학원외출 예외를 관리합니다. 병원 외출은 운영규칙과 무관하게 신청 가능하며, 신청이 있으면 오늘의 학사외출현황에 항상 표시됩니다. 실제 학생 외출기록은 구글폼 신청으로 생성됩니다.</p></div><div class="module-intro-actions"><button class="btn primary" id="dormOutingStatusOpen">학사외출현황</button><button class="btn secondary" id="dormRuleReload">규칙 동기화 확인</button><span class="state positive">규칙로그 · 40_학사운영규칙</span></div></div>
-  <div class="student-summary"><span><b>${currentStudents.length}</b> 현재 학사생</span><span><b>${rules.length}</b> 전체 규칙</span><span><b>${rules.filter(x=>x.active).length}</b> 사용중 규칙</span><span><b>${outings.length}</b> 원본 외출기록</span><span><b>${closed}</b> 미운영기간 기록</span></div>
-  ${directState}<div class="dorm-rule-priority-guide"><b>판정 우선순위</b><span>특정 날짜 입·퇴소 변경 → 학사 미운영기간 → 시험 외출허용 → 방학 중 외출허용 → 기본 입·퇴소 → 학교 운영기간</span><small>더 구체적인 예외 규칙이 일반 규칙보다 우선합니다.</small></div>
----
-  ${directState}<div class="dorm-rule-priority-guide"><b>판정 우선순위</b><span>특정 날짜 입·퇴소 변경 → 학사 미운영기간 → 시험 외출허용 → 방학 중 외출허용 → 기본 입·퇴소 → 학교 운영기간</span><small>더 구체적인 예외 규칙이 일반 규칙보다 우선합니다.</small></div>
-  ${sections}
-  <div class="setting-card pastel-mint"><h3>다음 단계: 학생용 학사외출 Google Form</h3><p>규칙은 규칙로그 시트에 영구 저장됩니다. 다음 단계에서는 정규화된 학사외출 응답을 이 규칙으로 판정한 뒤 빠른열기 학사외출에 연결합니다.</p></div></div>`;
-}
-
----
-  {icon:"👤",title:"사용자·역할 신청",desc:"사용자 이름과 실제 담당 역할을 신청합니다.",body:"홍석민은 최초 관리자·1학년부장 기준입니다. 다른 사용자의 선택은 권한 부여가 아니라 승인 요청 정보입니다."},
-  {icon:"🏫",title:"학교·담당 범위",desc:"운호고등학교의 담당 학년·반·부서를 지정합니다.",body:"담임도 학년 학생자료를 조회할 수 있으며, 담임반 업무수정과 타반 개인정보 보호를 분리 적용합니다. 학년부장·관리자는 담당 범위 전체를 조회합니다."},
-  {icon:"☁",title:"UEP 데이터 연결",desc:"기본정보·응답·데이터처리·규칙로그 연결 상태를 확인합니다.",body:"서비스 계정은 Windows 보안 저장소에 보관하고 UEP 표준 구글시트는 권한에 따라 조회·제한적 양방향 수정합니다."},
-  {icon:"▦",title:"NEIS 시간표",desc:"학교·학년·반과 기준일을 지정해 학급시간표를 확인합니다.",body:"공개 조회를 우선 사용하고 실패 시 마지막 정상 저장자료를 유지합니다."},
-  {icon:"🎨",title:"대시보드 위젯",desc:"내가 사용할 대시보드 카드만 선택합니다.",body:"시계·날씨, 오늘의 프로그램, 학교 캘린더, 개인 시간표, 오늘의 업무·공지를 개인별로 표시할 수 있습니다."},
----
-  scores:{title:"성적",summary:"내신·모의고사 상담자료",steps:["반과 학생, 조회범위를 선택합니다.","내신 변화와 모의고사 등락을 비교합니다.","출력센터에서 A4 상담자료로 출력합니다."],source:"기본연결시트 성적DB"},
-  admissions:{title:"입시",summary:"등급환산·수능최저·입결",steps:["학생의 모의고사 성적을 선택합니다.","대학별 수능최저 충족 가능성을 조회합니다.","환산식과 근거자료를 함께 확인합니다."],source:"수능최저DB·대학입결DB"},
-  records:{title:"생활기록부",summary:"활동 근거부터 최종 기록까지",steps:["활동내역과 SDGs 연계 성장 프로파일을 확인합니다.","자율·진로·종합의견 근거자료를 선택합니다.","규칙 기반 또는 AI 초안을 생성하고 규칙 검토 후 최종 저장합니다."],source:"기본연결시트·보고서 정규화·규칙로그"},
-  programs:{title:"프로그램",summary:"공통·선택·방과후 운영",steps:["공통활동은 자율·진로로 구분해 확인합니다.","선택활동은 명단·출석·보고서·SDGs·사진을 관리합니다.","방과후는 반복일정·결강·보강과 야자출결 영향을 관리합니다."],source:"기본연결시트 프로그램DB"},
-  calendar:{title:"학교 일정",summary:"학년도 일정과 개인 일정",steps:["월간·주간 보기를 전환합니다.","학교·프로그램·개인·미확정 일정을 필터링합니다.","학년도 동기화 후 수정 잠금된 일정은 보존합니다."],source:"학교캘린더"},
----
-===== 기본정보 =====
-    dataConnections: {
-      studentMaster: {
-        label: "학생 기본정보",
-        fileTitle: "2026. 운호고 입학생 기초자료",
-        spreadsheetId: "1IxBIpw3CKzVqWVaPPhFfdBC5DV8mMzQrXmN6o9KUavQ",
----
-        fileTitle: "UEP 표준시트",
-        spreadsheetId: "",
-        sheetName: "기본정보 20_학사생마스터 / 데이터처리 02_학사외출_일자별",
-        headerRow: 3,
-        joinKey: "학생ID 우선 · 학번 보조",
----
-    studentPageMode='stats'; state.activePage='students'; save();
-    $$('[data-page]').forEach(x=>x.classList.toggle('active',x.dataset.page==='students'));
-    $('#pageKicker').textContent='학생 기본정보 기준 원장'; $('#pageTitle').textContent='학생정보';
-    render('students'); requestAnimationFrame(()=>window.scrollTo(0,originScroll)); studentFocusContext=null; return;
-  }
----
-  studentDashboardIndex=index>=0?index:0; studentPageMode="dashboard"; state.activePage="students"; save();
-  $$('[data-page]').forEach(x=>x.classList.toggle('active',x.dataset.page==='students'));
-  $('#pageKicker').textContent='학생 기본정보 기준 원장'; $('#pageTitle').textContent='학생정보'; render('students');
-  window.scrollTo(0,originScroll); studentFocusContext=null;
-}
----
-  const info = {
-    dashboard: ["오늘 먼저 확인할 항목", "업무 현황"],
-    students: ["학생 기본정보 기준 원장", "학생정보"],
-    dorm: ["학사생·외출 기록 통합 조회", "학사생정보"],
-    timetable: ["선택과목 이동수업까지", "시간표"],
----
-  const room=student.dormRoom||dormRow.dormRoom||dormRow.room||dormRow.roomNo||dormRow.roomName||'-';
-  const phone=student.phone||'-', email=student.email||'-', middle=student.middleSchool||'-';
-  return `<section class="dorm-deep-section dorm-basic-panel"><header><div><small>STUDENT · DORM BASIC</small><h4>기본정보 · 학사방</h4></div><span>${escapeHtml(student.studentNo||'')} ${escapeHtml(student.name||'')}</span></header><dl class="dorm-basic-list"><dt>학급</dt><dd>${escapeHtml(classNumberOf(student)||'-')}반 ${escapeHtml(student.number||'-')}번</dd><dt>학사방</dt><dd>${escapeHtml(String(room))}${room&&room!=='-'&&!String(room).includes('호')?'호':''}</dd><dt>출신중</dt><dd>${escapeHtml(middle)}</dd><dt>학생 연락처</dt><dd>${escapeHtml(phone)}</dd><dt>이메일</dt><dd>${escapeHtml(email)}</dd><dt>${escapeHtml(student.guardian1Relation||'보호자1')}</dt><dd>${escapeHtml(student.guardian1Phone||'-')}</dd></dl></section>`;
-}
-function dormStudentOutingHistoryMarkup(student){
----
-  $("#drawerTitle").textContent=row?"공결 기록 수정":"공결 기록 등록";
-  $("#drawerBody").innerHTML=`<form id="officialAttendanceEditor" class="official-attendance-editor official-attendance-editor-v2">
-    <div class="official-editor-hero"><span>${row?"EDIT":"NEW"}</span><div><b>${row?"기존 공결 내용을 정확하게 수정합니다.":"새 공결 기록을 기본정보 연결시트에 등록합니다."}</b><small>저장 즉시 30_공결기록과 UEP 조회 화면에 반영됩니다.</small></div></div>
-    <section class="official-editor-section"><header><b>대상·일자</b><small>학생과 공결 적용일을 선택합니다.</small></header><div class="official-editor-grid two">
-      <label>일자<input type="date" id="officialDate" required value="${escapeHtml(row?.date||attendanceViewDate||dateKey(today))}"></label>
----
-    const selectedStudent=officialStudentFilter==="all"?null:rosterStudents.find(row=>attendanceStudentKey(row)===officialStudentFilter);
-    const cumulativeMarkup=officialStudentFilter!=="all"?`<div class="section-title-row official-cumulative-title"><div><small>CUMULATIVE · PERSONAL</small><h3>개인 누적 공결 현황</h3><p>${cumulativeRows.length}건 · ${escapeHtml(selectedStudent?.studentNo||cumulativeRows[0]?.studentNo||"")} ${escapeHtml(selectedStudent?.name||cumulativeRows[0]?.name||"")}</p></div></div>${officialTable(cumulativeRows,"누적 공결 기록이 없습니다.")}`:"";
-    return `<div class="module-page">${tabs}${attendanceDateControls("공결 조회일",canManageOfficial?'<button class="btn primary" id="officialAttendanceAdd">＋ 공결 등록</button>':'')}<section class="attendance-dashboard-head"><div><small>OFFICIAL ATTENDANCE · ${attendanceViewDate}</small><h3>공결 현황</h3><p>날짜별 전체 현황에서 반별·개인별로 조회하며, 등록·수정·삭제 내용은 기본정보 연결시트에 즉시 반영합니다.</p></div><div class="attendance-head-metrics"><span><b>${selectedDay.length}</b>선택일 기록</span><span><b>${new Set(selectedDay.map(attendanceStudentKey)).size}</b>선택일 학생</span><span><b>${officialRows.length}</b>전체 기록</span><span><b>${selectedDay.filter(x=>String(x.evidence).includes("미")).length}</b>증빙 확인</span></div></section>${classCards}<div class="toolbar official-toolbar">${studentSelect}<input class="search" id="attendanceSearch" placeholder="학번·이름·공결구분·사유 검색"><button class="btn secondary" id="attendanceSearchReset">검색 지우기</button><span class="state">기본정보 연결시트 · 30_공결기록</span></div>${officialTable(selected)}${cumulativeMarkup}</div>`;
-  }
-
----
-  {icon:"👤",title:"사용자·역할 신청",desc:"사용자 이름과 실제 담당 역할을 신청합니다.",body:"홍석민은 최초 관리자·1학년부장 기준입니다. 다른 사용자의 선택은 권한 부여가 아니라 승인 요청 정보입니다."},
-  {icon:"🏫",title:"학교·담당 범위",desc:"운호고등학교의 담당 학년·반·부서를 지정합니다.",body:"담임도 학년 학생자료를 조회할 수 있으며, 담임반 업무수정과 타반 개인정보 보호를 분리 적용합니다. 학년부장·관리자는 담당 범위 전체를 조회합니다."},
-  {icon:"☁",title:"UEP 데이터 연결",desc:"기본정보·응답·데이터처리·규칙로그 연결 상태를 확인합니다.",body:"서비스 계정은 Windows 보안 저장소에 보관하고 UEP 표준 구글시트는 권한에 따라 조회·제한적 양방향 수정합니다."},
-  {icon:"▦",title:"NEIS 시간표",desc:"학교·학년·반과 기준일을 지정해 학급시간표를 확인합니다.",body:"공개 조회를 우선 사용하고 실패 시 마지막 정상 저장자료를 유지합니다."},
-  {icon:"🎨",title:"대시보드 위젯",desc:"내가 사용할 대시보드 카드만 선택합니다.",body:"시계·날씨, 오늘의 프로그램, 학교 캘린더, 개인 시간표, 오늘의 업무·공지를 개인별로 표시할 수 있습니다."},
----
-  const todayValue=dateKey(new Date());
-  const layer=document.createElement('div');layer.id='studentGuidanceLayer';layer.className='issue-layer';
-  layer.innerHTML=`<div class="issue-dialog student-guidance-dialog"><header><div><small>STUDENT GUIDANCE</small><h3>학생지도 기록</h3><p>반과 학생을 선택하고 날짜와 지도내용을 기록합니다.</p></div><button type="button" data-guidance-close>×</button></header><form id="studentGuidanceForm"><div class="student-guidance-grid"><label>반 선택<select id="studentGuidanceClass" required><option value="">반 선택</option>${classes.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}반</option>`).join('')}</select></label><label>학생 선택<select id="studentGuidanceStudent" required disabled><option value="">학생 선택</option></select></label></div><label>지도 날짜<input id="studentGuidanceDate" type="date" value="${escapeHtml(todayValue)}" required></label><label>지도 내용<textarea id="studentGuidanceMemo" rows="7" required placeholder="학생에게 지도한 내용, 약속사항, 추후 확인할 내용을 기록해 주세요."></textarea></label><div class="issue-meta">지도교사 ${escapeHtml(currentLoginTeacherName()||currentUser?.name||roleName(currentRoleId())||'')} · 기본정보 연결시트 46_학생지도기록 저장</div><div class="modal-actions"><button type="button" class="btn secondary" data-guidance-close>취소</button><button class="btn primary" type="submit">지도 기록 저장</button></div></form></div>`;
-  document.body.appendChild(layer);
-  const classSelect=layer.querySelector('#studentGuidanceClass'),studentSelect=layer.querySelector('#studentGuidanceStudent');
----
-function workBoardRows(type){
-  const rows=type==="notice"?directNoticeRows({activeOnly:false}):workBoardData(type);
-  if(!rows.length)return `<div class="work-board-empty"><b>${workBoardEmpty(type)}</b><small>${type==="notice"?"직접 공지는 기본정보 연결시트와 양방향으로 관리됩니다.":"오른쪽 위 ‘새 글 등록’ 버튼으로 바로 등록할 수 있습니다."}</small></div>`;
-  return rows.map(item=>{
-    const id=escapeHtml(item.id||""), title=escapeHtml(item.title||"제목 없음");
----
-  const weekLabel=timetableWeekLabel(date||neisData?.date||dateKey(new Date()));
-  const header=days.map((day,i)=>`<div class="tt-day"><b>${day}</b><small>${weekDates[i]?`${weekDates[i].getMonth()+1}/${weekDates[i].getDate()}`:""}</small></div>`).join("");
-  return `<section class="tt-shell"><header class="tt-hero"><div><small>${studentMode?"STUDENT TIMETABLE":"CLASS TIMETABLE"} · UEP MASTER</small><h2>${escapeHtml(grade)}학년 ${escapeHtml(classNo)}반 ${studentMode?"학생 개인":"주간"} 시간표</h2><p>${escapeHtml(weekLabel)} · 2026학년도 2학기 확정시간표 · 2026-08-13 기준</p></div><div class="tt-stats"><span><b>${rows.length}</b>등록 수업</span><span><b>5</b>요일</span><span><b>7</b>최대 교시</span></div></header><div class="tt-status-row"><span class="tt-live">기준자료</span><span>${studentMode?"1학년은 선택과목 이동수업 전까지 학급시간표를 학생 개인시간표로 사용합니다.":"학급시간표: 과목 크게 · 담당교사 하단 표시"}</span></div><div class="tt-grid"><div class="tt-corner">교시</div>${header}${cells.join("")}</div><footer class="tt-legend class-legend"><span>UEP 기본정보 연결시트 · 17_시간표마스터</span></footer></section>`;
-}
-
----
-    }
-  }
-  return `<section class="tt-shell personal-tt-shell"><header class="tt-hero"><div><small>TEACHER TIMETABLE · UEP MASTER</small><h2>${escapeHtml(teacher)} 선생님 주간 시간표</h2><p>2026학년도 2학기 확정시간표 · 학급 크게 · 과목 하단 표시</p></div><div class="tt-stats"><span><b>${count}</b>등록 수업</span><span><b>5</b>요일</span><span><b>7</b>최대 교시</span></div></header><div class="tt-grid"><div class="tt-corner">교시</div>${days.map(day=>`<div class="tt-day"><b>${escapeHtml(day)}</b></div>`).join("")}${cells.join("")}</div><footer class="tt-legend class-legend"><span>UEP 기본정보 연결시트 · 17_시간표마스터</span></footer></section>`;
-}
-function normalizedSchoolHours(){
----
-  const reportState=studentLike?.reportSubmitted===true?'보고서 제출 완료':studentLike?.reportSubmitted===false?'보고서 미제출':'보고서 상태 확인';
-  const layer=document.createElement('div');layer.className='counsel-reason-layer program-student-basic-layer';
-  layer.innerHTML=`<div class="counsel-reason-dialog program-student-basic-dialog"><header><div><small>STUDENT · BASIC</small><h3>${escapeHtml(`${no} ${name}`.trim())}</h3><p>${escapeHtml(`${grade}학년${cls?` · ${String(cls).replace(/^1-?/,'')}반`:''}`)}</p></div><button type="button" data-program-student-basic-close>×</button></header><section class="counsel-evidence"><h4>학생 기본정보</h4><p><i>✓</i>학번 ${escapeHtml(no||'-')}</p><p><i>✓</i>학급 ${escapeHtml(cls?`${String(cls).replace(/^1-?/,'')}반`:'-')}</p><p><i>✓</i>${escapeHtml(reportState)}</p></section><footer class="uep-action-footer"><button class="btn secondary uep-help-button" data-program-student-basic-close data-tooltip="프로그램 참여학생 명단으로 돌아갑니다.">돌아오기</button><button class="btn primary uep-help-button" data-program-student-detail data-tooltip="학생 종합정보 화면을 엽니다.">학생 상세보기</button></footer></div>`;
-  document.body.appendChild(layer);
-  const close=()=>layer.remove();
----
-  const info=isProgram?[program.date||item.due,program.time||'',program.place||'',program.teacher?`담당 ${program.teacher}`:''].filter(Boolean).join(' · '):(item.meta||'상세정보 없음');
-  const layer=document.createElement('div');layer.className='counsel-reason-layer auto-deadline-basic-layer';
-  layer.innerHTML=`<div class="counsel-reason-dialog auto-basic-dialog"><header><div><small>AUTO NOTICE · BASIC</small><h3>${escapeHtml(item.title||'자동 마감공지')}</h3><p>${escapeHtml(item.category||'자동공지')} · ${escapeHtml(deadlineBadge(item))}</p></div><button type="button" data-auto-basic-close>×</button></header>${participantBlock}<section class="counsel-evidence"><h4>기본정보</h4>${isProgram&&reportState?`<p><i>✓</i>${escapeHtml(reportState)}</p>`:''}<p><i>✓</i>${escapeHtml(info||'상세정보 없음')}</p><p><i>✓</i>기한 ${escapeHtml(item.due||'-')}</p></section><footer class="uep-action-footer">${currentUserCanManageNotices()?'<button class="btn primary uep-help-button" data-auto-governance="approved" data-tooltip="이 자동공지를 대상 교사에게 노출합니다.">승인</button><button class="btn secondary uep-help-button" data-auto-governance="handled" data-tooltip="관리자 선에서 확인 처리하고 교사에게 보내지 않습니다.">확인</button><button class="btn secondary uep-help-button" data-auto-governance="blocked" data-tooltip="이 자동공지 후보를 제외합니다.">불가(해제)</button>':'<button class="btn secondary uep-help-button" data-auto-basic-confirm data-tooltip="이 알림을 확인한 상태로 유지합니다.">확인</button><button class="btn secondary uep-help-button" data-auto-basic-dismiss data-tooltip="내 대시보드에서 이 알림을 숨깁니다.">공지 해제</button>'}${isProgram?'<button class="btn primary uep-help-button" data-auto-basic-detail data-tooltip="관련 상세 화면으로 이동합니다.">상세보기</button>':''}</footer></div>`;
-  document.body.appendChild(layer);const close=()=>layer.remove();layer.querySelector('[data-auto-basic-close]').onclick=close;layer.onclick=e=>{if(e.target===layer)close();};
-  const participantGrid=layer.querySelector('.auto-program-student-grid'), participantToggle=layer.querySelector('[data-auto-participants-toggle]');
----
-    if(!result?.ok)throw new Error(result?.reason||'시트 저장 실패');
-    readonlyCache=result.data||readonlyCache;
-    toast(`${label}를 UEP 기본정보 연결시트에 저장했습니다.`);
-    if(embedded&&state.activePage==='students'){render('students');window.scrollTo(0,0);}else openStudentDrawer(index);
-  }catch(error){toast(error?.message||`${label} 수정에 실패했습니다.`);if(embedded&&state.activePage==='students')render('students');else openStudentDrawer(index);}
----
-  $("#drawerKicker").textContent = isReadonly ? "CONNECTED PROGRAM" : "TODAY PROGRAM";
-  $("#drawerTitle").textContent = program.actualTitle || program.title;
-  $("#drawerBody").innerHTML = `<div class="program-name-pair"><div><small>실제 프로그램명</small><b>${escapeHtml(program.actualTitle || program.title || "-")}</b></div><div><small>생활기록부 명칭</small><b>${escapeHtml(program.recordTitle || program.title || "-")}</b></div></div><div class="program-summary"><div><b>운영일</b><span>${escapeHtml(program.date || "-")} ${escapeHtml(weekdayLabelFromKey(program.date,true))}</span></div><div><b>운영시간</b><span>${escapeHtml(program.time || "-")}</span></div><div><b>장소</b><span>${escapeHtml(program.place || "-")}</span></div><div><b>담당교사</b><span>${escapeHtml(program.teacher || "-")}</span></div><div><b>담당부서</b><span>${escapeHtml(program.department || "-")}</span></div><div><b>교과</b><span>${escapeHtml(program.subject || "-")}</span></div><div><b>참여인원</b><span>${students.length}명</span></div><div><b>학생 보고서</b><span>${program.reportRequired===false?"없음":Number.isFinite(Number(program.reportSubmittedCount))?`${Number(program.reportSubmittedCount)}명 제출`:"필요"}</span></div></div><section class="program-admin-report ${program.reportToAuthority?"required":"not-required"}"><div><small>기관 보고</small><h4>${program.reportToAuthority?escapeHtml(program.reportAgency || "대상기관 미입력"):"보고 대상 아님"}</h4><p>${program.reportToAuthority?`프로그램 종료 후 ${Number(program.reportAfterDays||0)}일 · 기한 ${escapeHtml(dueDate||"-")}`:"기관·교육청 보고가 필요한 경우 프로그램 정보에 설정합니다."}</p></div><span class="report-due ${remain!=null&&remain<0&&!admin.done?"overdue":""}">${admin.done?"완료":escapeHtml(dueLabel)}</span>${program.reportToAuthority?`<button class="btn secondary" data-program-report-done="${escapeHtml(id)}">${admin.done?"완료 취소":"보고 완료"}</button>`:""}</section><section class="program-evidence"><div class="section-title-row"><div><small>PHOTO EVIDENCE</small><h4>사진등록 · ${evidence.length}장</h4></div><button class="btn primary" data-program-photo="${escapeHtml(id)}">사진 추가</button></div><div class="program-photo-list">${evidence.length?evidence.map(file=>`<div><span>▧</span><b>${escapeHtml(file.name||"사진")}</b><small>${escapeHtml(formatSyncTime(file.addedAt))}</small></div>`).join(""):'<p>등록된 사진이 없습니다.</p>'}</div><p class="safe-note">사진 원본은 이 PC의 UEP 전용 보관 폴더에 복사됩니다. 구글시트에는 원본 경로를 쓰지 않습니다.</p></section><div class="program-notice"><b>학생 안내</b><p>${escapeHtml(program.memo || "별도 안내가 없습니다.")}</p></div><div class="drawer-section"><h4>참여학생 명단</h4>${programRosterTabs(students)}<div class="participant-list participant-columns"><div class="participant-head"><em>번호</em><b>학번</b><b>이름</b></div>${students.map((student,index)=>`<div data-program-student-grade="${escapeHtml(programStudentGrade(student))}"><em>${index+1}</em><span>${escapeHtml(student.studentNo||student.number||"-")}</span><b>${escapeHtml(student.name||"이름 미확인")}${student.className?` · ${escapeHtml(student.className)}반`:""}<small class="participant-report-state">${program.reportRequired===false?'':student.reportSubmitted?'보고서 제출':'보고서 미제출'}</small>${student.reportId?`<button class="participant-report-open" data-open-program-report="${escapeHtml(student.reportId)}">보고서 보기</button>`:''}</b></div>`).join("") || '<div class="empty-state"><b>등록된 출석부 인원가 없습니다.</b></div>'}</div></div>${reportOverview}<section class="program-student-alert"><div class="section-title-row"><div><small>STUDENT NOTICE</small><h4>학생 안내·발송</h4></div></div><div class="program-alert-groups"><div class="program-alert-group"><small>A4 · 게시/확인</small><b>학생 안내문</b><p>운영정보와 대상학생 명단·서명칸을 출력합니다.</p><button class="btn primary" id="programStudentNoticeButton">학생 안내문 미리보기·출력</button></div><div class="program-alert-group"><small>PERSONAL · 개인 발송</small><b>학생별 안내</b><p>내용을 먼저 확인·수정한 뒤 메일을 열거나 문구를 복사합니다.</p><div><button class="btn secondary" id="programEmailButton">학생 알림 메일</button><button class="btn secondary" id="programIndividualNoticeButton">개인 메시지</button><button class="btn secondary" id="programSmsButton">문자 문구</button></div></div><div class="program-alert-group"><small>NOTICE · 공지</small><b>학교 공지용 문구</b><p>리로스쿨용 문구도 복사 전에 반드시 확인·수정합니다.</p><div><button class="btn secondary" id="programRiroButton">리로 개인문구</button><button class="btn secondary" id="programFamilyLetterButton">리로 가정통신문</button><button class="btn secondary" id="programAlertCenterButton">통합알림센터</button></div></div></div><p class="safe-note">출석 QR은 스캔 결과를 저장하는 수신 기능이 연결되어 있지 않아 제거했습니다. ${program.reportRequired===false?'이 프로그램은 학생 보고서를 사용하지 않습니다.':program.reportFormUrl?'<button class="link-button" id="programReportButton">연결된 학생 보고서 폼 열기</button>':'학생 보고서 폼 URL은 현재 연결되어 있지 않습니다.'}</p></section><div class="program-actions">${isReadonly?'<button class="btn secondary" id="overrideProgramButton">프로그램 세부내용 수정</button>':'<button class="btn secondary" id="editProgramButton">프로그램 세부내용 수정</button>'}<button class="btn primary" id="printProgramButton">출석/출석부</button><button class="btn secondary" id="excelProgramButton">출석부 Excel</button></div><p class="drawer-note">${isReadonly?"UEP 기본정보 연결시트의 공용 자료입니다. 관리자는 프로그램 운영정보를 양방향 수정할 수 있습니다.":"현재 프로그램 정보는 이 PC에 저장됩니다."}</p>`;
-  $("#drawer").classList.add("program-expanded");
-  $("#drawer").classList.remove("hidden"); $("#drawerBackdrop").classList.remove("hidden");
----
-  }
-
-  $("#drawerBody").innerHTML = `<form class="program-editor" id="programOverrideEditor"><div class="program-fixed-rule"><b>${escapeHtml(program.actualTitle||program.title)}</b><span>${isSelected?"10_선택활동마스터":isCommon?"09_공통활동마스터":isAfter?"11_방과후학교":"기본정보 연결시트"}의 표준 헤더와 UEP 입력항목을 직접 연결합니다.</span></div>${specificFields}<div class="program-actions"><button type="button" class="btn secondary" id="cancelProgramOverride">취소</button><button class="btn primary">기본정보 연결시트에 저장</button></div><p class="safe-note">${isAdmin?"저장 즉시 기본정보 연결시트에 반영되고 다른 PC의 UEP도 같은 값을 읽습니다.":"관리자만 공용 원본을 수정할 수 있습니다."}</p></form>`;
-  $("#drawer").classList.add("program-expanded"); $("#drawer").classList.remove("hidden"); $("#drawerBackdrop").classList.remove("hidden");
-  const reopen=()=>returnToAfter?openAfterschoolProgramDrawer(id):openProgramDrawer(id);
----
-        ["date","endDate","time","place","teacher","title","actualTitle","recordTitle","department","subject","reportRequired","reportFormUrl","reportToAuthority","reportAgency","reportAfterDays","photoRequired","memo","type","afterType","weekdays","operationPeriod","targetGrade","attendanceMethod","status"].forEach(key=>delete kept[key]);
-        if(Object.keys(kept).length) state.programOverrides[id]=kept; else delete state.programOverrides[id];
-        await save(); reopen(); toast(`${result.sheet||"기본정보 연결시트"}에 저장했습니다.`); return;
-      }catch(error){ toast(error?.message||"프로그램 운영정보를 시트에 저장하지 못했습니다."); return; }
-    }
----
-    const rows=selectionComparisonsForStudent(student);
-    const preAvailable=preTermsForStudent(student).size>0;
-    if(!rows.length)return `<section class="selection-compare-panel compact-089"><header><div><small>PRE ↔ MAIN</small><h3>사전상담 ↔ 본신청</h3></div><span>${preAvailable?'본신청 연결 대기':'사전자료 연결 대기'}</span></header><p class="selection-compare-help">사전 Google Form과 기본정보연결시트 본신청을 학기별로 자동 대조합니다.</p></section>`;
-    const changed=rows.filter(x=>x.status==='변경').length,waiting=rows.filter(x=>/대기/.test(x.status)).length,same=rows.filter(x=>x.status==='일치').length;
-    return `<section class="selection-compare-panel compact-089"><header><div><small>PRE ↔ MAIN</small><h3>사전상담 ↔ 본신청</h3></div><span>${changed?`변경 ${changed}`:same?`일치 ${same}`:'비교 중'}${waiting?` · 대기 ${waiting}`:''}</span></header><details><summary>학기별 비교 보기</summary><div class="selection-compare-grid">${rows.map(x=>`<article class="selection-compare-card ${x.status==='일치'?'same':/대기/.test(x.status)?'waiting':'changed'}"><div class="selection-compare-title"><b>${escapeHtml(x.term)}</b><em>${escapeHtml(x.status)}</em></div><div class="selection-compare-columns"><div><small>사전상담</small><p>${(x.preSubjects||[]).map(s=>`<span>${escapeHtml(s)}</span>`).join('')||'<i>없음</i>'}</p></div><div><small>본신청</small><p>${(x.mainSubjects||[]).map(s=>`<span>${escapeHtml(s)}</span>`).join('')||(/대기/.test(x.status)?'<i>아직 업로드되지 않음</i>':'<i>없음</i>')}</p></div></div>${x.status==='변경'?`<div class="selection-change-summary">${x.removed?.length?`<span class="removed">빠짐 · ${escapeHtml(x.removed.join(' · '))}</span>`:''}${x.added?.length?`<span class="added">추가 · ${escapeHtml(x.added.join(' · '))}</span>`:''}</div>`:''}</article>`).join('')}</div></details></section>`;
----
-===== 06_선택과목이력 =====
-    ["04_학생연락식별정보",(readonlyCache?.students||[]).some(s=>s.phone&&s.phone!=="-")],
-    ["05_대학적성데이터",!String(googleConnectionError||"").includes("05_대학적성데이터")&&!String(googleConnectionError||"").includes("05_진로희망이력")],
-    ["06_선택과목이력",Array.isArray(readonlyCache?.subjectSelections)],
-    ["20_학사생마스터",Array.isArray(readonlyCache?.dormStudents)],
-    ["41_학교캘린더",Array.isArray(readonlyCache?.calendarEvents)],
----
-===== 18_학교교육과정DB =====
-===== 19_선택과목블록DB =====
-===== 41_선택과목규칙 =====
-===== snapshot =====
-  } catch (normalizeError) {
-    console.error('[UEP] 저장상태 정규화 실패 - 기본 상태로 복구', normalizeError);
-    const authSnapshot=state?.auth ? structuredClone(state.auth) : structuredClone(baseState.auth);
-    const settingsSnapshot=state?.settings ? structuredClone(state.settings) : structuredClone(baseState.settings);
-    state=structuredClone(baseState);
----
-    console.error('[UEP] 저장상태 정규화 실패 - 기본 상태로 복구', normalizeError);
-    const authSnapshot=state?.auth ? structuredClone(state.auth) : structuredClone(baseState.auth);
-    const settingsSnapshot=state?.settings ? structuredClone(state.settings) : structuredClone(baseState.settings);
-    state=structuredClone(baseState);
-    state.auth={...state.auth,...authSnapshot};
----
-    const settingsSnapshot=state?.settings ? structuredClone(state.settings) : structuredClone(baseState.settings);
-    state=structuredClone(baseState);
-    state.auth={...state.auth,...authSnapshot};
-    state.settings={...state.settings,...settingsSnapshot};
-    try { normalizeSavedState(); } catch (_) {}
----
-    state=structuredClone(baseState);
-    state.auth={...state.auth,...authSnapshot};
-    state.settings={...state.settings,...settingsSnapshot};
-    try { normalizeSavedState(); } catch (_) {}
-  }
----
-  const holistic=selectedCount>=6?'적합':selectedCount>=3?'보완':'확인';
-  const rules=readonlyCache?.admissionMinimums||[];
-  const html=rows.map(row=>{const rule=rules.find(r=>String(r.university||'')===String(row.university||''));const latest=latestMockSnapshot(student.id), min=rule?minimumCheck(rule,admissionBase(student.id,latest.exam||'6월모의고사').mock):null;let state='자료확인';if(row.diff!=null)state=row.diff<=0?'가능권':row.diff<=.45?'경계':row.diff<=.9?'도전':'상향';const cls=state==='가능권'?'good':state==='경계'?'warn':state==='도전'?'warn':'bad';const internal=row.diff==null?'-':row.diff<=0?'충족':`+${row.diff.toFixed(2)}`;const mock=min?.result|| (gap.mockGap===0?'핵심충족':'보완');const point=row.diff==null?'입결 연결 확인':row.diff<=0?'학종 서류 연속성 강화':row.diff<=.45?'내신 경계 관리':row.diff<=.9?'내신·모의 동시 보완':'상향 지원 관찰';return `<div class="dorm-univ-row"><b>${escapeHtml(row.university)}</b><span class="fit ${cls}">${state}</span><span><small>내신</small>${escapeHtml(internal)}</span><span><small>모의/최저</small>${escapeHtml(mock)}</span><span><small>학종·계열</small>${holistic}</span><em>${escapeHtml(point)}</em></div>`;}).join('');
-  return `<section class="dorm-university-fit"><header><div><small>SEOUL · UNIVERSITY FIT</small><h4>인서울 대학별 적합도</h4></div><span>${escapeHtml(career.hopeTrack)} · ${escapeHtml(career.hopeMajor)}</span></header><div class="dorm-univ-head"><span>대학</span><span>현재판정</span><span>내신</span><span>모의/최저</span><span>학종·계열</span><span>핵심 보완</span></div>${html||'<div class="empty-inline">연결된 인서울 대학 입결 자료가 없습니다.</div>'}<small class="dorm-univ-note">대학별 입결·수능최저 연결자료를 활용한 상담 참고값이며 합격 가능성을 확정하지 않습니다.</small></section>`;
-}
----
-
-
-function latestMockSnapshot(studentId){
-  const names=mockExamNames(studentId);
-  const exam=names[names.length-1]||"";
----
-  const standard={internal:rule.internal,name:rule.label,mockText:rule.mockText};
-  const dataset=(readonlyCache?.students||[]).map(student=>{
-    const base=admissionBase(student.id),mock=latestMockSnapshot(student.id),prep=studentPreparationStats(student);
-    const directInternalOk=base.actual9!=null&&base.actual9<=standard.internal;
-    const fiveKey=base.avg5==null?null:Number(base.avg5).toFixed(2);
----
-}
-function counselPriorityCandidateForStudent(student){
-  const base=admissionBase(student.id),mock=latestMockSnapshot(student.id),prep=studentPreparationStats(student);
-  const actual9=base.actual9;
-  const reasons=[],tags=[];
----
-  if(studentBadgeCache.has(cacheKey))return studentBadgeCache.get(cacheKey);
-  const base=admissionBase(student.id);
-  const snapshot=latestMockSnapshot(student.id);
-  const mockRows=snapshot.rows||[];
-  if(base.actual9==null){studentBadgeCache.set(cacheKey,[]);return [];}
----
-  const base=admissionBase(student.id);
-  const snapshot=latestMockSnapshot(student.id);
-  const mockRows=snapshot.rows||[];
-  if(base.actual9==null){studentBadgeCache.set(cacheKey,[]);return [];}
-  const cuts=(readonlyCache?.admissionCuts||[]).filter(cut=>String(cut.discoveryUse||'Y').toUpperCase()!=='N');
----
-    if(accepted){
-      const {rule,match,check}=accepted;
-      evidence.push({university:String(cut.university||rule.university||''),cut,rule,limit,actual9:base.actual9,minimumResult:check.result,minimumDetail:check.detail||'',mockExam:snapshot.exam||'',mockDetail:snapshot.detail||'',pairReason:match.reason,pairLevel:match.level||0,discoveryReason:cut.discoveryReason||'',recheck:cut.recheck||'',discoveryMode:'입결+수능최저'});
-      continue;
-    }
----
-      university:String(cut.university||fallback?.rule?.university||''),cut,rule:fallback?.rule||null,limit,actual9:base.actual9,
-      minimumResult:fallback?.check?.result||(universityRules.length?'세부확인 필요':'수능최저 직접대응 없음'),
-      minimumDetail:fallback?.check?.detail||(cut.minimumLink||'운호고 실제 합격입결 우선 발굴'),mockExam:snapshot.exam||'',mockDetail:snapshot.detail||'',
-      pairReason:compatible.length?'2028 전형 큰 범주 연결':'운호고 실제 합격사례 기반 발굴',pairLevel:compatible[0]?.match?.level||1,
-      discoveryReason:cut.discoveryReason||'',recheck:cut.recheck||'2029 실제 지원 시 최종 모집요강 재검증',discoveryMode:'입결우선 발굴'
----
-===== getSheet =====
-  const payload={batchId:first.batchId||'',nature,programId:first.programId||'',programKind:first.programKind||program.kind||'',programName:program.actualTitle||program.title||'',programSemester:program.semester||program.term||'',records:rows.map(r=>({id:r.id,batchId:r.batchId,studentId:r.studentId,studentNo:r.studentNo,name:r.name,schoolYear:r.schoolYear,semester:r.semester,programId:r.programId,programKind:r.programKind,rawText:r.rawText,normalizedText:r.normalizedText,reviewText:r.reviewText||'',createdAt:r.createdAt}))};
-  let result=await window.schoolBoard?.normalizeInputBatch?.(payload);if(!result?.ok)return toast(result?.reason||'UEP 정규화 사전검사에 실패했습니다.');
-  if(result.requiresConfirmation){const summary=`정규화 대상: ${result.targetSheet||''}\n${result.programName||payload.programName||''}\n\n신규 ${result.newCount||0}건 · 중복 ${result.duplicateCount||0}건 · 갱신 ${result.updateCount||0}건\n\n계속 UEP에 적용할까요?`;if(!confirm(summary))return toast('UEP 적용을 취소했습니다.');result=await window.schoolBoard?.normalizeInputBatch?.({...payload,confirmed:true});if(!result?.ok)return toast(result?.reason||'UEP 정규화 적용에 실패했습니다.');}
-  await refreshReadonlyCacheSilently({force:true,rerender:false});inputCenterConfig.historyMode='active';inputCenterConfig.batchFilter='latest';toast(`${result.targetSheet||'UEP'} 적용 완료 · 신규 ${result.newCount||0} · 갱신 ${result.updateCount||0} · 중복 ${result.duplicateCount||0} · 작업목록에서 완료 배치를 내렸습니다.`);render('inputs');
-}
----
-  let result=await window.schoolBoard?.normalizeInputBatch?.(payload);if(!result?.ok)return toast(result?.reason||'UEP 정규화 사전검사에 실패했습니다.');
-  if(result.requiresConfirmation){const summary=`정규화 대상: ${result.targetSheet||''}\n${result.programName||payload.programName||''}\n\n신규 ${result.newCount||0}건 · 중복 ${result.duplicateCount||0}건 · 갱신 ${result.updateCount||0}건\n\n계속 UEP에 적용할까요?`;if(!confirm(summary))return toast('UEP 적용을 취소했습니다.');result=await window.schoolBoard?.normalizeInputBatch?.({...payload,confirmed:true});if(!result?.ok)return toast(result?.reason||'UEP 정규화 적용에 실패했습니다.');}
-  await refreshReadonlyCacheSilently({force:true,rerender:false});inputCenterConfig.historyMode='active';inputCenterConfig.batchFilter='latest';toast(`${result.targetSheet||'UEP'} 적용 완료 · 신규 ${result.newCount||0} · 갱신 ${result.updateCount||0} · 중복 ${result.duplicateCount||0} · 작업목록에서 완료 배치를 내렸습니다.`);render('inputs');
-}
-
----
-===== sheetRows =====
+===== sheetRows @2632 =====
+  const confidence=best.points>=6?'높음':best.points>=3?'보통':'낮음';
   return {...best,confidence};
 }
 function inputCenterSpreadsheetRows(file, raw){
   const ext=String(file?.extension||'').toLowerCase();
   if(!['xls','xlsx','csv','tsv'].includes(ext))return null;
+  const allLines=String(raw||'').replace(/\r/g,'').split('\n');
 ---
+===== sheetRows @2665 =====
+}
 function inputCenterExpandTextFile(file){
   const raw=String(file?.text||'').replace(/\r/g,'');
   const structured=inputCenterSpreadsheetRows(file,raw);
   const classification=inputCenterClassifyMaterial(file,raw);
   if(structured){structured.forEach(d=>{const q=(d.sheetHeaders||[]).filter(h=>/^\s*\d+[.)]/.test(String(h||''))).length;const isReport=q>=3||/보고서|제출내역_텍스트/.test(String(d.sheetName||''));d.detectedType=isReport?'보고서·탐구보고서':classification.type;d.detectedConfidence=isReport?'높음':classification.confidence;d.detectedReason=isReport?`Excel 문항형 보고서 · ${q}개 문항 직접 인식`:classification.reason;});return structured;}
+  if(!raw.trim()){const d=inputCenterDraftFromPayload(file,'');d.detectedType=classification.type;d.detectedConfidence=classification.confidence;d.detectedReason=classification.reason;return [d];}
 ---
-===== linked =====
-  return /^\d{4}-\d{2}-\d{2}$/.test(value)?value:"";
+===== getSheet @2953 =====
+  if(nature==='보고서'&&!first.programId)return toast('보고서는 연결프로그램을 먼저 확정해 주세요.');
+  const payload={batchId:first.batchId||'',nature,programId:first.programId||'',programKind:first.programKind||program.kind||'',programName:program.actualTitle||program.title||'',programSemester:program.semester||program.term||'',records:rows.map(r=>({id:r.id,batchId:r.batchId,studentId:r.studentId,studentNo:r.studentNo,name:r.name,schoolYear:r.schoolYear,semester:r.semester,programId:r.programId,programKind:r.programKind,rawText:r.rawText,normalizedText:r.normalizedText,reviewText:r.reviewText||'',createdAt:r.createdAt}))};
+  let result=await window.schoolBoard?.normalizeInputBatch?.(payload);if(!result?.ok)return toast(result?.reason||'UEP 정규화 사전검사에 실패했습니다.');
+  if(result.requiresConfirmation){const summary=`정규화 대상: ${result.targetSheet||''}\n${result.programName||payload.programName||''}\n\n신규 ${result.newCount||0}건 · 중복 ${result.duplicateCount||0}건 · 갱신 ${result.updateCount||0}건\n\n계속 UEP에 적용할까요?`;if(!confirm(summary))return toast('UEP 적용을 취소했습니다.');result=await window.schoolBoard?.normalizeInputBatch?.({...payload,confirmed:true});if(!result?.ok)return toast(result?.reason||'UEP 정규화 적용에 실패했습니다.');}
+  await refreshReadonlyCacheSilently({force:true,rerender:false});inputCenterConfig.historyMode='active';inputCenterConfig.batchFilter='latest';toast(`${result.targetSheet||'UEP'} 적용 완료 · 신규 ${result.newCount||0} · 갱신 ${result.updateCount||0} · 중복 ${result.duplicateCount||0} · 작업목록에서 완료 배치를 내렸습니다.`);render('inputs');
 }
-function studentLinkedRecordDate(item){
-  const raw=item?.date||item?.day||item?.activityDate||item?.attendanceDate||item?.submittedAt||item?.finalSubmittedAt||item?.startDate||item?.endDate||item?.recordDate||item?.createdAt||"";
-  const value=String(raw||"").slice(0,10);
+
 ---
-  const entry=studentEntryDate(student);
-  if(!entry||!/전입/.test(String(student?.status||student?.enrollmentStatus||student?.enrollmentReason||"")))return true;
-  const recordDate=studentLinkedRecordDate(item);
-  return !recordDate||recordDate>=entry;
+===== getSheet @2954 =====
+  const payload={batchId:first.batchId||'',nature,programId:first.programId||'',programKind:first.programKind||program.kind||'',programName:program.actualTitle||program.title||'',programSemester:program.semester||program.term||'',records:rows.map(r=>({id:r.id,batchId:r.batchId,studentId:r.studentId,studentNo:r.studentNo,name:r.name,schoolYear:r.schoolYear,semester:r.semester,programId:r.programId,programKind:r.programKind,rawText:r.rawText,normalizedText:r.normalizedText,reviewText:r.reviewText||'',createdAt:r.createdAt}))};
+  let result=await window.schoolBoard?.normalizeInputBatch?.(payload);if(!result?.ok)return toast(result?.reason||'UEP 정규화 사전검사에 실패했습니다.');
+  if(result.requiresConfirmation){const summary=`정규화 대상: ${result.targetSheet||''}\n${result.programName||payload.programName||''}\n\n신규 ${result.newCount||0}건 · 중복 ${result.duplicateCount||0}건 · 갱신 ${result.updateCount||0}건\n\n계속 UEP에 적용할까요?`;if(!confirm(summary))return toast('UEP 적용을 취소했습니다.');result=await window.schoolBoard?.normalizeInputBatch?.({...payload,confirmed:true});if(!result?.ok)return toast(result?.reason||'UEP 정규화 적용에 실패했습니다.');}
+  await refreshReadonlyCacheSilently({force:true,rerender:false});inputCenterConfig.historyMode='active';inputCenterConfig.batchFilter='latest';toast(`${result.targetSheet||'UEP'} 적용 완료 · 신규 ${result.newCount||0} · 갱신 ${result.updateCount||0} · 중복 ${result.duplicateCount||0} · 작업목록에서 완료 배치를 내렸습니다.`);render('inputs');
+}
+
+function inputCenterExportCsv(){
+---
+===== readonlyCache @187 =====
+let state = structuredClone(baseState),
+  helpOpen = "start";
+let googleConnectionStatus = { ok: false, encryption: false };
+let readonlyCache = null;
+let googleConnectionError = "";
+let readonlyAutoRefreshTimer = null;
+const READONLY_AUTO_REFRESH_MS = 10 * 60 * 1000;
+---
+===== readonlyCache @438 =====
+        .then((status) => { if (status) googleConnectionStatus = {ok:Boolean(status.authenticated),encryption:true,mode:'school_read_api',endpointReady:status.endpointReady!==false}; })
+        .catch((error) => console.warn("[UEP] School Read API 세션 확인 실패", error))
+    : Promise.resolve();
+  const cacheTask = window.schoolBoard?.readReadonlyCache
+    ? withStartupTimeout(window.schoolBoard.readReadonlyCache(), 8000, null)
+        .then((cached) => {
+          if (cached?.ok) { readonlyCache=uep08123NormalizeReadonlyCache(cached.data); googleConnectionError = ""; }
+---
+===== readonlyCache @439 =====
+        .catch((error) => console.warn("[UEP] School Read API 세션 확인 실패", error))
+    : Promise.resolve();
+  const cacheTask = window.schoolBoard?.readReadonlyCache
+    ? withStartupTimeout(window.schoolBoard.readReadonlyCache(), 8000, null)
+        .then((cached) => {
+          if (cached?.ok) { readonlyCache=uep08123NormalizeReadonlyCache(cached.data); googleConnectionError = ""; }
+          else if (cached) googleConnectionError = cached.reason || "학교 데이터 동기화를 확인하세요. 마지막 저장 자료는 계속 사용할 수 있습니다.";
+---
+===== readonlyCache @441 =====
+  const cacheTask = window.schoolBoard?.readReadonlyCache
+    ? withStartupTimeout(window.schoolBoard.readReadonlyCache(), 8000, null)
+        .then((cached) => {
+          if (cached?.ok) { readonlyCache=uep08123NormalizeReadonlyCache(cached.data); googleConnectionError = ""; }
+          else if (cached) googleConnectionError = cached.reason || "학교 데이터 동기화를 확인하세요. 마지막 저장 자료는 계속 사용할 수 있습니다.";
+        })
+        .catch((error) => {
+---
+===== readonlyCache @454 =====
+  // 사용자는 기다리지 않고 UEP를 사용하며, 최신 Google Sheet가 도착하면 현재 화면만 갱신한다.
+  if(googleConnectionStatus?.ok){
+    setTimeout(async()=>{
+      const ok=await refreshReadonlyCacheSilently({force:true,rerender:true});
+      if(ok){
+        updateTopSyncStatus();
+        if(currentRoleId()==='admin') migrateAdminProgramOverridesToSheetOnce().catch(()=>{});
+---
+===== readonlyCache @461 =====
+      }
+    },900);
+  }
+  if(googleConnectionStatus?.ok && readonlyCache) await migrateAdminProgramOverridesToSheetOnce();
+  updateDormOutingCount();
+  updateTopSyncStatus();
+  startReadonlyAutoRefresh();
+---
+===== readonlyCache @491 =====
+async function migrateAdminProgramOverridesToSheetOnce(){
+  if(currentRoleId()!=="admin" || state.settings?.programSheetMigrationV07662 || !window.schoolBoard?.saveProgramOperation) return;
+  const overrides=state.programOverrides&&typeof state.programOverrides==="object"?state.programOverrides:{};
+  const programs=Array.isArray(readonlyCache?.programs)?readonlyCache.programs:[];
+  let changed=false, failed=false;
+  for(const [id,override] of Object.entries(overrides)){
+    if(!override || !["date","time","place","teacher"].some(key=>String(override[key]??"").trim())) continue;
+---
+===== readonlyCache @500 =====
+    try{
+      const result=await window.schoolBoard.saveProgramOperation({role:"admin",source:program.source,programId:program.programId||program.courseId||"",sessionId:program.sessionId||"",date:override.date??program.date??"",time:override.time??program.time??"",place:override.place??program.place??"",teacher:override.teacher??program.teacher??""});
+      if(!result?.ok) throw new Error(result?.reason||"시트 저장 실패");
+      if(result.data) readonlyCache=result.data;
+      const kept={...override}; ["date","time","place","teacher"].forEach(key=>delete kept[key]);
+      if(Object.keys(kept).length) state.programOverrides[id]=kept; else delete state.programOverrides[id];
+      changed=true;
+---
+===== readonlyCache @511 =====
+}
+
+let readonlyRefreshInFlight=null;
+async function refreshReadonlyCacheSilently({force=true, rerender=true}={}) {
+  if(readonlyRefreshInFlight)return readonlyRefreshInFlight;
+  readonlyRefreshInFlight=(async()=>{
+  if(!googleConnectionStatus?.ok || !window.schoolBoard?.previewReadonlySync || !window.schoolBoard?.readReadonlyCache) return false;
+---
+===== readonlyCache @514 =====
+async function refreshReadonlyCacheSilently({force=true, rerender=true}={}) {
+  if(readonlyRefreshInFlight)return readonlyRefreshInFlight;
+  readonlyRefreshInFlight=(async()=>{
+  if(!googleConnectionStatus?.ok || !window.schoolBoard?.previewReadonlySync || !window.schoolBoard?.readReadonlyCache) return false;
+  try {
+    if(force){
+      const sync=await window.schoolBoard.previewReadonlySync();
+---
+===== readonlyCache @520 =====
+      const sync=await window.schoolBoard.previewReadonlySync();
+      if(!sync?.ok) throw new Error(sync?.reason||'UEP 학교 데이터 자동 갱신 실패');
+    }
+    const cached=await window.schoolBoard.readReadonlyCache();
+    if(!cached?.ok) throw new Error(cached?.reason||'UEP 학교 데이터를 읽지 못했습니다.');
+    readonlyCache=uep08123NormalizeReadonlyCache(cached.data);
+    googleConnectionError='';
+---
+===== readonlyCache @522 =====
+    }
+    const cached=await window.schoolBoard.readReadonlyCache();
+    if(!cached?.ok) throw new Error(cached?.reason||'UEP 학교 데이터를 읽지 못했습니다.');
+    readonlyCache=uep08123NormalizeReadonlyCache(cached.data);
+    googleConnectionError='';
+    if(typeof studentBadgeCache!=='undefined'&&studentBadgeCache?.clear) studentBadgeCache.clear();
+    updateDormOutingCount();
+---
+===== readonlyCache @546 =====
+  if(!googleConnectionStatus?.ok) return;
+  readonlyAutoRefreshTimer=setInterval(()=>{
+    if(document.hidden) return;
+    refreshReadonlyCacheSilently({force:true,rerender:true});
+  },READONLY_AUTO_REFRESH_MS);
+}
+
+---
+===== readonlyCache @561 =====
+    button.title = googleConnectionError;
+    return;
+  }
+  if (readonlyCache?.students?.length && neisData?.ok && !neisData.offline) {
+    button.classList.add("good");
+    if (label) label.textContent = "동기화 정상";
+    button.title = "UEP 구글시트와 NEIS 자료가 정상 연결되었습니다.";
+---
+===== readonlyCache @567 =====
+    button.title = "UEP 구글시트와 NEIS 자료가 정상 연결되었습니다.";
+    return;
+  }
+  if (readonlyCache?.students?.length) {
+    button.classList.add("warn");
+    if (label) label.textContent = neisData?.offline ? "NEIS 저장자료" : "NEIS 연결 대기";
+    button.title = neisError || "UEP 구글시트는 연결되었고 NEIS 자료를 확인 중입니다.";
+---
+===== readonlyCache @743 =====
+
+function studentForSignalId(id){
+  const key=String(id||'').trim(); if(!key)return null;
+  return (readonlyCache?.students||[]).find(item=>String(item.id)===key||String(item.studentNo)===key)||null;
+}
+function currentSignalStudent(){
+  // 신호등은 '현재 학생 상세 컨텍스트'가 확정된 경우에만 표시합니다.
+---
+===== readonlyCache @777 =====
+  }
+  if(page==='attendance'){
+    if(attendanceMode==='statistics'&&attendanceStatStudentFilter&&attendanceStatStudentFilter!=='all'){
+      const students=readonlyCache?.students||[];
+      return students.find(s=>attendanceStudentKey(s)===attendanceStatStudentFilter)||null;
+    }
+    if(studentFocusContext?.studentId)return studentForSignalId(studentFocusContext.studentId);
+---
+===== readonlyCache @956 =====
+
+function studentFocusStudent(){
+  if(!studentFocusContext)return null;
+  return (readonlyCache?.students||[]).find(student=>String(student.id)===String(studentFocusContext.studentId)||String(student.studentNo)===String(studentFocusContext.studentNo))||null;
+}
+function startStudentFocus(student, origin={}){
+  if(!student)return;
+---
+===== readonlyCache @974 =====
+    $('#pageKicker').textContent='학생 기본정보 기준 원장'; $('#pageTitle').textContent='학생정보';
+    render('students'); requestAnimationFrame(()=>window.scrollTo(0,originScroll)); studentFocusContext=null; return;
+  }
+  const index=(readonlyCache?.students||[]).findIndex(item=>String(item.id)===String(student.id));
+  studentDashboardIndex=index>=0?index:0; studentPageMode="dashboard"; state.activePage="students"; save();
+  $$('[data-page]').forEach(x=>x.classList.toggle('active',x.dataset.page==='students'));
+  $('#pageKicker').textContent='학생 기본정보 기준 원장'; $('#pageTitle').textContent='학생정보'; render('students');
+---
+===== readonlyCache @1267 =====
+    source: "직접 붙여넣기",
+    type: /마감|제출|입찰|종료/.test(row.join(" ")) ? "마감" : /시험|방학|수련|학력평가/.test(row.join(" ")) ? "학사" : "업무",
+  }));
+  const connected = Array.isArray(readonlyCache?.schoolCalendar) ? readonlyCache.schoolCalendar : [];
+  const connectedKeys=new Set(connected.map(x=>`${x.date}|${x.title}|${x.time||""}`));
+  return [...connected, ...manual.filter(x=>!connectedKeys.has(`${x.date}|${x.title}|${x.time||""}`))];
 }
 ---
-  const pid=unifiedProgramId(program?.programId||program?.activityId||program?.id||"");
-  if(pid){
-    const exact=semesterPool.find(report=>unifiedProgramId(report.programId||report.activityId||report.sourceProgramId||report.linkedProgramId||"")===pid);
-    if(exact)return exact;
+===== readonlyCache @1322 =====
+  return Number.isFinite(value)?value.toFixed(2):null;
+}
+function uepManagementExpandedFiveGroups(){
+  const students=readonlyCache?.students||[], scores=readonlyCache?.scoreRecords||[];
+  const signature=[students,scores,students.length,scores.length];
+  const cached=__uepManagementFiveGroupCache;
+  if(cached&&signature.every((v,i)=>cached.signature[i]===v))return cached;
+---
+===== readonlyCache @1425 =====
+  if(studentCounselSelectedStudentId && !visible.some(x=>String(x.student.id)===String(studentCounselSelectedStudentId))) studentCounselSelectedStudentId='';
+  const selectedCandidate=visible.find(x=>String(x.student.id)===String(studentCounselSelectedStudentId))||null;
+  const list=rows.length?rows.map((x,i)=>{const st=status(x), c=studentCounselCriteria(x,groupKey), active=String(x.student.id)===String(studentCounselSelectedStudentId);return `<button class="counsel-manage-row ${active?'active':''}" data-counsel-student="${escapeHtml(x.student.id||'')}"><em>${i+1}</em><span class="student"><b>${escapeHtml(x.student.studentNo)} ${escapeHtml(x.student.name)}</b><small>${escapeHtml(classNumberOf(x.student))}반 · 내신 ${x.base.actual9==null?'-':Number(x.base.actual9).toFixed(2)} (9등급)</small></span><span class="criterion"><i class="${studentCounselStatusClass(c.internal)}">${studentCounselStatusLabel(c.internal)}</i><small>내신</small></span><span class="criterion"><i class="${studentCounselStatusClass(c.mock)}">${studentCounselStatusLabel(c.mock)}</i><small>모의</small></span><span class="criterion"><i class="${studentCounselStatusClass(c.subjects)}">${studentCounselStatusLabel(c.subjects)}</i><small>선택과목</small></span><span class="criterion"><i class="${studentCounselStatusClass(c.activity)}">${studentCounselStatusLabel(c.activity)}</i><small>선택활동</small></span><span class="criterion"><i class="${studentCounselStatusClass(c.reports)}">${studentCounselStatusLabel(c.reports)}</i><small>보고서·탐구</small></span><strong>${escapeHtml((x.reasons||x.tags||[])[0]||'학생부·성적 연계 확인')}</strong><u>${active?'선택됨':'보기'}</u></button>`}).join(''):'<div class="query-empty compact"><b>해당 관리군 학생이 없습니다.</b><span>다른 관리군 또는 반을 선택해 주세요.</span></div>';
+  const history=(Array.isArray(readonlyCache?.counselRecords)?readonlyCache.counselRecords:[]).filter(r=>(!selectedClass||String(r.className||'').replace(/\D/g,'')===selectedClass)&&(!selectedCandidate||String(r.studentId||'')===String(selectedCandidate.student.id||''))).sort((a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||''))).slice(0,8);
+  const historyMarkup=`<section class="student-counsel-history-panel counsel-history-v07718"><div class="card-head"><strong>상담이력</strong><small>${selectedCandidate?'선택 학생 기록':'반 상담 기록'}</small></div>${history.length?history.map(row=>`<button data-student-counsel-history="${escapeHtml(row.studentId||'')}"><b>${escapeHtml(row.studentNo||'')} ${escapeHtml(row.name||'')}</b><span>${escapeHtml((row.createdAt||'').replace('T',' ').slice(0,16))}</span><small>${escapeHtml(row.memo||'')}</small></button>`).join(''):'<div class="query-empty compact"><b>상담이력이 없습니다.</b><span>상담기록을 작성하면 이곳에 누적됩니다.</span></div>'}</section>`;
+  return `<div class="module-page student-master-page student-counsel-center counsel-v07718">${studentPageTabs}<div class="counsel-v07718-head counsel-head-with-groups"><div class="counsel-head-copy"><small>학생정보 › 상담</small><h2>1학년 2학기 학생상담 관리</h2><p>관리군을 먼저 선택하고, 학생의 충족·근접·부족을 확인한 뒤 우측 상담 가이드를 그대로 활용합니다.</p></div><div class="counsel-group-summaries counsel-group-summaries-inline">${summary}</div></div><div class="counsel-filter-top"><select data-counsel-class-select>${classOptions}</select><button class="${!selectedClass?'active':''}" data-counsel-class-all ${!isHead?'disabled':''}>전체 학생</button><input data-counsel-search placeholder="학생명 또는 학번 검색"><small>※ 관리군 기준: 9등급 환산 내신</small></div><div class="student-counsel-center-grid"><section class="student-counsel-class-section counsel-list-v07718"><header><div><b>${d.label} 학생 목록</b><small>${d.rule} · ${rows.length}명 · 관리 필요도 순</small></div><span>학생을 누르면 우측 상세·상담가이드가 열립니다.</span></header><div class="counsel-manage-list">${list}</div></section><aside class="counsel-right-column">${studentCounselDetailMarkup(selectedCandidate,selectedCandidate?groupOf(selectedCandidate):groupKey)}${historyMarkup}</aside></div></div>`;
+}
+---
+===== readonlyCache @1453 =====
+}
+function refreshStudentHeatClasses(){
+  document.querySelectorAll('.student-detail-card[data-student]').forEach(card=>{
+    const student=(readonlyCache?.students||[])[Number(card.dataset.student)];
+    card.classList.remove('heat-0','heat-1','heat-2','heat-3','heat-4','heat-5','heat-6','heat-7');
+    card.classList.add(studentHeatClass(student));
+  });
+---
+===== readonlyCache @1461 =====
+}
+
+function studentsView() {
+  const liveStudents = readonlyCache?.students || [];
+  const studentPageTabs = `<div class="student-page-tabs"><button class="${studentPageMode==="list"?"active":""}" data-student-page-mode="list"><span>01</span> 학생정보</button><button class="${studentPageMode==="dashboard"?"active":""}" data-student-page-mode="dashboard"><span>02</span> 대시보드</button><button class="${studentPageMode==="stats"?"active":""}" data-student-page-mode="stats"><span>03</span> 학생 발굴·통계</button><button class="${studentPageMode==="counsel"?"active":""}" data-student-page-mode="counsel"><span>04</span> 상담</button></div>`;
+
+  if(studentPageMode==="stats") return studentDiscoveryStatsView(studentPageTabs);
+---
+===== readonlyCache @1471 =====
+    const selectedIndex=selectedKey?liveStudents.findIndex(student=>String(student.id||"")===selectedKey||String(student.studentNo||"")===selectedKey):studentDashboardIndex;
+    if(selectedIndex>=0) studentDashboardIndex=selectedIndex;
+    const selected=liveStudents[studentDashboardIndex];
+    return `<div class="module-page student-master-page">${studentPageTabs}${selected?`<div class="student-dashboard-page-head"><div><small>선택 학생</small><b>${escapeHtml(selected.studentNo||"")} ${escapeHtml(selected.name||"")}</b></div><div class="student-quick-switch"><button class="btn secondary" data-student-prev>‹ 이전</button><select data-student-quick-select>${(readonlyCache?.students||[]).filter(s=>studentIsCurrentlyActive(s)&&String(s.className||"").replace(/[^0-9]/g,"")===String(selected.className||"").replace(/[^0-9]/g,"")).sort((a,b)=>String(a.studentNo).localeCompare(String(b.studentNo))).map(s=>`<option value="${escapeHtml(s.id)}" ${s.id===selected.id?"selected":""}>${escapeHtml(`${s.studentNo} ${s.name}`)}</option>`).join("")}</select><button class="btn secondary" data-student-next>다음 ›</button><button class="btn secondary" data-student-page-mode="list">다른 반 찾기</button></div></div><div id="studentDashboardEmbedded" class="student-dashboard-embedded"></div>`:`<div class="student-selection-guide student-dashboard-empty-page"><b>01 학생정보에서 학생을 선택해 주세요.</b><span>학생을 선택하면 이곳에서 기존 팝업의 전체 내용을 한 화면으로 확인할 수 있습니다.</span><button class="btn primary" data-student-page-mode="list">학생 선택하기</button></div>`}</div>`;
+  }
+  if (liveStudents.length) {
+    const summary = readonlyCache.summary || {};
+---
+===== readonlyCache @1474 =====
+    return `<div class="module-page student-master-page">${studentPageTabs}${selected?`<div class="student-dashboard-page-head"><div><small>선택 학생</small><b>${escapeHtml(selected.studentNo||"")} ${escapeHtml(selected.name||"")}</b></div><div class="student-quick-switch"><button class="btn secondary" data-student-prev>‹ 이전</button><select data-student-quick-select>${(readonlyCache?.students||[]).filter(s=>studentIsCurrentlyActive(s)&&String(s.className||"").replace(/[^0-9]/g,"")===String(selected.className||"").replace(/[^0-9]/g,"")).sort((a,b)=>String(a.studentNo).localeCompare(String(b.studentNo))).map(s=>`<option value="${escapeHtml(s.id)}" ${s.id===selected.id?"selected":""}>${escapeHtml(`${s.studentNo} ${s.name}`)}</option>`).join("")}</select><button class="btn secondary" data-student-next>다음 ›</button><button class="btn secondary" data-student-page-mode="list">다른 반 찾기</button></div></div><div id="studentDashboardEmbedded" class="student-dashboard-embedded"></div>`:`<div class="student-selection-guide student-dashboard-empty-page"><b>01 학생정보에서 학생을 선택해 주세요.</b><span>학생을 선택하면 이곳에서 기존 팝업의 전체 내용을 한 화면으로 확인할 수 있습니다.</span><button class="btn primary" data-student-page-mode="list">학생 선택하기</button></div>`}</div>`;
+  }
+  if (liveStudents.length) {
+    const summary = readonlyCache.summary || {};
+    const classes = availableClasses();
+    const classCards = classes.map((classNo) => {
+      const members = liveStudents.filter((student) => classNumberOf(student) === String(classNo));
+---
+===== readonlyCache @1529 =====
+  ].map(x=>({entryTime:'',exitTime:'',lateEntry:'',earlyExit:'',reason:'',locked:false,actualExit:'',actualReentry:'',priorNightAcademyHome:false,formRequired:false,individualOutingAllowed:false,...x,source:'규칙로그 검증 미러(v0.76.99)'}));
+}
+function dormRuleHistory(){
+  const sheetRules=Array.isArray(readonlyCache?.dormRules)?readonlyCache.dormRules:[];
+  if(sheetRules.length) return sheetRules.map(x=>({...x,active:x.active!==false}));
+  return dormDefaultRules().map(x=>({...x,active:x.active!==false,source:'UEP 기본값(시트 연결 대기)'}));
+}
+---
+===== readonlyCache @1534 =====
+  return dormDefaultRules().map(x=>({...x,active:x.active!==false,source:'UEP 기본값(시트 연결 대기)'}));
+}
+function setDormRuleCache(rules){
+  readonlyCache=readonlyCache||{};
+  readonlyCache.dormRules=(Array.isArray(rules)?rules:[]).map(x=>({...x}));
+}
+
+---
+===== readonlyCache @1535 =====
+}
+function setDormRuleCache(rules){
+  readonlyCache=readonlyCache||{};
+  readonlyCache.dormRules=(Array.isArray(rules)?rules:[]).map(x=>({...x}));
+}
+
+// v0.76.97: 학사외출 규칙 읽기는 일반 UEP readonly 동기화 경로 하나만 사용합니다.
+---
+===== readonlyCache @1540 =====
+
+// v0.76.97: 학사외출 규칙 읽기는 일반 UEP readonly 동기화 경로 하나만 사용합니다.
+function refreshDormRulesFromReadonly({rerender=true,silent=true}={}){
+  const rules=Array.isArray(readonlyCache?.dormRules)?readonlyCache.dormRules:[];
+  if(rerender&&dormMode==='outing')render('dorm');
+  if(!silent)toast(rules.length?`학사운영규칙 ${rules.length}건이 연결되어 있습니다.`:'학사운영규칙을 찾지 못했습니다.');
+  return rules.length>0;
+---
+===== normalizeReadonlyCache @441 =====
+  const cacheTask = window.schoolBoard?.readReadonlyCache
+    ? withStartupTimeout(window.schoolBoard.readReadonlyCache(), 8000, null)
+        .then((cached) => {
+          if (cached?.ok) { readonlyCache=uep08123NormalizeReadonlyCache(cached.data); googleConnectionError = ""; }
+          else if (cached) googleConnectionError = cached.reason || "학교 데이터 동기화를 확인하세요. 마지막 저장 자료는 계속 사용할 수 있습니다.";
+        })
+        .catch((error) => {
+---
+===== normalizeReadonlyCache @522 =====
+    }
+    const cached=await window.schoolBoard.readReadonlyCache();
+    if(!cached?.ok) throw new Error(cached?.reason||'UEP 학교 데이터를 읽지 못했습니다.');
+    readonlyCache=uep08123NormalizeReadonlyCache(cached.data);
+    googleConnectionError='';
+    if(typeof studentBadgeCache!=='undefined'&&studentBadgeCache?.clear) studentBadgeCache.clear();
+    updateDormOutingCount();
+---
+===== normalizeReadonlyCache @3569 =====
+  document.getElementById('useDifferentUser')?.addEventListener('click',()=>renderUserAuthGate({locked:false,switchUser:true}));
+  document.getElementById('userAuthExit')?.addEventListener('click',async()=>{if(confirm('UEP를 종료할까요?'))await window.schoolBoard?.close?.();});
+  document.getElementById('rememberedUserContinue')?.addEventListener('click',async()=>{const status=await window.schoolBoard?.schoolReadSessionStatus?.({verify:true});if(!status?.authenticated)return renderUserAuthGate({switchUser:true});const a=status.user||{},account={id:String(a.userId||remembered.id||''),email:String(a.email||remembered.email||'').trim(),name:uep08125PickTeacherName(a.name,remembered.name),role:String(a.role||''),admin:a.isAdmin?'Y':'N',grade:String(a.grade||'1'),classNo:String(a.homeroom||''),department:String(a.department||((a.grade||1)+'학년부')),active:true,activeRaw:'Y'};state.auth.user=accountToSession(account);googleConnectionStatus={ok:true,encryption:true,mode:'school_read_api'};await save();hideUserAuthGate();refreshReadonlyCacheSilently({force:true,rerender:false}).catch(()=>{});navigate(state.activePage||'dashboard');});
+  document.getElementById('userAuthForm')?.addEventListener('submit',async event=>{event.preventDefault();const name=document.getElementById('userAuthName')?.value,email=document.getElementById('userAuthEmail')?.value;const submit=event.submitter||document.querySelector('#userAuthForm button[type="submit"]');if(submit){submit.disabled=true;submit.textContent='확인 중…';}try{if(!window.schoolBoard?.schoolReadLogin)throw new Error('이 UEP 빌드에는 School Read API 로그인이 없습니다.');const result=await window.schoolBoard.schoolReadLogin({name,email});if(!result?.ok){authGateMessage(result?.message||'UEP 로그인에 실패했습니다.');return;}const a=result.user||{};const account={id:String(a.userId||''),email:String(a.email||email||'').trim(),name:uep08125PickTeacherName(a.name,name),role:String(a.role||''),admin:a.isAdmin?'Y':'N',grade:String(a.grade||'1'),classNo:String(a.homeroom||''),department:String(a.department||((a.grade||1)+'학년부')),active:true,activeRaw:'Y'};const user=accountToSession(account),remember=Boolean(document.getElementById('userAuthRemember')?.checked);state.auth.user=user;state.auth.rememberUser=remember;state.auth.rememberedUser=remember?{id:user.id,name:user.name,email:user.email}:null;state.settings.userProfile={...state.settings.userProfile,...user};state.settings.loginUserName=user.name;state.settings.teacherName=user.name;googleConnectionStatus={ok:true,encryption:true,mode:'school_read_api'};await save();hideUserAuthGate();const synced=await window.schoolBoard?.previewReadonlySync?.();if(synced?.ok){const cached=await window.schoolBoard?.readReadonlyCache?.();if(cached?.ok){readonlyCache=uep08123NormalizeReadonlyCache(cached.data);googleConnectionError='';}}else if(synced){googleConnectionError=synced.reason||'학교 데이터 동기화에 실패했습니다.';}startReadonlyAutoRefresh();navigate(state.activePage||'dashboard');}catch(error){authGateMessage(error?.message||'UEP 로그인에 실패했습니다.');}finally{if(submit){submit.disabled=false;submit.textContent='UEP 시작';}}});
+}
+async function restoreRememberedSessionImmediately(){
+  const remembered=state?.auth?.rememberUser?state?.auth?.rememberedUser:null;
+---
+===== normalizeReadonlyCache @3796 =====
+    $("#wizardSecondaryRole").value="grade_head";
+  });
+  $("[data-wizard-google]")?.addEventListener("click",async()=>{await selectGoogleCredential();renderSetupWizard();});
+  $("[data-wizard-sync]")?.addEventListener("click",async()=>{const button=$("[data-wizard-sync]");if(button){button.disabled=true;button.textContent="새로고침 중…";}const result=await window.schoolBoard?.previewReadonlySync?.();if(result?.ok){const cached=await window.schoolBoard?.readReadonlyCache?.();if(cached?.ok){readonlyCache=uep08123NormalizeReadonlyCache(cached.data);googleConnectionError="";}}else if(result){googleConnectionError=result.reason||"학교 데이터 동기화를 확인하세요. 마지막 저장 자료는 계속 사용할 수 있습니다.";}renderSetupWizard();});
+  $("[data-wizard-neis-load]")?.addEventListener("click",async()=>{
+    const school=$("#wizardNeisSchool")?.value.trim()||"운호고등학교";
+    const grade=$("#wizardNeisGrade")?.value||currentUserProfile().grade||"1";
+---
+===== normalizeReadonlyCache @6793 =====
+  for(const value of values){ if(Array.isArray(value)&&value.length) return value; }
+  return [];
+}
+function uep08123NormalizeReadonlyCache(data){
+  if(!data||typeof data!=='object') return data;
+  if(!Array.isArray(data.timetableRows)||!data.timetableRows.length){
+    const rows=uep08123FirstArray(data.timetableMaster,data.masterTimetableRows,data.teacherTimetableRows,data.timetable?.rows,data.timetable?.timetableRows,data.timetable?.masterRows);
+---
+===== normalizeReadonlyCache @8989 =====
+  googleConnectionError = "";
+  googleConnectionStatus = await window.schoolBoard.googleCredentialStatus();
+  const cached = await window.schoolBoard.readReadonlyCache();
+  if (cached?.ok) { readonlyCache=uep08123NormalizeReadonlyCache(cached.data); googleConnectionError = ""; }
+  else googleConnectionError = cached?.reason || "UEP 학교 데이터를 읽지 못했습니다.";
+  updateTopSyncStatus();
+  startReadonlyAutoRefresh();
+---
+===== normalizeReadonlyCache @9027 =====
+  toast("UEP 구글시트를 다시 읽었습니다.");
+  if (window.schoolBoard?.readReadonlyCache) {
+    const cached = await window.schoolBoard.readReadonlyCache();
+    if (cached?.ok) readonlyCache=uep08123NormalizeReadonlyCache(cached.data);
+  }
+  closeDrawer();
+  render("dashboard");
+---
+===== normalizeReadonlyCache @9046 =====
+  }
+  const cached = await window.schoolBoard.readReadonlyCache();
+  if (cached?.ok) {
+    readonlyCache=uep08123NormalizeReadonlyCache(cached.data);
+    googleConnectionError = "";
+    toast("UEP 구글시트를 다시 불러왔습니다.");
+  } else {
+---
+===== normalizeReadonlyCache @12238 =====
+        googleConnectionError='';
+        if(typeof toast==='function')toast('학교 공용 읽기 연결 및 학교 시트 동기화가 완료되었습니다.');
+      }
+      if(window.schoolBoard?.readReadonlyCache){const cached=await window.schoolBoard.readReadonlyCache();if(cached?.ok)readonlyCache=uep08123NormalizeReadonlyCache(cached.data);}
+      if(typeof refreshReadonlyCacheSilently==='function')await refreshReadonlyCacheSilently({force:true,rerender:true});
+      if(typeof updateTopSyncStatus==='function')updateTopSyncStatus();
+      if(typeof startReadonlyAutoRefresh==='function')startReadonlyAutoRefresh();
+---
+
+######## app\resources\app\tools\UEP-DataProcessor-v1.2.0-dorm-ledger-rules-mail.js ########
+===== sheetName @964 =====
+  });
+}
+
+function writeSnapshot_(sheetName, rows, width, formats) {
+  const sheet = SpreadsheetApp.getActive().getSheetByName(sheetName);
+  const oldRows = Math.max(0, sheet.getLastRow() - 2);
+  const clearRows = Math.max(oldRows, rows.length);
+---
+===== sheetName @965 =====
+}
+
+function writeSnapshot_(sheetName, rows, width, formats) {
+  const sheet = SpreadsheetApp.getActive().getSheetByName(sheetName);
+  const oldRows = Math.max(0, sheet.getLastRow() - 2);
+  const clearRows = Math.max(oldRows, rows.length);
+  if (clearRows > 0) sheet.getRange(3, 1, clearRows, width).clearContent();
+---
+===== getSheet @265 =====
+  const config = getConfig_();
+
+  const sourceSs = SpreadsheetApp.openById(requiredConfig_(config, 'SOURCE_FORM_SPREADSHEET_ID'));
+  const sourceSheet = sourceSs.getSheetByName(requiredConfig_(config, 'SOURCE_FORM_SHEET'));
+  if (!sourceSheet) throw new Error('원본 학사외출 탭을 찾을 수 없습니다.');
+
+  const sourceBundle = readDormOutingSource_(sourceSheet, config);
+---
+===== getSheet @271 =====
+  const sourceBundle = readDormOutingSource_(sourceSheet, config);
+
+  const targetSs = SpreadsheetApp.openById(requiredConfig_(config, 'TARGET_DB_SPREADSHEET_ID'));
+  const studentSheet = targetSs.getSheetByName(config.STUDENT_MASTER_SHEET || '02_학생마스터');
+  const dormSheet = targetSs.getSheetByName(config.DORM_MASTER_SHEET || '20_학사생마스터');
+  if (!studentSheet) throw new Error('02_학생마스터를 찾을 수 없습니다.');
+  if (!dormSheet) throw new Error('20_학사생마스터를 찾을 수 없습니다.');
+---
+===== getSheet @272 =====
+
+  const targetSs = SpreadsheetApp.openById(requiredConfig_(config, 'TARGET_DB_SPREADSHEET_ID'));
+  const studentSheet = targetSs.getSheetByName(config.STUDENT_MASTER_SHEET || '02_학생마스터');
+  const dormSheet = targetSs.getSheetByName(config.DORM_MASTER_SHEET || '20_학사생마스터');
+  if (!studentSheet) throw new Error('02_학생마스터를 찾을 수 없습니다.');
+  if (!dormSheet) throw new Error('20_학사생마스터를 찾을 수 없습니다.');
+
+---
+===== getSheet @288 =====
+function configureSourceFormSafety_() {
+  const config = getConfig_();
+  const sourceSs = SpreadsheetApp.openById(requiredConfig_(config, 'SOURCE_FORM_SPREADSHEET_ID'));
+  const sourceSheet = sourceSs.getSheetByName(requiredConfig_(config, 'SOURCE_FORM_SHEET'));
+  if (!sourceSheet) throw new Error('원본 학사외출 탭을 찾을 수 없습니다.');
+
+  const formUrl = sourceSheet.getFormUrl();
+---
+===== getSheet @367 =====
+function syncDormOutingCollectionSheet_(table) {
+  const cfg = UEP_DORM_PROCESSOR;
+  const targetSs = SpreadsheetApp.openById(cfg.COLLECTION_SPREADSHEET_ID);
+  const target = targetSs.getSheetByName(cfg.COLLECTION_SHEET);
+  if (!target) {
+    throw new Error(`UEP 응답수집 탭을 찾을 수 없습니다: ${cfg.COLLECTION_SHEET}`);
   }
 ---
-  const depth=maxRepeat>=4?"심화":maxRepeat>=2?"연계":maxRepeat===1?"탐색":"근거 부족";
-  const hopeText=String(hope||"");
-  const linked=active.filter(f=>hopeText&&new RegExp(f.label.split('·').join('|')).test(hopeText)).length;
-  const cards=fields.map(f=>{
-    const count=new Set(f.reports.map(r=>r.program?.id||r.title)).size;
+===== getSheet @758 =====
+function upsertDailyRowsToTargetDb_() {
+  const config = getConfig_();
+  const targetSs = SpreadsheetApp.openById(requiredConfig_(config, 'TARGET_DB_SPREADSHEET_ID'));
+  const target = targetSs.getSheetByName(requiredConfig_(config, 'TARGET_DB_SHEET'));
+  if (!target) throw new Error('UEP 최종 학사외출 기록 탭을 찾을 수 없습니다.');
+
+  const dailyRows = readDailyRows_();
 ---
-  }).join('');
-  const evidence=rows.map(row=>{const a=analyzeReportTags(row.report);return `<article class="career-report-row"><div><small>${escapeHtml(row.report?.submittedAt||row.date||'')}</small><b>${escapeHtml(row.title||row.program?.recordTitle||row.program?.title||'진로활동')}</b><div>${a.careers.slice(0,2).map(x=>`<span>${escapeHtml(x.label)}</span>`).join('')}${a.majors.slice(0,2).map(x=>`<span class="major">${escapeHtml(x.label)}</span>`).join('')}</div></div><button class="link-button" data-open-student-report="${escapeHtml(row.report?.id||'')}">보고서 보기</button></article>`;}).join('')||'<div class="empty-inline">제출된 진로활동 보고서가 없습니다.</div>';
-  return `<section class="career-portfolio"><header><div><small>CAREER EXPLORATION PORTFOLIO</small><h3>${escapeHtml(student.name)} 진로탐색 포트폴리오</h3><p>진로활동 보고서를 바탕으로 전공분야의 탐색 폭과 반복·심화 흐름을 확인합니다.</p></div><span>${rows.length}개 보고서</span></header><div class="career-portfolio-metrics"><article><small>분야 다양성</small><b>${diversity}개 분야</b></article><article><small>탐구 심화도</small><b>${depth}</b></article><article><small>희망전공 연계</small><b>${hope?`${linked?'연계 발견':'탐색 중'}`:'희망 미등록'}</b><em>${escapeHtml(hope||'희망계열·전공을 등록하면 ★로 표시')}</em></article></div><div class="career-field-grid">${cards}</div><details class="career-report-evidence"><summary>진로활동 보고서 근거 ${rows.length}건 보기</summary><div>${evidence}</div></details></section>`;
+===== getSheet @840 =====
+
+function loadActiveDormRules_() {
+  const ss = SpreadsheetApp.openById(UEP_DORM_PROCESSOR.RULES_SPREADSHEET_ID);
+  const sh = ss.getSheetByName(UEP_DORM_PROCESSOR.RULES_SHEET);
+  if (!sh || sh.getLastRow() < 4) return [];
+  const values = sh.getRange(3, 1, sh.getLastRow() - 2, 18).getValues();
+  const headers = values[0].map(text_);
+---
+===== getSheet @912 =====
 }
-function sdgsDashboard(student,bundle){
+
+function readDailyRowsExtended_() {
+  const sheet = SpreadsheetApp.getActive().getSheetByName(UEP_DORM_PROCESSOR.DAILY_SHEET);
+  if (!sheet || sheet.getLastRow() < 3) return [];
+  const width=Math.max(30,Math.min(sheet.getLastColumn(),30));
+  return sheet.getRange(3,1,sheet.getLastRow()-2,width).getValues().filter(r=>r[0]);
 ---
+===== getSheet @965 =====
 }
-function dashboardProgramItem(p,group){
-  if(p.kind==="calendar-first-grade")return `<button class="dashboard-program-row calendar-linked-program" data-school-event="${escapeHtml(p.id)}"><time>${escapeHtml(p.time||"종일")}</time><span><b>${escapeHtml(p.title)}</b><small>학교일정 연동 · ${escapeHtml(p.target||"1학년 대상")}${p.place?` · ${escapeHtml(p.place)}`:""}</small></span><em>일정 보기 ›</em></button>`;
-  if(group==="after")return `<button class="dashboard-program-row program-area-after" data-after-program="${escapeHtml(p.id)}"><time>${escapeHtml(p.time||"시간 확인")}</time><span><b>${escapeHtml(p.actualTitle||p.title)}</b><small>${/야간심화/.test(`${p.afterType||""} ${p.title||""}`)?"야간심화":"방과후"} · ${escapeHtml(p.subject||"교과 미입력")} · ${escapeHtml(p.department||"부서 미입력")}</small></span><em>${Array.isArray(p.students)?p.students.length:0}명 ›</em></button>`;
-  return `<button class="dashboard-program-row program-area-${programAreaKind(p)}" data-program="${escapeHtml(p.id)}"><time>${escapeHtml(p.time||"종일")}</time><span><b>${escapeHtml(p.actualTitle||p.title)}</b><small>${programAreaLabel(p)} · ${escapeHtml(p.place||"장소 확인")}</small></span><em>${Array.isArray(p.students)?p.students.length:0}명 ›</em></button>`;
+
+function writeSnapshot_(sheetName, rows, width, formats) {
+  const sheet = SpreadsheetApp.getActive().getSheetByName(sheetName);
+  const oldRows = Math.max(0, sheet.getLastRow() - 2);
+  const clearRows = Math.max(oldRows, rows.length);
+  if (clearRows > 0) sheet.getRange(3, 1, clearRows, width).clearContent();
 ---
-  const [start,end]=String(event.time||"").split("~");
-  const ownerParts=String(event.owner||"").split(" · ");
-  $("#drawerBody").innerHTML=`<form class="calendar-single-editor calendar-single-editor-v430" id="calendarEditForm"><input type="hidden" id="calendarEditId" value="${escapeHtml(event.id)}"><div class="calendar-editor-grid"><label>날짜<input id="calendarEditDate" type="date" required value="${escapeHtml(event.date||dateKey(today))}"></label><label>상태<select id="calendarEditStatus">${["확정","예정","예약","미정","취소"].map(x=>`<option ${x===(event.status||"")?"selected":""}>${x}</option>`).join("")}</select></label><label>시작시각<input id="calendarEditStart" type="time" value="${escapeHtml(start||"")}"></label><label>종료시각<input id="calendarEditEnd" type="time" value="${escapeHtml(end||"")}"></label><label class="wide">일정명<input id="calendarEditTitle" required value="${escapeHtml(event.title||"")}"></label><label>대상<input id="calendarEditTarget" value="${escapeHtml(event.target||"")}"></label><label>장소<input id="calendarEditPlace" value="${escapeHtml(event.place||"")}"></label><label>부서<input id="calendarEditDepartment" value="${escapeHtml(ownerParts[0]||"")}"></label><label>담당자<input id="calendarEditManager" value="${escapeHtml(ownerParts.slice(1).join(" · ")||"")}"></label><label class="wide">보완 내용<textarea id="calendarEditNote" rows="3">${escapeHtml(event.detail||"")}</textarea></label><label class="calendar-check"><input id="calendarEditLock" type="checkbox" ${event.correctionLocked?"checked":""}> 원본 재동기화 때 이 보정값 보호</label><label class="calendar-check"><input id="calendarEditGrade1" type="checkbox" ${event.firstGradeTarget?"checked":""}> 1학년 대상</label><label class="calendar-check"><input id="calendarEditTodayProgram" type="checkbox" ${event.showTodayProgram?"checked":""}> 오늘의 프로그램에 표시</label><label class="calendar-check"><input id="calendarEditProgramLink" type="checkbox" ${event.programLinked?"checked":""}> 프로그램 모듈과 연동</label></div><div class="calendar-editor-actions"><button type="button" class="btn secondary" id="calendarEditCancel">취소</button><button class="btn primary">전체 화면에 저장</button></div><p class="safe-note">41_학교캘린더에 저장하며, 수정자·수정시각과 변경 이력을 남깁니다.</p></form>`;
-  $("#calendarEditCancel").onclick=closeDrawer;
-  $("#calendarEditForm").onsubmit=async(e)=>{e.preventDefault();const payload={id:$("#calendarEditId").value,date:$("#calendarEditDate").value,start:$("#calendarEditStart").value,end:$("#calendarEditEnd").value,title:$("#calendarEditTitle").value.trim(),target:$("#calendarEditTarget").value.trim(),place:$("#calendarEditPlace").value.trim(),department:$("#calendarEditDepartment").value.trim(),manager:$("#calendarEditManager").value.trim(),status:$("#calendarEditStatus").value,note:$("#calendarEditNote").value.trim(),correctionLocked:$("#calendarEditLock").checked,firstGradeTarget:$("#calendarEditGrade1").checked,showTodayProgram:$("#calendarEditTodayProgram").checked,programLinked:$("#calendarEditProgramLink").checked,expectedModifiedAt:event.modifiedAt||""};const result=await window.schoolBoard?.updateCalendar?.(payload);if(!result?.ok)return toast(result?.reason||"일정을 저장하지 못했습니다.");const refreshed=await window.schoolBoard?.readReadonlyCache?.();if(refreshed?.ok)readonlyCache=refreshed.data;closeDrawer();render(state.activePage);toast("일정 수정사항을 전체 화면에 반영했습니다.");};
+===== getSheet @982 =====
+}
+
+function writeErrors_(rows) {
+  const sheet = SpreadsheetApp.getActive().getSheetByName(UEP_DORM_PROCESSOR.ERROR_SHEET);
+  const width = 10;
+  const oldRows = Math.max(0, sheet.getLastRow() - 2);
+  const clearRows = Math.max(oldRows, rows.length);
 ---
-  $("#drawerBody").innerHTML=`<form class="calendar-single-editor calendar-single-editor-v430" id="calendarEditForm"><input type="hidden" id="calendarEditId" value="${escapeHtml(event.id)}"><div class="calendar-editor-grid"><label>날짜<input id="calendarEditDate" type="date" required value="${escapeHtml(event.date||dateKey(today))}"></label><label>상태<select id="calendarEditStatus">${["확정","예정","예약","미정","취소"].map(x=>`<option ${x===(event.status||"")?"selected":""}>${x}</option>`).join("")}</select></label><label>시작시각<input id="calendarEditStart" type="time" value="${escapeHtml(start||"")}"></label><label>종료시각<input id="calendarEditEnd" type="time" value="${escapeHtml(end||"")}"></label><label class="wide">일정명<input id="calendarEditTitle" required value="${escapeHtml(event.title||"")}"></label><label>대상<input id="calendarEditTarget" value="${escapeHtml(event.target||"")}"></label><label>장소<input id="calendarEditPlace" value="${escapeHtml(event.place||"")}"></label><label>부서<input id="calendarEditDepartment" value="${escapeHtml(ownerParts[0]||"")}"></label><label>담당자<input id="calendarEditManager" value="${escapeHtml(ownerParts.slice(1).join(" · ")||"")}"></label><label class="wide">보완 내용<textarea id="calendarEditNote" rows="3">${escapeHtml(event.detail||"")}</textarea></label><label class="calendar-check"><input id="calendarEditLock" type="checkbox" ${event.correctionLocked?"checked":""}> 원본 재동기화 때 이 보정값 보호</label><label class="calendar-check"><input id="calendarEditGrade1" type="checkbox" ${event.firstGradeTarget?"checked":""}> 1학년 대상</label><label class="calendar-check"><input id="calendarEditTodayProgram" type="checkbox" ${event.showTodayProgram?"checked":""}> 오늘의 프로그램에 표시</label><label class="calendar-check"><input id="calendarEditProgramLink" type="checkbox" ${event.programLinked?"checked":""}> 프로그램 모듈과 연동</label></div><div class="calendar-editor-actions"><button type="button" class="btn secondary" id="calendarEditCancel">취소</button><button class="btn primary">전체 화면에 저장</button></div><p class="safe-note">41_학교캘린더에 저장하며, 수정자·수정시각과 변경 이력을 남깁니다.</p></form>`;
-  $("#calendarEditCancel").onclick=closeDrawer;
-  $("#calendarEditForm").onsubmit=async(e)=>{e.preventDefault();const payload={id:$("#calendarEditId").value,date:$("#calendarEditDate").value,start:$("#calendarEditStart").value,end:$("#calendarEditEnd").value,title:$("#calendarEditTitle").value.trim(),target:$("#calendarEditTarget").value.trim(),place:$("#calendarEditPlace").value.trim(),department:$("#calendarEditDepartment").value.trim(),manager:$("#calendarEditManager").value.trim(),status:$("#calendarEditStatus").value,note:$("#calendarEditNote").value.trim(),correctionLocked:$("#calendarEditLock").checked,firstGradeTarget:$("#calendarEditGrade1").checked,showTodayProgram:$("#calendarEditTodayProgram").checked,programLinked:$("#calendarEditProgramLink").checked,expectedModifiedAt:event.modifiedAt||""};const result=await window.schoolBoard?.updateCalendar?.(payload);if(!result?.ok)return toast(result?.reason||"일정을 저장하지 못했습니다.");const refreshed=await window.schoolBoard?.readReadonlyCache?.();if(refreshed?.ok)readonlyCache=refreshed.data;closeDrawer();render(state.activePage);toast("일정 수정사항을 전체 화면에 반영했습니다.");};
+===== getSheet @994 =====
+}
+
+function markDailyAsSent_() {
+  const sheet = SpreadsheetApp.getActive().getSheetByName(UEP_DORM_PROCESSOR.DAILY_SHEET);
+  const count = Math.max(0, sheet.getLastRow() - 2);
+  if (!count) return;
+  const now = new Date();
+---
+===== getSheet @1003 =====
+}
+
+function readNormalizedRows_() {
+  const sheet = SpreadsheetApp.getActive().getSheetByName(UEP_DORM_PROCESSOR.NORMALIZED_SHEET);
+  if (sheet.getLastRow() < 3) return [];
+  return sheet.getRange(3, 1, sheet.getLastRow() - 2, 25).getValues()
+    .filter((r) => r[0]);
+---
+===== getSheet @1010 =====
+}
+
+function readDailyRows_() {
+  const sheet = SpreadsheetApp.getActive().getSheetByName(UEP_DORM_PROCESSOR.DAILY_SHEET);
+  if (sheet.getLastRow() < 3) return [];
+  return sheet.getRange(3, 1, sheet.getLastRow() - 2, 23).getValues()
+    .filter((r) => r[0]);
+---
+===== getSheet @1068 =====
+}
+
+function getConfig_() {
+  const sheet = SpreadsheetApp.getActive().getSheetByName(UEP_DORM_PROCESSOR.CONFIG_SHEET);
+  if (!sheet) throw new Error('00_처리설정 탭이 없습니다.');
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 3) return {};
+---
+===== getSheet @1084 =====
+}
+
+function setConfigValue_(key, value) {
+  const sheet = SpreadsheetApp.getActive().getSheetByName(UEP_DORM_PROCESSOR.CONFIG_SHEET);
+  const lastRow = Math.max(sheet.getLastRow(), 3);
+  const keys = sheet.getRange(3, 1, lastRow - 2, 1).getValues().flat().map(text_);
+  const index = keys.indexOf(key);
+---
+===== getSheet @1112 =====
+    UEP_DORM_PROCESSOR.ERROR_SHEET,
+    UEP_DORM_PROCESSOR.RETRY_SHEET,
+  ].forEach((name) => {
+    if (!ss.getSheetByName(name)) throw new Error(`필수 탭 누락: ${name}`);
+  });
 }
 
 ---
+===== getSheet @1119 =====
+function showUepDormOutingProcessorStatus() {
+  const config = getConfig_();
+  const normalized = SpreadsheetApp.getActive()
+    .getSheetByName(UEP_DORM_PROCESSOR.NORMALIZED_SHEET).getLastRow() - 2;
+  const daily = SpreadsheetApp.getActive()
+    .getSheetByName(UEP_DORM_PROCESSOR.DAILY_SHEET).getLastRow() - 2;
+  const errors = SpreadsheetApp.getActive()
+---
+===== getSheet @1121 =====
+  const normalized = SpreadsheetApp.getActive()
+    .getSheetByName(UEP_DORM_PROCESSOR.NORMALIZED_SHEET).getLastRow() - 2;
+  const daily = SpreadsheetApp.getActive()
+    .getSheetByName(UEP_DORM_PROCESSOR.DAILY_SHEET).getLastRow() - 2;
+  const errors = SpreadsheetApp.getActive()
+    .getSheetByName(UEP_DORM_PROCESSOR.ERROR_SHEET).getLastRow() - 2;
+  const triggers = ScriptApp.getProjectTriggers()
+---
+===== getSheet @1123 =====
+  const daily = SpreadsheetApp.getActive()
+    .getSheetByName(UEP_DORM_PROCESSOR.DAILY_SHEET).getLastRow() - 2;
+  const errors = SpreadsheetApp.getActive()
+    .getSheetByName(UEP_DORM_PROCESSOR.ERROR_SHEET).getLastRow() - 2;
+  const triggers = ScriptApp.getProjectTriggers()
+    .filter((t) => t.getHandlerFunction() === UEP_DORM_PROCESSOR.AUTO_HANDLER).length;
+
+---
+===== getSheet @1146 =====
 }
-function reportProgramId(report){
-  return String(report?.programId||report?.activityId||report?.sourceProgramId||report?.linkedProgramId||"").trim();
+
+function logProcess_(step, result, startedAt, count, errorCount, detail) {
+  const sheet = SpreadsheetApp.getActive().getSheetByName(UEP_DORM_PROCESSOR.LOG_SHEET);
+  sheet.appendRow([
+    new Date(),
+    '학사외출',
+---
+
+######## app\resources\app\tools\UEP-DataProcessor-v1.2.3-daily-dedupe-operational-rules-fullset.js ########
+===== sheetName @254 =====
+
+  const sourceId = text_(config.SOURCE_FORM_SPREADSHEET_ID) ||
+    UEP_DORM_PROCESSOR.COLLECTION_SPREADSHEET_ID;
+  const sourceSheetName = text_(config.SOURCE_FORM_SHEET) ||
+    UEP_DORM_PROCESSOR.COLLECTION_SHEET;
+
+  const sourceSs = SpreadsheetApp.openById(sourceId);
+---
+===== sheetName @258 =====
+    UEP_DORM_PROCESSOR.COLLECTION_SHEET;
+
+  const sourceSs = SpreadsheetApp.openById(sourceId);
+  const sourceSheet = sourceSs.getSheetByName(sourceSheetName);
+  if (!sourceSheet) throw new Error(`원본 학사외출 탭을 찾을 수 없습니다: ${sourceSheetName}`);
+
+  const sourceBundle = readDormOutingSource_(sourceSheet, config);
+---
+===== sheetName @259 =====
+
+  const sourceSs = SpreadsheetApp.openById(sourceId);
+  const sourceSheet = sourceSs.getSheetByName(sourceSheetName);
+  if (!sourceSheet) throw new Error(`원본 학사외출 탭을 찾을 수 없습니다: ${sourceSheetName}`);
+
+  const sourceBundle = readDormOutingSource_(sourceSheet, config);
+
+---
+===== sheetName @272 =====
+    UEP_DORM_PROCESSOR.MASTER_SPREADSHEET_ID_DEFAULT;
+
+  const masterSs = SpreadsheetApp.openById(masterSpreadsheetId);
+  const studentSheetName = text_(config.STUDENT_MASTER_SHEET) || '02_학생마스터';
+  const dormSheetName = text_(config.DORM_MASTER_SHEET) || '20_학사생마스터';
+  const studentSheet = masterSs.getSheetByName(studentSheetName);
+  const dormSheet = masterSs.getSheetByName(dormSheetName);
+---
+===== sheetName @273 =====
+
+  const masterSs = SpreadsheetApp.openById(masterSpreadsheetId);
+  const studentSheetName = text_(config.STUDENT_MASTER_SHEET) || '02_학생마스터';
+  const dormSheetName = text_(config.DORM_MASTER_SHEET) || '20_학사생마스터';
+  const studentSheet = masterSs.getSheetByName(studentSheetName);
+  const dormSheet = masterSs.getSheetByName(dormSheetName);
+
+---
+===== sheetName @274 =====
+  const masterSs = SpreadsheetApp.openById(masterSpreadsheetId);
+  const studentSheetName = text_(config.STUDENT_MASTER_SHEET) || '02_학생마스터';
+  const dormSheetName = text_(config.DORM_MASTER_SHEET) || '20_학사생마스터';
+  const studentSheet = masterSs.getSheetByName(studentSheetName);
+  const dormSheet = masterSs.getSheetByName(dormSheetName);
+
+  if (!studentSheet) throw new Error(`학생마스터를 찾을 수 없습니다: ${studentSheetName}`);
+---
+===== sheetName @275 =====
+  const studentSheetName = text_(config.STUDENT_MASTER_SHEET) || '02_학생마스터';
+  const dormSheetName = text_(config.DORM_MASTER_SHEET) || '20_학사생마스터';
+  const studentSheet = masterSs.getSheetByName(studentSheetName);
+  const dormSheet = masterSs.getSheetByName(dormSheetName);
+
+  if (!studentSheet) throw new Error(`학생마스터를 찾을 수 없습니다: ${studentSheetName}`);
+  if (!dormSheet) throw new Error(`학사생마스터를 찾을 수 없습니다: ${dormSheetName}`);
+---
+===== sheetName @277 =====
+  const studentSheet = masterSs.getSheetByName(studentSheetName);
+  const dormSheet = masterSs.getSheetByName(dormSheetName);
+
+  if (!studentSheet) throw new Error(`학생마스터를 찾을 수 없습니다: ${studentSheetName}`);
+  if (!dormSheet) throw new Error(`학사생마스터를 찾을 수 없습니다: ${dormSheetName}`);
+
+  return {
+---
+===== sheetName @278 =====
+  const dormSheet = masterSs.getSheetByName(dormSheetName);
+
+  if (!studentSheet) throw new Error(`학생마스터를 찾을 수 없습니다: ${studentSheetName}`);
+  if (!dormSheet) throw new Error(`학사생마스터를 찾을 수 없습니다: ${dormSheetName}`);
+
+  return {
+    config,
+---
+===== sheetName @986 =====
+  });
+}
+
+function writeSnapshot_(sheetName, rows, width, formats) {
+  const sheet = SpreadsheetApp.getActive().getSheetByName(sheetName);
+  const oldRows = Math.max(0, sheet.getLastRow() - 2);
+  const clearRows = Math.max(oldRows, rows.length);
+---
+===== sheetName @987 =====
+}
+
+function writeSnapshot_(sheetName, rows, width, formats) {
+  const sheet = SpreadsheetApp.getActive().getSheetByName(sheetName);
+  const oldRows = Math.max(0, sheet.getLastRow() - 2);
+  const clearRows = Math.max(oldRows, rows.length);
+  if (clearRows > 0) sheet.getRange(3, 1, clearRows, width).clearContent();
+---
+===== getSheet @258 =====
+    UEP_DORM_PROCESSOR.COLLECTION_SHEET;
+
+  const sourceSs = SpreadsheetApp.openById(sourceId);
+  const sourceSheet = sourceSs.getSheetByName(sourceSheetName);
+  if (!sourceSheet) throw new Error(`원본 학사외출 탭을 찾을 수 없습니다: ${sourceSheetName}`);
+
+  const sourceBundle = readDormOutingSource_(sourceSheet, config);
+---
+===== getSheet @274 =====
+  const masterSs = SpreadsheetApp.openById(masterSpreadsheetId);
+  const studentSheetName = text_(config.STUDENT_MASTER_SHEET) || '02_학생마스터';
+  const dormSheetName = text_(config.DORM_MASTER_SHEET) || '20_학사생마스터';
+  const studentSheet = masterSs.getSheetByName(studentSheetName);
+  const dormSheet = masterSs.getSheetByName(dormSheetName);
+
+  if (!studentSheet) throw new Error(`학생마스터를 찾을 수 없습니다: ${studentSheetName}`);
+---
+===== getSheet @275 =====
+  const studentSheetName = text_(config.STUDENT_MASTER_SHEET) || '02_학생마스터';
+  const dormSheetName = text_(config.DORM_MASTER_SHEET) || '20_학사생마스터';
+  const studentSheet = masterSs.getSheetByName(studentSheetName);
+  const dormSheet = masterSs.getSheetByName(dormSheetName);
+
+  if (!studentSheet) throw new Error(`학생마스터를 찾을 수 없습니다: ${studentSheetName}`);
+  if (!dormSheet) throw new Error(`학사생마스터를 찾을 수 없습니다: ${dormSheetName}`);
+---
+===== getSheet @292 =====
+function configureSourceFormSafety_() {
+  const config = getConfig_();
+  const sourceSs = SpreadsheetApp.openById(requiredConfig_(config, 'SOURCE_FORM_SPREADSHEET_ID'));
+  const sourceSheet = sourceSs.getSheetByName(requiredConfig_(config, 'SOURCE_FORM_SHEET'));
+  if (!sourceSheet) throw new Error('원본 학사외출 탭을 찾을 수 없습니다.');
+
+  const formUrl = sourceSheet.getFormUrl();
+---
+===== getSheet @371 =====
+function syncDormOutingCollectionSheet_(table) {
+  const cfg = UEP_DORM_PROCESSOR;
+  const targetSs = SpreadsheetApp.openById(cfg.COLLECTION_SPREADSHEET_ID);
+  const target = targetSs.getSheetByName(cfg.COLLECTION_SHEET);
+  if (!target) {
+    throw new Error(`UEP 응답수집 탭을 찾을 수 없습니다: ${cfg.COLLECTION_SHEET}`);
+  }
+---
+===== getSheet @804 =====
+
+function ensureDormRuleOperationalSchema_() {
+  const ss = SpreadsheetApp.openById(UEP_DORM_PROCESSOR.RULES_SPREADSHEET_ID);
+  const sh = ss.getSheetByName(UEP_DORM_PROCESSOR.RULES_SHEET);
+  if (!sh) throw new Error('40_학사외출규칙 탭을 찾을 수 없습니다.');
+
+  const wanted = [
+---
+===== getSheet @837 =====
+
+function loadActiveDormRules_() {
+  const ss = SpreadsheetApp.openById(UEP_DORM_PROCESSOR.RULES_SPREADSHEET_ID);
+  const sh = ss.getSheetByName(UEP_DORM_PROCESSOR.RULES_SHEET);
+  if (!sh || sh.getLastRow() < 4) return [];
+  const width = Math.max(18, Math.min(sh.getLastColumn(), 24));
+  const values = sh.getRange(3, 1, sh.getLastRow() - 2, width).getValues();
+---
+===== getSheet @934 =====
+}
+
+function readDailyRowsExtended_() {
+  const sheet = SpreadsheetApp.getActive().getSheetByName(UEP_DORM_PROCESSOR.DAILY_SHEET);
+  if (!sheet || sheet.getLastRow() < 3) return [];
+  const width=Math.max(30,Math.min(sheet.getLastColumn(),30));
+  return sheet.getRange(3,1,sheet.getLastRow()-2,width).getValues().filter(r=>r[0]);
+---
+===== getSheet @987 =====
+}
+
+function writeSnapshot_(sheetName, rows, width, formats) {
+  const sheet = SpreadsheetApp.getActive().getSheetByName(sheetName);
+  const oldRows = Math.max(0, sheet.getLastRow() - 2);
+  const clearRows = Math.max(oldRows, rows.length);
+  if (clearRows > 0) sheet.getRange(3, 1, clearRows, width).clearContent();
+---
+===== getSheet @1004 =====
+}
+
+function writeErrors_(rows) {
+  const sheet = SpreadsheetApp.getActive().getSheetByName(UEP_DORM_PROCESSOR.ERROR_SHEET);
+  const width = 10;
+  const oldRows = Math.max(0, sheet.getLastRow() - 2);
+  const clearRows = Math.max(oldRows, rows.length);
+---
+===== getSheet @1016 =====
+}
+
+function readNormalizedRows_() {
+  const sheet = SpreadsheetApp.getActive().getSheetByName(UEP_DORM_PROCESSOR.NORMALIZED_SHEET);
+  if (sheet.getLastRow() < 3) return [];
+  return sheet.getRange(3, 1, sheet.getLastRow() - 2, 25).getValues()
+    .filter((r) => r[0]);
+---
+===== getSheet @1023 =====
+}
+
+function readDailyRows_() {
+  const sheet = SpreadsheetApp.getActive().getSheetByName(UEP_DORM_PROCESSOR.DAILY_SHEET);
+  if (sheet.getLastRow() < 3) return [];
+  return sheet.getRange(3, 1, sheet.getLastRow() - 2, 23).getValues()
+    .filter((r) => r[0]);
+---
+===== getSheet @1081 =====
+}
+
+function getConfig_() {
+  const sheet = SpreadsheetApp.getActive().getSheetByName(UEP_DORM_PROCESSOR.CONFIG_SHEET);
+  if (!sheet) throw new Error('00_처리설정 탭이 없습니다.');
+
+  const lastRow = sheet.getLastRow();
+---
+===== getSheet @1126 =====
+  return config;
+}
+function setConfigValue_(key, value) {
+  const sheet = SpreadsheetApp.getActive().getSheetByName(UEP_DORM_PROCESSOR.CONFIG_SHEET);
+  const lastRow = Math.max(sheet.getLastRow(), 3);
+  const keys = sheet.getRange(3, 1, lastRow - 2, 1).getValues().flat().map(text_);
+  const index = keys.indexOf(key);
+---
+===== getSheet @1154 =====
+    UEP_DORM_PROCESSOR.ERROR_SHEET,
+    UEP_DORM_PROCESSOR.RETRY_SHEET,
+  ].forEach((name) => {
+    if (!ss.getSheetByName(name)) throw new Error(`필수 탭 누락: ${name}`);
+  });
 }
 
 ---
-  const participationPrograms=[...rawParticipationPrograms.filter(p=>!p.__isAfter),...afterForStudent]
-    .sort((a,b)=>String(b.date||"").localeCompare(String(a.date||""))||String(a.recordTitle||a.actualTitle||a.title||"").localeCompare(String(b.recordTitle||b.actualTitle||b.title||"")));
-  let selectedCount=0,afterCount=0,commonCount=0; const linkedReportIds=new Set(); for(const p of participationPrograms){ if(p.__isSelected)selectedCount++; if(p.__isAfter)afterCount++; if(p.__isCommon)commonCount++; const reportId=String(p.__studentParticipant?.reportId||""); if(reportId)linkedReportIds.add(reportId); } const submittedReportCount=studentReports.length;
-  const unmatchedReportCount=studentReports.filter(r=>r.id&&!linkedReportIds.has(String(r.id))).length;
-  const mockMini=["3월모의고사","6월모의고사"].map(exam=>`<span class="mock-mini"><b>${exam}</b>${mockGradeMiniMarkup(live.id,exam)}</span>`).join('');
+===== getSheet @1161 =====
+function showUepDormOutingProcessorStatus() {
+  const config = getConfig_();
+  const ss = SpreadsheetApp.getActive();
+  const normalized = ss.getSheetByName(UEP_DORM_PROCESSOR.NORMALIZED_SHEET).getLastRow() - 2;
+  const daily = ss.getSheetByName(UEP_DORM_PROCESSOR.DAILY_SHEET).getLastRow() - 2;
+  const errors = ss.getSheetByName(UEP_DORM_PROCESSOR.ERROR_SHEET).getLastRow() - 2;
+  const triggers = ScriptApp.getProjectTriggers()
 ---
-    .sort((a,b)=>String(b.date||"").localeCompare(String(a.date||""))||String(a.recordTitle||a.actualTitle||a.title||"").localeCompare(String(b.recordTitle||b.actualTitle||b.title||"")));
-  let selectedCount=0,afterCount=0,commonCount=0; const linkedReportIds=new Set(); for(const p of participationPrograms){ if(p.__isSelected)selectedCount++; if(p.__isAfter)afterCount++; if(p.__isCommon)commonCount++; const reportId=String(p.__studentParticipant?.reportId||""); if(reportId)linkedReportIds.add(reportId); } const submittedReportCount=studentReports.length;
-  const unmatchedReportCount=studentReports.filter(r=>r.id&&!linkedReportIds.has(String(r.id))).length;
-  const mockMini=["3월모의고사","6월모의고사"].map(exam=>`<span class="mock-mini"><b>${exam}</b>${mockGradeMiniMarkup(live.id,exam)}</span>`).join('');
-  const activityPreview=bundle.activities.filter(x=>{const t=`${x.area||""} ${x.type||""} ${x.title||""} ${x.role||""} ${x.source||""}`;const office=/임원|학생회|회장|부회장|실장|부실장|반장|부반장/.test(t);const club=isTrueClubActivity(x);const volunteer=isVolunteerActivity(x)&&String(x.area||"")!=="교육과정 내 봉사";return office||club||volunteer;}).slice(0,12);
+===== getSheet @1162 =====
+  const config = getConfig_();
+  const ss = SpreadsheetApp.getActive();
+  const normalized = ss.getSheetByName(UEP_DORM_PROCESSOR.NORMALIZED_SHEET).getLastRow() - 2;
+  const daily = ss.getSheetByName(UEP_DORM_PROCESSOR.DAILY_SHEET).getLastRow() - 2;
+  const errors = ss.getSheetByName(UEP_DORM_PROCESSOR.ERROR_SHEET).getLastRow() - 2;
+  const triggers = ScriptApp.getProjectTriggers()
+    .filter((t) => t.getHandlerFunction() === UEP_DORM_PROCESSOR.AUTO_HANDLER).length;
 ---
-  $("#drawerKicker").textContent="NIGHT PROGRAM SUMMARY";
-  $("#drawerTitle").textContent=program.actualTitle||program.title||display.label;
-  $("#drawerBody").innerHTML=`<div class="night-program-summary-card"><div class="program-name-pair"><div><small>표시 구분</small><b>${escapeHtml(display.label)}</b></div><div><small>프로그램명</small><b>${escapeHtml(program.actualTitle||program.title||"-")}</b></div></div><div class="program-summary afterschool-program-summary"><div><b>학생</b><span>${escapeHtml(student?`${student.studentNo} ${student.name}`:"-")}</span></div><div><b>해당 차시</b><span>${escapeHtml(day||program.date||"-")} ${escapeHtml(weekdayLabelFromKey(day||program.date,true))}</span></div><div><b>시간대</b><span>${escapeHtml(slot||"-")}</span></div><div><b>운영시간</b><span>${escapeHtml(program.time||"-")}</span></div><div><b>운영요일</b><span>${escapeHtml(program.weekdays||weekdayLabelFromKey(program.date,true)||"-")}</span></div><div><b>장소</b><span>${escapeHtml(program.place||"-")}</span></div><div><b>담당교사</b><span>${escapeHtml(program.teacher||"-")}</span></div><div><b>유형</b><span>${escapeHtml(program.afterType||program.type||"프로그램")}</span></div><div><b>참여상태</b><span>${escapeHtml(participant?.attendance||participant?.participation||participant?.result||"참여")}</span></div><div><b>확인방식</b><span>${escapeHtml(participant?.checkMethod||"출석부 연결")}</span></div></div><div class="program-notice attendance-linked"><b>표시 기준</b><p>11_방과후학교의 강좌, 12_차시일정의 실제수업일·야자영향타임, 13_출석부의 학생 등록이 모두 일치한 경우에만 표시됩니다.</p></div><div class="program-actions"><button class="btn primary" id="openNightProgramFull">전체 프로그램 상세</button></div></div>`;
-  $("#drawer").classList.remove("program-expanded","hidden"); $("#drawerBackdrop").classList.remove("hidden");
-  $("#openNightProgramFull")?.addEventListener("click",()=>openAfterschoolProgramDrawer(id));
+===== getSheet @1163 =====
+  const ss = SpreadsheetApp.getActive();
+  const normalized = ss.getSheetByName(UEP_DORM_PROCESSOR.NORMALIZED_SHEET).getLastRow() - 2;
+  const daily = ss.getSheetByName(UEP_DORM_PROCESSOR.DAILY_SHEET).getLastRow() - 2;
+  const errors = ss.getSheetByName(UEP_DORM_PROCESSOR.ERROR_SHEET).getLastRow() - 2;
+  const triggers = ScriptApp.getProjectTriggers()
+    .filter((t) => t.getHandlerFunction() === UEP_DORM_PROCESSOR.AUTO_HANDLER).length;
+
 ---
-  $("#drawerKicker").textContent = "AFTER-SCHOOL PROGRAM";
-  $("#drawerTitle").textContent = program.title;
-  $("#drawerBody").innerHTML = `<div class="program-name-pair"><div><small>실제 프로그램명</small><b>${escapeHtml(program.actualTitle||program.title)}</b></div><div><small>생활기록부 명칭</small><b class="not-record-target">생활기록부 기록 대상 아님</b></div></div><div class="program-summary afterschool-program-summary"><div><b>실제 수업일</b><span>${escapeHtml(program.date || "-")} ${escapeHtml(weekdayLabelFromKey(program.date,true))}</span></div><div><b>회차</b><span>${escapeHtml(program.sessionNo ? `${program.sessionNo}회차` : program.sessionId || "-")}</span></div><div><b>운영시간</b><span>${escapeHtml(program.time || "-")}</span></div><div><b>수업상태</b><span>${escapeHtml(program.status || "예정")}</span></div>${program.changeType?`<div><b>변경유형</b><span>${escapeHtml(program.changeType)}</span></div>`:""}${program.originalDate?`<div><b>원예정일</b><span>${escapeHtml(program.originalDate)}</span></div>`:""}<div><b>교과</b><span>${escapeHtml(program.subject || "-")}</span></div><div><b>담당부서</b><span>${escapeHtml(program.department || "-")}</span></div><div><b>방과후 유형</b><span>${escapeHtml(program.afterType || program.type || "-")}</span></div><div><b>출석부 인원</b><span>${students.length}명</span></div><div><b>출석·참여</b><span>${program.attendedCount}명</span></div><div><b>학생 보고서</b><span>없음</span></div><div><b>야자 중복</b><span>${programHasNightStudyImpact(program)?"자동 제외":"해당 없음"}</span></div></div><div class="program-notice ${programHasNightStudyImpact(program)?"attendance-linked":""}"><b>${programHasNightStudyImpact(program)?"야자출결 중복 처리":"방과후 프로그램"}</b><p>${programHasNightStudyImpact(program)?"결강·휴강·취소가 아닌 실제 차시가 오후자습·야자와 겹치면 출석부 학생의 해당 시간에 실제 강좌명으로 표시합니다.":"수요일 수업은 야자 미운영일이므로 야자출결에 영향을 주지 않습니다. 일반 프로그램과 동일하게 운영일·출석부 인원·출결을 관리합니다."}</p></div><div class="drawer-section"><div class="section-title-row"><h4>학생 출석</h4><small>${program.sessionNo?`${escapeHtml(program.sessionNo)}차시 기준`:`강좌 신청 명단`}</small></div><div class="after-status-summary">${statusSummary}</div>${programRosterTabs(students)}<div class="participant-list participant-afterschool"><div class="participant-head"><em>번호</em><b>학번</b><b>이름</b><b>반</b><b>학생 출석</b></div>${students.map((student,index)=>{const selected=resolvedAfterAttendanceStatus(program,student);return `<div data-program-student-grade="${escapeHtml(programStudentGrade(student))}"><em>${index+1}</em><span>${escapeHtml(student.studentNo||student.number||"-")}</span><b>${escapeHtml(student.name||"-")}</b><span>${escapeHtml(student.className||"-")}반</span><select class="after-attendance-select" data-after-attendance-student="${escapeHtml(student.studentId||student.studentNo||student.number||student.name||"")}">${AFTER_ATTENDANCE_STATUSES.map(status=>`<option value="${escapeHtml(status)}" ${status===selected?"selected":""}>${escapeHtml(status)}</option>`).join("")}</select></div>`;}).join("") || '<div class="empty-state"><b>출석부에 등록된 학생이 없습니다.</b></div>'}</div><p class="safe-note">불참(인정)은 공식 행사·공결 등으로 실제 참여하지 않았지만 인정 처리하는 상태입니다.</p></div><section class="program-student-alert"><div class="section-title-row"><div><small>STUDENT NOTICE</small><h4>학생 안내·발송</h4></div></div><div class="program-alert-groups compact"><div class="program-alert-group"><small>PERSONAL · 개인 발송</small><b>방과후 참여학생 안내</b><p>복사·발송 전에 내용을 먼저 확인하고 수정합니다.</p><div><button class="btn primary" id="programEmailButton">학생 알림 메일</button><button class="btn secondary" id="programIndividualNoticeButton">개인 메시지</button><button class="btn secondary" id="programSmsButton">문자 문구</button></div></div><div class="program-alert-group"><small>NOTICE · 공지</small><b>공지용 문구</b><p>리로스쿨 문구도 확인 후 복사합니다.</p><div><button class="btn secondary" id="programRiroButton">리로 개인문구</button><button class="btn secondary" id="programFamilyLetterButton">리로 가정통신문</button></div></div></div><p class="safe-note">출석 QR은 스캔 결과 저장 기능이 연결되어 있지 않아 제거했습니다.</p></section><div class="program-actions"><button class="btn secondary" id="overrideAfterProgramButton">운영정보 수정</button><button class="btn primary" id="printAfterProgramButton">출석부 PDF·인쇄</button><button class="btn secondary" id="excelAfterProgramButton">출석부 Excel</button></div><p class="drawer-note">방과후 프로그램은 학생 보고서·생활기록부 기록 대상이 아닙니다. 야자와 겹치는 경우 실제 프로그램을 학사보다 우선 표시하고 중복 출결을 제거합니다.</p>`;
-  $("#drawer").classList.add("program-expanded"); $("#drawer").classList.remove("hidden"); $("#drawerBackdrop").classList.remove("hidden");
-  bindProgramRosterGradeFilter();
----
-  }else if(isAfter){
-    const clocks=String(program.time||"").match(/\d{1,2}:\d{2}/g)||[];
-    specificFields=`<label>프로그램명<input id="overrideProgramTitle" value="${escapeHtml(program.actualTitle||program.title||"")}"></label><div class="form-row"><label>운영기간구분<input id="overrideProgramOperationPeriod" value="${escapeHtml(program.operationPeriod||program.type||"")}" placeholder="예: 1학기, 여름방학"></label><label>방과후유형<input id="overrideProgramAfterType" value="${escapeHtml(program.afterType||"")}" placeholder="예: 일반 방과후, 야간심화수업"></label></div><div class="form-row"><label>운영시작일<input id="overrideProgramDate" type="date" value="${escapeHtml(program.date||"")}"></label><label>운영종료일<input id="overrideProgramEndDate" type="date" value="${escapeHtml(program.endDate||program.date||"")}"></label></div><div class="form-row"><label>요일<input id="overrideProgramWeekdays" value="${escapeHtml(program.weekdays||"")}" placeholder="예: 월,수"></label><label>대상학년<input id="overrideProgramTargetGrade" value="${escapeHtml(program.targetGrade||"")}" placeholder="예: 1"></label></div><div class="form-row"><label>시작시간<input id="overrideProgramStartTime" value="${escapeHtml(clocks[0]||"")}" placeholder="17:00"></label><label>종료시간<input id="overrideProgramEndTime" value="${escapeHtml(clocks[1]||"")}" placeholder="18:00"></label></div><div class="form-row"><label>장소<input id="overrideProgramPlace" value="${escapeHtml(program.place||"")}"></label><label>담당교사<input id="overrideProgramTeacher" value="${escapeHtml(program.teacher||"")}"></label></div><div class="form-row"><label>교과<input id="overrideProgramSubject" value="${escapeHtml(program.subject||"")}"></label><label>담당부서<input id="overrideProgramDepartment" value="${escapeHtml(program.department||"")}"></label></div><div class="form-row"><label>출석관리방식<input id="overrideProgramAttendanceMethod" value="${escapeHtml(program.attendanceMethod||"출석부")}"></label><label>운영상태<input id="overrideProgramStatus" value="${escapeHtml(program.status||"예정")}"></label></div><label class="check-label"><input id="overrideProgramNightLinked" type="checkbox" ${program.affectsAttendance?"checked":""}> 야자연계여부</label><label>학생안내<textarea id="overrideProgramMemo" rows="3">${escapeHtml(program.memo||"")}</textarea></label><input id="overrideProgramReportRequired" type="hidden">`;
-  }else{
-    specificFields=`<div class="form-row"><label>운영일<input id="overrideProgramDate" type="date" value="${escapeHtml(program.date||"")}"></label><label>운영시간<input id="overrideProgramTime" value="${escapeHtml(program.time||"")}"></label></div><div class="form-row"><label>장소<input id="overrideProgramPlace" value="${escapeHtml(program.place||"")}"></label><label>담당교사<input id="overrideProgramTeacher" value="${escapeHtml(program.teacher||"")}"></label></div><input id="overrideProgramReportRequired" type="hidden">`;
----
-      reportRequired:Boolean($("#overrideProgramReportRequired")?.checked), reportDeadline:$("#overrideProgramReportDeadline")?.value||"", activityType:$("#overrideProgramType")?.value||program.type||"", memo:$("#overrideProgramMemo")?.value.trim()||"",
-      afterType:$("#overrideProgramAfterType")?.value.trim()||"", weekdays:$("#overrideProgramWeekdays")?.value.trim()||"", operationPeriod:$("#overrideProgramOperationPeriod")?.value.trim()||"",
-      targetGrade:$("#overrideProgramTargetGrade")?.value.trim()||"", nightLinked:Boolean($("#overrideProgramNightLinked")?.checked), attendanceMethod:$("#overrideProgramAttendanceMethod")?.value.trim()||"", status:$("#overrideProgramStatus")?.value.trim()||""
-    };
-    if(isSelected){
+===== getSheet @1195 =====
+  );
+}
+function logProcess_(step, result, startedAt, count, errorCount, detail) {
+  const sheet = SpreadsheetApp.getActive().getSheetByName(UEP_DORM_PROCESSOR.LOG_SHEET);
+  sheet.appendRow([
+    new Date(),
+    '학사외출',
 ---
