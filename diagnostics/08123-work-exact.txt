@@ -1,0 +1,188 @@
+SOURCE: app/resources/app/gyomuon.js
+
+### ANCHOR: directNoticeRows
+COUNT=7
+@@ line 6446
+  6441:   const mine=currentTeacherHomeroomClass();
+  6442:   if(!mine)return true;
+  6443:   const mineNo=mine.split("-")[1];
+  6444:   return target.split(/[,·\s]+/).some(v=>String(v).replace(/[^0-9]/g,"")===mineNo||String(v)===mine);
+  6445: }
+  6446: function directNoticeRows({activeOnly=true}={}){
+  6447:   const todayKey=dateKey(today);
+  6448:   const connected=(Array.isArray(readonlyCache?.notices)?readonlyCache.notices:[]).filter(connectedNoticeVisibleToCurrentUser);
+  6449:   const local=workBoardData("notice").filter(workItemVisibleToCurrentUser).filter(x=>!connected.some(n=>String(n.id)===String(x.id)));
+  6450:   return [...connected,...local].filter(item=>{
+  6451:     if(item?.status==="삭제"||item?.status==="종료"||item?.done)return false;
+  6452:     if(!activeOnly)return true;
+  6453:     const start=String(item.postDate||item.date||"").slice(0,10), end=String(item.endDate||"").slice(0,10);
+  6454:     if(start&&start>todayKey)return false;
+  6455:     if(end&&end<todayKey)return false;
+@@ line 6568
+  6563: }
+  6564: 
+  6565: function workBoardLabel(type){return type==="notice"?"학교업무 공지":type==="deadline"?"일정·마감":"개인 체크리스트";}
+  6566: function workBoardEmpty(type){return type==="notice"?"등록된 학교업무 공지가 없습니다.":type==="deadline"?"등록된 일정·마감이 없습니다.":"등록된 개인 체크리스트가 없습니다.";}
+  6567: function workBoardRows(type){
+  6568:   const rows=type==="notice"?directNoticeRows({activeOnly:false}):workBoardData(type);
+  6569:   if(!rows.length)return `<div class="work-board-empty"><b>${workBoardEmpty(type)}</b><small>${type==="notice"?"직접 공지는 기본정보 연결시트와 양방향으로 관리됩니다.":"오른쪽 위 ‘새 글 등록’ 버튼으로 바로 등록할 수 있습니다."}</small></div>`;
+  6570:   return rows.map(item=>{
+  6571:     const id=escapeHtml(item.id||""), title=escapeHtml(item.title||"제목 없음");
+  6572:     if(type==="notice"){
+  6573:       const stateInfo=noticeActionState(item), expected=noticeExpectedCount(item), confirmCount=Number(item.confirmedCount||0), submitCount=Number(item.submittedCount||0);
+  6574:       const badges=[item.noticeKind||item.type||"공지",item.homeroomNotice?"종례":"",item.important?"중요":""].filter(Boolean).map(x=>`<i>${escapeHtml(x)}</i>`).join('');
+  6575:       const progress=currentUserCanManageNotices()?`<small>확인 ${confirmCount}/${expected}${item.submitRequired?` · 제출 ${submitCount}/${expected}`:""}</small>`:`<small>${item.confirmRequired?(stateInfo.confirmed?"확인 완료":"확인 필요"):"확인 선택"}${item.submitRequired?` · ${stateInfo.submitted?"제출 완료":"제출 필요"}`:""}</small>`;
+  6576:       return `<article class="work-board-row ${item.status==='종료'?'done':''}"><button class="work-board-main" data-work-notice-detail="${id}" data-work-notice-source="connected"><span class="work-board-state">직접</span><div><b>${title}</b><div class="work-notice-badges">${badges}</div><small>${escapeHtml(item.department||item.author||"1학년부")} · ${escapeHtml(item.postDate||item.date||"")}${item.deadline?` · 마감 ${escapeHtml(item.deadline)}`:""}</small>${progress}${item.detail?`<p>${escapeHtml(item.detail)}</p>`:""}</div><em>열기 ›</em></button>${currentUserCanManageNotices()?`<div class="work-board-row-actions"><button data-notice-edit="${id}">수정</button><button class="danger" data-notice-delete="${id}">삭제</button></div>`:""}</article>`;
+  6577:     }
+@@ line 6586
+  6581:     return `<article class="work-board-row ${done?"done":""}"><button class="work-board-main" data-work-edit="${type}" data-work-id="${id}"><span class="work-board-state">${done?"완료":"진행"}</span><div><b>${title}</b><small>${escapeHtml(meta.filter(Boolean).join(" · "))}</small>${item.content||item.memo||item.description?`<p>${escapeHtml(item.content||item.memo||item.description)}</p>`:""}</div><em>열기 ›</em></button><div class="work-board-row-actions"><button data-work-edit="${type}" data-work-id="${id}">수정</button><button class="danger" data-work-delete="${type}" data-work-id="${id}">삭제</button></div></article>`;
+  6582:   }).join("");
+  6583: }
+  6584: function workBoardView(type){
+  6585:   if(type==="notice"){
+  6586:     const direct=directNoticeRows({activeOnly:false}), active=directNoticeRows(), auto=automaticDeadlineAlerts({includePast:true,includeDismissed:currentUserCanManageNotices(),includeUnapproved:currentUserCanManageNotices()}).filter(x=>x.days>=-7&&x.days<=30), todayDirect=active.filter(item=>String(item.postDate||item.date||"").slice(0,10)===dateKey(today)||item.homeroomNotice);
+  6587:     return `<div class="module-page work-board-page work-notice-split-v07668"><section class="work-board-head"><button class="btn secondary" data-work-board="home">← 학교업무 홈</button><div><small>SCHOOL WORK NOTICE</small><h2>학교업무 공지</h2><p>직접 공지와 UEP가 원본 날짜에서 계산한 자동 마감공지를 성격별로 분리해 관리합니다.</p></div><button class="btn primary" data-notice-add>＋ 직접공지 등록</button></section><div class="student-summary work-board-summary"><span><b>${active.length}</b> 게시 중 직접공지</span><span><b>${todayDirect.length}</b> 오늘·종례 공지</span><span><b>${auto.filter(x=>x.days>=0).length}</b> 예정 자동마감</span><span><b>${auto.filter(x=>x.days<0).length}</b> 기한 경과</span></div><div class="work-notice-two-track"><section class="work-board-direct"><header><div><small>MANUAL NOTICE</small><h3>직접 공지</h3><p>학년부장이 등록한 공지·확인요청·제출요청·종례전달</p></div><span>${direct.length}건</span></header><div class="work-board-list">${workBoardRows("notice")}</div></section><section class="work-board-deadline-auto"><header><div><small>AUTO DEADLINE</small><h3>자동 마감공지</h3><p>${currentUserCanManageNotices()?'자동공지 후보를 검토하여 승인·확인·불가 처리합니다. 승인된 공지만 담임 대시보드에 표시됩니다.':'승인되어 배포된 자동 마감공지를 확인합니다.'}</p></div><div class="auto-review-tools">${currentUserCanManageNotices()?'<button class="btn secondary" data-auto-bulk-governance="approved">일괄 승인</button><button class="btn secondary" data-auto-bulk-governance="handled">일괄 확인</button><button class="btn secondary" data-auto-bulk-governance="blocked">일괄 불가</button>':''}<span>${auto.length}건</span></div></header><div class="work-auto-deadline-list">${currentUserCanManageNotices()?automaticDeadlineAdminReviewMarkup(40):automaticDeadlineMarkup(30)}</div></section></div><section class="work-board-auto status-auto"><header><div><small>AUTO CHECK</small><h3>상태 기반 자동 확인알림</h3></div><span>${teacherAutoWorkAlerts().length}건</span></header>${workAutoNoticeMarkup(20)}</section></div>`;
+  6588:   }
+  6589:   const label=workBoardLabel(type),rows=workBoardData(type),done=rows.filter(x=>x.done||x.status==="완료").length;
+  6590:   return `<div class="module-page work-board-page"><section class="work-board-head"><button class="btn secondary" data-work-board="home">← 학교업무 홈</button><div><small>WORK BOARD</small><h2>${label}</h2><p>${type==="deadline"?"직접 등록한 업무 일정과 마감을 관리합니다.":"개인 업무를 등록하고 완료 여부와 마감일을 관리합니다."}</p></div><button class="btn primary" data-work-add="${type}">＋ 새 글 등록</button></section><div class="student-summary work-board-summary"><span><b>${rows.length}</b> 전체</span><span><b>${rows.length-done}</b> 진행</span><span><b>${done}</b> 완료</span></div><section class="work-board-list">${workBoardRows(type)}</section></div>`;
+  6591: }
+  6592: function workAutoNoticeMarkup(limit=8){
+  6593:   const autoAlerts=teacherAutoWorkAlerts();
+  6594:   if(!autoAlerts.length)return '<div class="work-empty"><b>현재 자동 알림이 없습니다.</b><small>보고서 제출·선택과목 수정·프로그램 일정 상태에 따라 자동으로 나타납니다.</small></div>';
+  6595:   return autoAlerts.slice(0,limit).map(item=>`<div class="work-auto-notice-row"><button class="work-auto-notice kind-${escapeHtml(item.category)}" data-auto-alert-open="${escapeHtml(item.id)}"><span><i>자동</i><b>${escapeHtml(item.title)}</b><small>${escapeHtml(item.meta)}</small></span><em>${item.count||''} ›</em></button></div>`).join("");
+@@ line 6606
+  6601: }
+  6602: function workView() {
+  6603:   if(workEmbeddedMode==="duties") return `<div class="module-page work-embedded-page"><div class="embedded-backbar"><button class="btn secondary" data-work-embedded="home">← 학교업무</button><div><small>SCHOOL WORK</small><h3>업무분장</h3></div></div>${dutiesView()}</div>`;
+  6604:   if(workEmbeddedMode==="forms") return `<div class="module-page work-embedded-page"><div class="embedded-backbar"><button class="btn secondary" data-work-embedded="home">← 학교업무</button><div><small>SCHOOL WORK</small><h3>각종 양식</h3></div></div>${formsView()}</div>`;
+  6605:   if(workBoardMode!=="home")return workBoardView(workBoardMode);
+  6606:   const activeDirect=directNoticeRows();
+  6607:   const deadlines=workBoardData("deadline").filter(workItemVisibleToCurrentUser), pendingDeadlines=deadlines.filter(item=>!item.done&&item.status!=="완료");
+  6608:   const checklist=workBoardData("checklist"), pendingChecklist=checklist.filter(item=>!item.done&&item.status!=="완료");
+  6609:   const autoDeadlines=automaticDeadlineAlerts({includePast:true}).filter(item=>item.days>=-7&&item.days<=30);
+  6610:   return `<div class="module-page work-project-page work-hub-v0761 work-hub-v07629">
+  6611:     <section class="school-work-hub school-work-hub-compact">
+  6612:       <header><div><small>SCHOOL WORK HUB</small><h2>학교업무</h2></div><span>업무 통합 관리</span></header>
+  6613:       <div class="school-work-cards school-work-cards-five school-work-cards-one-line">
+  6614:         <button data-work-board="notice"><i>공지</i><b>학교업무 공지</b><em>${activeDirect.length + autoDeadlines.length}건</em></button>
+  6615:         <button data-work-board="deadline"><i>마감</i><b>일정·마감</b><em>${pendingDeadlines.length}건</em></button>
+
+### ANCHOR: dashboardDeadlineItems
+COUNT=2
+@@ line 8214
+  8209:   layer.querySelector('[data-auto-basic-dismiss]')?.addEventListener('click',async()=>{close();render(state.activePage||'dashboard');toast('내 대시보드에서 자동공지를 숨겼습니다.');await saveAutoNoticeReceipt(source,id,{dismissed:true,note:'자동공지 해제'});});
+  8210:   layer.querySelectorAll('[data-auto-governance]').forEach(button=>button.addEventListener('click',async()=>{const status=button.dataset.autoGovernance,label=status==='approved'?'승인':status==='handled'?'확인':'불가(해제)';if(await setAutoNoticeGovernance(source,id,status,`관리자 ${label}`)){close();render(state.activePage||'dashboard');toast(`자동공지를 ${label} 처리했습니다.`);}}));
+  8211:   layer.querySelector('[data-auto-basic-detail]')?.addEventListener('click',async()=>{await saveAutoNoticeReceipt(source,id,{detailViewed:true,note:'자동공지 상세보기'});close();openProgramDrawer(pid,{returnTo:'dashboard'});});
+  8212: }
+  8213: 
+  8214: function dashboardDeadlineItems(){
+  8215:   // 대시보드는 관리자도 담임과 동일한 실제 배포 화면을 본다.
+  8216:   return automaticDeadlineAlerts({includePast:true}).filter(item=>item.days>=-3&&item.days<=7).slice(0,4);
+  8217: }
+  8218: function dashboardPersonalChecklist(){
+  8219:   return workBoardData('checklist').filter(item=>!item.done&&item.status!=='완료').sort((a,b)=>String(a.date||'9999').localeCompare(String(b.date||'9999'))).slice(0,3);
+  8220: }
+  8221: function todayOperationsMarkup() {
+  8222:   const notices=directNoticeRows().filter(item=>String(item.postDate||item.date||'').slice(0,10)===dateKey(today)||item.homeroomNotice||item.important).slice(0,3);
+  8223:   const deadlines=dashboardDeadlineItems();
+@@ line 8223
+  8218: function dashboardPersonalChecklist(){
+  8219:   return workBoardData('checklist').filter(item=>!item.done&&item.status!=='완료').sort((a,b)=>String(a.date||'9999').localeCompare(String(b.date||'9999'))).slice(0,3);
+  8220: }
+  8221: function todayOperationsMarkup() {
+  8222:   const notices=directNoticeRows().filter(item=>String(item.postDate||item.date||'').slice(0,10)===dateKey(today)||item.homeroomNotice||item.important).slice(0,3);
+  8223:   const deadlines=dashboardDeadlineItems();
+  8224:   const checklist=dashboardPersonalChecklist();
+  8225:   const isHead=currentUserCanManageNotices();
+  8226:   const manualNoticeBody=notices.map(item=>{const st=noticeActionState(item);const action=item.submitRequired&&!st.submitted?'제출':item.confirmRequired&&!st.confirmed?'확인':'열기';return `<button class="work-mini-item notice ${item.important?'important':''}" data-work-notice-detail="${escapeHtml(item.id||'')}" data-work-notice-source="connected"><span><b>${item.homeroomNotice?'<i>종례</i> ':''}${escapeHtml(item.title||'학교업무 공지')}</b><small>${escapeHtml(item.noticeKind||item.type||'공지')} · ${escapeHtml(item.author||item.department||'1학년부')}</small></span><em>${action}</em></button>`;}).join('');
+  8227:   const noticeBody=manualNoticeBody||`<div class="work-mini-empty">오늘 전달할 직접 공지가 없습니다.</div>`;
+  8228:   const deadlineBody=deadlines.length?deadlines.map(item=>`<button class="work-mini-item deadline ${item.days<0?'overdue':item.days<=1?'urgent':''}" data-auto-deadline-source="${escapeHtml(item.source)}" data-auto-deadline-id="${escapeHtml(String(item.id||''))}"><span><b><i>${escapeHtml(item.category)}</i> ${escapeHtml(item.title||'마감')}</b><small>${escapeHtml(item.due||'기한 확인')} · ${escapeHtml(item.meta||'')}</small></span><em>${deadlineBadge(item)}</em></button>`).join(''):`<div class="work-mini-empty">7일 이내 자동 마감공지가 없습니다.</div>`;
+  8229:   const checklistBody=checklist.length?checklist.map(item=>`<button class="work-mini-item checklist" data-work-edit="checklist" data-work-id="${escapeHtml(item.id||'')}"><span><b>${escapeHtml(item.title||'개인 업무')}</b><small>${escapeHtml(item.date||'기한 없음')}</small></span><em>미완료</em></button>`).join(''):`<div class="work-mini-empty">미완료 체크리스트가 없습니다.</div>`;
+  8230:   return `<article class="card task-card operations-card operations-card-v07668 widget-configurable" ${widgetAttrs('operations')}><div class="card-head"><div><span class="card-icon ci-blue">✓</span><strong>학교업무공지·마감</strong></div><div class="operation-head-tools"><span><b>${notices.length}</b> 직접공지</span><span><b>${deadlines.length}</b> 자동마감</span><button class="text-button notice-add-button" data-notice-add>＋ 공지</button></div></div><div class="work-four-grid"><section><header><b>오늘의 직접공지</b><button data-page="work">전체</button></header>${noticeBody}</section><section><header><b>자동 마감공지</b><button data-page="work">전체</button></header>${deadlineBody}</section><section><header><b>상담 필요</b><button data-student-counsel-route>전체</button></header>${dashboardCounselMarkup()}</section><section><header><b>내 체크리스트</b><button data-page="work">전체</button></header>${checklistBody}</section></div></article>`;
+  8231: }
+  8232: 
+
+### ANCHOR: workBoardData
+COUNT=15
+@@ line 6246
+  6241:   return `<div class="module-page program-detail-page">${hub}<div class="program-content-panel">${programMode==="after"?afterDbCheck:""}<div class="module-intro pastel-peach"><span>03</span><div><h3>${title}</h3><p>${intro}</p></div></div><div class="student-summary"><span><b>${items.length}</b> 운영 단위</span><span><b>${items.filter(p=>p.date===todayKey).length}</b> 오늘 운영</span><span><b>${uniqueParticipants.size}</b> 대상 학생</span><span><b>${items.filter(p=>p.reportRequired).length}</b> 보고서 사용</span></div><div class="toolbar"><input class="search" type="search" id="programPageSearch" placeholder="활동명·운영일·대상 검색"><button class="btn secondary" data-program-sheet>시트 연결</button><button class="btn primary" data-program-add data-program-kind="${addKind}">＋ ${title} 등록</button></div><div class="data-card program-table-scroll" id="programPageRows"><div class="data-head program-unified-grid"><span>운영일</span><span>구분</span><span>프로그램명</span><span>영역·기록명</span><span>시간</span><span>장소·운영정보</span><span>대상</span><span>출결</span><span>보고·SDGs</span><span></span></div>${rows}</div></div></div>`;
+  6242: }
+  6243: 
+  6244: let workBoardMode="home";
+  6245: 
+  6246: function workBoardData(type){
+  6247:   if(type==="notice"){
+  6248:     if(!Array.isArray(state.workNotices))state.workNotices=[];
+  6249:     return state.workNotices;
+  6250:   }
+  6251:   if(type==="deadline"){
+  6252:     if(!Array.isArray(state.schoolDeadlines))state.schoolDeadlines=[];
+  6253:     return state.schoolDeadlines;
+  6254:   }
+  6255:   return (state.tasks||[]).filter(task=>task?.project!=="UEP"&&(!task.owner||task.owner===currentWorkAudienceContext().name));
+@@ line 6449
+  6444:   return target.split(/[,·\s]+/).some(v=>String(v).replace(/[^0-9]/g,"")===mineNo||String(v)===mine);
+  6445: }
+  6446: function directNoticeRows({activeOnly=true}={}){
+  6447:   const todayKey=dateKey(today);
+  6448:   const connected=(Array.isArray(readonlyCache?.notices)?readonlyCache.notices:[]).filter(connectedNoticeVisibleToCurrentUser);
+  6449:   const local=workBoardData("notice").filter(workItemVisibleToCurrentUser).filter(x=>!connected.some(n=>String(n.id)===String(x.id)));
+  6450:   return [...connected,...local].filter(item=>{
+  6451:     if(item?.status==="삭제"||item?.status==="종료"||item?.done)return false;
+  6452:     if(!activeOnly)return true;
+  6453:     const start=String(item.postDate||item.date||"").slice(0,10), end=String(item.endDate||"").slice(0,10);
+  6454:     if(start&&start>todayKey)return false;
+  6455:     if(end&&end<todayKey)return false;
+  6456:     return true;
+  6457:   }).sort((a,b)=>Number(Boolean(b.important))-Number(Boolean(a.important))||String(b.postDate||b.date||"").localeCompare(String(a.postDate||a.date||"")));
+  6458: }
+@@ line 6568
+  6563: }
+  6564: 
+  6565: function workBoardLabel(type){return type==="notice"?"학교업무 공지":type==="deadline"?"일정·마감":"개인 체크리스트";}
+  6566: function workBoardEmpty(type){return type==="notice"?"등록된 학교업무 공지가 없습니다.":type==="deadline"?"등록된 일정·마감이 없습니다.":"등록된 개인 체크리스트가 없습니다.";}
+  6567: function workBoardRows(type){
+  6568:   const rows=type==="notice"?directNoticeRows({activeOnly:false}):workBoardData(type);
+  6569:   if(!rows.length)return `<div class="work-board-empty"><b>${workBoardEmpty(type)}</b><small>${type==="notice"?"직접 공지는 기본정보 연결시트와 양방향으로 관리됩니다.":"오른쪽 위 ‘새 글 등록’ 버튼으로 바로 등록할 수 있습니다."}</small></div>`;
+  6570:   return rows.map(item=>{
+  6571:     const id=escapeHtml(item.id||""), title=escapeHtml(item.title||"제목 없음");
+  6572:     if(type==="notice"){
+  6573:       const stateInfo=noticeActionState(item), expected=noticeExpectedCount(item), confirmCount=Number(item.confirmedCount||0), submitCount=Number(item.submittedCount||0);
+  6574:       const badges=[item.noticeKind||item.type||"공지",item.homeroomNotice?"종례":"",item.important?"중요":""].filter(Boolean).map(x=>`<i>${escapeHtml(x)}</i>`).join('');
+  6575:       const progress=currentUserCanManageNotices()?`<small>확인 ${confirmCount}/${expected}${item.submitRequired?` · 제출 ${submitCount}/${expected}`:""}</small>`:`<small>${item.confirmRequired?(stateInfo.confirmed?"확인 완료":"확인 필요"):"확인 선택"}${item.submitRequired?` · ${stateInfo.submitted?"제출 완료":"제출 필요"}`:""}</small>`;
+  6576:       return `<article class="work-board-row ${item.status==='종료'?'done':''}"><button class="work-board-main" data-work-notice-detail="${id}" data-work-notice-source="connected"><span class="work-board-state">직접</span><div><b>${title}</b><div class="work-notice-badges">${badges}</div><small>${escapeHtml(item.department||item.author||"1학년부")} · ${escapeHtml(item.postDate||item.date||"")}${item.deadline?` · 마감 ${escapeHtml(item.deadline)}`:""}</small>${progress}${item.detail?`<p>${escapeHtml(item.detail)}</p>`:""}</div><em>열기 ›</em></button>${currentUserCanManageNotices()?`<div class="work-board-row-actions"><button data-notice-edit="${id}">수정</button><button class="danger" data-notice-delete="${id}">삭제</button></div>`:""}</article>`;
+  6577:     }
+@@ line 6589
+  6584: function workBoardView(type){
+  6585:   if(type==="notice"){
+  6586:     const direct=directNoticeRows({activeOnly:false}), active=directNoticeRows(), auto=automaticDeadlineAlerts({includePast:true,includeDismissed:currentUserCanManageNotices(),includeUnapproved:currentUserCanManageNotices()}).filter(x=>x.days>=-7&&x.days<=30), todayDirect=active.filter(item=>String(item.postDate||item.date||"").slice(0,10)===dateKey(today)||item.homeroomNotice);
+  6587:     return `<div class="module-page work-board-page work-notice-split-v07668"><section class="work-board-head"><button class="btn secondary" data-work-board="home">← 학교업무 홈</button><div><small>SCHOOL WORK NOTICE</small><h2>학교업무 공지</h2><p>직접 공지와 UEP가 원본 날짜에서 계산한 자동 마감공지를 성격별로 분리해 관리합니다.</p></div><button class="btn primary" data-notice-add>＋ 직접공지 등록</button></section><div class="student-summary work-board-summary"><span><b>${active.length}</b> 게시 중 직접공지</span><span><b>${todayDirect.length}</b> 오늘·종례 공지</span><span><b>${auto.filter(x=>x.days>=0).length}</b> 예정 자동마감</span><span><b>${auto.filter(x=>x.days<0).length}</b> 기한 경과</span></div><div class="work-notice-two-track"><section class="work-board-direct"><header><div><small>MANUAL NOTICE</small><h3>직접 공지</h3><p>학년부장이 등록한 공지·확인요청·제출요청·종례전달</p></div><span>${direct.length}건</span></header><div class="work-board-list">${workBoardRows("notice")}</div></section><section class="work-board-deadline-auto"><header><div><small>AUTO DEADLINE</small><h3>자동 마감공지</h3><p>${currentUserCanManageNotices()?'자동공지 후보를 검토하여 승인·확인·불가 처리합니다. 승인된 공지만 담임 대시보드에 표시됩니다.':'승인되어 배포된 자동 마감공지를 확인합니다.'}</p></div><div class="auto-review-tools">${currentUserCanManageNotices()?'<button class="btn secondary" data-auto-bulk-governance="approved">일괄 승인</button><button class="btn secondary" data-auto-bulk-governance="handled">일괄 확인</button><button class="btn secondary" data-auto-bulk-governance="blocked">일괄 불가</button>':''}<span>${auto.length}건</span></div></header><div class="work-auto-deadline-list">${currentUserCanManageNotices()?automaticDeadlineAdminReviewMarkup(40):automaticDeadlineMarkup(30)}</div></section></div><section class="work-board-auto status-auto"><header><div><small>AUTO CHECK</small><h3>상태 기반 자동 확인알림</h3></div><span>${teacherAutoWorkAlerts().length}건</span></header>${workAutoNoticeMarkup(20)}</section></div>`;
+  6588:   }
+  6589:   const label=workBoardLabel(type),rows=workBoardData(type),done=rows.filter(x=>x.done||x.status==="완료").length;
+  6590:   return `<div class="module-page work-board-page"><section class="work-board-head"><button class="btn secondary" data-work-board="home">← 학교업무 홈</button><div><small>WORK BOARD</small><h2>${label}</h2><p>${type==="deadline"?"직접 등록한 업무 일정과 마감을 관리합니다.":"개인 업무를 등록하고 완료 여부와 마감일을 관리합니다."}</p></div><button class="btn primary" data-work-add="${type}">＋ 새 글 등록</button></section><div class="student-summary work-board-summary"><span><b>${rows.length}</b> 전체</span><span><b>${rows.length-done}</b> 진행</span><span><b>${done}</b> 완료</span></div><section class="work-board-list">${workBoardRows(type)}</section></div>`;
+  6591: }
+  6592: function workAutoNoticeMarkup(limit=8){
+  6593:   const autoAlerts=teacherAutoWorkAlerts();
+  6594:   if(!autoAlerts.length)return '<div class="work-empty"><b>현재 자동 알림이 없습니다.</b><small>보고서 제출·선택과목 수정·프로그램 일정 상태에 따라 자동으로 나타납니다.</small></div>';
+  6595:   return autoAlerts.slice(0,limit).map(item=>`<div class="work-auto-notice-row"><button class="work-auto-notice kind-${escapeHtml(item.category)}" data-auto-alert-open="${escapeHtml(item.id)}"><span><i>자동</i><b>${escapeHtml(item.title)}</b><small>${escapeHtml(item.meta)}</small></span><em>${item.count||''} ›</em></button></div>`).join("");
+  6596: }
+  6597: function workAcknowledgedAutoMarkup(){
+  6598:   const rows=teacherAutoWorkAlerts({includeAcked:true}).filter(autoAlertIsAcked);
+
+### ANCHOR: readonlyCache?.work
+COUNT=0
+
+### ANCHOR: readonlyCache.work
+COUNT=0
+
+### ANCHOR: renderWork
+COUNT=0
+
+### ANCHOR: operationsMarkup
+COUNT=0
+
+### ANCHOR: dashboardOperations
+COUNT=0
+
+### ANCHOR: directNotices
+COUNT=0

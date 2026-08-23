@@ -1,0 +1,550 @@
+SOURCE: app/resources/app/gyomuon.js
+
+### ANCHOR: schoolReadSessionStatus
+COUNT=9
+@@ line 433
+   428:   }
+   429: 
+   430:   // 외부 연결은 UI 초기화와 분리하고 서로 독립적인 작업은 병렬로 시작한다.
+   431:   // NEIS가 Google 캐시 완료를 기다리지 않도록 먼저 예약한다.
+   432:   setTimeout(() => loadNeisDashboard(false), 0);
+   433:   const credentialTask = window.schoolBoard?.schoolReadSessionStatus
+   434:     ? withStartupTimeout(window.schoolBoard.schoolReadSessionStatus({verify:true}), 5000, null)
+   435:         .then((status) => { if (status) googleConnectionStatus = {ok:Boolean(status.authenticated),encryption:true,mode:'school_read_api',endpointReady:status.endpointReady!==false}; })
+   436:         .catch((error) => console.warn("[UEP] School Read API 세션 확인 실패", error))
+   437:     : Promise.resolve();
+   438:   const cacheTask = window.schoolBoard?.readReadonlyCache
+   439:     ? withStartupTimeout(window.schoolBoard.readReadonlyCache(), 8000, null)
+   440:         .then((cached) => {
+   441:           if (cached?.ok) { readonlyCache = cached.data; googleConnectionError = ""; }
+   442:           else if (cached) googleConnectionError = cached.reason || "학교 데이터 동기화를 확인하세요. 마지막 저장 자료는 계속 사용할 수 있습니다.";
+@@ line 434
+   429: 
+   430:   // 외부 연결은 UI 초기화와 분리하고 서로 독립적인 작업은 병렬로 시작한다.
+   431:   // NEIS가 Google 캐시 완료를 기다리지 않도록 먼저 예약한다.
+   432:   setTimeout(() => loadNeisDashboard(false), 0);
+   433:   const credentialTask = window.schoolBoard?.schoolReadSessionStatus
+   434:     ? withStartupTimeout(window.schoolBoard.schoolReadSessionStatus({verify:true}), 5000, null)
+   435:         .then((status) => { if (status) googleConnectionStatus = {ok:Boolean(status.authenticated),encryption:true,mode:'school_read_api',endpointReady:status.endpointReady!==false}; })
+   436:         .catch((error) => console.warn("[UEP] School Read API 세션 확인 실패", error))
+   437:     : Promise.resolve();
+   438:   const cacheTask = window.schoolBoard?.readReadonlyCache
+   439:     ? withStartupTimeout(window.schoolBoard.readReadonlyCache(), 8000, null)
+   440:         .then((cached) => {
+   441:           if (cached?.ok) { readonlyCache = cached.data; googleConnectionError = ""; }
+   442:           else if (cached) googleConnectionError = cached.reason || "학교 데이터 동기화를 확인하세요. 마지막 저장 자료는 계속 사용할 수 있습니다.";
+   443:         })
+@@ line 3558
+  3553:   const gate=document.getElementById('userAuthGate');if(!gate)return;document.body.classList.add('uep-auth-locked');gate.classList.remove('hidden');authSessionReady=false;
+  3554:   const remembered=state?.auth?.rememberedUser||state?.auth?.user;const canContinue=remembered&&remembered.name&&remembered.email&&!switchUser;
+  3555:   gate.innerHTML=`<section class="user-auth-card"><div class="user-auth-brand"><span>U</span><div><small>UNHO EDUCATION PLATFORM</small><h2>${locked?'UEP 화면 잠금':'사용자 확인'}</h2><p>${locked?'학생정보 보호를 위해 현재 화면을 잠갔습니다.':'학교에 등록된 이메일을 기준으로 사용자를 확인합니다. 최고관리자는 신규 PC에서도 안전하게 진입할 수 있습니다.'}</p></div></div>${canContinue?`<button class="user-auth-remembered" id="rememberedUserContinue"><b>${escapeHtml(remembered.name)}</b><span>${escapeHtml(maskEmail(remembered.email))}</span><small>${locked?'계속 사용':'자동 로그인 사용자'}</small></button><button class="user-auth-text" id="useDifferentUser">다른 사용자로 로그인</button>`:`<form id="userAuthForm"><label>교사 이름<input id="userAuthName" autocomplete="name" required placeholder="예: 홍석민"></label><label>교사 이메일<input id="userAuthEmail" type="email" autocomplete="email" required placeholder="학교에 등록된 이메일"></label><label class="user-auth-check"><input id="userAuthRemember" type="checkbox"> 이 PC에서 자동 로그인</label><p id="userAuthMessage" class="user-auth-message"></p><button class="btn primary" type="submit">UEP 시작</button></form>`}<div class="user-auth-exit-row"><button type="button" class="user-auth-text danger" id="userAuthExit">UEP 종료</button></div><footer>PC 인증과 사용자 확인은 별도입니다. 상담 메모와 개인 권한은 현재 로그인 교사를 기준으로 표시됩니다.</footer></section>`;
+  3556:   document.getElementById('useDifferentUser')?.addEventListener('click',()=>renderUserAuthGate({locked:false,switchUser:true}));
+  3557:   document.getElementById('userAuthExit')?.addEventListener('click',async()=>{if(confirm('UEP를 종료할까요?'))await window.schoolBoard?.close?.();});
+  3558:   document.getElementById('rememberedUserContinue')?.addEventListener('click',async()=>{const status=await window.schoolBoard?.schoolReadSessionStatus?.({verify:true});if(!status?.authenticated)return renderUserAuthGate({switchUser:true});const a=status.user||{},account={id:String(a.userId||remembered.id||''),email:String(a.email||remembered.email||'').trim(),name:String(a.name||remembered.name||'').trim(),role:String(a.role||''),admin:a.isAdmin?'Y':'N',grade:String(a.grade||'1'),classNo:String(a.homeroom||''),department:String(a.department||((a.grade||1)+'학년부')),active:true,activeRaw:'Y'};state.auth.user=accountToSession(account);googleConnectionStatus={ok:true,encryption:true,mode:'school_read_api'};await save();hideUserAuthGate();refreshReadonlyCacheSilently({force:true,rerender:false}).catch(()=>{});navigate(state.activePage||'dashboard');});
+  3559:   document.getElementById('userAuthForm')?.addEventListener('submit',async event=>{event.preventDefault();const name=document.getElementById('userAuthName')?.value,email=document.getElementById('userAuthEmail')?.value;const submit=event.submitter||document.querySelector('#userAuthForm button[type="submit"]');if(submit){submit.disabled=true;submit.textContent='확인 중…';}try{if(!window.schoolBoard?.schoolReadLogin)throw new Error('이 UEP 빌드에는 School Read API 로그인이 없습니다.');const result=await window.schoolBoard.schoolReadLogin({name,email});if(!result?.ok){authGateMessage(result?.message||'UEP 로그인에 실패했습니다.');return;}const a=result.user||{};const account={id:String(a.userId||''),email:String(a.email||email||'').trim(),name:String(a.name||name||'').trim(),role:String(a.role||''),admin:a.isAdmin?'Y':'N',grade:String(a.grade||'1'),classNo:String(a.homeroom||''),department:String(a.department||((a.grade||1)+'학년부')),active:true,activeRaw:'Y'};const user=accountToSession(account),remember=Boolean(document.getElementById('userAuthRemember')?.checked);state.auth.user=user;state.auth.rememberUser=remember;state.auth.rememberedUser=remember?{id:user.id,name:user.name,email:user.email}:null;state.settings.userProfile={...state.settings.userProfile,...user};state.settings.loginUserName=user.name;googleConnectionStatus={ok:true,encryption:true,mode:'school_read_api'};await save();hideUserAuthGate();const synced=await window.schoolBoard?.previewReadonlySync?.();if(synced?.ok){const cached=await window.schoolBoard?.readReadonlyCache?.();if(cached?.ok){readonlyCache=cached.data;googleConnectionError='';}}else if(synced){googleConnectionError=synced.reason||'학교 데이터 동기화에 실패했습니다.';}startReadonlyAutoRefresh();navigate(state.activePage||'dashboard');}catch(error){authGateMessage(error?.message||'UEP 로그인에 실패했습니다.');}finally{if(submit){submit.disabled=false;submit.textContent='UEP 시작';}}});
+  3560: }
+  3561: async function restoreRememberedSessionImmediately(){
+  3562:   const remembered=state?.auth?.rememberUser?state?.auth?.rememberedUser:null;
+  3563:   const savedUser=state?.auth?.user;
+  3564:   if(!remembered?.name||!remembered?.email||!savedUser?.name||!savedUser?.email)return false;
+  3565:   const sameName=String(savedUser.name).trim()===String(remembered.name).trim();
+  3566:   const sameEmail=String(savedUser.email).trim().toLowerCase()===String(remembered.email).trim().toLowerCase();
+  3567:   if(!sameName||!sameEmail)return false;
+@@ line 3568
+  3563:   const savedUser=state?.auth?.user;
+  3564:   if(!remembered?.name||!remembered?.email||!savedUser?.name||!savedUser?.email)return false;
+  3565:   const sameName=String(savedUser.name).trim()===String(remembered.name).trim();
+  3566:   const sameEmail=String(savedUser.email).trim().toLowerCase()===String(remembered.email).trim().toLowerCase();
+  3567:   if(!sameName||!sameEmail)return false;
+  3568:   if(!window.schoolBoard?.schoolReadSessionStatus)return false;
+  3569:   const status=await window.schoolBoard.schoolReadSessionStatus({verify:true});
+  3570:   if(!status?.authenticated)return false;
+  3571:   const a=status.user||{};const account={id:String(a.userId||remembered?.id||savedUser?.id||''),email:String(a.email||remembered?.email||savedUser?.email||'').trim(),name:String(a.name||remembered?.name||savedUser?.name||'').trim(),role:String(a.role||''),admin:a.isAdmin?'Y':'N',grade:String(a.grade||'1'),classNo:String(a.homeroom||''),department:String(a.department||((a.grade||1)+'학년부')),active:true,activeRaw:'Y'};state.auth.user=accountToSession(account);state.settings.userProfile={...state.settings.userProfile,...state.auth.user};state.settings.loginUserName=state.auth.user.name;googleConnectionStatus={ok:true,encryption:true,mode:'school_read_api'};
+  3572:   const gate=document.getElementById('userAuthGate');
+  3573:   if(gate){
+  3574:     document.body.classList.add('uep-auth-locked');gate.classList.remove('hidden');
+  3575:     gate.innerHTML=`<section class="user-auth-card auto-login-transition"><div class="user-auth-brand"><span>U</span><div><small>UNHO EDUCATION PLATFORM</small><h2>자동 로그인 중…</h2><p>${escapeHtml(state.auth.user.name)} · ${escapeHtml(maskEmail(state.auth.user.email))}</p></div></div><div class="auto-login-progress"><i></i></div><footer>승인된 UEP 세션을 확인했습니다.</footer></section>`;
+  3576:     await new Promise(resolve=>setTimeout(resolve,220));
+  3577:   }
+@@ line 3569
+  3564:   if(!remembered?.name||!remembered?.email||!savedUser?.name||!savedUser?.email)return false;
+  3565:   const sameName=String(savedUser.name).trim()===String(remembered.name).trim();
+  3566:   const sameEmail=String(savedUser.email).trim().toLowerCase()===String(remembered.email).trim().toLowerCase();
+  3567:   if(!sameName||!sameEmail)return false;
+  3568:   if(!window.schoolBoard?.schoolReadSessionStatus)return false;
+  3569:   const status=await window.schoolBoard.schoolReadSessionStatus({verify:true});
+  3570:   if(!status?.authenticated)return false;
+  3571:   const a=status.user||{};const account={id:String(a.userId||remembered?.id||savedUser?.id||''),email:String(a.email||remembered?.email||savedUser?.email||'').trim(),name:String(a.name||remembered?.name||savedUser?.name||'').trim(),role:String(a.role||''),admin:a.isAdmin?'Y':'N',grade:String(a.grade||'1'),classNo:String(a.homeroom||''),department:String(a.department||((a.grade||1)+'학년부')),active:true,activeRaw:'Y'};state.auth.user=accountToSession(account);state.settings.userProfile={...state.settings.userProfile,...state.auth.user};state.settings.loginUserName=state.auth.user.name;googleConnectionStatus={ok:true,encryption:true,mode:'school_read_api'};
+  3572:   const gate=document.getElementById('userAuthGate');
+  3573:   if(gate){
+  3574:     document.body.classList.add('uep-auth-locked');gate.classList.remove('hidden');
+  3575:     gate.innerHTML=`<section class="user-auth-card auto-login-transition"><div class="user-auth-brand"><span>U</span><div><small>UNHO EDUCATION PLATFORM</small><h2>자동 로그인 중…</h2><p>${escapeHtml(state.auth.user.name)} · ${escapeHtml(maskEmail(state.auth.user.email))}</p></div></div><div class="auto-login-progress"><i></i></div><footer>승인된 UEP 세션을 확인했습니다.</footer></section>`;
+  3576:     await new Promise(resolve=>setTimeout(resolve,220));
+  3577:   }
+  3578:   await save();
+
+### ANCHOR: refreshReadonlyCacheSilently
+COUNT=8
+@@ line 454
+   449:   await Promise.all([credentialTask, cacheTask]);
+   450:   // 화면은 로컬/메모리 캐시로 먼저 표시한 뒤, 실행당 한 번만 백그라운드 원격 동기화한다.
+   451:   // 사용자는 기다리지 않고 UEP를 사용하며, 최신 Google Sheet가 도착하면 현재 화면만 갱신한다.
+   452:   if(googleConnectionStatus?.ok){
+   453:     setTimeout(async()=>{
+   454:       const ok=await refreshReadonlyCacheSilently({force:true,rerender:true});
+   455:       if(ok){
+   456:         updateTopSyncStatus();
+   457:         if(currentRoleId()==='admin') migrateAdminProgramOverridesToSheetOnce().catch(()=>{});
+   458:       }
+   459:     },900);
+   460:   }
+   461:   if(googleConnectionStatus?.ok && readonlyCache) await migrateAdminProgramOverridesToSheetOnce();
+   462:   updateDormOutingCount();
+   463:   updateTopSyncStatus();
+@@ line 511
+   506:   if(!failed){ state.settings.programSheetMigrationV07662=true; changed=true; }
+   507:   if(changed) await save();
+   508: }
+   509: 
+   510: let readonlyRefreshInFlight=null;
+   511: async function refreshReadonlyCacheSilently({force=true, rerender=true}={}) {
+   512:   if(readonlyRefreshInFlight)return readonlyRefreshInFlight;
+   513:   readonlyRefreshInFlight=(async()=>{
+   514:   if(!googleConnectionStatus?.ok || !window.schoolBoard?.previewReadonlySync || !window.schoolBoard?.readReadonlyCache) return false;
+   515:   try {
+   516:     if(force){
+   517:       const sync=await window.schoolBoard.previewReadonlySync();
+   518:       if(!sync?.ok) throw new Error(sync?.reason||'UEP 학교 데이터 자동 갱신 실패');
+   519:     }
+   520:     const cached=await window.schoolBoard.readReadonlyCache();
+@@ line 546
+   541: function startReadonlyAutoRefresh(){
+   542:   if(readonlyAutoRefreshTimer) clearInterval(readonlyAutoRefreshTimer);
+   543:   if(!googleConnectionStatus?.ok) return;
+   544:   readonlyAutoRefreshTimer=setInterval(()=>{
+   545:     if(document.hidden) return;
+   546:     refreshReadonlyCacheSilently({force:true,rerender:true});
+   547:   },READONLY_AUTO_REFRESH_MS);
+   548: }
+   549: 
+   550: function updateTopSyncStatus() {
+   551:   const button = $("#syncButton");
+   552:   if (!button) return;
+   553:   button.classList.remove("good", "warn", "bad");
+   554:   const label = button.querySelector("span");
+   555:   if (googleConnectionError) {
+@@ line 2897
+  2892:     const summary=`등록 대상: ${programLabel}\n\n신규 ${result.newCount||0}건 · 중복 ${result.duplicateCount||0}건 · 갱신 ${result.updateCount||0}건\n중복 자료는 저장하지 않고, 기존 학생·프로그램 보고서가 있으면서 제출시각이 달라진 자료는 갱신합니다.\n\n계속 저장할까요?`;
+  2893:     if(!confirm(summary))return toast('영구 저장을 취소했습니다. 기존 자료는 변경되지 않았습니다.');
+  2894:     result=await window.schoolBoard?.saveInputRecords?.({...payload,confirmed:true}); if(!result?.ok)return toast(result?.reason||'입력자료를 저장하지 못했습니다.');
+  2895:   }
+  2896:   if(inputCenterConfig.storageMode==='local') inputCenterLocalHistory.unshift(...rows.map(r=>({...r,source:payload.source,type:payload.type,subtype:payload.subtype,title:payload.title||r.fileName,storageMode:'local',savedAt:new Date().toISOString(),createdAt:new Date().toISOString()})));
+  2897:   inputCenterDrafts=[]; await refreshReadonlyCacheSilently({force:true,rerender:false}); if(inputCenterConfig.storageMode==='uep'){inputCenterConfig.tab='library';inputCenterConfig.batchFilter=batchId;inputCenterConfig.historyMode='active';} render('inputs');
+  2898:   if(inputCenterConfig.storageMode==='uep') toast(`입력센터 원본 저장 완료 · 신규 ${result.newCount||0} · 갱신 ${result.updateCount||0} · 중복 제외 ${result.duplicateCount||0} · 02 검수·분류로 이동했습니다.`);
+  2899:   else toast(`${result.count||rows.length}건을 내 PC 로컬에 저장했습니다.`);
+  2900: }
+  2901: function inputCenterHumanReportText(value=''){
+  2902:   const source=String(value||'').trim();if(!source)return '';
+  2903:   try{
+  2904:     const meta=JSON.parse(source);
+  2905:     const fields=Array.isArray(meta?.fields)?meta.fields:Array.isArray(meta)?meta:[];
+  2906:     const skip=/^(연락처|전화번호|휴대폰|서명|이메일|학번|성명|이름|학년|반|수정시간|제출시간|제출일시)$/;
+@@ line 2952
+  2947:   const nature=String(first.type||'').includes('보고서')?'보고서':String(first.type||'').includes('신청')?'신청':String(first.type||'').includes('만족도')||String(first.type||'').includes('설문')?'만족도조사':first.type||'기타';
+  2948:   if(nature==='보고서'&&!first.programId)return toast('보고서는 연결프로그램을 먼저 확정해 주세요.');
+  2949:   const payload={batchId:first.batchId||'',nature,programId:first.programId||'',programKind:first.programKind||program.kind||'',programName:program.actualTitle||program.title||'',programSemester:program.semester||program.term||'',records:rows.map(r=>({id:r.id,batchId:r.batchId,studentId:r.studentId,studentNo:r.studentNo,name:r.name,schoolYear:r.schoolYear,semester:r.semester,programId:r.programId,programKind:r.programKind,rawText:r.rawText,normalizedText:r.normalizedText,reviewText:r.reviewText||'',createdAt:r.createdAt}))};
+  2950:   let result=await window.schoolBoard?.normalizeInputBatch?.(payload);if(!result?.ok)return toast(result?.reason||'UEP 정규화 사전검사에 실패했습니다.');
+  2951:   if(result.requiresConfirmation){const summary=`정규화 대상: ${result.targetSheet||''}\n${result.programName||payload.programName||''}\n\n신규 ${result.newCount||0}건 · 중복 ${result.duplicateCount||0}건 · 갱신 ${result.updateCount||0}건\n\n계속 UEP에 적용할까요?`;if(!confirm(summary))return toast('UEP 적용을 취소했습니다.');result=await window.schoolBoard?.normalizeInputBatch?.({...payload,confirmed:true});if(!result?.ok)return toast(result?.reason||'UEP 정규화 적용에 실패했습니다.');}
+  2952:   await refreshReadonlyCacheSilently({force:true,rerender:false});inputCenterConfig.historyMode='active';inputCenterConfig.batchFilter='latest';toast(`${result.targetSheet||'UEP'} 적용 완료 · 신규 ${result.newCount||0} · 갱신 ${result.updateCount||0} · 중복 ${result.duplicateCount||0} · 작업목록에서 완료 배치를 내렸습니다.`);render('inputs');
+  2953: }
+  2954: 
+  2955: function inputCenterExportCsv(){
+  2956:   const rows=inputCenterReviewRowsCache||[]; if(!rows.length)return toast('내보낼 검수 자료가 없습니다.');
+  2957:   const q=v=>'"'+String(v??'').replace(/"/g,'""')+'"';
+  2958:   const csv='\ufeff'+[['학번','이름','학년','반','자료유형','자료제목','검수텍스트','원본파일'].map(q).join(','),...rows.map(r=>[r.studentNo,r.name,r.grade,r.className,r.type,r.title||r.fileName,r.reviewText||r.normalizedText||r.rawText||r.text,r.fileName].map(q).join(','))].join('\r\n');
+  2959:   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));a.download=`UEP_검수자료_${new Date().toISOString().slice(0,10)}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);toast(`${rows.length}건을 CSV로 내보냈습니다.`);
+  2960: }
+  2961: function bindInputCenter(){
+
+### ANCHOR: previewReadonlySync
+COUNT=13
+@@ line 514
+   509: 
+   510: let readonlyRefreshInFlight=null;
+   511: async function refreshReadonlyCacheSilently({force=true, rerender=true}={}) {
+   512:   if(readonlyRefreshInFlight)return readonlyRefreshInFlight;
+   513:   readonlyRefreshInFlight=(async()=>{
+   514:   if(!googleConnectionStatus?.ok || !window.schoolBoard?.previewReadonlySync || !window.schoolBoard?.readReadonlyCache) return false;
+   515:   try {
+   516:     if(force){
+   517:       const sync=await window.schoolBoard.previewReadonlySync();
+   518:       if(!sync?.ok) throw new Error(sync?.reason||'UEP 학교 데이터 자동 갱신 실패');
+   519:     }
+   520:     const cached=await window.schoolBoard.readReadonlyCache();
+   521:     if(!cached?.ok) throw new Error(cached?.reason||'UEP 학교 데이터를 읽지 못했습니다.');
+   522:     readonlyCache=cached.data;
+   523:     googleConnectionError='';
+@@ line 517
+   512:   if(readonlyRefreshInFlight)return readonlyRefreshInFlight;
+   513:   readonlyRefreshInFlight=(async()=>{
+   514:   if(!googleConnectionStatus?.ok || !window.schoolBoard?.previewReadonlySync || !window.schoolBoard?.readReadonlyCache) return false;
+   515:   try {
+   516:     if(force){
+   517:       const sync=await window.schoolBoard.previewReadonlySync();
+   518:       if(!sync?.ok) throw new Error(sync?.reason||'UEP 학교 데이터 자동 갱신 실패');
+   519:     }
+   520:     const cached=await window.schoolBoard.readReadonlyCache();
+   521:     if(!cached?.ok) throw new Error(cached?.reason||'UEP 학교 데이터를 읽지 못했습니다.');
+   522:     readonlyCache=cached.data;
+   523:     googleConnectionError='';
+   524:     if(typeof studentBadgeCache!=='undefined'&&studentBadgeCache?.clear) studentBadgeCache.clear();
+   525:     updateDormOutingCount();
+   526:     updateTopSyncStatus();
+@@ line 3559
+  3554:   const remembered=state?.auth?.rememberedUser||state?.auth?.user;const canContinue=remembered&&remembered.name&&remembered.email&&!switchUser;
+  3555:   gate.innerHTML=`<section class="user-auth-card"><div class="user-auth-brand"><span>U</span><div><small>UNHO EDUCATION PLATFORM</small><h2>${locked?'UEP 화면 잠금':'사용자 확인'}</h2><p>${locked?'학생정보 보호를 위해 현재 화면을 잠갔습니다.':'학교에 등록된 이메일을 기준으로 사용자를 확인합니다. 최고관리자는 신규 PC에서도 안전하게 진입할 수 있습니다.'}</p></div></div>${canContinue?`<button class="user-auth-remembered" id="rememberedUserContinue"><b>${escapeHtml(remembered.name)}</b><span>${escapeHtml(maskEmail(remembered.email))}</span><small>${locked?'계속 사용':'자동 로그인 사용자'}</small></button><button class="user-auth-text" id="useDifferentUser">다른 사용자로 로그인</button>`:`<form id="userAuthForm"><label>교사 이름<input id="userAuthName" autocomplete="name" required placeholder="예: 홍석민"></label><label>교사 이메일<input id="userAuthEmail" type="email" autocomplete="email" required placeholder="학교에 등록된 이메일"></label><label class="user-auth-check"><input id="userAuthRemember" type="checkbox"> 이 PC에서 자동 로그인</label><p id="userAuthMessage" class="user-auth-message"></p><button class="btn primary" type="submit">UEP 시작</button></form>`}<div class="user-auth-exit-row"><button type="button" class="user-auth-text danger" id="userAuthExit">UEP 종료</button></div><footer>PC 인증과 사용자 확인은 별도입니다. 상담 메모와 개인 권한은 현재 로그인 교사를 기준으로 표시됩니다.</footer></section>`;
+  3556:   document.getElementById('useDifferentUser')?.addEventListener('click',()=>renderUserAuthGate({locked:false,switchUser:true}));
+  3557:   document.getElementById('userAuthExit')?.addEventListener('click',async()=>{if(confirm('UEP를 종료할까요?'))await window.schoolBoard?.close?.();});
+  3558:   document.getElementById('rememberedUserContinue')?.addEventListener('click',async()=>{const status=await window.schoolBoard?.schoolReadSessionStatus?.({verify:true});if(!status?.authenticated)return renderUserAuthGate({switchUser:true});const a=status.user||{},account={id:String(a.userId||remembered.id||''),email:String(a.email||remembered.email||'').trim(),name:String(a.name||remembered.name||'').trim(),role:String(a.role||''),admin:a.isAdmin?'Y':'N',grade:String(a.grade||'1'),classNo:String(a.homeroom||''),department:String(a.department||((a.grade||1)+'학년부')),active:true,activeRaw:'Y'};state.auth.user=accountToSession(account);googleConnectionStatus={ok:true,encryption:true,mode:'school_read_api'};await save();hideUserAuthGate();refreshReadonlyCacheSilently({force:true,rerender:false}).catch(()=>{});navigate(state.activePage||'dashboard');});
+  3559:   document.getElementById('userAuthForm')?.addEventListener('submit',async event=>{event.preventDefault();const name=document.getElementById('userAuthName')?.value,email=document.getElementById('userAuthEmail')?.value;const submit=event.submitter||document.querySelector('#userAuthForm button[type="submit"]');if(submit){submit.disabled=true;submit.textContent='확인 중…';}try{if(!window.schoolBoard?.schoolReadLogin)throw new Error('이 UEP 빌드에는 School Read API 로그인이 없습니다.');const result=await window.schoolBoard.schoolReadLogin({name,email});if(!result?.ok){authGateMessage(result?.message||'UEP 로그인에 실패했습니다.');return;}const a=result.user||{};const account={id:String(a.userId||''),email:String(a.email||email||'').trim(),name:String(a.name||name||'').trim(),role:String(a.role||''),admin:a.isAdmin?'Y':'N',grade:String(a.grade||'1'),classNo:String(a.homeroom||''),department:String(a.department||((a.grade||1)+'학년부')),active:true,activeRaw:'Y'};const user=accountToSession(account),remember=Boolean(document.getElementById('userAuthRemember')?.checked);state.auth.user=user;state.auth.rememberUser=remember;state.auth.rememberedUser=remember?{id:user.id,name:user.name,email:user.email}:null;state.settings.userProfile={...state.settings.userProfile,...user};state.settings.loginUserName=user.name;googleConnectionStatus={ok:true,encryption:true,mode:'school_read_api'};await save();hideUserAuthGate();const synced=await window.schoolBoard?.previewReadonlySync?.();if(synced?.ok){const cached=await window.schoolBoard?.readReadonlyCache?.();if(cached?.ok){readonlyCache=cached.data;googleConnectionError='';}}else if(synced){googleConnectionError=synced.reason||'학교 데이터 동기화에 실패했습니다.';}startReadonlyAutoRefresh();navigate(state.activePage||'dashboard');}catch(error){authGateMessage(error?.message||'UEP 로그인에 실패했습니다.');}finally{if(submit){submit.disabled=false;submit.textContent='UEP 시작';}}});
+  3560: }
+  3561: async function restoreRememberedSessionImmediately(){
+  3562:   const remembered=state?.auth?.rememberUser?state?.auth?.rememberedUser:null;
+  3563:   const savedUser=state?.auth?.user;
+  3564:   if(!remembered?.name||!remembered?.email||!savedUser?.name||!savedUser?.email)return false;
+  3565:   const sameName=String(savedUser.name).trim()===String(remembered.name).trim();
+  3566:   const sameEmail=String(savedUser.email).trim().toLowerCase()===String(remembered.email).trim().toLowerCase();
+  3567:   if(!sameName||!sameEmail)return false;
+  3568:   if(!window.schoolBoard?.schoolReadSessionStatus)return false;
+@@ line 3786
+  3781:     $("#wizardUserName").value="홍석민";
+  3782:     $("#wizardRole").value="admin";
+  3783:     $("#wizardSecondaryRole").value="grade_head";
+  3784:   });
+  3785:   $("[data-wizard-google]")?.addEventListener("click",async()=>{await selectGoogleCredential();renderSetupWizard();});
+  3786:   $("[data-wizard-sync]")?.addEventListener("click",async()=>{const button=$("[data-wizard-sync]");if(button){button.disabled=true;button.textContent="새로고침 중…";}const result=await window.schoolBoard?.previewReadonlySync?.();if(result?.ok){const cached=await window.schoolBoard?.readReadonlyCache?.();if(cached?.ok){readonlyCache=cached.data;googleConnectionError="";}}else if(result){googleConnectionError=result.reason||"학교 데이터 동기화를 확인하세요. 마지막 저장 자료는 계속 사용할 수 있습니다.";}renderSetupWizard();});
+  3787:   $("[data-wizard-neis-load]")?.addEventListener("click",async()=>{
+  3788:     const school=$("#wizardNeisSchool")?.value.trim()||"운호고등학교";
+  3789:     const grade=$("#wizardNeisGrade")?.value||currentUserProfile().grade||"1";
+  3790:     const classNo=$("#wizardNeisClass")?.value||"";
+  3791:     const date=$("#wizardNeisDate")?.value||dateKey(today);
+  3792:     if(!classNo) return toast("학년부장·관리자는 반 선택이 필수가 아닙니다. 시간표 미리보기가 필요할 때만 반을 선택하세요.");
+  3793:     state.settings.neis={...state.settings.neis,schoolName:school,grade,classNo,date};
+  3794:     save();
+  3795:     const button=$("[data-wizard-neis-load]");
+@@ line 8958
+  8953:   startReadonlyAutoRefresh();
+  8954:   toast(`${result.account || "Google 서비스 계정"}으로 UEP 구글시트에 연결했습니다.`);
+  8955:   render("settings");
+  8956: }
+  8957: 
+  8958: async function previewReadonlySync() {
+  8959:   if (!googleConnectionStatus.ok || !window.schoolBoard?.previewReadonlySync)
+  8960:     return toast("먼저 Google 연결 인증을 등록하세요.");
+  8961:   const button = $("[data-readonly-sync]");
+  8962:   if (button) {
+  8963:     button.disabled = true;
+  8964:     button.textContent = "읽는 중…";
+  8965:   }
+  8966:   const result = await window.schoolBoard.previewReadonlySync();
+  8967:   if (!result?.ok) {
+
+### ANCHOR: readReadonlyCache
+COUNT=20
+@@ line 438
+   433:   const credentialTask = window.schoolBoard?.schoolReadSessionStatus
+   434:     ? withStartupTimeout(window.schoolBoard.schoolReadSessionStatus({verify:true}), 5000, null)
+   435:         .then((status) => { if (status) googleConnectionStatus = {ok:Boolean(status.authenticated),encryption:true,mode:'school_read_api',endpointReady:status.endpointReady!==false}; })
+   436:         .catch((error) => console.warn("[UEP] School Read API 세션 확인 실패", error))
+   437:     : Promise.resolve();
+   438:   const cacheTask = window.schoolBoard?.readReadonlyCache
+   439:     ? withStartupTimeout(window.schoolBoard.readReadonlyCache(), 8000, null)
+   440:         .then((cached) => {
+   441:           if (cached?.ok) { readonlyCache = cached.data; googleConnectionError = ""; }
+   442:           else if (cached) googleConnectionError = cached.reason || "학교 데이터 동기화를 확인하세요. 마지막 저장 자료는 계속 사용할 수 있습니다.";
+   443:         })
+   444:         .catch((error) => {
+   445:           console.warn("[UEP] 읽기 캐시 불러오기 실패", error);
+   446:           googleConnectionError = error?.message || "학교 데이터 동기화를 확인하세요. 마지막 저장 자료는 계속 사용할 수 있습니다.";
+   447:         })
+@@ line 439
+   434:     ? withStartupTimeout(window.schoolBoard.schoolReadSessionStatus({verify:true}), 5000, null)
+   435:         .then((status) => { if (status) googleConnectionStatus = {ok:Boolean(status.authenticated),encryption:true,mode:'school_read_api',endpointReady:status.endpointReady!==false}; })
+   436:         .catch((error) => console.warn("[UEP] School Read API 세션 확인 실패", error))
+   437:     : Promise.resolve();
+   438:   const cacheTask = window.schoolBoard?.readReadonlyCache
+   439:     ? withStartupTimeout(window.schoolBoard.readReadonlyCache(), 8000, null)
+   440:         .then((cached) => {
+   441:           if (cached?.ok) { readonlyCache = cached.data; googleConnectionError = ""; }
+   442:           else if (cached) googleConnectionError = cached.reason || "학교 데이터 동기화를 확인하세요. 마지막 저장 자료는 계속 사용할 수 있습니다.";
+   443:         })
+   444:         .catch((error) => {
+   445:           console.warn("[UEP] 읽기 캐시 불러오기 실패", error);
+   446:           googleConnectionError = error?.message || "학교 데이터 동기화를 확인하세요. 마지막 저장 자료는 계속 사용할 수 있습니다.";
+   447:         })
+   448:     : Promise.resolve();
+@@ line 514
+   509: 
+   510: let readonlyRefreshInFlight=null;
+   511: async function refreshReadonlyCacheSilently({force=true, rerender=true}={}) {
+   512:   if(readonlyRefreshInFlight)return readonlyRefreshInFlight;
+   513:   readonlyRefreshInFlight=(async()=>{
+   514:   if(!googleConnectionStatus?.ok || !window.schoolBoard?.previewReadonlySync || !window.schoolBoard?.readReadonlyCache) return false;
+   515:   try {
+   516:     if(force){
+   517:       const sync=await window.schoolBoard.previewReadonlySync();
+   518:       if(!sync?.ok) throw new Error(sync?.reason||'UEP 학교 데이터 자동 갱신 실패');
+   519:     }
+   520:     const cached=await window.schoolBoard.readReadonlyCache();
+   521:     if(!cached?.ok) throw new Error(cached?.reason||'UEP 학교 데이터를 읽지 못했습니다.');
+   522:     readonlyCache=cached.data;
+   523:     googleConnectionError='';
+@@ line 520
+   515:   try {
+   516:     if(force){
+   517:       const sync=await window.schoolBoard.previewReadonlySync();
+   518:       if(!sync?.ok) throw new Error(sync?.reason||'UEP 학교 데이터 자동 갱신 실패');
+   519:     }
+   520:     const cached=await window.schoolBoard.readReadonlyCache();
+   521:     if(!cached?.ok) throw new Error(cached?.reason||'UEP 학교 데이터를 읽지 못했습니다.');
+   522:     readonlyCache=cached.data;
+   523:     googleConnectionError='';
+   524:     if(typeof studentBadgeCache!=='undefined'&&studentBadgeCache?.clear) studentBadgeCache.clear();
+   525:     updateDormOutingCount();
+   526:     updateTopSyncStatus();
+   527:     if(rerender && !setupWizardActive){
+   528:       const scrollY=window.scrollY;
+   529:       render(state.activePage||'dashboard');
+@@ line 3559
+  3554:   const remembered=state?.auth?.rememberedUser||state?.auth?.user;const canContinue=remembered&&remembered.name&&remembered.email&&!switchUser;
+  3555:   gate.innerHTML=`<section class="user-auth-card"><div class="user-auth-brand"><span>U</span><div><small>UNHO EDUCATION PLATFORM</small><h2>${locked?'UEP 화면 잠금':'사용자 확인'}</h2><p>${locked?'학생정보 보호를 위해 현재 화면을 잠갔습니다.':'학교에 등록된 이메일을 기준으로 사용자를 확인합니다. 최고관리자는 신규 PC에서도 안전하게 진입할 수 있습니다.'}</p></div></div>${canContinue?`<button class="user-auth-remembered" id="rememberedUserContinue"><b>${escapeHtml(remembered.name)}</b><span>${escapeHtml(maskEmail(remembered.email))}</span><small>${locked?'계속 사용':'자동 로그인 사용자'}</small></button><button class="user-auth-text" id="useDifferentUser">다른 사용자로 로그인</button>`:`<form id="userAuthForm"><label>교사 이름<input id="userAuthName" autocomplete="name" required placeholder="예: 홍석민"></label><label>교사 이메일<input id="userAuthEmail" type="email" autocomplete="email" required placeholder="학교에 등록된 이메일"></label><label class="user-auth-check"><input id="userAuthRemember" type="checkbox"> 이 PC에서 자동 로그인</label><p id="userAuthMessage" class="user-auth-message"></p><button class="btn primary" type="submit">UEP 시작</button></form>`}<div class="user-auth-exit-row"><button type="button" class="user-auth-text danger" id="userAuthExit">UEP 종료</button></div><footer>PC 인증과 사용자 확인은 별도입니다. 상담 메모와 개인 권한은 현재 로그인 교사를 기준으로 표시됩니다.</footer></section>`;
+  3556:   document.getElementById('useDifferentUser')?.addEventListener('click',()=>renderUserAuthGate({locked:false,switchUser:true}));
+  3557:   document.getElementById('userAuthExit')?.addEventListener('click',async()=>{if(confirm('UEP를 종료할까요?'))await window.schoolBoard?.close?.();});
+  3558:   document.getElementById('rememberedUserContinue')?.addEventListener('click',async()=>{const status=await window.schoolBoard?.schoolReadSessionStatus?.({verify:true});if(!status?.authenticated)return renderUserAuthGate({switchUser:true});const a=status.user||{},account={id:String(a.userId||remembered.id||''),email:String(a.email||remembered.email||'').trim(),name:String(a.name||remembered.name||'').trim(),role:String(a.role||''),admin:a.isAdmin?'Y':'N',grade:String(a.grade||'1'),classNo:String(a.homeroom||''),department:String(a.department||((a.grade||1)+'학년부')),active:true,activeRaw:'Y'};state.auth.user=accountToSession(account);googleConnectionStatus={ok:true,encryption:true,mode:'school_read_api'};await save();hideUserAuthGate();refreshReadonlyCacheSilently({force:true,rerender:false}).catch(()=>{});navigate(state.activePage||'dashboard');});
+  3559:   document.getElementById('userAuthForm')?.addEventListener('submit',async event=>{event.preventDefault();const name=document.getElementById('userAuthName')?.value,email=document.getElementById('userAuthEmail')?.value;const submit=event.submitter||document.querySelector('#userAuthForm button[type="submit"]');if(submit){submit.disabled=true;submit.textContent='확인 중…';}try{if(!window.schoolBoard?.schoolReadLogin)throw new Error('이 UEP 빌드에는 School Read API 로그인이 없습니다.');const result=await window.schoolBoard.schoolReadLogin({name,email});if(!result?.ok){authGateMessage(result?.message||'UEP 로그인에 실패했습니다.');return;}const a=result.user||{};const account={id:String(a.userId||''),email:String(a.email||email||'').trim(),name:String(a.name||name||'').trim(),role:String(a.role||''),admin:a.isAdmin?'Y':'N',grade:String(a.grade||'1'),classNo:String(a.homeroom||''),department:String(a.department||((a.grade||1)+'학년부')),active:true,activeRaw:'Y'};const user=accountToSession(account),remember=Boolean(document.getElementById('userAuthRemember')?.checked);state.auth.user=user;state.auth.rememberUser=remember;state.auth.rememberedUser=remember?{id:user.id,name:user.name,email:user.email}:null;state.settings.userProfile={...state.settings.userProfile,...user};state.settings.loginUserName=user.name;googleConnectionStatus={ok:true,encryption:true,mode:'school_read_api'};await save();hideUserAuthGate();const synced=await window.schoolBoard?.previewReadonlySync?.();if(synced?.ok){const cached=await window.schoolBoard?.readReadonlyCache?.();if(cached?.ok){readonlyCache=cached.data;googleConnectionError='';}}else if(synced){googleConnectionError=synced.reason||'학교 데이터 동기화에 실패했습니다.';}startReadonlyAutoRefresh();navigate(state.activePage||'dashboard');}catch(error){authGateMessage(error?.message||'UEP 로그인에 실패했습니다.');}finally{if(submit){submit.disabled=false;submit.textContent='UEP 시작';}}});
+  3560: }
+  3561: async function restoreRememberedSessionImmediately(){
+  3562:   const remembered=state?.auth?.rememberUser?state?.auth?.rememberedUser:null;
+  3563:   const savedUser=state?.auth?.user;
+  3564:   if(!remembered?.name||!remembered?.email||!savedUser?.name||!savedUser?.email)return false;
+  3565:   const sameName=String(savedUser.name).trim()===String(remembered.name).trim();
+  3566:   const sameEmail=String(savedUser.email).trim().toLowerCase()===String(remembered.email).trim().toLowerCase();
+  3567:   if(!sameName||!sameEmail)return false;
+  3568:   if(!window.schoolBoard?.schoolReadSessionStatus)return false;
+
+### ANCHOR: googleConnectionStatus?.ok
+COUNT=10
+@@ line 452
+   447:         })
+   448:     : Promise.resolve();
+   449:   await Promise.all([credentialTask, cacheTask]);
+   450:   // 화면은 로컬/메모리 캐시로 먼저 표시한 뒤, 실행당 한 번만 백그라운드 원격 동기화한다.
+   451:   // 사용자는 기다리지 않고 UEP를 사용하며, 최신 Google Sheet가 도착하면 현재 화면만 갱신한다.
+   452:   if(googleConnectionStatus?.ok){
+   453:     setTimeout(async()=>{
+   454:       const ok=await refreshReadonlyCacheSilently({force:true,rerender:true});
+   455:       if(ok){
+   456:         updateTopSyncStatus();
+   457:         if(currentRoleId()==='admin') migrateAdminProgramOverridesToSheetOnce().catch(()=>{});
+   458:       }
+   459:     },900);
+   460:   }
+   461:   if(googleConnectionStatus?.ok && readonlyCache) await migrateAdminProgramOverridesToSheetOnce();
+@@ line 461
+   456:         updateTopSyncStatus();
+   457:         if(currentRoleId()==='admin') migrateAdminProgramOverridesToSheetOnce().catch(()=>{});
+   458:       }
+   459:     },900);
+   460:   }
+   461:   if(googleConnectionStatus?.ok && readonlyCache) await migrateAdminProgramOverridesToSheetOnce();
+   462:   updateDormOutingCount();
+   463:   updateTopSyncStatus();
+   464:   startReadonlyAutoRefresh();
+   465:   // 여기서는 백그라운드에서 최신 계정 유효성을 재검증한다.
+   466:   // 자동로그인 세션은 이미 화면을 열었으므로 네트워크 지연이 시작 화면을 막지 않는다.
+   467:   await Promise.race([
+   468:     initializeUserSessionGate(),
+   469:     new Promise(resolve=>setTimeout(()=>{
+   470:       try{
+@@ line 477
+   472:       }catch{}
+   473:       resolve(true);
+   474:     },1800))
+   475:   ]);
+   476:   if(authSessionReady && !resumedRememberedSession) navigate(state.activePage || "dashboard");
+   477:   if(false && !googleConnectionStatus?.ok && currentRoleId()==="admin"){
+   478:     // 인증정보가 없거나 복호화/유효성 검증에 실패한 경우에는 기존 setupCompleted 값과 무관하게
+   479:     // 데이터 연결 단계에서 멈춘다. 학생정보 화면을 먼저 열어 권한부여를 건너뛰지 않는다.
+   480:     setTimeout(()=>openSetupWizard(3),50);
+   481:   }else if(!state.settings.setupCompleted){
+   482:     setTimeout(()=>openSetupWizard(0),50);
+   483:   }else{
+   484:     setSetupWizardLock(false);
+   485:   }
+   486: }
+@@ line 514
+   509: 
+   510: let readonlyRefreshInFlight=null;
+   511: async function refreshReadonlyCacheSilently({force=true, rerender=true}={}) {
+   512:   if(readonlyRefreshInFlight)return readonlyRefreshInFlight;
+   513:   readonlyRefreshInFlight=(async()=>{
+   514:   if(!googleConnectionStatus?.ok || !window.schoolBoard?.previewReadonlySync || !window.schoolBoard?.readReadonlyCache) return false;
+   515:   try {
+   516:     if(force){
+   517:       const sync=await window.schoolBoard.previewReadonlySync();
+   518:       if(!sync?.ok) throw new Error(sync?.reason||'UEP 학교 데이터 자동 갱신 실패');
+   519:     }
+   520:     const cached=await window.schoolBoard.readReadonlyCache();
+   521:     if(!cached?.ok) throw new Error(cached?.reason||'UEP 학교 데이터를 읽지 못했습니다.');
+   522:     readonlyCache=cached.data;
+   523:     googleConnectionError='';
+@@ line 543
+   538:   })();
+   539:   try{return await readonlyRefreshInFlight;}finally{readonlyRefreshInFlight=null;}
+   540: }
+   541: function startReadonlyAutoRefresh(){
+   542:   if(readonlyAutoRefreshTimer) clearInterval(readonlyAutoRefreshTimer);
+   543:   if(!googleConnectionStatus?.ok) return;
+   544:   readonlyAutoRefreshTimer=setInterval(()=>{
+   545:     if(document.hidden) return;
+   546:     refreshReadonlyCacheSilently({force:true,rerender:true});
+   547:   },READONLY_AUTO_REFRESH_MS);
+   548: }
+   549: 
+   550: function updateTopSyncStatus() {
+   551:   const button = $("#syncButton");
+   552:   if (!button) return;
+
+### ANCHOR: readonlyCache=cached.data
+COUNT=4
+@@ line 522
+   517:       const sync=await window.schoolBoard.previewReadonlySync();
+   518:       if(!sync?.ok) throw new Error(sync?.reason||'UEP 학교 데이터 자동 갱신 실패');
+   519:     }
+   520:     const cached=await window.schoolBoard.readReadonlyCache();
+   521:     if(!cached?.ok) throw new Error(cached?.reason||'UEP 학교 데이터를 읽지 못했습니다.');
+   522:     readonlyCache=cached.data;
+   523:     googleConnectionError='';
+   524:     if(typeof studentBadgeCache!=='undefined'&&studentBadgeCache?.clear) studentBadgeCache.clear();
+   525:     updateDormOutingCount();
+   526:     updateTopSyncStatus();
+   527:     if(rerender && !setupWizardActive){
+   528:       const scrollY=window.scrollY;
+   529:       render(state.activePage||'dashboard');
+   530:       requestAnimationFrame(()=>window.scrollTo(0,scrollY));
+   531:     }
+@@ line 3559
+  3554:   const remembered=state?.auth?.rememberedUser||state?.auth?.user;const canContinue=remembered&&remembered.name&&remembered.email&&!switchUser;
+  3555:   gate.innerHTML=`<section class="user-auth-card"><div class="user-auth-brand"><span>U</span><div><small>UNHO EDUCATION PLATFORM</small><h2>${locked?'UEP 화면 잠금':'사용자 확인'}</h2><p>${locked?'학생정보 보호를 위해 현재 화면을 잠갔습니다.':'학교에 등록된 이메일을 기준으로 사용자를 확인합니다. 최고관리자는 신규 PC에서도 안전하게 진입할 수 있습니다.'}</p></div></div>${canContinue?`<button class="user-auth-remembered" id="rememberedUserContinue"><b>${escapeHtml(remembered.name)}</b><span>${escapeHtml(maskEmail(remembered.email))}</span><small>${locked?'계속 사용':'자동 로그인 사용자'}</small></button><button class="user-auth-text" id="useDifferentUser">다른 사용자로 로그인</button>`:`<form id="userAuthForm"><label>교사 이름<input id="userAuthName" autocomplete="name" required placeholder="예: 홍석민"></label><label>교사 이메일<input id="userAuthEmail" type="email" autocomplete="email" required placeholder="학교에 등록된 이메일"></label><label class="user-auth-check"><input id="userAuthRemember" type="checkbox"> 이 PC에서 자동 로그인</label><p id="userAuthMessage" class="user-auth-message"></p><button class="btn primary" type="submit">UEP 시작</button></form>`}<div class="user-auth-exit-row"><button type="button" class="user-auth-text danger" id="userAuthExit">UEP 종료</button></div><footer>PC 인증과 사용자 확인은 별도입니다. 상담 메모와 개인 권한은 현재 로그인 교사를 기준으로 표시됩니다.</footer></section>`;
+  3556:   document.getElementById('useDifferentUser')?.addEventListener('click',()=>renderUserAuthGate({locked:false,switchUser:true}));
+  3557:   document.getElementById('userAuthExit')?.addEventListener('click',async()=>{if(confirm('UEP를 종료할까요?'))await window.schoolBoard?.close?.();});
+  3558:   document.getElementById('rememberedUserContinue')?.addEventListener('click',async()=>{const status=await window.schoolBoard?.schoolReadSessionStatus?.({verify:true});if(!status?.authenticated)return renderUserAuthGate({switchUser:true});const a=status.user||{},account={id:String(a.userId||remembered.id||''),email:String(a.email||remembered.email||'').trim(),name:String(a.name||remembered.name||'').trim(),role:String(a.role||''),admin:a.isAdmin?'Y':'N',grade:String(a.grade||'1'),classNo:String(a.homeroom||''),department:String(a.department||((a.grade||1)+'학년부')),active:true,activeRaw:'Y'};state.auth.user=accountToSession(account);googleConnectionStatus={ok:true,encryption:true,mode:'school_read_api'};await save();hideUserAuthGate();refreshReadonlyCacheSilently({force:true,rerender:false}).catch(()=>{});navigate(state.activePage||'dashboard');});
+  3559:   document.getElementById('userAuthForm')?.addEventListener('submit',async event=>{event.preventDefault();const name=document.getElementById('userAuthName')?.value,email=document.getElementById('userAuthEmail')?.value;const submit=event.submitter||document.querySelector('#userAuthForm button[type="submit"]');if(submit){submit.disabled=true;submit.textContent='확인 중…';}try{if(!window.schoolBoard?.schoolReadLogin)throw new Error('이 UEP 빌드에는 School Read API 로그인이 없습니다.');const result=await window.schoolBoard.schoolReadLogin({name,email});if(!result?.ok){authGateMessage(result?.message||'UEP 로그인에 실패했습니다.');return;}const a=result.user||{};const account={id:String(a.userId||''),email:String(a.email||email||'').trim(),name:String(a.name||name||'').trim(),role:String(a.role||''),admin:a.isAdmin?'Y':'N',grade:String(a.grade||'1'),classNo:String(a.homeroom||''),department:String(a.department||((a.grade||1)+'학년부')),active:true,activeRaw:'Y'};const user=accountToSession(account),remember=Boolean(document.getElementById('userAuthRemember')?.checked);state.auth.user=user;state.auth.rememberUser=remember;state.auth.rememberedUser=remember?{id:user.id,name:user.name,email:user.email}:null;state.settings.userProfile={...state.settings.userProfile,...user};state.settings.loginUserName=user.name;googleConnectionStatus={ok:true,encryption:true,mode:'school_read_api'};await save();hideUserAuthGate();const synced=await window.schoolBoard?.previewReadonlySync?.();if(synced?.ok){const cached=await window.schoolBoard?.readReadonlyCache?.();if(cached?.ok){readonlyCache=cached.data;googleConnectionError='';}}else if(synced){googleConnectionError=synced.reason||'학교 데이터 동기화에 실패했습니다.';}startReadonlyAutoRefresh();navigate(state.activePage||'dashboard');}catch(error){authGateMessage(error?.message||'UEP 로그인에 실패했습니다.');}finally{if(submit){submit.disabled=false;submit.textContent='UEP 시작';}}});
+  3560: }
+  3561: async function restoreRememberedSessionImmediately(){
+  3562:   const remembered=state?.auth?.rememberUser?state?.auth?.rememberedUser:null;
+  3563:   const savedUser=state?.auth?.user;
+  3564:   if(!remembered?.name||!remembered?.email||!savedUser?.name||!savedUser?.email)return false;
+  3565:   const sameName=String(savedUser.name).trim()===String(remembered.name).trim();
+  3566:   const sameEmail=String(savedUser.email).trim().toLowerCase()===String(remembered.email).trim().toLowerCase();
+  3567:   if(!sameName||!sameEmail)return false;
+  3568:   if(!window.schoolBoard?.schoolReadSessionStatus)return false;
+@@ line 3786
+  3781:     $("#wizardUserName").value="홍석민";
+  3782:     $("#wizardRole").value="admin";
+  3783:     $("#wizardSecondaryRole").value="grade_head";
+  3784:   });
+  3785:   $("[data-wizard-google]")?.addEventListener("click",async()=>{await selectGoogleCredential();renderSetupWizard();});
+  3786:   $("[data-wizard-sync]")?.addEventListener("click",async()=>{const button=$("[data-wizard-sync]");if(button){button.disabled=true;button.textContent="새로고침 중…";}const result=await window.schoolBoard?.previewReadonlySync?.();if(result?.ok){const cached=await window.schoolBoard?.readReadonlyCache?.();if(cached?.ok){readonlyCache=cached.data;googleConnectionError="";}}else if(result){googleConnectionError=result.reason||"학교 데이터 동기화를 확인하세요. 마지막 저장 자료는 계속 사용할 수 있습니다.";}renderSetupWizard();});
+  3787:   $("[data-wizard-neis-load]")?.addEventListener("click",async()=>{
+  3788:     const school=$("#wizardNeisSchool")?.value.trim()||"운호고등학교";
+  3789:     const grade=$("#wizardNeisGrade")?.value||currentUserProfile().grade||"1";
+  3790:     const classNo=$("#wizardNeisClass")?.value||"";
+  3791:     const date=$("#wizardNeisDate")?.value||dateKey(today);
+  3792:     if(!classNo) return toast("학년부장·관리자는 반 선택이 필수가 아닙니다. 시간표 미리보기가 필요할 때만 반을 선택하세요.");
+  3793:     state.settings.neis={...state.settings.neis,schoolName:school,grade,classNo,date};
+  3794:     save();
+  3795:     const button=$("[data-wizard-neis-load]");
+@@ line 12193
+ 12188:         if(typeof toast==='function')toast(`학교 공용 연결 확인 완료 · 시트 조회 확인 필요: ${googleConnectionError}`);
+ 12189:       } else {
+ 12190:         googleConnectionError='';
+ 12191:         if(typeof toast==='function')toast('학교 공용 읽기 연결 및 학교 시트 동기화가 완료되었습니다.');
+ 12192:       }
+ 12193:       if(window.schoolBoard?.readReadonlyCache){const cached=await window.schoolBoard.readReadonlyCache();if(cached?.ok)readonlyCache=cached.data;}
+ 12194:       if(typeof refreshReadonlyCacheSilently==='function')await refreshReadonlyCacheSilently({force:true,rerender:true});
+ 12195:       if(typeof updateTopSyncStatus==='function')updateTopSyncStatus();
+ 12196:       if(typeof startReadonlyAutoRefresh==='function')startReadonlyAutoRefresh();
+ 12197:       if(typeof toast==='function')toast(`Google 읽기 연결 완료${result.account?' · '+result.account:''}`);
+ 12198:       document.querySelector('[data-uep-google-oauth]')?.remove();
+ 12199:     }catch(error){if(typeof toast==='function')toast(error?.message||'학교 공용 연결 확인에 실패했습니다.');}
+ 12200:     finally{busy=false;const b=document.querySelector('[data-uep-google-oauth]');if(b){b.disabled=false;b.textContent='학교 공용 연결 확인';}}
+ 12201:   }
+ 12202:   function enhance(){
+
+### ANCHOR: readonlyCache = cached.data
+COUNT=4
+@@ line 441
+   436:         .catch((error) => console.warn("[UEP] School Read API 세션 확인 실패", error))
+   437:     : Promise.resolve();
+   438:   const cacheTask = window.schoolBoard?.readReadonlyCache
+   439:     ? withStartupTimeout(window.schoolBoard.readReadonlyCache(), 8000, null)
+   440:         .then((cached) => {
+   441:           if (cached?.ok) { readonlyCache = cached.data; googleConnectionError = ""; }
+   442:           else if (cached) googleConnectionError = cached.reason || "학교 데이터 동기화를 확인하세요. 마지막 저장 자료는 계속 사용할 수 있습니다.";
+   443:         })
+   444:         .catch((error) => {
+   445:           console.warn("[UEP] 읽기 캐시 불러오기 실패", error);
+   446:           googleConnectionError = error?.message || "학교 데이터 동기화를 확인하세요. 마지막 저장 자료는 계속 사용할 수 있습니다.";
+   447:         })
+   448:     : Promise.resolve();
+   449:   await Promise.all([credentialTask, cacheTask]);
+   450:   // 화면은 로컬/메모리 캐시로 먼저 표시한 뒤, 실행당 한 번만 백그라운드 원격 동기화한다.
+@@ line 8950
+  8945:   if (result?.canceled) return;
+  8946:   if (!result?.ok) { googleConnectionError = result?.reason || "Google 서비스 계정 인증을 연결하지 못했습니다."; updateTopSyncStatus(); return toast(googleConnectionError); }
+  8947:   googleConnectionError = "";
+  8948:   googleConnectionStatus = await window.schoolBoard.googleCredentialStatus();
+  8949:   const cached = await window.schoolBoard.readReadonlyCache();
+  8950:   if (cached?.ok) { readonlyCache = cached.data; googleConnectionError = ""; }
+  8951:   else googleConnectionError = cached?.reason || "UEP 학교 데이터를 읽지 못했습니다.";
+  8952:   updateTopSyncStatus();
+  8953:   startReadonlyAutoRefresh();
+  8954:   toast(`${result.account || "Google 서비스 계정"}으로 UEP 구글시트에 연결했습니다.`);
+  8955:   render("settings");
+  8956: }
+  8957: 
+  8958: async function previewReadonlySync() {
+  8959:   if (!googleConnectionStatus.ok || !window.schoolBoard?.previewReadonlySync)
+@@ line 8988
+  8983:   $("#drawer").classList.remove("hidden");
+  8984:   $("#drawerBackdrop").classList.remove("hidden");
+  8985:   toast("UEP 구글시트를 다시 읽었습니다.");
+  8986:   if (window.schoolBoard?.readReadonlyCache) {
+  8987:     const cached = await window.schoolBoard.readReadonlyCache();
+  8988:     if (cached?.ok) readonlyCache = cached.data;
+  8989:   }
+  8990:   closeDrawer();
+  8991:   render("dashboard");
+  8992: }
+  8993: 
+  8994: async function retryGoogleConnection() {
+  8995:   if (!window.schoolBoard?.previewReadonlySync) return navigate("settings");
+  8996:   toast("UEP 구글시트를 다시 읽는 중입니다.");
+  8997:   const result = await window.schoolBoard.previewReadonlySync();
+@@ line 9007
+  9002:     render("dashboard");
+  9003:     return;
+  9004:   }
+  9005:   const cached = await window.schoolBoard.readReadonlyCache();
+  9006:   if (cached?.ok) {
+  9007:     readonlyCache = cached.data;
+  9008:     googleConnectionError = "";
+  9009:     toast("UEP 구글시트를 다시 불러왔습니다.");
+  9010:   } else {
+  9011:     googleConnectionError = cached?.reason || "UEP 학교 데이터를 읽지 못했습니다.";
+  9012:     toast(googleConnectionError);
+  9013:   }
+  9014:   updateTopSyncStatus();
+  9015:   render("dashboard");
+  9016: }

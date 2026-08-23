@@ -1,0 +1,236 @@
+SOURCE: app/resources/app/gyomuon.js
+
+### ANCHOR: personalTimetableData
+COUNT=5
+@@ line 6865
+  6860:   }
+  6861:   const subject=String(cell.subject||cell.subjectName||cell.name||cell.course||cell.className||"").trim();
+  6862:   const room=String(cell.location||cell.room||cell.classroom||cell.gradeClass||cell.classNo||"").trim();
+  6863:   return subject?{subject,room,changed:Boolean(cell.isChanged||cell.changed||cell.changeInfo),changeInfo:cell.changeInfo||""}:null;
+  6864: }
+  6865: function personalTimetableData() {
+  6866:   const teacher=String(currentLoginTeacherName()||state.settings.comciganTeacher||state.settings.teacherName||"담당교사").trim();
+  6867:   // 홍석민 교사는 사용자가 제공한 2026학년도 공식 교사시간표 PDF를
+  6868:   // 최우선 기준으로 사용해 잘못 매칭된 컴시간 자료가 표시되지 않게 합니다.
+  6869:   const masterReference=masterTeacherTimetableData(teacher);
+  6870:   if(masterReference)return masterReference;
+  6871:   // 연결 전 고정/샘플 교사시간표는 오인 가능성이 있어 배포판에서 사용하지 않는다.
+  6872:   const timetable=neisData?.timetable||{};
+  6873:   const teacherMap=timetable.teachers||{};
+  6874:   const all=timetable.teacherTimetable||{};
+@@ line 6908
+  6903:   if(found)return {week,days:["월","화","수","목","금"],teacher,source:neisData?.offline?"컴시간 저장자료":"컴시간 실시간",reference:false,changed};
+  6904:   return {week:[],days:["월","화","수","목","금"],teacher,source:"연결 대기",reference:false,changed:0};
+  6905: }
+  6906: 
+  6907: function personalTimetableMarkup() {
+  6908:   const data=personalTimetableData();
+  6909:   if(!data.week.some(row=>row.some(Boolean)))return `<div class="personal-timetable-trust"><div class="connection-guide"><span>COMCIGAN</span><h3>${escapeHtml(data.teacher)} 교사시간표 연결 대기</h3><p>컴시간 실시간 자료에서 로그인 교사 이름을 찾지 못했습니다. 교사 이름과 컴시간 학교코드를 확인하세요.</p><button type="button" class="btn primary" data-neis-refresh>컴시간 다시 불러오기</button></div></div>`;
+  6910:   const days=(data.days||['월','화','수','목','금']).slice(0,5);const cells=[];let count=0;
+  6911:   for(let period=1;period<=7;period+=1){
+  6912:     cells.push(`<div class="tt-period"><b>${period}</b><small>${escapeHtml(periodTimeLabel(period)||'')}</small></div>`);
+  6913:     for(let d=0;d<5;d+=1){const raw=data.week[period-1]?.[d]||'';const [subject,room,flag]=String(raw).split('|');if(raw)count+=1;const classTone=timetableClassStyle(room||'');cells.push(`<div class="tt-cell ${raw?`has-lesson ${classTone.cls}`:'empty'}"${raw?classTone.style:''}><div class="${raw?'tt-lesson-card':'tt-empty-card'}"><strong>${escapeHtml(subject||'-')}</strong><small>${escapeHtml(room||'')}</small>${flag==='changed'?'<em class="tt-change-badge">변동</em>':''}</div></div>`);}
+  6914:   }
+  6915:   const sourceClass=data.reference?'offline':'';const sourceNote=data.reference?'참고용 고정 시간표 · 결보강/일과변동 미반영':'결보강·일과변동 반영';
+  6916:   return `<section class="tt-shell personal-tt-shell"><header class="tt-hero"><div><small>PERSONAL TIMETABLE · ${escapeHtml(data.source)}</small><h2>${escapeHtml(data.teacher)} 선생님 주간 시간표</h2><p>${escapeHtml(sourceNote)}</p></div><div class="tt-stats"><span><b>${count}</b>등록 수업</span><span><b>5</b>요일</span><span><b>7</b>최대 교시</span></div></header><div class="tt-status-row"><span class="tt-live ${sourceClass}">${escapeHtml(data.source)}</span><span>${escapeHtml(data.reference?'실시간 연결 전 참고자료입니다.':'컴시간 교사 매칭 정상')}</span><button type="button" data-neis-refresh>새로고침</button></div><div class="tt-grid"><div class="tt-corner">교시</div>${days.map(day=>`<div class="tt-day"><b>${escapeHtml(day)}</b></div>`).join('')}${cells.join('')}</div><footer class="tt-legend"><span class="subject-korean">국어</span><span class="subject-math">수학</span><span class="subject-english">영어</span><span class="subject-social">사회</span><span class="subject-science">과학</span><span class="subject-creative">창체</span><span class="subject-art">예체능</span><span class="subject-other">기타</span></footer></section>`;
+  6917: }
+@@ line 7058
+  7053:   try { return renderer(); }
+  7054:   catch (error) { console.error(`widget:${key}`, error); return widgetErrorCard(key, title, error?.message || String(error)); }
+  7055: }
+  7056: 
+  7057: function dashboardTodayLessonsMarkup() {
+  7058:   const {week,days}=personalTimetableData();
+  7059:   const todayIndex=Math.max(0,Math.min(4,(today.getDay()+6)%7));
+  7060:   const lessons=week.map((row,index)=>({period:index+1,cell:row[todayIndex]})).filter(item=>item.cell&&item.cell!=="-");
+  7061:   const status=schoolPeriodStatus(new Date());
+  7062:   if(!lessons.length){
+  7063:     const connected=Array.isArray(days)&&days.length>0;
+  7064:     return `<div class="uep-empty-state uep-empty-lessons"><span class="uep-empty-icon">◷</span><div><b>오늘은 편성된 수업이 없습니다.</b><small>방학·휴업일이거나 오늘 시간표가 비어 있습니다.</small></div><footer><em>${connected?"개인 시간표 연결됨":"시간표 연결 확인 필요"}</em><button data-page="timetable">시간표 확인 ›</button></footer></div>`;
+  7065:   }
+  7066:   return `<div class="uep-lesson-list">${lessons.map(item=>{const [subject,room]=item.cell.split("|"); const current=status.index===item.period-1; const done=status.index>item.period-1 || /종료/.test(status.label); return `<button class="uep-lesson-item ${current?"is-now":done?"is-done":""}" data-page="timetable"><span class="uep-period-badge">${item.period}교시</span><span class="uep-lesson-main"><b>${escapeHtml(room||"교실 미등록")}</b><small>${escapeHtml(subject||"과목 미등록")}</small></span><time>${escapeHtml(periodTimeLabel(item.period)||"")}</time><em>${current?"NOW":done?"DONE":"NEXT"}</em></button>`;}).join("")}</div>`;
+  7067: }
+@@ line 7499
+  7494:   $("#drawerBody [data-night-attendance-date]")?.addEventListener("click",()=>{attendanceViewDate=day;nightViewMonth=day.slice(0,7);window.__uepNightRequestedSlot=slot;closeDrawer();navigate("attendance");attendanceMode="night";render("attendance");window.scrollTo(0,0);requestAnimationFrame(()=>toast(`${day} ${slot} 야자출결로 이동했습니다.`));});
+  7495:   $("#drawerBody").querySelectorAll('[data-dashboard-night-student]').forEach(btn=>btn.onclick=()=>openNightAttendanceDetail(btn.dataset.dashboardNightStudent,btn.dataset.dashboardNightStudentDay,btn.dataset.dashboardNightStudentSlot));
+  7496: }
+  7497: 
+  7498: function dashboardPersonalWeekMarkup(){
+  7499:   const {week,days}=personalTimetableData();
+  7500:   const status=schoolPeriodStatus(new Date());
+  7501:   const todayIndex=Math.max(0,Math.min(4,(today.getDay()+6)%7));
+  7502:   const maxPeriods=Math.max(7,Array.isArray(week)?week.length:0);
+  7503:   if(!Array.isArray(week)||!week.some(row=>Array.isArray(row)&&row.some(Boolean))){
+  7504:     return `<div class="uep-week-timetable-empty"><span>◷</span><b>내 주간시간표 연결 준비</b><small>컴시간 교사시간표가 연결되면 월~금 수업이 이곳에 표시됩니다.</small><button data-page="timetable">시간표 연결 확인</button></div>`;
+  7505:   }
+  7506:   const heads=(days?.length?days:["월","화","수","목","금"]).slice(0,5);
+  7507:   const cells=[];
+  7508:   for(let period=1;period<=maxPeriods;period+=1){
+
+### ANCHOR: dashboardPersonalWeekMarkup
+COUNT=2
+@@ line 7456
+  7451:   const range=first&&last?`${first.getMonth()+1}/${first.getDate()}~${last.getMonth()+1}/${last.getDate()}`:"이번 주";
+  7452:   return `<nav class="dashboard-timetable-header-controls"><button class="${mode==='day'?'active':''}" data-dashboard-timetable-mode="day">정규시간</button><button class="${mode==='night'?'active':''}" data-dashboard-timetable-mode="night">야간시간</button><span class="dashboard-tt-week-nav"><button data-dashboard-tt-week-shift="-1" aria-label="이전 주">‹</button><b>${range}</b><button data-dashboard-tt-week-shift="1" aria-label="다음 주">›</button></span></nav>`;
+  7453: }
+  7454: function dashboardTimetablePanelMarkup(){
+  7455:   const mode=dashboardTimetableAutoMode();
+  7456:   return mode==='night'?dashboardNightWeekMarkup():dashboardPersonalWeekMarkup();
+  7457: }
+  7458: function dashboardNightStudentGroups(day,slot){
+  7459:   const rows=dashboardNightAttendanceRows(day,slot).map(normalizeDashboardStudentRow);
+  7460:   const map=new Map();
+  7461:   rows.forEach(row=>{
+  7462:     const gc=recordGradeClass(row.studentRef||row),cls=String(Number(gc.classNo||0)||"");
+  7463:     if(!cls)return;
+  7464:     if(!map.has(cls))map.set(cls,new Map());
+  7465:     const key=String(row.studentRef?.id||row.studentId||row.studentNo||`${row.name}|${cls}`);
+@@ line 7498
+  7493:   $("#drawer").classList.remove("hidden");$("#drawerBackdrop").classList.remove("hidden");
+  7494:   $("#drawerBody [data-night-attendance-date]")?.addEventListener("click",()=>{attendanceViewDate=day;nightViewMonth=day.slice(0,7);window.__uepNightRequestedSlot=slot;closeDrawer();navigate("attendance");attendanceMode="night";render("attendance");window.scrollTo(0,0);requestAnimationFrame(()=>toast(`${day} ${slot} 야자출결로 이동했습니다.`));});
+  7495:   $("#drawerBody").querySelectorAll('[data-dashboard-night-student]').forEach(btn=>btn.onclick=()=>openNightAttendanceDetail(btn.dataset.dashboardNightStudent,btn.dataset.dashboardNightStudentDay,btn.dataset.dashboardNightStudentSlot));
+  7496: }
+  7497: 
+  7498: function dashboardPersonalWeekMarkup(){
+  7499:   const {week,days}=personalTimetableData();
+  7500:   const status=schoolPeriodStatus(new Date());
+  7501:   const todayIndex=Math.max(0,Math.min(4,(today.getDay()+6)%7));
+  7502:   const maxPeriods=Math.max(7,Array.isArray(week)?week.length:0);
+  7503:   if(!Array.isArray(week)||!week.some(row=>Array.isArray(row)&&row.some(Boolean))){
+  7504:     return `<div class="uep-week-timetable-empty"><span>◷</span><b>내 주간시간표 연결 준비</b><small>컴시간 교사시간표가 연결되면 월~금 수업이 이곳에 표시됩니다.</small><button data-page="timetable">시간표 연결 확인</button></div>`;
+  7505:   }
+  7506:   const heads=(days?.length?days:["월","화","수","목","금"]).slice(0,5);
+  7507:   const cells=[];
+
+### ANCHOR: timetableRows
+COUNT=1
+@@ line 6778
+  6773:   return weekdayNo===3?5:([1,2,4,5].includes(weekdayNo)?7:0);
+  6774: }
+  6775: function masterTimetableRows({grade=1,classNo="",teacher=""}={}){
+  6776:   // 배포판에서는 연결 전 샘플/고정 시간표를 실제 자료처럼 표시하지 않는다.
+  6777:   // 시간표마스터가 구글시트에서 정상 수신된 경우에만 렌더링한다.
+  6778:   const rows=Array.isArray(readonlyCache?.timetableRows)?readonlyCache.timetableRows:[];
+  6779:   return rows.filter(row=>{
+  6780:     if(String(row["학년도"]||"")!=="2026"||String(row["학기"]||"")!=="2")return false;
+  6781:     if(grade&&String(row["학년"]||"")!==String(grade))return false;
+  6782:     if(classNo&&String(row["반"]||"")!==String(classNo))return false;
+  6783:     if(teacher&&String(row["교사명"]||"").trim()!==String(teacher).trim())return false;
+  6784:     return String(row["적용상태"]||"확정").trim()!=="취소";
+  6785:   });
+  6786: }
+  6787: function masterTeacherTimetableData(teacher){
+
+### ANCHOR: teacherTimetable
+COUNT=5
+@@ line 6874
+  6869:   const masterReference=masterTeacherTimetableData(teacher);
+  6870:   if(masterReference)return masterReference;
+  6871:   // 연결 전 고정/샘플 교사시간표는 오인 가능성이 있어 배포판에서 사용하지 않는다.
+  6872:   const timetable=neisData?.timetable||{};
+  6873:   const teacherMap=timetable.teachers||{};
+  6874:   const all=timetable.teacherTimetable||{};
+  6875:   let teacherKey="";
+  6876:   for(const [key,value] of Object.entries(teacherMap||{})){
+  6877:     const name=typeof value==="string"?value:(value?.name||value?.teacherName||value?.label||"");
+  6878:     if(String(name).trim()===teacher){teacherKey=key;break;}
+  6879:   }
+  6880:   let source=all?.[teacherKey]||all?.[teacher]||null;
+  6881:   if(!source&&Array.isArray(all)) source=all.find(row=>String(row?.teacher||row?.teacherName||row?.name||"").trim()===teacher);
+  6882:   const week=Array.from({length:7},()=>Array(5).fill(""));
+  6883:   let found=0,changed=0;
+@@ line 6993
+  6988:   const teacherNames = schoolTeacherNames();
+  6989:   const content = {
+  6990:     mine: `<div class="timetable-toolbar"><div><b>개인 시간표</b><small>대시보드와 동일한 내 수업 시간표</small></div><div><button class="btn secondary" data-print-timetable>인쇄</button><button class="btn secondary" data-reference="homeroom-timetable">학급 시간표</button><button class="btn secondary" data-widget-settings="timetable">⚙ 시간표 설정</button></div></div><div class="card timetable-full">${personalTimetableMarkup()}</div>`,
+  6991:     homeroom: `<div class="timetable-toolbar neis-timetable-toolbar inline-timetable-toolbar"><div><b>${escapeHtml(neisData?.school?.schoolName||state.settings.neis.schoolName)}</b><small>${escapeHtml(state.settings.neis.grade)}학년 ${escapeHtml(state.settings.neis.classNo)}반 · ${escapeHtml(timetableWeekLabel(neisData?.date||dateKey(new Date())))}</small></div><form id="inlineTimetableNeisForm"><button type="button" class="btn secondary timetable-week-arrow" data-inline-timetable-prev>‹</button><label class="timetable-week-picker"><span>주간</span><input type="date" id="inlineTimetableDate" value="${escapeHtml(neisData?.date||dateKey(new Date()))}"><b>${escapeHtml(timetableWeekLabel(neisData?.date||dateKey(new Date())))}</b></label><button type="button" class="btn secondary timetable-week-arrow" data-inline-timetable-next>›</button><select id="inlineTimetableGrade">${[1,2,3].map(v=>`<option ${String(v)===String(state.settings.neis.grade)?"selected":""}>${v}</option>`).join("")}</select><select id="inlineTimetableClass">${Array.from({length:9},(_,i)=>i+1).map(v=>`<option ${String(v)===String(state.settings.neis.classNo)?"selected":""}>${v}</option>`).join("")}</select><button class="btn primary">조회</button><button type="button" class="btn secondary" data-inline-neis-today>오늘</button><button type="button" class="btn secondary" data-inline-neis-refresh>새로고침</button></form></div><div class="card timetable-full inline-class-timetable">${classTimetableMarkup()}</div>`,
+  6992:     student: studentTimetableMarkup(),
+  6993:     teacher: (()=>{const selected=teacherNames.includes(state.settings.comciganTeacher)?state.settings.comciganTeacher:(teacherNames[0]||"");return `<div class="teacher-timetable-search"><div><small>UEP MASTER · TEACHER</small><h3>교사별 시간표</h3><p>17_시간표마스터에 실제 수업이 있는 교사만 가나다순으로 표시합니다. 이름을 클릭하면 바로 시간표를 확인할 수 있습니다.</p></div><div class="teacher-search-row"><input class="search" id="teacherTimetableSearch" list="teacherTimetableNames" placeholder="교사 이름 검색" value="${escapeHtml(selected)}"><datalist id="teacherTimetableNames">${teacherNames.map(name=>`<option value="${escapeHtml(name)}"></option>`).join("")}</datalist><button class="btn secondary" id="teacherTimetableApply">시간표 보기</button><button class="btn primary" id="teacherTimetableOpen">컴시간 원본 열기</button></div><div class="teacher-list-preview">${teacherNames.map(name=>`<button class="${name===selected?"active":""}" data-teacher-name="${escapeHtml(name)}">${escapeHtml(name)}</button>`).join("")}</div></div><div class="card timetable-full teacher-master-timetable">${teacherMasterTimetableMarkup(selected)}</div>`;})(),
+  6994:   }[state.timetableTab] || `<div class="card timetable-full">${personalTimetableMarkup()}</div>`;
+  6995:   return `<div class="module-page timetable-page"><div class="timetable-tabs timetable-tabs-four">${tabs.map((tab) => `<button class="${state.timetableTab === tab[0] ? "active" : ""}" data-timetable-tab="${tab[0]}"><b>${tab[1]}</b><small>${tab[2]}</small></button>`).join("")}</div>${content}</div>`;
+  6996: }
+  6997: 
+  6998: function homeroomWeekMarkup() {
+  6999:   return `<div class="connection-guide"><span>NEIS</span><h3>학급시간표를 조회하세요</h3><p>정적 예시 시간표는 제거했습니다. 실제 학년·반을 선택한 NEIS 자료만 표시합니다.</p><button class="btn primary" data-reference="homeroom-timetable">학급 시간표 조회</button></div>`;
+  7000: }
+  7001: 
+  7002: function studentTimetableMarkup() {
+@@ line 10448
+ 10443:       (x.onclick = (event) => {
+ 10444:         event.stopPropagation();
+ 10445:         openWidgetSettings(x.dataset.widgetSettings);
+ 10446:       }),
+ 10447:   );
+ 10448:   const teacherSearch = $("#teacherTimetableSearch");
+ 10449:   const showTeacherTimetable=async teacher=>{const name=String(teacher||"").trim();if(!name)return toast("교사 이름을 선택하세요.");state.settings.comciganTeacher=name;await save();render(calendarHubMode==="timetable"?"calendar":"timetable");};
+ 10450:   $$('[data-teacher-name]').forEach(button => button.onclick = () => showTeacherTimetable(button.dataset.teacherName || ""));
+ 10451:   const teacherApply=$("#teacherTimetableApply");
+ 10452:   if(teacherApply)teacherApply.onclick=()=>showTeacherTimetable(teacherSearch?.value||"");
+ 10453:   const teacherOpen = $("#teacherTimetableOpen");
+ 10454:   if (teacherOpen) teacherOpen.onclick = async () => {
+ 10455:     const teacher = teacherSearch?.value.trim() || "";
+ 10456:     if (!teacher) return toast("교사 이름을 선택하세요.");
+ 10457:     state.settings.comciganTeacher = teacher;
+@@ line 10451
+ 10446:       }),
+ 10447:   );
+ 10448:   const teacherSearch = $("#teacherTimetableSearch");
+ 10449:   const showTeacherTimetable=async teacher=>{const name=String(teacher||"").trim();if(!name)return toast("교사 이름을 선택하세요.");state.settings.comciganTeacher=name;await save();render(calendarHubMode==="timetable"?"calendar":"timetable");};
+ 10450:   $$('[data-teacher-name]').forEach(button => button.onclick = () => showTeacherTimetable(button.dataset.teacherName || ""));
+ 10451:   const teacherApply=$("#teacherTimetableApply");
+ 10452:   if(teacherApply)teacherApply.onclick=()=>showTeacherTimetable(teacherSearch?.value||"");
+ 10453:   const teacherOpen = $("#teacherTimetableOpen");
+ 10454:   if (teacherOpen) teacherOpen.onclick = async () => {
+ 10455:     const teacher = teacherSearch?.value.trim() || "";
+ 10456:     if (!teacher) return toast("교사 이름을 선택하세요.");
+ 10457:     state.settings.comciganTeacher = teacher;
+ 10458:     await save();
+ 10459:     window.schoolBoard?.openChrome?.("https://comcigan.co.kr/");
+ 10460:     toast(`${teacher} 선생님 · 컴시간 원본을 열었습니다.`);
+
+### ANCHOR: readonlyCache?.timetable
+COUNT=1
+@@ line 6778
+  6773:   return weekdayNo===3?5:([1,2,4,5].includes(weekdayNo)?7:0);
+  6774: }
+  6775: function masterTimetableRows({grade=1,classNo="",teacher=""}={}){
+  6776:   // 배포판에서는 연결 전 샘플/고정 시간표를 실제 자료처럼 표시하지 않는다.
+  6777:   // 시간표마스터가 구글시트에서 정상 수신된 경우에만 렌더링한다.
+  6778:   const rows=Array.isArray(readonlyCache?.timetableRows)?readonlyCache.timetableRows:[];
+  6779:   return rows.filter(row=>{
+  6780:     if(String(row["학년도"]||"")!=="2026"||String(row["학기"]||"")!=="2")return false;
+  6781:     if(grade&&String(row["학년"]||"")!==String(grade))return false;
+  6782:     if(classNo&&String(row["반"]||"")!==String(classNo))return false;
+  6783:     if(teacher&&String(row["교사명"]||"").trim()!==String(teacher).trim())return false;
+  6784:     return String(row["적용상태"]||"확정").trim()!=="취소";
+  6785:   });
+  6786: }
+  6787: function masterTeacherTimetableData(teacher){
+
+### ANCHOR: readonlyCache.timetable
+COUNT=1
+@@ line 6778
+  6773:   return weekdayNo===3?5:([1,2,4,5].includes(weekdayNo)?7:0);
+  6774: }
+  6775: function masterTimetableRows({grade=1,classNo="",teacher=""}={}){
+  6776:   // 배포판에서는 연결 전 샘플/고정 시간표를 실제 자료처럼 표시하지 않는다.
+  6777:   // 시간표마스터가 구글시트에서 정상 수신된 경우에만 렌더링한다.
+  6778:   const rows=Array.isArray(readonlyCache?.timetableRows)?readonlyCache.timetableRows:[];
+  6779:   return rows.filter(row=>{
+  6780:     if(String(row["학년도"]||"")!=="2026"||String(row["학기"]||"")!=="2")return false;
+  6781:     if(grade&&String(row["학년"]||"")!==String(grade))return false;
+  6782:     if(classNo&&String(row["반"]||"")!==String(classNo))return false;
+  6783:     if(teacher&&String(row["교사명"]||"").trim()!==String(teacher).trim())return false;
+  6784:     return String(row["적용상태"]||"확정").trim()!=="취소";
+  6785:   });
+  6786: }
+  6787: function masterTeacherTimetableData(teacher){
+
+### ANCHOR: readonlyCache?.teacherTimetable
+COUNT=0
+
+### ANCHOR: renderTimetable
+COUNT=0
+
+### ANCHOR: renderDashboard
+COUNT=0

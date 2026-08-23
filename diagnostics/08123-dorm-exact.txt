@@ -1,0 +1,286 @@
+SOURCE: app/resources/app/gyomuon.js
+
+### ANCHOR: updateDormOutingCount
+COUNT=4
+@@ line 462
+   457:         if(currentRoleId()==='admin') migrateAdminProgramOverridesToSheetOnce().catch(()=>{});
+   458:       }
+   459:     },900);
+   460:   }
+   461:   if(googleConnectionStatus?.ok && readonlyCache) await migrateAdminProgramOverridesToSheetOnce();
+   462:   updateDormOutingCount();
+   463:   updateTopSyncStatus();
+   464:   startReadonlyAutoRefresh();
+   465:   // 여기서는 백그라운드에서 최신 계정 유효성을 재검증한다.
+   466:   // 자동로그인 세션은 이미 화면을 열었으므로 네트워크 지연이 시작 화면을 막지 않는다.
+   467:   await Promise.race([
+   468:     initializeUserSessionGate(),
+   469:     new Promise(resolve=>setTimeout(()=>{
+   470:       try{
+   471:         /* 0.81.20: local remembered state never bypasses School Read session verification */
+   472:       }catch{}
+@@ line 525
+   520:     const cached=await window.schoolBoard.readReadonlyCache();
+   521:     if(!cached?.ok) throw new Error(cached?.reason||'UEP 학교 데이터를 읽지 못했습니다.');
+   522:     readonlyCache=cached.data;
+   523:     googleConnectionError='';
+   524:     if(typeof studentBadgeCache!=='undefined'&&studentBadgeCache?.clear) studentBadgeCache.clear();
+   525:     updateDormOutingCount();
+   526:     updateTopSyncStatus();
+   527:     if(rerender && !setupWizardActive){
+   528:       const scrollY=window.scrollY;
+   529:       render(state.activePage||'dashboard');
+   530:       requestAnimationFrame(()=>window.scrollTo(0,scrollY));
+   531:     }
+   532:     return true;
+   533:   } catch(error) {
+   534:     googleConnectionError=error?.message||'UEP 학교 데이터 자동 갱신 실패';
+   535:     updateTopSyncStatus();
+@@ line 11325
+ 11320:   const ids=new Set(dorm.flatMap(x=>[String(x.studentId||''),String(x.studentNo||'')]).filter(Boolean));
+ 11321:   const students=(ids.size?all.filter(s=>ids.has(String(s.id||''))||ids.has(String(s.studentNo||''))):all).filter(s=>String(s.status||'재학')==='재학').sort((a,b)=>String(a.studentNo||'').localeCompare(String(b.studentNo||''),'ko'));
+ 11322:   const layer=document.createElement('div');layer.className='issue-layer';layer.id='dormOutingTeacherLayer';
+ 11323:   layer.innerHTML=`<div class="issue-dialog dorm-outing-teacher-dialog"><header><div><small>DORMITORY · TEACHER ENTRY</small><h3>학사외출 교사 추가</h3><p>갑작스러운 병원 진료 등 학생 폼 제출이 어려운 경우 교사가 직접 기록합니다.</p></div><button type="button" data-outing-editor-close>×</button></header><form id="dormOutingTeacherForm"><div class="dorm-outing-editor-grid"><label>학생<select id="dormOutingTeacherStudent" required><option value="">학생 선택</option>${students.map(s=>`<option value="${escapeHtml(s.id||s.studentNo||'')}">${escapeHtml((s.studentNo||'')+' '+(s.name||''))}</option>`).join('')}</select></label><label>날짜<input id="dormOutingTeacherDate" type="date" value="${escapeHtml(dateKey(outingViewDate))}" required></label><label>구분<select id="dormOutingTeacherCategory"><option>외출</option><option>병원외출</option><option>퇴소</option><option>늦은 입소</option></select></label><label>외출시간<input id="dormOutingTeacherOut" type="time"></label><label>복귀·귀가 예정<input id="dormOutingTeacherReturn" type="time"></label><label>사유<input id="dormOutingTeacherReason" placeholder="예: 복통으로 병원 진료" required></label><label>목적지<input id="dormOutingTeacherDestination" placeholder="병원·자택 등"></label><label class="wide">비고<input id="dormOutingTeacherNote" placeholder="보호자 연락 여부 등"></label></div><div class="modal-actions"><button type="button" class="btn secondary" data-outing-editor-close>취소</button><button class="btn primary" type="submit">교사등록 저장</button></div></form></div>`;
+ 11324:   document.body.appendChild(layer);const close=()=>layer.remove();layer.querySelectorAll('[data-outing-editor-close]').forEach(b=>b.onclick=close);
+ 11325:   layer.querySelector('#dormOutingTeacherForm').onsubmit=async e=>{e.preventDefault();const id=layer.querySelector('#dormOutingTeacherStudent').value,student=students.find(s=>String(s.id||s.studentNo||'')===String(id));if(!student)return toast('학생을 선택하세요.');const payload={role:currentRoleId(),studentId:String(student.id||''),studentNo:String(student.studentNo||''),name:String(student.name||''),grade:String(student.grade||'1'),className:String(classNumberOf(student)||''),number:String(student.number||''),date:layer.querySelector('#dormOutingTeacherDate').value,category:layer.querySelector('#dormOutingTeacherCategory').value,outTime:layer.querySelector('#dormOutingTeacherOut').value,returnTime:layer.querySelector('#dormOutingTeacherReturn').value,reason:layer.querySelector('#dormOutingTeacherReason').value.trim(),destination:layer.querySelector('#dormOutingTeacherDestination').value.trim(),note:layer.querySelector('#dormOutingTeacherNote').value.trim(),status:'확인',writer:currentLoginTeacherName()||''};const btn=e.submitter;btn.disabled=true;btn.textContent='저장 중…';try{const result=await window.schoolBoard?.saveDormOuting?.(payload);if(!result?.ok)throw new Error(result?.reason||'저장 실패');readonlyCache=result.data||readonlyCache;close();openDormOutingDrawer();updateDormOutingCount();toast('학사외출을 교사등록으로 저장했습니다.');}catch(err){btn.disabled=false;btn.textContent='교사등록 저장';toast(err?.message||'학사외출 저장 실패');}};
+ 11326: }
+ 11327: function openDormOutingDrawer() {
+ 11328:   const viewKey = dateKey(outingViewDate);
+ 11329:   const liveOutings = (readonlyCache?.dormOutings || []).filter(item=>!dormOutingExcludedByRule(item));
+ 11330:   const items = liveOutings.filter((item) => item.date === viewKey);
+ 11331:   const monday = new Date(outingViewDate);
+ 11332:   const day = monday.getDay();
+ 11333:   monday.setDate(monday.getDate() - (day === 0 ? 6 : day - 1));
+ 11334:   const sunday = new Date(monday);
+ 11335:   sunday.setDate(sunday.getDate() + 6);
+@@ line 11471
+ 11466:       }
+ 11467:     }
+ 11468:   });
+ 11469: }
+ 11470: 
+ 11471: function updateDormOutingCount() {
+ 11472:   const key = dateKey(today);
+ 11473:   const count = (readonlyCache?.dormOutings||[]).filter((item) => item.date === key && !dormOutingExcludedByRule(item)).length || 0;
+ 11474:   const badge = $("#dormOutingCount");
+ 11475:   if (badge) badge.textContent = count;
+ 11476: }
+ 11477: function openModal() {
+ 11478:   $("#taskDate").value = dateKey(today);
+ 11479:   $("#modalBackdrop").classList.remove("hidden");
+ 11480:   setTimeout(() => $("#taskTitle").focus(), 30);
+ 11481: }
+
+### ANCHOR: dormOutingExcludedByRule
+COUNT=4
+@@ line 1584
+  1579: }
+  1580: function dormOutingIsMedical(item){
+  1581:   const text=[item?.category,item?.reason,item?.destination,item?.type,item?.outingType].map(v=>String(v||'').trim()).join(' ');
+  1582:   return /병원|의원|진료|치과|한의원|의료/.test(text);
+  1583: }
+  1584: function dormOutingExcludedByRule(item){
+  1585:   // 병원 외출은 학사운영규칙의 학원외출 허용/미운영 판정과 무관한 개인 외출사유입니다.
+  1586:   // 신청이 존재하면 오늘의 학사외출현황과 메일/출력 대상에서 제외하지 않습니다.
+  1587:   if(dormOutingIsMedical(item))return false;
+  1588:   if(item?.operationIncluded===false)return true;
+  1589:   const value=String(item?.date||'').slice(0,10);
+  1590:   if(!value)return false;
+  1591:   const stamp=new Date(`${value}T12:00:00`);
+  1592:   return dormRuleHistory().some(rule=>rule.category==='closure'&&dormRuleAppliesAt(rule,stamp));
+  1593: }
+  1594: function dormRuleOperationStateForCategory(category){
+@@ line 1746
+  1741:   };
+  1742:   const sections=grouped.map(category=>{
+  1743:     const rows=rules.filter(x=>x.category===category);
+  1744:     return `<section class="data-card dorm-rule-category"><div class="card-head"><div><strong>${dormRuleCategoryLabel(category)}</strong><small>${categoryHelp[category]}</small></div><button class="btn secondary" data-dorm-rule-add="${category}">+ 추가</button></div><div class="dorm-rule-list">${rows.length?rows.map(rule=>`<article class="dorm-rule-row ${rule.active?'active':'inactive'}"><div class="dorm-rule-title"><b>${escapeHtml(rule.name)}</b><small>${escapeHtml(rule.effect||dormRuleCategoryLabel(category))}${rule.active?'':' · 사용 안 함'}</small></div><span>${escapeHtml(dormRuleDateText(rule.start))}<br>~ ${escapeHtml(dormRuleDateText(rule.end))}</span><div class="dorm-rule-detail"><p>${escapeHtml(rule.note||'')}</p><small>${escapeHtml([rule.days&&`요일 ${rule.days}`,rule.entryTime&&`입소 ${rule.entryTime}`,rule.exitTime&&`퇴소 ${rule.exitTime}`,rule.lateEntry&&`늦은입소 ${rule.lateEntry}`,rule.earlyExit&&`이른퇴소 ${rule.earlyExit}`,rule.reason&&`사유 ${rule.reason}`,rule.operationState&&`상태 ${rule.operationState}`,rule.actualExit&&`실제퇴소 ${dormRuleDateText(rule.actualExit)}`,rule.actualReentry&&`재입소 ${dormRuleDateText(rule.actualReentry)}`,rule.priorNightAcademyHome&&'전날 학원후귀가 허용',rule.formRequired&&'개인신청 필요',rule.individualOutingAllowed&&'개인외출 허용'].filter(Boolean).join(' · '))}</small></div><div class="dorm-rule-actions">${!rule.active?`<button class="btn primary" data-dorm-rule-confirm="${escapeHtml(rule.id)}">활성화</button>`:""}<button class="btn secondary" data-dorm-rule-edit="${escapeHtml(rule.id)}">수정</button><button class="btn secondary" data-dorm-rule-copy="${escapeHtml(rule.id)}">복사</button><button class="btn danger" data-dorm-rule-delete="${escapeHtml(rule.id)}">삭제</button></div></article>`).join(''):'<div class="query-empty compact"><b>등록된 규칙이 없습니다.</b><span>필요한 규칙을 직접 추가할 수 있습니다.</span></div>'}</div></section>`;
+  1745:   }).join('');
+  1746:   const closed=outings.filter(x=>dormOutingExcludedByRule(x)).length;
+  1747:   const directState=''?`<div class="setting-card warn"><h3>규칙로그 권한 연결 필요 · 검증 미러 ${rules.length}건 표시 중</h3><p>${escapeHtml('')} · 상단의 ‘권한 연결’을 눌러 서비스계정 이메일을 편집자로 공유하면 원본 양방향 연결로 전환됩니다.</p></div>`:'';
+  1748:   return `<div class="dorm-rule-page"><div class="module-intro pastel-mint"><span>03</span><div><h3>학사운영규칙</h3><p>학사 전체 운영변경과 학원외출 예외를 관리합니다. 병원 외출은 운영규칙과 무관하게 신청 가능하며, 신청이 있으면 오늘의 학사외출현황에 항상 표시됩니다. 실제 학생 외출기록은 구글폼 신청으로 생성됩니다.</p></div><div class="module-intro-actions"><button class="btn primary" id="dormOutingStatusOpen">학사외출현황</button><button class="btn secondary" id="dormRuleReload">규칙 동기화 확인</button><span class="state positive">규칙로그 · 40_학사운영규칙</span></div></div>
+  1749:   <div class="student-summary"><span><b>${currentStudents.length}</b> 현재 학사생</span><span><b>${rules.length}</b> 전체 규칙</span><span><b>${rules.filter(x=>x.active).length}</b> 사용중 규칙</span><span><b>${outings.length}</b> 원본 외출기록</span><span><b>${closed}</b> 미운영기간 기록</span></div>
+  1750:   ${directState}<div class="dorm-rule-priority-guide"><b>판정 우선순위</b><span>특정 날짜 입·퇴소 변경 → 학사 미운영기간 → 시험 외출허용 → 방학 중 외출허용 → 기본 입·퇴소 → 학교 운영기간</span><small>더 구체적인 예외 규칙이 일반 규칙보다 우선합니다.</small></div>
+  1751:   ${sections}
+  1752:   <div class="setting-card pastel-mint"><h3>다음 단계: 학생용 학사외출 Google Form</h3><p>규칙은 규칙로그 시트에 영구 저장됩니다. 다음 단계에서는 정규화된 학사외출 응답을 이 규칙으로 판정한 뒤 빠른열기 학사외출에 연결합니다.</p></div></div>`;
+  1753: }
+  1754: 
+  1755: function dormTermDefinition(mode){
+  1756:   return ({
+@@ line 11329
+ 11324:   document.body.appendChild(layer);const close=()=>layer.remove();layer.querySelectorAll('[data-outing-editor-close]').forEach(b=>b.onclick=close);
+ 11325:   layer.querySelector('#dormOutingTeacherForm').onsubmit=async e=>{e.preventDefault();const id=layer.querySelector('#dormOutingTeacherStudent').value,student=students.find(s=>String(s.id||s.studentNo||'')===String(id));if(!student)return toast('학생을 선택하세요.');const payload={role:currentRoleId(),studentId:String(student.id||''),studentNo:String(student.studentNo||''),name:String(student.name||''),grade:String(student.grade||'1'),className:String(classNumberOf(student)||''),number:String(student.number||''),date:layer.querySelector('#dormOutingTeacherDate').value,category:layer.querySelector('#dormOutingTeacherCategory').value,outTime:layer.querySelector('#dormOutingTeacherOut').value,returnTime:layer.querySelector('#dormOutingTeacherReturn').value,reason:layer.querySelector('#dormOutingTeacherReason').value.trim(),destination:layer.querySelector('#dormOutingTeacherDestination').value.trim(),note:layer.querySelector('#dormOutingTeacherNote').value.trim(),status:'확인',writer:currentLoginTeacherName()||''};const btn=e.submitter;btn.disabled=true;btn.textContent='저장 중…';try{const result=await window.schoolBoard?.saveDormOuting?.(payload);if(!result?.ok)throw new Error(result?.reason||'저장 실패');readonlyCache=result.data||readonlyCache;close();openDormOutingDrawer();updateDormOutingCount();toast('학사외출을 교사등록으로 저장했습니다.');}catch(err){btn.disabled=false;btn.textContent='교사등록 저장';toast(err?.message||'학사외출 저장 실패');}};
+ 11326: }
+ 11327: function openDormOutingDrawer() {
+ 11328:   const viewKey = dateKey(outingViewDate);
+ 11329:   const liveOutings = (readonlyCache?.dormOutings || []).filter(item=>!dormOutingExcludedByRule(item));
+ 11330:   const items = liveOutings.filter((item) => item.date === viewKey);
+ 11331:   const monday = new Date(outingViewDate);
+ 11332:   const day = monday.getDay();
+ 11333:   monday.setDate(monday.getDate() - (day === 0 ? 6 : day - 1));
+ 11334:   const sunday = new Date(monday);
+ 11335:   sunday.setDate(sunday.getDate() + 6);
+ 11336:   const weekItems = liveOutings.filter((item) => item.date >= dateKey(monday) && item.date <= dateKey(sunday));
+ 11337:   const displayDate = new Intl.DateTimeFormat("ko-KR", { year: "numeric", month: "long", day: "numeric", weekday: "short" }).format(outingViewDate);
+ 11338:   $("#drawerKicker").textContent = "DORMITORY · OUTING";
+ 11339:   $("#drawerTitle").textContent = `학사외출 · ${displayDate}`;
+@@ line 11473
+ 11468:   });
+ 11469: }
+ 11470: 
+ 11471: function updateDormOutingCount() {
+ 11472:   const key = dateKey(today);
+ 11473:   const count = (readonlyCache?.dormOutings||[]).filter((item) => item.date === key && !dormOutingExcludedByRule(item)).length || 0;
+ 11474:   const badge = $("#dormOutingCount");
+ 11475:   if (badge) badge.textContent = count;
+ 11476: }
+ 11477: function openModal() {
+ 11478:   $("#taskDate").value = dateKey(today);
+ 11479:   $("#modalBackdrop").classList.remove("hidden");
+ 11480:   setTimeout(() => $("#taskTitle").focus(), 30);
+ 11481: }
+ 11482: function closeModal() {
+ 11483:   $("#modalBackdrop").classList.add("hidden");
+
+### ANCHOR: dormOutingRows
+COUNT=1
+@@ line 10200
+ 10195:       if (label) label.textContent = collapsed ? "펼치기 ﹀" : "접기 ︿";
+ 10196:     });
+ 10197:   }
+ 10198:   if (page === "dorm") {
+ 10199:     bindLocalFilter("#dormRosterSearch", "#dormRosterRows .dorm-roster-row", "#dormRosterReset");
+ 10200:     bindLocalFilter("#dormOutingSearch", "#dormOutingRows .dorm-outing-row", "#dormOutingReset");
+ 10201:     if($("#dormOutingCalendar")) $("#dormOutingCalendar").onclick=openDormOutingDrawer;
+ 10202:     if($("#dormOutingStatusOpen")) $("#dormOutingStatusOpen").onclick=openDormOutingDrawer;
+ 10203:     $$('[data-dorm-growth-student]').forEach(button=>button.onclick=()=>openDormGrowthStudent(button.dataset.dormGrowthStudent,dormMode));
+ 10204:     $$('[data-student-id]').forEach(button=>button.onclick=()=>{const index=(readonlyCache?.students||[]).findIndex(s=>s.id===button.dataset.studentId);if(index>=0)openStudentDrawer(index);});
+ 10205:   }
+ 10206:   $$("[data-dashboard-task]").forEach((x)=>{
+ 10207:     x.onchange=async()=>{
+ 10208:       const task=state.tasks.find(item=>String(item.id)===String(x.dataset.dashboardTask));
+ 10209:       if(!task)return;
+ 10210:       task.done=x.checked;
+
+### ANCHOR: dormOuting
+COUNT=35
+@@ line 74
+    69:   issueReports: [],
+    70:   programs: [],
+    71:   gradeNotices: [],
+    72:   reportDeadlines: [],
+    73:   schoolDeadlines: [],
+    74:   dormOutings: [],
+    75:   settings: {
+    76:     autoStart: true,
+    77:     setupCompleted: false,
+    78:     setupCompletedVersion: "",
+    79:     userProfile: {
+    80:       name: "",
+    81:       primaryRole: "homeroom",
+    82:       secondaryRole: "",
+    83:       grade: "1",
+    84:       classNo: "",
+@@ line 178
+   173:       ["7교시", "15:40", "16:30"],
+   174:       ["오후자습", "17:00", "18:00"],
+   175:       ["야자1", "19:00", "20:10"],
+   176:       ["야자2", "20:20", "21:30"],
+   177:     ],
+   178:     mailAlerts: { dormOuting:true, afternoonStudy:false, night1:false, night2:false, nightException:true, nightSummary:false },
+   179:   },
+   180:   activePage: "dashboard",
+   181:   timetableTab: "mine",
+   182:   calendarMode: "month",
+   183: };
+   184: let state = structuredClone(baseState),
+   185:   helpOpen = "start";
+   186: let googleConnectionStatus = { ok: false, encryption: false };
+   187: let readonlyCache = null;
+   188: let googleConnectionError = "";
+@@ line 316
+   311:       requiredClasses: Array.isArray(item.requiredClasses) ? item.requiredClasses : [],
+   312:       confirmedClasses: Array.isArray(item.confirmedClasses) ? item.confirmedClasses : [],
+   313:     }));
+   314:   state.reportDeadlines = (Array.isArray(state.reportDeadlines) ? state.reportDeadlines : structuredClone(baseState.reportDeadlines)).filter(Boolean);
+   315:   state.schoolDeadlines = (Array.isArray(state.schoolDeadlines) ? state.schoolDeadlines : structuredClone(baseState.schoolDeadlines)).filter(Boolean);
+   316:   state.dormOutings = (Array.isArray(state.dormOutings) ? state.dormOutings : structuredClone(baseState.dormOutings))
+   317:     .filter((item) => item && typeof item === "object")
+   318:     .map((item) => ({ date: dateKey(today), ...item }));
+   319: 
+   320:   if (!state.settings || typeof state.settings !== "object") state.settings = structuredClone(baseState.settings);
+   321:   state.settings.links = { ...baseState.settings.links, ...(state.settings.links && typeof state.settings.links === "object" ? state.settings.links : {}) };
+   322:   const canonicalLinks={portal:"https://cbe.eduptl.kr/bpm_lgn_lg00_001.do",edufine:"https://klef.cbe.go.kr/keris_ui/main.do",riro:"https://unho.riroschool.kr/",unhoLlm:"https://unho.kr/"}; Object.entries(canonicalLinks).forEach(([k,v])=>{if(!String(state.settings.links?.[k]||"").trim())state.settings.links[k]=v;});
+   323:   state.settings.manualCalendar = Array.isArray(state.settings.manualCalendar) ? state.settings.manualCalendar : [];
+   324:   state.settings.schoolHours = Array.isArray(state.settings.schoolHours) ? state.settings.schoolHours : structuredClone(baseState.settings.schoolHours);
+   325:   state.settings.quickOrder = Array.isArray(state.settings.quickOrder) ? state.settings.quickOrder : [...baseState.settings.quickOrder];
+   326:   state.settings.dashboardOrder = Array.isArray(state.settings.dashboardOrder) ? state.settings.dashboardOrder : [...baseState.settings.dashboardOrder];
+@@ line 1580
+  1575:   if(!rule?.active)return false;
+  1576:   const stamp=(dateLike instanceof Date?dateLike:new Date(dateLike)).getTime();
+  1577:   const a=new Date(rule.start||'1900-01-01T00:00').getTime(), b=new Date(rule.end||'2999-12-31T23:59').getTime();
+  1578:   return Number.isFinite(stamp)&&stamp>=a&&stamp<=b;
+  1579: }
+  1580: function dormOutingIsMedical(item){
+  1581:   const text=[item?.category,item?.reason,item?.destination,item?.type,item?.outingType].map(v=>String(v||'').trim()).join(' ');
+  1582:   return /병원|의원|진료|치과|한의원|의료/.test(text);
+  1583: }
+  1584: function dormOutingExcludedByRule(item){
+  1585:   // 병원 외출은 학사운영규칙의 학원외출 허용/미운영 판정과 무관한 개인 외출사유입니다.
+  1586:   // 신청이 존재하면 오늘의 학사외출현황과 메일/출력 대상에서 제외하지 않습니다.
+  1587:   if(dormOutingIsMedical(item))return false;
+  1588:   if(item?.operationIncluded===false)return true;
+  1589:   const value=String(item?.date||'').slice(0,10);
+  1590:   if(!value)return false;
+@@ line 1584
+  1579: }
+  1580: function dormOutingIsMedical(item){
+  1581:   const text=[item?.category,item?.reason,item?.destination,item?.type,item?.outingType].map(v=>String(v||'').trim()).join(' ');
+  1582:   return /병원|의원|진료|치과|한의원|의료/.test(text);
+  1583: }
+  1584: function dormOutingExcludedByRule(item){
+  1585:   // 병원 외출은 학사운영규칙의 학원외출 허용/미운영 판정과 무관한 개인 외출사유입니다.
+  1586:   // 신청이 존재하면 오늘의 학사외출현황과 메일/출력 대상에서 제외하지 않습니다.
+  1587:   if(dormOutingIsMedical(item))return false;
+  1588:   if(item?.operationIncluded===false)return true;
+  1589:   const value=String(item?.date||'').slice(0,10);
+  1590:   if(!value)return false;
+  1591:   const stamp=new Date(`${value}T12:00:00`);
+  1592:   return dormRuleHistory().some(rule=>rule.category==='closure'&&dormRuleAppliesAt(rule,stamp));
+  1593: }
+  1594: function dormRuleOperationStateForCategory(category){
+
+### ANCHOR: renderDorm
+COUNT=0
+
+### ANCHOR: sendDorm
+COUNT=0
+
+### ANCHOR: dormReport
+COUNT=1
+@@ line 2049
+  2044:     ${dormStudentOutingHistoryMarkup(student)}
+  2045:     <div class="modal-actions dorm-deep-actions"><button class="btn secondary" data-dorm-open-student="${escapeHtml(student.id)}">학생정보 전체보기</button><button class="btn primary" data-dorm-open-counsel="${escapeHtml(student.id)}">상담하기</button></div>
+  2046:   </div>`;
+  2047:   $('#drawer').classList.add('reference-expanded','dorm-deep-expanded','dorm-deep-wide');
+  2048:   $('#drawer').classList.remove('hidden');$('#drawerBackdrop').classList.remove('hidden');
+  2049:   $('#drawerBody')?.querySelectorAll('[data-dorm-report-id]').forEach(btn=>btn.addEventListener('click',()=>openDormReportOverlay(btn.dataset.dormReportId,btn.dataset.dormReportStudent)));
+  2050:   $('[data-dorm-open-student]')?.addEventListener('click',()=>{
+  2051:     const index=(readonlyCache?.students||[]).findIndex(s=>String(s.id)===String(student.id));if(index<0)return;
+  2052:     openStudentDrawer(index);
+  2053:     $('#drawer').classList.add('reference-expanded','dorm-deep-expanded','dorm-deep-wide');
+  2054:     const back=document.createElement('button');back.className='btn secondary dorm-return-button';back.textContent='← 학사생 심층관리로 돌아가기';
+  2055:     back.onclick=()=>openDormGrowthStudent(student.id,termMode);$('#drawerBody')?.prepend(back);
+  2056:   });
+  2057:   $('[data-dorm-open-counsel]')?.addEventListener('click',()=>{
+  2058:     // 심층관리 화면을 유지한 채 우측 상담 패널만 연다.
+  2059:     openCounselSidePanel(student.id);
+
+### ANCHOR: reportDorm
+COUNT=0
+
+### ANCHOR: sendMail
+COUNT=0
+
+### ANCHOR: mailAlerts.dormOuting
+COUNT=0
