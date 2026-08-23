@@ -5,8 +5,10 @@ const appDir=path.join(appRoot,'resources','app');
 const jsFile=path.join(appDir,'gyomuon.js');
 let s=fs.readFileSync(jsFile,'utf8');
 
-if(!s.includes('const APP_VERSION = "0.81.30";')) throw new Error('0.81.30 runtime anchor missing');
-s=s.replace('const APP_VERSION = "0.81.30";','const APP_VERSION = "0.81.31";');
+// Normalize the runtime version structurally. Do not depend on whitespace or quote style.
+const versionRegex=/const\s+APP_VERSION\s*=\s*['\"]0\.81\.30['\"]\s*;/;
+if(!versionRegex.test(s)) throw new Error('0.81.30 runtime version declaration missing');
+s=s.replace(versionRegex,'const APP_VERSION = "0.81.31";');
 
 // Selected-student detail belongs immediately below the filters, not after the full roster.
 const oldReturn='return controls+list+detail;';
@@ -19,8 +21,6 @@ s=s.replaceAll("recordStudentId=b.dataset.recordStudent;recordQueryMode='student
 s=s.replaceAll("recordStudentId=button.dataset.recordStudent;recordQueryMode='student';render('records');","recordStudentId=button.dataset.recordStudent;render('records');");
 
 // Repair subject-card click bindings exactly once.
-// IMPORTANT: do not use while(s.includes(badBinding)) here. The good '$$(' form contains
-// the bad '$(' text starting at its second '$', which caused the previous infinite loop.
 const goodSubjectBinding="$$('[data-curriculum-subject]').forEach(b=>b.onclick=()=>{curriculumSubjectKey=b.dataset.curriculumSubject;uepOpenSubjectModal08128(curriculumSubjectKey);});";
 const badSingleRegex=/(?<!\$)\$\('\[data-curriculum-subject\]'\)\.forEach\(b=>b\.onclick=\(\)=>\{curriculumSubjectKey=b\.dataset\.curriculumSubject;uepOpenSubjectModal08128\(curriculumSubjectKey\);\}\);/g;
 const legacyRenderRegex=/\$\$\('\[data-curriculum-subject\]'\)\.forEach\(b=>b\.onclick=\(\)=>\{curriculumSubjectKey=b\.dataset\.curriculumSubject;render\('records'\);\}\);/g;
@@ -29,9 +29,9 @@ const legacyMatches=s.match(legacyRenderRegex)||[];
 s=s.replace(badSingleRegex,goodSubjectBinding).replace(legacyRenderRegex,goodSubjectBinding);
 const subjectBindFixes=badMatches.length+legacyMatches.length;
 
-// Validate the resulting runtime rather than relying on a potentially self-matching replacement loop.
+if(!/const\s+APP_VERSION\s*=\s*['\"]0\.81\.31['\"]\s*;/.test(s)) throw new Error('0.81.31 runtime version not applied');
 if(!s.includes(goodSubjectBinding)) throw new Error('subject popup binding missing after repair');
-if(badSingleRegex.test(s)) throw new Error('single-element subject binding remains after repair');
+if(/(?<!\$)\$\('\[data-curriculum-subject\]'\)\.forEach/.test(s)) throw new Error('single-element subject binding remains after repair');
 if(legacyRenderRegex.test(s)) throw new Error('legacy subject render binding remains after repair');
 if(!s.includes('function uepOpenSubjectModal08128(')) throw new Error('subject popup function missing');
 if(!s.includes('<span>학사여부</span>')||!s.includes('<span>1학년 내신평균</span>')||!s.includes('<span>예상등수</span>')||!s.includes('<span>예상등급</span>')) throw new Error('subject popup columns missing');
@@ -42,4 +42,7 @@ c+='\n/* UEP 0.81.31 selected-student detail visibility + subject card interacti
 
 fs.writeFileSync(jsFile,s,'utf8');
 fs.writeFileSync(cssFile,c,'utf8');
-console.log('UEP 0.81.31 patch applied; subject bindings repaired=',subjectBindFixes);
+const written=fs.readFileSync(jsFile,'utf8');
+const actual=(written.match(/const\s+APP_VERSION\s*=\s*['\"]([^'\"]+)['\"]\s*;/)||[])[1]||'missing';
+if(actual!=='0.81.31') throw new Error('written runtime version mismatch: '+actual);
+console.log('UEP 0.81.31 patch applied; runtime=',actual,'subject bindings repaired=',subjectBindFixes);
