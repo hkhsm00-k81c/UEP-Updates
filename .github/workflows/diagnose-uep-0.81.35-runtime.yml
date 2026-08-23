@@ -1,0 +1,49 @@
+name: Diagnose UEP 0.81.35 Runtime Structures
+
+'on':
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/diagnose-uep-0.81.35-runtime.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download shipped 0.81.35
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.81.35 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+      - name: Inspect runtime anchors
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          @'
+          const fs=require('fs');
+          const p='app/resources/app/gyomuon.js';
+          const s=fs.readFileSync(p,'utf8');
+          const terms=['민감정보 보안','공결·지각 학생','공결 현황','학교 캘린더','공휴일','과목별 신청현황','학생신청','출석인정','조퇴','6~7','6-7'];
+          for(const term of terms){
+            console.log('\n===== TERM:',term,'=====');
+            let start=0,count=0;
+            while(count<8){
+              const i=s.indexOf(term,start); if(i<0)break;
+              console.log('INDEX',i);
+              console.log(s.slice(Math.max(0,i-900),Math.min(s.length,i+1600)).replace(/\n/g,' '));
+              start=i+term.length;count++;
+            }
+            if(!count) console.log('NOT FOUND');
+          }
+          '@ | Set-Content inspect.js -Encoding UTF8
+          node inspect.js
