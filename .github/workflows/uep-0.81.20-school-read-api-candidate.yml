@@ -5,6 +5,7 @@ on:
     paths:
       - tools/apply-school-read-api-0.81.20.js
       - scripts/build-update-0.81.20.ps1
+      - uep-policy.json
       - .github/workflows/uep-0.81.20-school-read-api-candidate.yml
   workflow_dispatch:
 permissions:
@@ -14,6 +15,14 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Verify School Read API policy endpoint
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $policy=Get-Content 'uep-policy.json' -Raw -Encoding UTF8 | ConvertFrom-Json
+          $url=[string]$policy.schoolReadApiUrl
+          if(-not ($url -match '^https://script\.google\.com/macros/s/[^/]+/exec(?:\?.*)?$')){throw 'schoolReadApiUrl is missing or invalid'}
+          Write-Host 'School Read API endpoint configured.'
       - name: Download shipped base
         shell: pwsh
         env:
@@ -50,6 +59,7 @@ jobs:
       - name: Apply 0.81.20 School Read API integration
         shell: pwsh
         run: |
+          $ErrorActionPreference='Stop'
           & ./scripts/build-update-0.81.20.ps1
       - name: Authentication regression gates
         shell: pwsh
@@ -58,15 +68,17 @@ jobs:
           $m=Get-Content 'app/resources/app/electron/main.cjs' -Raw -Encoding UTF8
           $p=Get-Content 'app/resources/app/electron/preload.cjs' -Raw -Encoding UTF8
           $g=Get-Content 'app/resources/app/gyomuon.js' -Raw -Encoding UTF8
+          $policy=Get-Content 'uep-policy.json' -Raw -Encoding UTF8 | ConvertFrom-Json
           $checks=[ordered]@{
             schoolApiPrimary=$m.Contains('__UEP_SCHOOL_READ_API_PRIMARY_08120__')
             deviceId=$m.Contains('uep-device-id.txt')
             tokenStore=$m.Contains('uep-school-read-session.bin')
+            policyEndpoint=([string]$policy.schoolReadApiUrl -match '^https://script\.google\.com/macros/s/[^/]+/exec(?:\?.*)?$')
             batchRead=$m.Contains("startsWith('UEP_SCHOOL_READ:')")
             loginBridge=$p.Contains('schoolReadLogin:') -and $g.Contains('window.schoolBoard.schoolReadLogin({name,email})')
             sessionBridge=$p.Contains('schoolReadSessionStatus:') -and $g.Contains('window.schoolBoard?.schoolReadSessionStatus')
             logoutBridge=$p.Contains('schoolReadLogout:')
-            noTeacherGoogleLogin=(-not $g.Contains("authUrl.searchParams.set('scope','openid email https://www.googleapis.com/auth/spreadsheets.readonly')"))
+            readonlyUsesSchoolApi=$m.Contains("mode:'school_read_api'") -and $m.Contains('schoolReadBatchRead(spreadsheetId,ranges)')
             rendererSyntax=$true
           }
           node --check 'app/resources/app/gyomuon.js'; if($LASTEXITCODE-ne 0){$checks.rendererSyntax=$false}
