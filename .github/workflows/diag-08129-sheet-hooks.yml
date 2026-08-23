@@ -24,18 +24,26 @@ jobs:
           New-Item -ItemType Directory -Force source,app,diag | Out-Null
           gh release download v0.81.28 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
           Expand-Archive source/UEP-update.zip app -Force
-          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
-          $patterns=@('schoolRead','School Read','sheetName','sheetData','basicInfo','rule','규칙로그','기본정보','06_선택과목이력','18_학교교육과정DB','19_선택과목블록DB','41_선택과목규칙','linked','snapshot','getSheet','sheetRows')
-          $lines=Get-Content app/resources/app/gyomuon.js -Encoding UTF8
-          $out=@()
-          foreach($p in $patterns){
-            $out += "===== $p ====="
-            $hits=Select-String -InputObject $lines -Pattern ([regex]::Escape($p)) -SimpleMatch:$false -Context 2,2
-            foreach($h in $hits | Select-Object -First 20){$out += $h.Context.PreContext; $out += $h.Line; $out += $h.Context.PostContext; $out += '---'}
+          @'
+          const fs=require('fs');
+          const p='app/resources/app/gyomuon.js';
+          const lines=fs.readFileSync(p,'utf8').split(/\r?\n/);
+          const pats=['schoolRead','school read','sheetName','sheetData','basicInfo','규칙로그','기본정보','06_선택과목이력','18_학교교육과정DB','19_선택과목블록DB','41_선택과목규칙','snapshot','getSheet','sheetRows','linked'];
+          const out=[];
+          for(const pat of pats){
+            out.push('===== '+pat+' =====');
+            let n=0;
+            for(let i=0;i<lines.length&&n<40;i++){
+              if(lines[i].toLowerCase().includes(pat.toLowerCase())){
+                out.push(...lines.slice(Math.max(0,i-2),Math.min(lines.length,i+3)), '---'); n++;
+              }
+            }
           }
-          $out | Set-Content diag/08129-sheet-hooks.txt -Encoding UTF8
+          fs.writeFileSync('diag/08129-sheet-hooks.txt',out.join('\n'),'utf8');
+          '@ | Set-Content inspect.js -Encoding UTF8
+          node inspect.js
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add diag/08129-sheet-hooks.txt
-          git commit -m 'diag: capture 0.81.28 sheet hooks for 0.81.29'
+          git commit -m 'diag: capture 0.81.28 sheet hooks for 0.81.29' || echo no-change
           git push
