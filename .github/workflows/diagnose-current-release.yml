@@ -1,0 +1,43 @@
+name: Diagnose Current UEP Release
+
+'on':
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - diagnose-current-release.trigger
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read current manifest and package
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $m=Get-Content uep-update.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          Write-Host "manifest version=$($m.version)"
+          Write-Host "manifest sha=$($m.sha256)"
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download ("v"+$m.version) --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          $actual=(Get-FileHash source/UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          Write-Host "asset sha=$actual"
+          if($actual -ne $m.sha256){throw "manifest/asset sha mismatch"}
+          Expand-Archive source/UEP-update.zip app -Force
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          $pkg=Get-Content app/resources/app/package.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          $v=[regex]::Match($g,'const APP_VERSION = "([^"]+)";').Groups[1].Value
+          Write-Host "gyomuon APP_VERSION=$v"
+          Write-Host "package version=$($pkg.version)"
+          foreach($marker in @('UEP_SELECTION_GROUP_RULES_08128','careerSupportMarkup(student,bundle,false)','uepOpenSubjectModal08128','오류종류','중국어·일본어·인공지능 기초')){
+            Write-Host ("marker [{0}] = {1}" -f $marker,$g.Contains($marker))
+          }
+          if($v -ne $m.version){throw "runtime version differs from manifest"}
+          if($pkg.version -ne $m.version){throw "package version differs from manifest"}
