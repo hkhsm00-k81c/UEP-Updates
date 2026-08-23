@@ -8,7 +8,7 @@ name: Diagnose UEP 0.81.35 Runtime Structures
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   diagnose:
@@ -25,7 +25,7 @@ jobs:
           New-Item -ItemType Directory -Force source,app | Out-Null
           gh release download v0.81.35 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
           Expand-Archive source/UEP-update.zip app -Force
-      - name: Inspect runtime anchors
+      - name: Build structural runtime map
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
@@ -33,17 +33,43 @@ jobs:
           const fs=require('fs');
           const p='app/resources/app/gyomuon.js';
           const s=fs.readFileSync(p,'utf8');
-          const terms=['민감정보 보안','공결·지각 학생','공결 현황','학교 캘린더','공휴일','과목별 신청현황','학생신청','출석인정','조퇴','6~7','6-7'];
+          const terms=['정규시간','야간시간','학교 캘린더','공휴일','민감정보 보안','과목별 신청현황','공결·지각 학생','공결 현황','출석인정','조퇴','6~7','6-7'];
+          function functionAround(idx){
+            const before=s.slice(0,idx);
+            const re=/function\s+([A-Za-z0-9_$]+)\s*\([^)]*\)\s*\{/g;
+            let m,last=null;while((m=re.exec(before)))last=m;
+            if(!last)return null;
+            return {name:last[1],start:last.index};
+          }
+          let out='# UEP 0.81.35 Structural Runtime Map\n\n';
+          out+='Generated from shipped `v0.81.35` `resources/app/gyomuon.js`.\n\n';
           for(const term of terms){
-            console.log('\n===== TERM:',term,'=====');
+            out+='## '+term+'\n\n';
             let start=0,count=0;
-            while(count<8){
+            while(count<12){
               const i=s.indexOf(term,start); if(i<0)break;
-              console.log('INDEX',i);
-              console.log(s.slice(Math.max(0,i-900),Math.min(s.length,i+1600)).replace(/\n/g,' '));
+              const fn=functionAround(i);
+              out+='- index: '+i+'; enclosing function: '+(fn?fn.name:'(top-level/arrow/minified block)')+'\n';
+              const snippet=s.slice(Math.max(0,i-500),Math.min(s.length,i+900)).replace(/\r?\n/g,' ');
+              out+='```text\n'+snippet.replace(/```/g,'` ` `')+'\n```\n\n';
               start=i+term.length;count++;
             }
-            if(!count) console.log('NOT FOUND');
+            if(!count)out+='- NOT FOUND\n\n';
           }
+          out+='## Injected repair blocks\n\n';
+          for(const marker of ['UEP_08132_INTERACTION_REPAIR_START','UEP_08133_CURRICULUM_SECURITY_START','UEP_08134_CURRICULUM_SECURITY_START','UEP_08135_RUNTIME_REPAIR_START']){
+            out+='- '+marker+': '+(s.includes(marker)?'present':'absent')+'\n';
+          }
+          fs.mkdirSync('diagnostics',{recursive:true});
+          fs.writeFileSync('diagnostics/uep-0.81.35-structural-map.md',out,'utf8');
           '@ | Set-Content inspect.js -Encoding UTF8
           node inspect.js
+      - name: Commit structural map
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add diagnostics/uep-0.81.35-structural-map.md
+          git diff --cached --quiet
+          if($LASTEXITCODE -ne 0){git commit -m 'diag: persist UEP 0.81.35 structural runtime map';git push}
