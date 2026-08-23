@@ -133,10 +133,14 @@ jobs:
           $notes='UEP 0.81.23: dashboard timetable/work cache compatibility and dorm late-entry reporting fix.'
           gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
           if($LASTEXITCODE -eq 0){
-            gh release upload $tag out/UEP-update.zip --repo $env:GITHUB_REPOSITORY --clobber
-          }else{
-            gh release create $tag out/UEP-update.zip --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.23' --notes $notes
+            Write-Host 'Removing incomplete v0.81.23 release before clean publish'
+            gh release delete $tag --repo $env:GITHUB_REPOSITORY --yes --cleanup-tag
           }
+          gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.23' --notes $notes --draft
+          gh release upload $tag out/UEP-update.zip --repo $env:GITHUB_REPOSITORY --clobber
+          gh release edit $tag --repo $env:GITHUB_REPOSITORY --draft=false --latest
+          gh release view $tag --repo $env:GITHUB_REPOSITORY --json assets --jq '.assets[].name' | Select-String -SimpleMatch 'UEP-update.zip' | Out-Null
+          if($LASTEXITCODE -ne 0){ throw 'UEP-update.zip asset verification failed' }
 
       - name: Promote homeroom stable policy
         shell: pwsh
