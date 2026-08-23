@@ -38,6 +38,8 @@ const googleUserOAuthCanonicalRoot = () => path.join(process.env.APPDATA || path
 const googleUserOAuthCanonicalPath = () => path.join(googleUserOAuthCanonicalRoot(), 'google-user-oauth.bin');
 const googleUserOAuthCanonicalRecoveryPath = () => path.join(googleUserOAuthCanonicalRoot(), 'google-user-oauth.recovery.json');
 const neisApiKeyPath = () => path.join(stableUserDataRoot(), "neis-api-key.bin");
+const schoolReadDevicePath = () => path.join(stableUserDataRoot(), "uep-device-id.txt");
+const schoolReadSessionPath = () => path.join(stableUserDataRoot(), "uep-school-read-session.bin");
 const neisCachePath = () => path.join(stableUserDataRoot(), "neis-dashboard-cache.json");
 
 const comciganCachePath = () => path.join(stableUserDataRoot(), "comcigan-timetable-cache.json");
@@ -324,6 +326,62 @@ async function readEncrypted(filePath) {
   throw error;
 }
 
+
+// __UEP_SCHOOL_READ_API_PRIMARY_08120__
+let schoolReadPolicyCache={url:'',expiresAt:0};
+function schoolReadError(message,code='UEP_SCHOOL_READ_ERROR'){const e=new Error(message);e.code=code;return e;}
+async function loadSchoolReadApiUrl(){
+  if(schoolReadPolicyCache.url&&schoolReadPolicyCache.expiresAt>Date.now())return schoolReadPolicyCache.url;
+  let response;
+  try{response=await net.fetch(UEP_UPDATE_POLICY_URL,{cache:'no-store'});}catch(error){throw schoolReadError('UEP School Read API 설정을 확인하지 못했습니다.','UEP_SCHOOL_READ_POLICY_UNAVAILABLE');}
+  if(!response.ok)throw schoolReadError('UEP School Read API 설정 조회 실패 ('+response.status+')','UEP_SCHOOL_READ_POLICY_UNAVAILABLE');
+  const policy=await response.json();
+  const url=String(policy?.schoolReadApiUrl||'').trim();
+  if(!/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec(?:\?.*)?$/i.test(url))throw schoolReadError('UEP School Read API 배포 URL이 아직 등록되지 않았습니다.','UEP_SCHOOL_READ_NOT_CONFIGURED');
+  schoolReadPolicyCache={url,expiresAt:Date.now()+10*60*1000};
+  return url;
+}
+async function getOrCreateSchoolReadDeviceId(){
+  try{const saved=String(await fs.readFile(schoolReadDevicePath(),'utf8')).trim();if(saved)return saved;}catch{}
+  const id='UEP-'+crypto.randomUUID();
+  await fs.mkdir(path.dirname(schoolReadDevicePath()),{recursive:true});
+  await fs.writeFile(schoolReadDevicePath(),id,'utf8');
+  return id;
+}
+async function readSchoolReadSession(){
+  try{const value=await readEncrypted(schoolReadSessionPath());return value&&typeof value==='object'?value:null;}catch{return null;}
+}
+async function saveSchoolReadSession(value){await saveEncrypted(schoolReadSessionPath(),value);return value;}
+async function clearSchoolReadSession(){try{await fs.unlink(schoolReadSessionPath());}catch(error){if(error?.code!=='ENOENT')throw error;}liveDataCache=null;liveDataFetchedAt=0;return {ok:true};}
+async function schoolReadPost(action,payload={}){
+  const url=await loadSchoolReadApiUrl();
+  const response=await net.fetch(url,{method:'POST',headers:{'content-type':'application/json;charset=UTF-8','accept':'application/json'},body:JSON.stringify({action,...payload})});
+  let data={};try{data=await response.json();}catch{}
+  if(!response.ok)throw schoolReadError(data?.message||('School Read API HTTP '+response.status),data?.code||'UEP_SCHOOL_READ_HTTP_ERROR');
+  return data;
+}
+async function loginSchoolReadUser({name='',email=''}={}){
+  const deviceId=await getOrCreateSchoolReadDeviceId();
+  const result=await schoolReadPost('login',{name:String(name||'').trim(),email:String(email||'').trim(),deviceId});
+  if(result?.ok&&result?.token){await saveSchoolReadSession({token:String(result.token),deviceId,user:result.user||{},expiresAt:Date.now()+Math.max(300,Number(result.expiresIn||0))*1000,savedAt:new Date().toISOString()});liveDataCache=null;liveDataFetchedAt=0;}
+  return result;
+}
+async function schoolReadSessionStatus({verify=true}={}){
+  let endpointReady=true,endpointError='';
+  try{await loadSchoolReadApiUrl();}catch(error){endpointReady=false;endpointError=String(error?.message||error);}
+  const session=await readSchoolReadSession();
+  if(!session?.token||!session?.deviceId)return {ok:endpointReady,authenticated:false,endpointReady,reason:endpointError,user:null,mode:'school_read_api'};
+  if(!verify)return {ok:true,authenticated:true,endpointReady,user:session.user||null,mode:'school_read_api'};
+  try{const result=await schoolReadPost('verify-token',{token:session.token,deviceId:session.deviceId});if(!result?.ok)throw schoolReadError(result?.message||'UEP 세션 확인 실패',result?.code||'UEP_SCHOOL_READ_TOKEN_INVALID');session.user=result.user||session.user||{};await saveSchoolReadSession(session);return {ok:true,authenticated:true,endpointReady:true,user:session.user,expiresAt:result.expiresAt||'',mode:'school_read_api'};}catch(error){await clearSchoolReadSession();return {ok:false,authenticated:false,endpointReady,reason:String(error?.message||error),code:error?.code||'',user:null,mode:'school_read_api'};}
+}
+async function schoolReadBatchRead(spreadsheetId,ranges){
+  const session=await readSchoolReadSession();
+  if(!session?.token||!session?.deviceId)throw schoolReadError('UEP 로그인이 필요합니다.','UEP_SCHOOL_READ_LOGIN_REQUIRED');
+  const result=await schoolReadPost('batch-read',{token:session.token,deviceId:session.deviceId,spreadsheetId,ranges});
+  if(!result?.ok)throw schoolReadError(result?.message||'학교 데이터를 읽지 못했습니다.',result?.code||'UEP_SCHOOL_READ_BATCH_FAILED');
+  return result.valueRanges||[];
+}
+
 function base64url(value) { return Buffer.from(value).toString("base64url"); }
 
 // __UEP_GOOGLE_USER_OAUTH_08070__
@@ -438,16 +496,9 @@ async function getGoogleUserSheetsToken(){
 }
 async function getReadonlySheetsAuth(credentials=null){
   if(credentials){if(!validateServiceAccount(credentials))throw new Error("Google 서비스 계정 인증정보가 올바르지 않습니다.");return {token:await getSheetsToken(credentials),mode:'service_account',account:credentials.client_email||''};}
-  try{
-    const service=await readEncrypted(credentialPath());
-    if(validateServiceAccount(service)) return {token:await getSheetsToken(service),mode:'service_account',account:service.client_email||''};
-  }catch(error){
-    const fallbackAllowed=error?.code==='UEP_GOOGLE_CREDENTIAL_MISSING'||error?.code==='ENOENT'||error?.code==='UEP_SAFE_STORAGE_DECRYPT_FAILED'||/no such file/i.test(String(error?.message||''));
-    if(!fallbackAllowed) throw error;
-  }
-  const saved=await readGoogleUserOAuth();
-  const token=await getGoogleUserSheetsToken();
-  return {token,mode:'user_oauth',account:String(saved?.email||'')};
+  const session=await readSchoolReadSession();
+  if(session?.token&&session?.deviceId)return {token:'UEP_SCHOOL_READ:'+session.token,mode:'school_read_api',account:String(session?.user?.email||'')};
+  throw schoolReadError('교사 이름과 이메일로 UEP 로그인 후 학교 데이터를 불러올 수 있습니다.','UEP_SCHOOL_READ_LOGIN_REQUIRED');
 }
 async function authorizeGoogleUser({loginHint=''}={}){
   const clientId=await loadGoogleOAuthClientId();
@@ -577,6 +628,7 @@ async function getSheetsToken(credentials) {
 }
 
 async function readSheetBatch(token, spreadsheetId, ranges, attempt = 0) {
+  if(String(token||'').startsWith('UEP_SCHOOL_READ:')) return schoolReadBatchRead(spreadsheetId,ranges);
   const url = new URL(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchGet`);
   url.searchParams.set("majorDimension", "ROWS");
   url.searchParams.set("valueRenderOption", "UNFORMATTED_VALUE");
@@ -1903,7 +1955,10 @@ function createWindow() {
 
 app.whenReady().then(async () => {
   await migrateStableUserData();
-  ipcMain.handle("state:load", async () => readState());
+  ipcMain.handle("uep:schoolReadLogin", async (_event,payload={}) => { try{return await loginSchoolReadUser(payload);}catch(error){return {ok:false,code:error?.code||'UEP_SCHOOL_READ_ERROR',message:error?.message||String(error)};} });
+ipcMain.handle("uep:schoolReadSessionStatus", async (_event,payload={}) => { try{return await schoolReadSessionStatus(payload);}catch(error){return {ok:false,authenticated:false,code:error?.code||'UEP_SCHOOL_READ_ERROR',reason:error?.message||String(error),mode:'school_read_api'};} });
+ipcMain.handle("uep:schoolReadLogout", async () => { try{return await clearSchoolReadSession();}catch(error){return {ok:false,reason:error?.message||String(error)};} });
+ipcMain.handle("state:load", async () => readState());
   ipcMain.handle("state:save", async (_event, value) => writeState(value));
   ipcMain.handle("program:selectPhotos", async (event, programId) => {
     const win = BrowserWindow.fromWebContents(event.sender);
