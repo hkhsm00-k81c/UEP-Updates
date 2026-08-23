@@ -1,0 +1,49 @@
+name: Diagnose UEP 0.81.30 Selection UI
+
+'on':
+  push:
+    branches: [main]
+    paths:
+      - diag-08130-selection-ui.trigger
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect shipped 0.81.29 selection UI
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,diag | Out-Null
+          gh release download v0.81.29 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+          @'
+          const fs=require('fs');
+          const f='app/resources/app/gyomuon.js';
+          const s=fs.readFileSync(f,'utf8');
+          function range(name){
+            const start=s.indexOf('function '+name+'('); if(start<0)return 'MISSING '+name;
+            const open=s.indexOf('{',start); let d=0,q=null,e=false,l=false,b=false;
+            for(let i=open;i<s.length;i++){const c=s[i],n=s[i+1];if(l){if(c==='\n')l=false;continue;}if(b){if(c==='*'&&n==='/'){b=false;i++;}continue;}if(q){if(e){e=false;continue;}if(c==='\\'){e=true;continue;}if(c===q)q=null;continue;}if(c==='/'&&n==='/'){l=true;i++;continue;}if(c==='/'&&n==='*'){b=true;i++;continue;}if(c==='"'||c==="'"||c==='`'){q=c;continue;}if(c==='{')d++;else if(c==='}'&&--d===0)return s.slice(start,i+1);}
+            return 'UNTERMINATED '+name;
+          }
+          const names=['uepStudentApplicationView','uepStudentApplicationDetail','uepSubjectApplicationView','uepOpenSubjectModal08128','uepSelectionDataset','uepSelectionErrorSummary'];
+          const out=[]; for(const n of names){out.push('\n===== '+n+' =====\n'+range(n));}
+          for(const pat of ['data-uep-student-prev','data-uep-student-next','data-open-subject-modal','data-record-student','data-curriculum-error-only','curriculumErrorOnly']){
+            out.push('\n===== PATTERN '+pat+' ====='); let from=0,count=0; while(count<20){const i=s.indexOf(pat,from);if(i<0)break;out.push(s.slice(Math.max(0,i-500),Math.min(s.length,i+900)));from=i+pat.length;count++;}
+          }
+          fs.writeFileSync('diag/08130-selection-ui.txt',out.join('\n'),'utf8');
+          '@ | Set-Content inspect.js -Encoding UTF8
+          node inspect.js
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add diag/08130-selection-ui.txt
+          git commit -m 'diag: capture UEP 0.81.29 selection UI for 0.81.30' || echo no-change
+          git push
