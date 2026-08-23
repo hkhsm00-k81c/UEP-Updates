@@ -28,29 +28,57 @@ jobs:
           gh release download v0.81.22 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
           Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
 
-      - name: Inspect exact runtime paths
+      - name: Capture focused runtime source ranges
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          $out='diagnostics/0.81.23-dashboard-dorm-paths.txt'
-          $g='app/resources/app/gyomuon.js'
-          $preload='app/resources/app/preload.js'
-          $main='app/resources/app/main.js'
-          'UEP 0.81.23 dashboard/work/dorm diagnostic v2' | Set-Content $out -Encoding UTF8
-          foreach($file in @($g,$preload,$main)){
-            if(Test-Path $file){
-              Add-Content $out "`n===== $file =====" -Encoding UTF8
-              Select-String -Path $file -Pattern 'readonlyCache\.|dashboard|timetable|operations|workEmbeddedMode|schoolReadSessionStatus|refreshReadonlyCacheSilently|readReadonlyCache|previewReadonlySync|dormOuting|학사외출|귀가|입소|늦은|mail|메일' -Context 18,45 | Select-Object -First 1200 | ForEach-Object { Add-Content $out $_.ToString() -Encoding UTF8 }
+          $out='diagnostics/0.81.23-runtime-paths-v3.txt'
+          $patterns = @(
+            'personalTimetableData','dashboardPersonalWeekMarkup','directNoticeRows',
+            'dashboardDeadlineItems','workBoardData','readonlyCache','schoolReadSessionStatus',
+            'refreshReadonlyCacheSilently','readReadonlyCache','previewReadonlySync',
+            'renderDashboard','operations','timetable','dormOuting','학사외출','귀가','입소','늦은',
+            'mail','메일','report','보고'
+          )
+          'UEP 0.81.23 focused runtime path diagnostic v3' | Set-Content $out -Encoding UTF8
+          foreach($file in @('app/resources/app/gyomuon.js','app/resources/app/preload.js','app/resources/app/main.js')){
+            if(-not (Test-Path $file)){ continue }
+            $lines = Get-Content -Path $file -Encoding UTF8
+            $hits = New-Object System.Collections.Generic.List[int]
+            for($i=0; $i -lt $lines.Count; $i++){
+              foreach($p in $patterns){
+                if($lines[$i] -match [regex]::Escape($p)){ $hits.Add($i); break }
+              }
+            }
+            Add-Content $out "`n===== $file =====" -Encoding UTF8
+            if($hits.Count -eq 0){ Add-Content $out '(no matches)' -Encoding UTF8; continue }
+            $ranges = @()
+            foreach($h in ($hits | Sort-Object -Unique)){
+              $start=[Math]::Max(0,$h-14)
+              $end=[Math]::Min($lines.Count-1,$h+28)
+              if($ranges.Count -eq 0 -or $start -gt ($ranges[-1].End + 1)){
+                $ranges += [pscustomobject]@{Start=$start;End=$end}
+              } else {
+                if($end -gt $ranges[-1].End){ $ranges[-1].End=$end }
+              }
+            }
+            foreach($r in $ranges){
+              Add-Content $out ("`n--- lines {0}-{1} ---" -f ($r.Start+1),($r.End+1)) -Encoding UTF8
+              for($j=$r.Start; $j -le $r.End; $j++){
+                Add-Content $out ("{0,6}: {1}" -f ($j+1),$lines[$j]) -Encoding UTF8
+              }
             }
           }
-          if(-not (Test-Path $out)){throw 'diagnostic output missing'}
+          if((Get-Item $out).Length -lt 1000){ throw 'focused diagnostic output unexpectedly small' }
 
-      - name: Persist diagnostics
+      - name: Persist focused diagnostics
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add diagnostics/0.81.23-dashboard-dorm-paths.txt
-          git commit -m 'diag: expand 0.81.23 dashboard work dorm runtime paths'
-          if($LASTEXITCODE -eq 0){ git push origin HEAD:fix/0.81.23-dashboard-dorm-sync }
+          git add diagnostics/0.81.23-runtime-paths-v3.txt
+          git diff --cached --quiet
+          if($LASTEXITCODE -eq 0){ Write-Host 'No diagnostic changes to commit'; exit 0 }
+          git commit -m 'diag: capture focused 0.81.23 runtime paths v3'
+          git push origin HEAD:fix/0.81.23-dashboard-dorm-sync
