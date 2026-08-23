@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   simulate-homeroom:
@@ -117,3 +117,22 @@ jobs:
           node --check app/resources/app/electron/main.cjs
           node --check app/resources/app/electron/preload.cjs
           node --check app/resources/app/gyomuon.js
+
+      - name: Persist successful simulation result
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force audit-output | Out-Null
+          @(
+            'UEP 0.81.20 HOMEROOM NO-GOOGLE SIMULATION: PASS',
+            "commit=$env:GITHUB_SHA",
+            "time=$([DateTime]::UtcNow.ToString('o'))",
+            'endpoint=School Read API JSON response without browser OAuth',
+            'local_google_credentials=removed before final assertions',
+            'readonly_path=UEP login -> deviceId -> UEP session -> School Read API -> batch-read'
+          ) | Set-Content audit-output/homeroom-no-google-0.81.20.txt -Encoding UTF8
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add audit-output/homeroom-no-google-0.81.20.txt
+          git commit -m 'audit: persist 0.81.20 homeroom no-Google simulation pass' || exit 0
+          git push
