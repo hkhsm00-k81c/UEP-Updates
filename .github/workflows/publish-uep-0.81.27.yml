@@ -1,0 +1,145 @@
+name: Publish UEP 0.81.27
+
+'on':
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/publish-uep-0.81.27.yml
+      - publish-uep-0.81.27.trigger
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download shipped 0.81.26
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,out | Out-Null
+          gh release download v0.81.26 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+
+      - name: Consolidate selection ownership without wrappers
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $script=@'
+          const fs=require('fs');
+          const jsFile='app/resources/app/gyomuon.js';
+          const cssFile=fs.existsSync('app/resources/app/gyomuon.css')?'app/resources/app/gyomuon.css':'app/resources/app/style.css';
+          let s=fs.readFileSync(jsFile,'utf8');
+          let c=fs.readFileSync(cssFile,'utf8');
+          if(!s.includes('const APP_VERSION = "0.81.26";')) throw new Error('0.81.26 version anchor missing');
+          s=s.replace('const APP_VERSION = "0.81.26";','const APP_VERSION = "0.81.27";');
+
+          const refinementStart=s.indexOf('// __UEP_REFINEMENT_08107__');
+          const datasetStart=s.indexOf('// __UEP_08113_RESTORED_SELECTION_DATASET__');
+          if(refinementStart<0||datasetStart<0||datasetStart<=refinementStart) throw new Error('selection ownership markers missing');
+          const helper=`// __UEP_SELECTION_VIEW_HELPER_08127__\nfunction uepSelectionSubjectState(subject,term,errors){const related=(errors||[]).filter(e=>(String(e.term||'').includes(term)||!e.term)&&(String(e.detail||'').includes(subject)||String(e.subject||'')===subject));if(related.length)return {cls:'selection-subject-error',label:[...new Set(related.map(e=>String(e.type||'오류').replace(/오류|과목/g,'')))].join('·')};const linked=(errors||[]).some(e=>String(e.term||'').includes(term));return linked?{cls:'selection-subject-related',label:'연계 확인'}:{cls:'',label:'신청'};}\n\n`;
+          s=s.slice(0,refinementStart)+helper+s.slice(datasetStart);
+
+          const errStart=s.indexOf('function uepSelectionErrors08105(row){');
+          const bodyStart=s.indexOf('// __UEP_08113_RESTORED_CURRICULUM_SDGS_BODY__');
+          if(errStart<0||bodyStart<0||bodyStart<=errStart) throw new Error('selection error/body anchors missing');
+          const canonicalErrors=`function uepSelectionErrors08105(row){\n  const errors=uepSelectionErrors(row),terms=["2-1","2-2","3-1","3-2"],seenSubjects=new Map();\n  terms.forEach(term=>{\n    const subjects=uepSelectionTermSubjects(row,term);\n    if(!subjects.length&&!errors.some(x=>x.type==="신청 누락"&&x.term===term))errors.push({type:"신청 누락",term,detail:"해당 학기 선택과목이 비어 있습니다."});\n    subjects.forEach(subject=>{const normalized=String(subject).replace(/\\s+/g,"");if(!seenSubjects.has(normalized))seenSubjects.set(normalized,[]);seenSubjects.get(normalized).push(term);});\n  });\n  seenSubjects.forEach((subjectTerms,subject)=>{if(subjectTerms.length>1)errors.push({type:"학기간 동일과목 중복",term:subjectTerms.join(" · "),detail:subject+" 과목이 여러 학기에 중복 신청되었습니다."});});\n  const s21=uepSelectionTermSubjects(row,"2-1"),s22=uepSelectionTermSubjects(row,"2-2");\n  [["일본어",/일본어/],["중국어",/중국어/],["음악",/음악/],["미술",/미술/]].forEach(([label,rx])=>{\n    const a=s21.find(x=>rx.test(String(x)))||"",b=s22.find(x=>rx.test(String(x)))||"";\n    if(Boolean(a)!==Boolean(b)||(a&&b&&String(a).replace(/\\s+/g,"")!==String(b).replace(/\\s+/g,"")))errors.push({type:label+" 연계오류",term:"2-1 · 2-2",detail:"2학년 1·2학기 "+label+" 선택은 동일해야 합니다."});\n  });\n  const seen=new Set();return errors.filter(e=>{const key=[e.type,e.term,e.detail].join("|");if(seen.has(key))return false;seen.add(key);return true;});\n}\n\n`;
+          s=s.slice(0,errStart)+canonicalErrors+s.slice(bodyStart);
+
+          const canonicalStart=s.indexOf('// __UEP_08113_RESTORED_CURRICULUM_SDGS_BODY__');
+          const sdgsStart=s.indexOf('function uepSdgsEvidenceBridge',canonicalStart);
+          if(canonicalStart<0||sdgsStart<0) throw new Error('canonical curriculum range missing');
+          const canonical=`// __UEP_08113_RESTORED_CURRICULUM_SDGS_BODY__\n// __UEP_CURRICULUM_CANONICAL_08127__\nlet curriculumWorkspaceMode="students",curriculumErrorOnly=false,curriculumErrorType="all",curriculumTermFilter="2-1",curriculumSubjectKey="",curriculumRosterSort="grade";\nfunction uepMainRecordTabs(){const tabs=[["activities","활동내역"],["sdgs","SDGs 연계 성장 프로파일"],["curriculum","교육과정"],["final","기록"]];return '<div class="record-main-tabs">'+tabs.map(([id,label])=>'<button data-record-mode="'+id+'" class="'+(recordMode===id?'active':'')+'"><b>'+label+'</b><small>'+(id==='activities'?'학생 활동 사실 확인':id==='sdgs'?'진로·전공·탐구주제·사회적 가치 연계':id==='curriculum'?'학기별 선택과목':'학생 성장 자료')+'</small></button>').join('')+'</div>';}\nfunction uepCurriculumNav(){return '<div class="selection-analysis-tabs curriculum-final-tabs"><button data-curriculum-workspace="students" class="'+(curriculumWorkspaceMode==='students'?'active':'')+'">학생신청</button><button data-curriculum-workspace="subjects" class="'+(curriculumWorkspaceMode==='subjects'?'active':'')+'">과목별 신청현황</button></div>';}\nfunction uepSelectionErrorLabel(errors){return errors.length?'<span class="selection-error-count">'+errors.length+'건 확인</span>':'<span class="selection-ok">정상</span>';}\nfunction uepStudentApplicationDetail(row,errors){const student=row.__student,sms=uepSelectionSms(student,errors),className=String(student.className||recordStudentClass(student)||'').replace(/반+$/,'');const alert=errors.length?'<section class="selection-error-panel selection-error-first"><header><h3>먼저 확인할 신청 오류</h3><span>'+errors.length+'건</span></header>'+errors.map(x=>'<article><b>'+escapeHtml(x.type)+'</b><em>'+escapeHtml(x.term)+'</em><p>'+escapeHtml(x.detail)+'</p></article>').join('')+'</section>':'<section class="selection-safe-panel selection-safe-first"><b>✓ 선택과목 검증 정상</b><span>현재 신청자료에서 확인할 오류가 없습니다.</span></section>';return '<section class="curriculum-student-detail"><header><div><small>'+escapeHtml(student.studentNo)+' · '+escapeHtml(className)+'반</small><h3>'+escapeHtml(student.name)+' 학생신청</h3></div>'+uepSelectionErrorLabel(errors)+'</header>'+alert+'<div class="curriculum-term-grid curriculum-term-grid-four">'+["2-1","2-2","3-1","3-2"].map(term=>'<section><header><h3>'+term.replace('-','학년 ')+'학기</h3><span>'+uepSelectionTermSubjects(row,term).length+'과목</span></header>'+((uepSelectionTermSubjects(row,term).map(x=>{const state=uepSelectionSubjectState(x,term,errors);return '<article class="'+state.cls+'" title="'+escapeHtml(state.label)+'"><b>'+escapeHtml(x)+'</b><em>'+escapeHtml(state.label)+'</em></article>';}).join(''))||'<div class="selection-missing">미신청</div>')+'</section>').join('')+'</div>'+(errors.length?'<section class="curriculum-message-panel"><header><div><small>STUDENT MESSAGE</small><h3>현재 오류 보완 문자</h3></div><button class="btn primary" data-copy-current-selection-sms>문자 복사</button></header><textarea id="currentSelectionSms" readonly>'+escapeHtml(sms)+'</textarea></section>':'')+'</section>';}\nfunction uepStudentApplicationView(){const data=uepSelectionDataset(),types=[...new Set(data.errors.map(x=>x.type))],allRows=data.rows,classRows=recordClassNo==='all'?allRows:allRows.filter(r=>recordStudentClass(r.__student)===String(recordClassNo)),visible=classRows.filter(r=>{const errs=data.errors.filter(e=>e.student.id===r.__student.id);return(!curriculumErrorOnly||errs.length)&&(curriculumErrorType==='all'||errs.some(e=>e.type===curriculumErrorType));});if(!recordStudentId||!classRows.some(r=>r.__student.id===recordStudentId))recordStudentId=classRows[0]?.__student.id||'';const chosen=classRows.find(r=>r.__student.id===recordStudentId)||classRows[0],errs=chosen?data.errors.filter(e=>e.student.id===chosen.__student.id):[];const classButton=(no,label)=>'<button data-record-class="'+no+'" class="'+(String(recordClassNo)===no?'active':'')+'"><b>'+label+'</b><span>'+(no==='all'?allRows.length:data.rows.filter(r=>recordStudentClass(r.__student)===no).length)+'명</span></button>',classes=classButton('all','전체')+Array.from({length:9},(_,i)=>classButton(String(i+1),(i+1)+'반')).join(''),switcher='<div class="record-query-switch curriculum-query-inline"><button data-record-query="class" class="'+(recordQueryMode==='class'?'active':'')+'">반별 조회</button><button data-record-query="student" class="'+(recordQueryMode==='student'?'active':'')+'">개인별 조회</button></div>',controls='<div class="curriculum-filter-bar curriculum-filter-one-line"><div class="record-class-cards">'+classes+'</div>'+switcher+'<label>오류유형<select data-curriculum-error-type><option value="all">전체 오류</option>'+types.map(x=>'<option value="'+escapeHtml(x)+'" '+(curriculumErrorType===x?'selected':'')+'>'+escapeHtml(x)+'</option>').join('')+'</select></label><button class="btn '+(curriculumErrorOnly?'primary':'secondary')+'" data-curriculum-error-only>'+(curriculumErrorOnly?'오류학생만 보는 중':'오류학생만 보기')+'</button></div>',picker=recordQueryMode==='student'?'<div class="uep-student-picker curriculum-student-picker"><button data-uep-student-prev>‹</button><button class="uep-picker-main" data-open-student-picker><small>'+(recordClassNo==='all'?'전체 학생':recordClassNo+'반 학생')+'</small><b>'+escapeHtml(chosen?.__student.studentNo||'')+' '+escapeHtml(chosen?.__student.name||'학생 선택')+'</b></button><button data-uep-student-next>›</button><div class="uep-picker-menu" hidden><input data-uep-student-search placeholder="학번·이름 검색"><div>'+classRows.map(r=>'<button data-record-student="'+escapeHtml(r.__student.id)+'">'+escapeHtml(r.__student.studentNo)+' '+escapeHtml(r.__student.name)+'</button>').join('')+'</div></div></div>':'';if(recordQueryMode==='student')return controls+picker+(chosen?uepStudentApplicationDetail(chosen,errs):'');return controls+'<div class="curriculum-class-list"><div class="curriculum-class-head"><span>학번·학생</span><span>2-1</span><span>2-2</span><span>3-1</span><span>3-2</span><span>상태</span></div>'+visible.map(r=>{const es=data.errors.filter(e=>e.student.id===r.__student.id);return '<button data-record-student="'+escapeHtml(r.__student.id)+'"><b>'+escapeHtml(r.__student.studentNo)+' '+escapeHtml(r.__student.name)+'</b>'+["2-1","2-2","3-1","3-2"].map(t=>'<span>'+uepSelectionTermSubjects(r,t).length+'과목</span>').join('')+'<span>'+uepSelectionErrorLabel(es)+'</span></button>';}).join('')+'</div>';}\nfunction uepSubjectStatus(group){const n=group.students.length;if(n<10)return '<i class="subject-risk close">폐강위기</i>';if(n<20)return '<i class="subject-risk watch">개설확인</i>';if(Math.ceil(n/group.sectionCount)>30)return '<i class="subject-risk crowd">과밀가능</i>';return '<i class="subject-risk stable">안정</i>';}\nfunction uepSubjectApplicationView(){const data=uepSelectionDataset(),terms=["2-1","2-2","3-1","3-2"],groups=data.subjects.filter(x=>x.term===curriculumTermFilter),selected=groups.find(x=>x.key===curriculumSubjectKey)||null,privacy=privacyModeEnabled();let detail='';if(selected){const rows=[...selected.students].sort(curriculumRosterSort==='class'?((a,b)=>String(a.student.studentNo).localeCompare(String(b.student.studentNo))):((a,b)=>(a.avg??99)-(b.avg??99)||String(a.student.studentNo).localeCompare(String(b.student.studentNo))));detail='<section class="subject-roster-detail"><header><div><small>'+selected.term+'</small><h3>'+escapeHtml(selected.subject)+' 신청명단</h3></div><div class="roster-sort"><button data-roster-sort="grade" class="'+(curriculumRosterSort==='grade'?'active':'')+'">예상성적순</button><button data-roster-sort="class" class="'+(curriculumRosterSort==='class'?'active':'')+'">반·번호순</button></div></header><div class="selection-roster privacy-roster roster-six-columns '+(privacy?'masked':'')+'"><div class="selection-roster-head"><span>학번·성명</span><span>현재반</span><span>구분</span><span>1학년 내신평균</span><span>예상등수</span><span>예상등급</span></div>'+rows.map(x=>'<article><b class="privacy-sensitive-text">'+(privacy?'**** ＊＊＊':escapeHtml(x.student.studentNo)+' '+escapeHtml(x.student.name))+'</b><span>'+escapeHtml(recordStudentClass(x.student))+'반</span><span>'+(x.dorm?'<i class="dorm-badge">학사</i>':'-')+'</span><span class="privacy-sensitive-text">'+(privacy?'＊.＊＊':x.avg==null?'성적 없음':x.avg.toFixed(2))+'</span><span class="privacy-sensitive-text">'+(privacy?'＊위':x.expectedRank?x.expectedRank+'위':'-')+'</span><span class="privacy-sensitive-text expected-grade-cell">'+(privacy?'＊등급':x.expectedGrade==='-'?'-':x.expectedGrade+'등급')+'</span></article>').join('')+'</div><p class="selection-estimate-note">예상등수·등급은 해당 과목 신청자의 1학년 내신 등급 평균을 사용한 상담용 추정치입니다.</p></section>';}return '<div class="term-picker-cards">'+terms.map(t=>'<button data-curriculum-term="'+t+'" class="'+(curriculumTermFilter===t?'active':'')+'"><b>'+t.replace('-','학년 ')+'학기</b><span>'+data.subjects.filter(x=>x.term===t).length+'과목</span></button>').join('')+'</div><div class="subject-card-grid">'+groups.map(g=>'<button data-curriculum-subject="'+escapeHtml(g.key)+'" class="'+(g.key===curriculumSubjectKey?'active':'')+'"><small>'+g.term+'</small><b>'+escapeHtml(g.subject)+'</b><span>'+g.students.length+'명 · 예상 '+g.sectionCount+'분반</span>'+uepSubjectStatus(g)+'</button>').join('')+'</div>'+detail;}\nfunction uepCurriculumFinalView(){return '<div class="module-page records-v0601 curriculum-final-page">'+uepMainRecordTabs()+uepCurriculumNav()+(curriculumWorkspaceMode==='students'?uepStudentApplicationView():uepSubjectApplicationView())+'</div>';}\n\n`;
+          s=s.slice(0,canonicalStart)+canonical+s.slice(sdgsStart);
+
+          const cssStart=c.indexOf('/* __UEP_REFINEMENT_STYLE_08107__ */');
+          const cssEnd=c.indexOf('/* __UEP_OPERATIONS_STYLE_08108__ */',cssStart);
+          if(cssStart<0||cssEnd<0) throw new Error('selection css ownership range missing');
+          const selectionCss=`/* __UEP_SELECTION_CANONICAL_STYLE_08127__ */\n.curriculum-filter-one-line{display:flex;align-items:center;gap:8px;flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px}.curriculum-filter-one-line .record-class-cards{display:flex;flex-wrap:nowrap;gap:5px;flex:0 0 auto}.curriculum-filter-one-line .record-class-cards button{min-width:54px}.curriculum-filter-one-line .record-query-switch,.curriculum-filter-one-line>label,.curriculum-filter-one-line>[data-curriculum-error-only]{flex:0 0 auto}.curriculum-student-picker{margin:14px 0;grid-template-columns:44px minmax(300px,520px) 44px}.selection-error-first,.selection-safe-first{margin:16px 0}.selection-error-first{border:1px solid #efb8a8;background:#fff8f5}.curriculum-term-grid-four{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;align-items:start}.curriculum-term-grid-four>section{min-width:0}.curriculum-term-grid article.selection-subject-error{background:#fff0eb;border-left:4px solid #d65d45;padding-left:10px}.curriculum-term-grid article.selection-subject-error em{color:#a33e2e;font-weight:800}.curriculum-term-grid article.selection-subject-related{background:#fff8dc;border-left:4px solid #d5a829;padding-left:10px}.selection-roster.roster-six-columns .selection-roster-head,.selection-roster.roster-six-columns article{display:grid;grid-template-columns:minmax(210px,1.7fr) 90px 90px 140px 110px 110px;align-items:center;gap:10px}.selection-roster.roster-six-columns .expected-grade-cell{display:block;grid-column:6;white-space:nowrap}@media(max-width:1100px){.curriculum-term-grid-four{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:760px){.curriculum-term-grid-four{grid-template-columns:1fr}.selection-roster.roster-six-columns .selection-roster-head,.selection-roster.roster-six-columns article{grid-template-columns:1fr 1fr}}\n\n`;
+          c=c.slice(0,cssStart)+selectionCss+c.slice(cssEnd);
+          const legacy26=c.indexOf('/* __UEP_08126_SELECTION_LAYOUT__ */');
+          if(legacy26>=0)c=c.slice(0,legacy26);
+
+          fs.writeFileSync(jsFile,s,'utf8');fs.writeFileSync(cssFile,c,'utf8');
+          '@
+          Set-Content structural-08127.cjs $script -Encoding UTF8
+          node structural-08127.cjs
+          node --check app/resources/app/gyomuon.js
+
+      - name: Verify single ownership and dorm write/read chain
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          $main=Get-Content app/resources/app/electron/main.cjs -Raw -Encoding UTF8
+          $cssPath=if(Test-Path 'app/resources/app/gyomuon.css'){'app/resources/app/gyomuon.css'}else{'app/resources/app/style.css'}
+          $css=Get-Content $cssPath -Raw -Encoding UTF8
+          foreach($name in @('function uepStudentApplicationDetail(','function uepStudentApplicationView(','function uepSubjectApplicationView(','function uepSelectionErrors08105(')){
+            $count=([regex]::Matches($g,[regex]::Escape($name))).Count
+            if($count -ne 1){throw "$name ownership count=$count"}
+          }
+          foreach($check in @('const APP_VERSION = "0.81.27";','__UEP_CURRICULUM_CANONICAL_08127__',"classButton('all','전체')",'curriculum-filter-one-line','selection-error-first','curriculum-term-grid-four','roster-six-columns','expected-grade-cell','일본어','중국어','음악','미술')){if(-not $g.Contains($check)){throw "missing renderer invariant: $check"}}
+          if($g.Contains('__UEP_08126_SELECTION_CONTINUITY__')){throw 'legacy selection wrapper remains'}
+          if($g.Contains('__UEP_REFINEMENT_08107__')){throw 'duplicate 0.81.07 refinement block remains'}
+          if(-not $css.Contains('__UEP_SELECTION_CANONICAL_STYLE_08127__')){throw 'canonical selection css missing'}
+          if($css.Contains('__UEP_08126_SELECTION_LAYOUT__')){throw 'legacy 0.81.26 css patch remains'}
+          foreach($check in @('async function saveDormOuting(payload={})','resolveSchoolServiceAccount()','appendSheetValues(','fetchLiveData({force:true})','동일한 학사외출 기록이 이미 있습니다')){if(-not $main.Contains($check)){throw "dorm write/read invariant missing: $check"}}
+          if(([regex]::Matches($main,'saveDormOuting')).Count -lt 2){throw 'saveDormOuting is not exposed to IPC bridge'}
+          if(-not $g.Contains('window.schoolBoard?.saveDormOuting?.(payload)')){throw 'renderer dorm teacher-save call missing'}
+          if(-not $g.Contains('[오늘의 1학년 학사 입소 및 늦은 입소 현황]')){throw '0.81.26 Sunday report regression'}
+          if(-not $g.Contains('[오늘의 1학년 학사 외출 및 퇴소 현황]')){throw '0.81.26 weekday report regression'}
+
+      - name: Build 0.81.27 package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $pkg='app/resources/app/package.json'
+          $j=Get-Content $pkg -Raw -Encoding UTF8 | ConvertFrom-Json
+          $j.version='0.81.27'
+          $j | ConvertTo-Json -Depth 50 | Set-Content $pkg -Encoding UTF8
+          Compress-Archive -Path app/* -DestinationPath out/UEP-update.zip -Force
+          $hash=(Get-FileHash out/UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "UEP_SHA256=$hash" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Publish v0.81.27
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $tag='v0.81.27'
+          gh release delete $tag --repo $env:GITHUB_REPOSITORY --yes --cleanup-tag 2>$null
+          $global:LASTEXITCODE=0
+          gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.27' --notes 'Consolidates selection rendering and validation into single canonical ownership, removes wrapper/CSS patch duplication, preserves verified dorm teacher-write and supervisor-report paths.' --draft
+          gh release upload $tag out/UEP-update.zip --repo $env:GITHUB_REPOSITORY --clobber
+          gh release edit $tag --repo $env:GITHUB_REPOSITORY --draft=false
+
+      - name: Promote stable manifests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $p=Get-Content uep-policy.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          $p.latestVersion='0.81.27'
+          $p.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.27/UEP-update.zip'
+          $p.sha256=$env:UEP_SHA256
+          $p.message='UEP 0.81.27 선택과목 구조 단일화 및 학사외출 저장경로 회귀검증'
+          $p | ConvertTo-Json -Depth 50 | Set-Content uep-policy.json -Encoding UTF8
+          $m=Get-Content uep-update.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          $m.version='0.81.27'
+          $m.channel='stable'
+          $m.downloadUrl=$p.downloadUrl
+          $m.sha256=$env:UEP_SHA256
+          $m.notes='선택과목 중복 렌더/검증 경로 단일화, 학사외출 교사등록 저장-재조회 경로 보존'
+          $m | ConvertTo-Json -Depth 50 | Set-Content uep-update.json -Encoding UTF8
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add uep-policy.json uep-update.json
+          git commit -m 'release: promote UEP 0.81.27 auto-update'
+          git push origin HEAD:main
