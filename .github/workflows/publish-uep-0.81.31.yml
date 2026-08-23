@@ -1,0 +1,117 @@
+name: Publish UEP 0.81.31 Student Selection Fix
+
+'on':
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/publish-uep-0.81.31.yml
+      - scripts/patch-uep-0.81.31.js
+      - publish-uep-0.81.31.trigger
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download shipped 0.81.30
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,out | Out-Null
+          gh release download v0.81.30 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+
+      - name: Apply student selection visibility fix
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node scripts/patch-uep-0.81.31.js app
+          node --check app/resources/app/gyomuon.js
+
+      - name: Verify student selection invariants
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          foreach($check in @(
+            'const APP_VERSION = "0.81.31";',
+            'return controls+detail+list;',
+            'data-record-student=',
+            'data-uep-student-prev',
+            'data-uep-student-next',
+            'uepOpenSubjectModal08128(curriculumSubjectKey)'
+          )){if(-not $g.Contains($check)){throw "missing 0.81.31 invariant: $check"}}
+
+      - name: Build 0.81.31 package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $pkg='app/resources/app/package.json'
+          $j=Get-Content $pkg -Raw -Encoding UTF8 | ConvertFrom-Json
+          $j.version='0.81.31'
+          $j | ConvertTo-Json -Depth 50 | Set-Content $pkg -Encoding UTF8
+          Compress-Archive -Path app/* -DestinationPath out/UEP-update.zip -Force
+          $hash=(Get-FileHash out/UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "UEP_SHA256=$hash" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Publish v0.81.31
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $tag='v0.81.31'
+          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+          if($LASTEXITCODE -eq 0){ gh release delete $tag --repo $env:GITHUB_REPOSITORY --yes --cleanup-tag }
+          $global:LASTEXITCODE=0
+          gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.31' --notes 'Student selection fix: clicking a student now shows the selected-student counseling detail immediately above the class roster while preserving prev/next navigation and the subject roster popup.' --draft
+          gh release upload $tag out/UEP-update.zip --repo $env:GITHUB_REPOSITORY --clobber
+          gh release edit $tag --repo $env:GITHUB_REPOSITORY --draft=false
+
+      - name: Promote updater fields to 0.81.31
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $url='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.31/UEP-update.zip'
+          $notes='학생 선택 클릭 시 상담 상세를 즉시 상단 표시하고 좌우이동·과목팝업 유지'
+          $manifest=@{version='0.81.31';channel='stable';downloadUrl=$url;sha256=$env:UEP_SHA256;notes=$notes} | ConvertTo-Json
+          Set-Content uep-update.json $manifest -Encoding UTF8
+          Set-Content uep-version.json $manifest -Encoding UTF8
+          $policy=Get-Content uep-policy.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          $policy.latestVersion='0.81.31'
+          $policy.downloadUrl=$url
+          $policy.sha256=$env:UEP_SHA256
+          $policy.message=$notes
+          if($policy.homeroomStableVersion){$policy.homeroomStableVersion='0.81.31'}
+          if($policy.sharedBoardStableVersion){$policy.sharedBoardStableVersion='0.81.31'}
+          $policy | ConvertTo-Json -Depth 50 | Set-Content uep-policy.json -Encoding UTF8
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add uep-update.json uep-version.json uep-policy.json
+          git commit -m 'release: promote UEP 0.81.31 all updater fields'
+          git push
+
+      - name: Final release consistency check
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force verify | Out-Null
+          gh release download v0.81.31 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir verify
+          $actual=(Get-FileHash verify/UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          if($actual -ne $env:UEP_SHA256){throw 'published ZIP SHA mismatch'}
+          Expand-Archive verify/UEP-update.zip verify/app -Force
+          $g=Get-Content verify/app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          $pkg=Get-Content verify/app/resources/app/package.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          if(-not $g.Contains('const APP_VERSION = "0.81.31";')){throw 'published runtime is not 0.81.31'}
+          if($pkg.version -ne '0.81.31'){throw 'published package is not 0.81.31'}
+          Write-Host 'UEP 0.81.31 package and updater manifests are consistent.'
