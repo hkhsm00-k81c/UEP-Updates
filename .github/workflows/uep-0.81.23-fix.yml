@@ -1,0 +1,79 @@
+name: UEP 0.81.23 Fix Dashboard and Dorm
+
+'on':
+  push:
+    branches:
+      - fix/0.81.23-dashboard-dorm-sync
+    paths:
+      - .github/workflows/uep-0.81.23-fix.yml
+      - uep-0.81.23-fix.trigger
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download shipped 0.81.22
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,out | Out-Null
+          gh release download v0.81.22 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+      - name: Patch dashboard and dorm runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $g='app/resources/app/gyomuon.js'
+          $text=Get-Content $g -Raw -Encoding UTF8
+          # 0.81.22 readonly cache is healthy, but dashboard placeholders can remain after async refresh.
+          # Force dashboard rerender after a successful readonly refresh by wrapping the refresh function's resolved result.
+          if($text -notmatch '__UEP08123_DASHBOARD_REFRESH__'){
+            $text += @'
+
+/* __UEP08123_DASHBOARD_REFRESH__ */
+(function(){
+  const rerenderDashboard=()=>{ try{ if(typeof render==='function' && (typeof currentPage==='undefined' || currentPage==='dashboard')) render('dashboard'); }catch(e){} };
+  const old=window.schoolBoard && window.schoolBoard.readReadonlyCache;
+  if(window.schoolBoard && typeof old==='function'){
+    window.schoolBoard.readReadonlyCache=async function(...args){ const r=await old.apply(this,args); setTimeout(rerenderDashboard,0); return r; };
+  }
+  window.addEventListener('focus',()=>setTimeout(rerenderDashboard,0));
+})();
+'@
+          }
+          # Treat any same-day dorm outing/late-entry record as reportable. The old empty-state path was too narrow (home-going only).
+          if($text -notmatch '__UEP08123_DORM_REPORTABLE__'){
+            $text += @'
+
+/* __UEP08123_DORM_REPORTABLE__ */
+(function(){
+  window.uepDormReportableToday=function(rows){
+    const key=(typeof dateKey==='function')?dateKey(new Date()):new Date().toISOString().slice(0,10);
+    return (Array.isArray(rows)?rows:[]).filter(r=>String(r.date||r.outDate||r.entryDate||'').slice(0,10)===key && !(typeof dormOutingExcludedByRule==='function' && dormOutingExcludedByRule(r)));
+  };
+})();
+'@
+          }
+          Set-Content $g $text -Encoding UTF8
+          node --check $g
+      - name: Set version 0.81.23
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $pkg='app/resources/app/package.json'
+          $j=Get-Content $pkg -Raw | ConvertFrom-Json
+          $j.version='0.81.23'
+          $j | ConvertTo-Json -Depth 50 | Set-Content $pkg -Encoding UTF8
+          Compress-Archive -Path app/* -DestinationPath out/UEP-update.zip -Force
+      - name: Publish RC artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: UEP-0.81.23-dashboard-dorm-RC
+          path: out/UEP-update.zip
