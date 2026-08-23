@@ -4,6 +4,10 @@ on:
     branches: [fix/0.81.20-school-read-api]
     paths:
       - .github/workflows/uep-0.81.20-auth-runtime-audit.yml
+      - tools/apply-school-read-api-0.81.20.js
+      - tools/harden-school-read-auth-gate-0.81.20.js
+      - scripts/build-update-0.81.20.ps1
+      - uep-policy.json
   workflow_dispatch:
 permissions:
   contents: write
@@ -25,7 +29,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          2..18 | ForEach-Object { $version='0.81.{0:d2}' -f $_; & "scripts/build-update-$version.ps1" }
+          2..18 | ForEach-Object { $version='0.81.{0:d2}' -f $_; & "scripts/build-update-$version.ps1"; if($LASTEXITCODE -ne 0){throw "reconstruct failed: $version"} }
       - name: Apply verified 0.81.19 patches
         shell: pwsh
         run: |
@@ -41,6 +45,31 @@ jobs:
             'tools/apply-openstudentdrawer-after-index-0.81.19.js'
           )
           foreach($p in $patches){ node $p app; if($LASTEXITCODE -ne 0){throw "patch failed: $p"} }
+      - name: Build actual 0.81.20 School Read API candidate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          & scripts/build-update-0.81.20.ps1
+          if($LASTEXITCODE -ne 0){throw '0.81.20 candidate build failed'}
+      - name: Assert intended homeroom auth path
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $main=Get-Content app/resources/app/electron/main.cjs -Raw -Encoding UTF8
+          $preload=Get-Content app/resources/app/electron/preload.cjs -Raw -Encoding UTF8
+          $renderer=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          $checks=[ordered]@{
+            schoolReadPrimary=$main.Contains('__UEP_SCHOOL_READ_API_PRIMARY_08120__')
+            loginIpc=$main.Contains('uep:schoolReadLogin') -and $preload.Contains('schoolReadLogin:')
+            sessionVerify=$main.Contains('uep:schoolReadSessionStatus') -and $renderer.Contains('schoolReadSessionStatus({verify:true})')
+            batchRead=$main.Contains('schoolReadBatchRead(spreadsheetId,ranges)')
+            rendererLogin=$renderer.Contains('window.schoolBoard.schoolReadLogin({name,email})')
+            noRememberBypass=(-not $renderer.Contains('if(state?.auth?.rememberUser&&state?.auth?.user){hideUserAuthGate();authSessionReady=true;state.auth.locked=false;}'))
+            noReadonlyOAuthFallback=(-not ($main -match 'getReadonlySheetsAuth[\s\S]{0,1800}readGoogleUserOAuth'))
+            noReadonlyServiceFallback=(-not ($main -match 'getReadonlySheetsAuth[\s\S]{0,1800}readEncrypted\(credentialPath\(\)\)'))
+          }
+          $checks.GetEnumerator()|ForEach-Object{Write-Host ("AUTH FINAL {0} = {1}" -f $_.Key,$_.Value)}
+          if($checks.Values-contains $false){throw '0.81.20 auth runtime assertion failed'}
       - name: Capture auth runtime context
         shell: pwsh
         run: |
@@ -61,7 +90,7 @@ jobs:
           Get-Content app/resources/app/electron/main.cjs -Raw | Set-Content "$out/main.cjs.txt"
           Get-Content app/resources/app/electron/google-data.cjs -Raw | Set-Content "$out/google-data.cjs.txt"
           Get-Content app/resources/app/electron/preload.cjs -Raw | Set-Content "$out/preload.cjs.txt"
-          & ./tools/extract-auth-renderer-context-0.81.20.ps1
+          if(Test-Path ./tools/extract-auth-renderer-context-0.81.20.ps1){ & ./tools/extract-auth-renderer-context-0.81.20.ps1 }
       - name: Persist auth audit snapshots
         shell: pwsh
         run: |
@@ -70,7 +99,7 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add audit-output/auth-0.81.20
           git diff --cached --quiet; if($LASTEXITCODE -eq 0){ Write-Host 'No auth snapshot changes'; exit 0 }
-          git commit -m 'audit: persist 0.81.20 auth runtime snapshots'
+          git commit -m 'audit: persist actual 0.81.20 auth runtime snapshots'
           git push
       - uses: actions/upload-artifact@v4
         with:
