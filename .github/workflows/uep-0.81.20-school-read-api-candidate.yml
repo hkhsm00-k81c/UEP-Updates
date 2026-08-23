@@ -1,0 +1,88 @@
+name: UEP 0.81.20 School Read API Candidate
+on:
+  push:
+    branches: [fix/0.81.20-school-read-api]
+    paths:
+      - tools/apply-school-read-api-0.81.20.js
+      - scripts/build-update-0.81.20.ps1
+      - .github/workflows/uep-0.81.20-school-read-api-candidate.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download shipped base
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.81.01 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
+      - name: Reconstruct production through 0.81.18
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          2..18 | ForEach-Object { $version='0.81.{0:d2}' -f $_; & "scripts/build-update-$version.ps1" }
+      - name: Apply verified 0.81.19 performance cleanup
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $patches=@(
+            'tools/apply-performance1-0.81.19.js',
+            'tools/apply-performance2-0.81.19.js',
+            'tools/apply-dashboardview-memoization-0.81.19.js',
+            'tools/apply-dashboardview-sort-rank-0.81.19.js',
+            'tools/apply-dashboard-calendar-mode-cache-0.81.19.js',
+            'tools/apply-openstudentdrawer-summary-pass-0.81.19.js',
+            'tools/apply-openstudentdrawer-status-pass-0.81.19.js',
+            'tools/apply-openstudentdrawer-after-index-0.81.19.js'
+          )
+          foreach($p in $patches){ node $p app; if($LASTEXITCODE -ne 0){throw "0.81.19 patch failed: $p"} }
+          $g='app/resources/app/gyomuon.js'
+          $js=Get-Content $g -Raw -Encoding UTF8
+          $js=[regex]::Replace($js,'const APP_VERSION\s*=\s*["''][^"'']+["''];','const APP_VERSION = "0.81.19";',1)
+          Set-Content -LiteralPath $g -Value $js -Encoding UTF8 -NoNewline
+      - name: Apply 0.81.20 School Read API integration
+        shell: pwsh
+        run: |
+          & ./scripts/build-update-0.81.20.ps1
+      - name: Authentication regression gates
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $m=Get-Content 'app/resources/app/electron/main.cjs' -Raw -Encoding UTF8
+          $p=Get-Content 'app/resources/app/electron/preload.cjs' -Raw -Encoding UTF8
+          $g=Get-Content 'app/resources/app/gyomuon.js' -Raw -Encoding UTF8
+          $checks=[ordered]@{
+            schoolApiPrimary=$m.Contains('__UEP_SCHOOL_READ_API_PRIMARY_08120__')
+            deviceId=$m.Contains('uep-device-id.txt')
+            tokenStore=$m.Contains('uep-school-read-session.bin')
+            batchRead=$m.Contains("startsWith('UEP_SCHOOL_READ:')")
+            loginBridge=$p.Contains('schoolReadLogin:') -and $g.Contains('window.schoolBoard.schoolReadLogin({name,email})')
+            sessionBridge=$p.Contains('schoolReadSessionStatus:') -and $g.Contains('window.schoolBoard?.schoolReadSessionStatus')
+            logoutBridge=$p.Contains('schoolReadLogout:')
+            noTeacherGoogleLogin=(-not $g.Contains("authUrl.searchParams.set('scope','openid email https://www.googleapis.com/auth/spreadsheets.readonly')"))
+            rendererSyntax=$true
+          }
+          node --check 'app/resources/app/gyomuon.js'; if($LASTEXITCODE-ne 0){$checks.rendererSyntax=$false}
+          node --check 'app/resources/app/electron/main.cjs'
+          node --check 'app/resources/app/electron/preload.cjs'
+          node --check 'app/resources/app/electron/google-data.cjs'
+          $checks.GetEnumerator()|ForEach-Object{Write-Host ("AUTH GATE {0} = {1}" -f $_.Key,$_.Value)}
+          if($checks.Values-contains $false){throw '0.81.20 auth regression gate failed'}
+      - name: Build candidate package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Compress-Archive -Path app/* -DestinationPath UEP-0.81.20-school-read-api-candidate.zip -CompressionLevel Optimal
+          $sha=(Get-FileHash UEP-0.81.20-school-read-api-candidate.zip -Algorithm SHA256).Hash.ToLower()
+          Write-Host "UEP 0.81.20 CANDIDATE SHA256=$sha"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UEP-0.81.20-School-Read-API-Candidate
+          path: UEP-0.81.20-school-read-api-candidate.zip
