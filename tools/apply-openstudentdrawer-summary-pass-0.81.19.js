@@ -1,0 +1,12 @@
+const fs=require('fs'),path=require('path');
+const root=process.argv[2]||'app';
+const file=path.join(root,'resources/app/gyomuon.js');
+let text=fs.readFileSync(file,'utf8');
+const before='const selectedCount=participationPrograms.filter(p=>p.__isSelected).length; const afterCount=participationPrograms.filter(p=>p.__isAfter).length; const commonCount=participationPrograms.filter(p=>p.__isCommon).length; const submittedReportCount=studentReports.length; const linkedReportIds=new Set(participationPrograms.map(p=>String(p.__studentParticipant?.reportId||"" )).filter(Boolean));';
+const beforeAlt='const selectedCount=participationPrograms.filter(p=>p.__isSelected).length; const afterCount=participationPrograms.filter(p=>p.__isAfter).length; const commonCount=participationPrograms.filter(p=>p.__isCommon).length; const submittedReportCount=studentReports.length; const linkedReportIds=new Set(participationPrograms.map(p=>String(p.__studentParticipant?.reportId||"")).filter(Boolean));';
+const after='let selectedCount=0,afterCount=0,commonCount=0; const linkedReportIds=new Set(); for(const p of participationPrograms){ if(p.__isSelected)selectedCount++; if(p.__isAfter)afterCount++; if(p.__isCommon)commonCount++; const reportId=String(p.__studentParticipant?.reportId||""); if(reportId)linkedReportIds.add(reportId); } const submittedReportCount=studentReports.length;';
+if(text.includes(beforeAlt)) text=text.replace(beforeAlt,after);
+else if(text.includes(before)) text=text.replace(before,after);
+else throw new Error('openStudentDrawer summary pattern not found');
+fs.writeFileSync(file,text);
+console.log('Applied openStudentDrawer single-pass summary optimization');
