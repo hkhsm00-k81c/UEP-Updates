@@ -1,0 +1,156 @@
+name: Publish UEP 0.81.25
+
+'on':
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/publish-uep-0.81.25.yml
+      - publish-uep-0.81.25.trigger
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download shipped 0.81.24
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,out | Out-Null
+          gh release download v0.81.24 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+
+      - name: Apply 0.81.25 identity recovery fixes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $patch=@'
+          const fs=require('fs');
+          const file='app/resources/app/gyomuon.js';
+          let s=fs.readFileSync(file,'utf8');
+
+          if(!s.includes('const APP_VERSION = "0.81.24";')) throw new Error('APP_VERSION 0.81.24 anchor missing');
+          s=s.replace('const APP_VERSION = "0.81.24";','const APP_VERSION = "0.81.25";');
+
+          const profileAnchor='function currentUserProfile(){';
+          const helper=`function uep08125ValidTeacherName(value){\n  const v=String(value||'').normalize('NFKC').trim();\n  if(!v)return '';\n  if(/^(?:\\?+|사용자|담당교사|unknown|null|undefined)$/i.test(v))return '';\n  return v;\n}\nfunction uep08125PickTeacherName(...values){for(const value of values){const v=uep08125ValidTeacherName(value);if(v)return v;}return '';}\n\n`;
+          if(!s.includes(profileAnchor)) throw new Error('currentUserProfile anchor missing');
+          if(!s.includes('function uep08125ValidTeacherName')) s=s.replace(profileAnchor,helper+profileAnchor);
+
+          const oldProfileName='name:String(session.name||current.name||remembered.name||raw.name||state?.settings?.loginUserName||state?.settings?.teacherName||"").trim(),';
+          const newProfileName='name:uep08125PickTeacherName(session.name,current.name,remembered.name,raw.name,state?.settings?.loginUserName,state?.settings?.teacherName),';
+          if(!s.includes(oldProfileName)) throw new Error('profile name anchor missing');
+          s=s.replace(oldProfileName,newProfileName);
+
+          const oldCanContinue='const remembered=state?.auth?.rememberedUser||state?.auth?.user;const canContinue=remembered&&remembered.name&&remembered.email&&!switchUser;';
+          const newCanContinue='const remembered=state?.auth?.rememberedUser||state?.auth?.user;const canContinue=remembered&&uep08125ValidTeacherName(remembered.name)&&remembered.email&&!switchUser;';
+          if(!s.includes(oldCanContinue)) throw new Error('auth gate continue anchor missing');
+          s=s.replace(oldCanContinue,newCanContinue);
+
+          const oldRestoreGuard='if(!remembered?.name||!remembered?.email||!savedUser?.name||!savedUser?.email)return false;';
+          const newRestoreGuard='if(!uep08125ValidTeacherName(remembered?.name)||!remembered?.email||!uep08125ValidTeacherName(savedUser?.name)||!savedUser?.email)return false;';
+          if(!s.includes(oldRestoreGuard)) throw new Error('remember restore guard missing');
+          s=s.replace(oldRestoreGuard,newRestoreGuard);
+
+          const oldInitIf='if(remembered?.name&&remembered?.email&&window.schoolBoard?.schoolReadSessionStatus){';
+          const newInitIf='if(uep08125ValidTeacherName(remembered?.name)&&remembered?.email&&window.schoolBoard?.schoolReadSessionStatus){';
+          if(!s.includes(oldInitIf)) throw new Error('session gate remembered guard missing');
+          s=s.replace(oldInitIf,newInitIf);
+
+          s=s.replaceAll("name:String(a.name||remembered.name||'').trim()","name:uep08125PickTeacherName(a.name,remembered.name)");
+          s=s.replaceAll("name:String(a.name||remembered?.name||savedUser?.name||'').trim()","name:uep08125PickTeacherName(a.name,remembered?.name,savedUser?.name)");
+          s=s.replace("name:String(a.name||name||'').trim()","name:uep08125PickTeacherName(a.name,name)");
+
+          const oldLoginUser='state.settings.loginUserName=user.name;googleConnectionStatus={ok:true,encryption:true,mode:\'school_read_api\'};';
+          const newLoginUser='state.settings.loginUserName=user.name;state.settings.teacherName=user.name;googleConnectionStatus={ok:true,encryption:true,mode:\'school_read_api\'};';
+          if(s.includes(oldLoginUser)) s=s.replace(oldLoginUser,newLoginUser);
+
+          const oldRestoreAssign='state.settings.loginUserName=state.auth.user.name;googleConnectionStatus={ok:true,encryption:true,mode:\'school_read_api\'};';
+          const newRestoreAssign='state.settings.loginUserName=state.auth.user.name;state.settings.teacherName=state.auth.user.name;googleConnectionStatus={ok:true,encryption:true,mode:\'school_read_api\'};';
+          s=s.replaceAll(oldRestoreAssign,newRestoreAssign);
+
+          fs.writeFileSync(file,s,'utf8');
+          '@
+          Set-Content patch-08125.cjs $patch -Encoding UTF8
+          node patch-08125.cjs
+          node --check app/resources/app/gyomuon.js
+
+      - name: Verify 0.81.25 identity invariants
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $g=Get-Content 'app/resources/app/gyomuon.js' -Raw -Encoding UTF8
+          foreach($c in @(
+            'const APP_VERSION = "0.81.25";',
+            'function uep08125ValidTeacherName(value)',
+            'uep08125PickTeacherName(session.name,current.name,remembered.name',
+            'uep08125ValidTeacherName(remembered?.name)',
+            'state.settings.teacherName=user.name',
+            'uep08123NormalizeReadonlyCache(cached.data)',
+            'readonlyCache?.timetableRows',
+            'readonlyCache?.notices'
+          )){ if(-not $g.Contains($c)){ throw "missing invariant: $c" } }
+          if($g.Contains('const APP_VERSION = "0.81.24";')){ throw 'stale runtime version remains' }
+
+      - name: Build 0.81.25 package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $pkg='app/resources/app/package.json'
+          $j=Get-Content $pkg -Raw -Encoding UTF8 | ConvertFrom-Json
+          $j.version='0.81.25'
+          $j | ConvertTo-Json -Depth 50 | Set-Content $pkg -Encoding UTF8
+          Compress-Archive -Path app/* -DestinationPath out/UEP-update.zip -Force
+          $hash=(Get-FileHash out/UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "UEP_SHA256=$hash" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "SHA256=$hash"
+
+      - name: Publish release safely
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $tag='v0.81.25'
+          gh release delete $tag --repo $env:GITHUB_REPOSITORY --yes --cleanup-tag 2>$null
+          $global:LASTEXITCODE=0
+          gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.25' --notes 'UEP 0.81.25: invalid remembered identity recovery, login teacher identity normalization, dashboard timetable identity recovery.' --draft
+          gh release upload $tag out/UEP-update.zip --repo $env:GITHUB_REPOSITORY --clobber
+          $assets=gh release view $tag --repo $env:GITHUB_REPOSITORY --json assets --jq '.assets[].name'
+          if($assets -notcontains 'UEP-update.zip'){ throw 'UEP-update.zip release asset missing' }
+          gh release edit $tag --repo $env:GITHUB_REPOSITORY --draft=false
+
+      - name: Promote both update manifests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $policy='uep-policy.json'
+          $p=Get-Content $policy -Raw -Encoding UTF8 | ConvertFrom-Json
+          $p.latestVersion='0.81.25'
+          $p.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.25/UEP-update.zip'
+          $p.sha256=$env:UEP_SHA256
+          $p.message='UEP 0.81.25 로그인 사용자 복구 및 대시보드 교사 식별 경로 정상화'
+          $p | ConvertTo-Json -Depth 50 | Set-Content $policy -Encoding UTF8
+
+          $manifest='uep-update.json'
+          $m=Get-Content $manifest -Raw -Encoding UTF8 | ConvertFrom-Json
+          $m.version='0.81.25'
+          $m.channel='stable'
+          $m.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.25/UEP-update.zip'
+          $m.sha256=$env:UEP_SHA256
+          $m.notes='UEP 0.81.25 로그인 사용자 복구 및 교사 식별 정상화'
+          $m | ConvertTo-Json -Depth 50 | Set-Content $manifest -Encoding UTF8
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add $policy $manifest
+          git commit -m 'release: promote UEP 0.81.25 auto-update'
+          git push origin HEAD:main
