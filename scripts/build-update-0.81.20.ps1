@@ -17,6 +17,8 @@ node ./tools/normalize-readonly-auth-0.81.20.js app
 if($LASTEXITCODE-ne 0){throw '0.81.20 readonly auth normalization failed'}
 node ./tools/apply-school-read-api-0.81.20.js app
 if($LASTEXITCODE-ne 0){throw '0.81.20 School Read API integration failed'}
+node ./tools/harden-school-read-auth-gate-0.81.20.js app
+if($LASTEXITCODE-ne 0){throw '0.81.20 School Read auth gate hardening failed'}
 
 node --check $gyo;if($LASTEXITCODE-ne 0){throw 'renderer syntax failed'}
 node --check $main;if($LASTEXITCODE-ne 0){throw 'main syntax failed'}
@@ -40,6 +42,9 @@ $checks=[ordered]@{
   'renderer login school api'=$g.Contains('window.schoolBoard.schoolReadLogin({name,email})')
   'startup school session'=$g.Contains('window.schoolBoard?.schoolReadSessionStatus')
   'teacher switch clears api token'=$g.Contains('await window.schoolBoard?.schoolReadLogout?.()')
+  'remembered login verifies api'=$g.Contains('const status=await window.schoolBoard.schoolReadSessionStatus({verify:true});')
+  'no local remembered bypass'=(-not $g.Contains('if(state?.auth?.rememberUser&&state?.auth?.user){hideUserAuthGate();authSessionReady=true;state.auth.locked=false;}'))
+  'auth gate independent of readonly cache'=(-not ($g -match 'async function initializeUserSessionGate\(\)[\s\S]{0,2600}findUserAccount\('))
 }
 $checks.GetEnumerator()|ForEach-Object{Write-Host ("CHECK {0} = {1}" -f $_.Key,$_.Value)}
 if($checks.Values-contains $false){throw 'UEP 0.81.20 School Read API verification failed'}
