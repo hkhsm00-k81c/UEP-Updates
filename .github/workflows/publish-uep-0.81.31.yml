@@ -42,6 +42,24 @@ jobs:
           node scripts/patch-uep-0.81.31.js app
           node --check app/resources/app/gyomuon.js
 
+      - name: Force runtime version to 0.81.31
+        shell: pwsh
+        timeout-minutes: 1
+        run: |
+          $ErrorActionPreference='Stop'
+          $file='app/resources/app/gyomuon.js'
+          $g=[System.IO.File]::ReadAllText($file)
+          $pattern='const\s+APP_VERSION\s*=\s*["''][^"'']+["'']\s*;'
+          $matches=[regex]::Matches($g,$pattern)
+          if($matches.Count -lt 1){ throw 'APP_VERSION declaration missing before normalization' }
+          $g=[regex]::Replace($g,$pattern,'const APP_VERSION = "0.81.31";')
+          [System.IO.File]::WriteAllText($file,$g,(New-Object System.Text.UTF8Encoding($false)))
+          $after=[System.IO.File]::ReadAllText($file)
+          $versions=[regex]::Matches($after,'const\s+APP_VERSION\s*=\s*["'']([^"'']+)["'']\s*;') | ForEach-Object {$_.Groups[1].Value}
+          Write-Host ('APP_VERSION declarations after force: '+($versions -join ','))
+          if($versions.Count -lt 1 -or ($versions | Where-Object {$_ -ne '0.81.31'})){ throw 'runtime version force failed' }
+          node --check $file
+
       - name: Verify 0.81.31 runtime invariants
         shell: pwsh
         timeout-minutes: 2
@@ -50,8 +68,8 @@ jobs:
           @'
           const fs=require('fs');
           const g=fs.readFileSync('app/resources/app/gyomuon.js','utf8');
-          const vm=(g.match(/const\s+APP_VERSION\s*=\s*['\"]([^'\"]+)['\"]\s*;/)||[])[1];
-          if(vm!=='0.81.31') throw new Error('runtime version='+vm);
+          const versions=[...g.matchAll(/const\s+APP_VERSION\s*=\s*['\"]([^'\"]+)['\"]\s*;/g)].map(m=>m[1]);
+          if(!versions.length || versions.some(v=>v!=='0.81.31')) throw new Error('runtime versions='+versions.join(','));
           const checks=[
             'return controls+detail+list;',
             'data-record-student=',
@@ -68,7 +86,7 @@ jobs:
           for(const x of checks) if(!g.includes(x)) throw new Error('missing invariant: '+x);
           if(/(?<!\$)\$\('\[data-curriculum-subject\]'\)\.forEach/.test(g)) throw new Error('broken single-card binding remains');
           if(/\$\$\('\[data-curriculum-subject\]'\)\.forEach\(b=>b\.onclick=\(\)=>\{curriculumSubjectKey=b\.dataset\.curriculumSubject;render\('records'\);\}\);/.test(g)) throw new Error('legacy render binding remains');
-          console.log('UEP 0.81.31 runtime invariants PASS');
+          console.log('UEP 0.81.31 runtime invariants PASS; APP_VERSION declarations=',versions.length);
           '@ | Set-Content verify-08131.js -Encoding UTF8
           node verify-08131.js
 
@@ -135,7 +153,8 @@ jobs:
           Expand-Archive verify/UEP-update.zip verify/app -Force
           $g=Get-Content verify/app/resources/app/gyomuon.js -Raw -Encoding UTF8
           $pkg=Get-Content verify/app/resources/app/package.json -Raw -Encoding UTF8 | ConvertFrom-Json
-          if($g -notmatch 'APP_VERSION\s*=\s*["'']0\.81\.31["'']'){throw 'published runtime is not 0.81.31'}
+          $versions=[regex]::Matches($g,'const\s+APP_VERSION\s*=\s*["'']([^"'']+)["'']\s*;') | ForEach-Object {$_.Groups[1].Value}
+          if($versions.Count -lt 1 -or ($versions | Where-Object {$_ -ne '0.81.31'})){throw 'published runtime is not uniformly 0.81.31'}
           if($pkg.version -ne '0.81.31'){throw 'published package is not 0.81.31'}
           if(-not $g.Contains('function uepOpenSubjectModal08128(')){throw 'published runtime missing subject popup function'}
           Write-Host 'UEP 0.81.31 package and updater manifests are consistent.'
