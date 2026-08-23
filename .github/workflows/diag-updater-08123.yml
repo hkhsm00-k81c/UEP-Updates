@@ -1,0 +1,63 @@
+name: Diagnose UEP 0.81.23 Update Path
+
+'on':
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/diag-updater-08123.yml
+      - diag-updater-08123.trigger
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download 0.81.22 and 0.81.23
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force old,new,diagnostics | Out-Null
+          gh release download v0.81.22 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir old
+          gh release download v0.81.23 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir new
+          Expand-Archive old/UEP-update.zip old/app -Force
+          Expand-Archive new/UEP-update.zip new/app -Force
+      - name: Verify package and trace updater
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $out='diagnostics/08123-updater-trace.txt'
+          "PACKAGE VERIFY" | Set-Content $out -Encoding UTF8
+          $pkg=Get-Content new/app/resources/app/package.json -Raw | ConvertFrom-Json
+          Add-Content $out ("new.version="+$pkg.version) -Encoding UTF8
+          $g=Get-Content new/app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          foreach($needle in @('__UEP08123_CACHE_COMPAT__','uep08123NormalizeReadonlyCache(cached.data)','uep08123TeacherKey(row["교사명"]')){
+            Add-Content $out ("patch."+$needle+"="+$g.Contains($needle)) -Encoding UTF8
+          }
+          foreach($root in @('old/app/resources/app','new/app/resources/app')){
+            Add-Content $out ("`n===== "+$root+" =====") -Encoding UTF8
+            Get-ChildItem $root -File -Recurse | Where-Object {$_.Extension -in '.js','.json'} | ForEach-Object {
+              $file=$_.FullName
+              $lines=Get-Content $file -Encoding UTF8 -ErrorAction SilentlyContinue
+              for($i=0;$i -lt $lines.Count;$i++){
+                if($lines[$i] -match 'latestVersion|updateEnabled|downloadUrl|uep-policy|auto.?update|check.?update|updateAvailable|update.zip|sha256'){
+                  Add-Content $out (("{0}:{1}: {2}" -f $file.Replace((Get-Location).Path+'\',''),($i+1),$lines[$i])) -Encoding UTF8
+                }
+              }
+            }
+          }
+      - name: Persist updater trace
+        shell: pwsh
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add diagnostics/08123-updater-trace.txt
+          git diff --cached --quiet
+          if($LASTEXITCODE -eq 0){exit 0}
+          git commit -m 'diag: persist 0.81.23 updater trace'
+          git push origin HEAD:main
