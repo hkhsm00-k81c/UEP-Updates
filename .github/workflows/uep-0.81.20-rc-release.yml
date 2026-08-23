@@ -5,6 +5,11 @@ on:
     branches: [fix/0.81.20-school-read-api]
     paths:
       - .github/workflows/uep-0.81.20-rc-release.yml
+      - scripts/build-update-0.81.20.ps1
+      - tools/apply-school-read-api-0.81.20.js
+      - tools/harden-school-read-auth-gate-0.81.20.js
+      - tools/normalize-readonly-auth-0.81.20.js
+      - uep-policy.json
   workflow_dispatch:
 
 permissions:
@@ -39,7 +44,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          2..18 | ForEach-Object { $version='0.81.{0:d2}' -f $_; & "scripts/build-update-$version.ps1" }
+          2..18 | ForEach-Object { $version='0.81.{0:d2}' -f $_; & "scripts/build-update-$version.ps1"; if($LASTEXITCODE-ne 0){throw "reconstruct failed: $version"} }
 
       - name: Apply verified 0.81.19 cleanup
         shell: pwsh
@@ -66,6 +71,7 @@ jobs:
         run: |
           $ErrorActionPreference='Stop'
           & ./scripts/build-update-0.81.20.ps1
+          if($LASTEXITCODE-ne 0){throw '0.81.20 integration failed'}
 
       - name: Final RC gates
         shell: pwsh
@@ -74,6 +80,7 @@ jobs:
           $m=Get-Content 'app/resources/app/electron/main.cjs' -Raw -Encoding UTF8
           $p=Get-Content 'app/resources/app/electron/preload.cjs' -Raw -Encoding UTF8
           $g=Get-Content 'app/resources/app/gyomuon.js' -Raw -Encoding UTF8
+          $gd=Get-Content 'app/resources/app/electron/google-data.cjs' -Raw -Encoding UTF8
           node --check 'app/resources/app/gyomuon.js'
           node --check 'app/resources/app/electron/main.cjs'
           node --check 'app/resources/app/electron/preload.cjs'
@@ -85,10 +92,13 @@ jobs:
             tokenStore=$m.Contains('uep-school-read-session.bin')
             endpoint=$m.Contains('schoolReadApiUrl')
             loginBridge=$p.Contains('schoolReadLogin:') -and $g.Contains('window.schoolBoard.schoolReadLogin({name,email})')
-            sessionBridge=$p.Contains('schoolReadSessionStatus:') -and $g.Contains('window.schoolBoard?.schoolReadSessionStatus')
-            logoutBridge=$p.Contains('schoolReadLogout:')
+            sessionBridge=$p.Contains('schoolReadSessionStatus:') -and $g.Contains('schoolReadSessionStatus({verify:true})')
+            logoutBridge=$p.Contains('schoolReadLogout:') -and $g.Contains('schoolReadLogout')
             batchRead=$m.Contains("startsWith('UEP_SCHOOL_READ:')") -and $m.Contains('schoolReadBatchRead(spreadsheetId,ranges)')
-            single06=(Get-Content 'app/resources/app/electron/google-data.cjs' -Raw -Encoding UTF8).Contains('"06_선택과목이력"')
+            noRememberBypass=(-not $g.Contains('if(state?.auth?.rememberUser&&state?.auth?.user){hideUserAuthGate();authSessionReady=true;state.auth.locked=false;}'))
+            noReadonlyOAuthFallback=(-not ($m -match 'getReadonlySheetsAuth[\s\S]{0,1800}readGoogleUserOAuth'))
+            noReadonlyServiceFallback=(-not ($m -match 'getReadonlySheetsAuth[\s\S]{0,1800}readEncrypted\(credentialPath\(\)\)'))
+            single06=$gd.Contains('"06_선택과목이력"') -and (-not $gd.Contains('06A_학생별선택과목'))
           }
           $checks.GetEnumerator()|ForEach-Object{Write-Host ("RC GATE {0} = {1}" -f $_.Key,$_.Value)}
           if($checks.Values-contains $false){throw '0.81.20 RC gate failed'}
