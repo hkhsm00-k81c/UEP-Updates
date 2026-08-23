@@ -13,6 +13,8 @@ if($g -match 'const APP_VERSION\s*=\s*"0\.81\.1[89]";'){
 $g=$g.Replace('v0.81.19','v0.81.20').Replace('v0.81.18','v0.81.20')
 [System.IO.File]::WriteAllText($gyo,$g,$utf8NoBom)
 
+node ./tools/normalize-readonly-auth-0.81.20.js app
+if($LASTEXITCODE-ne 0){throw '0.81.20 readonly auth normalization failed'}
 node ./tools/apply-school-read-api-0.81.20.js app
 if($LASTEXITCODE-ne 0){throw '0.81.20 School Read API integration failed'}
 
