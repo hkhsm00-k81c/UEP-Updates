@@ -47,27 +47,17 @@ jobs:
           Write-Host "before patch sha256: $((Get-FileHash $target -Algorithm SHA256).Hash.ToLower())"
 
           node scripts/patch-uep-0.81.36.js app
+          if($LASTEXITCODE -ne 0){throw "source patch script failed with exit code $LASTEXITCODE"}
 
           $after=Get-Content $target -Raw -Encoding UTF8
           $afterLine=([regex]::Match($after,'[^\r\n]*APP_VERSION[^\r\n]*')).Value
           Write-Host "after node patch version: $afterLine"
+          if(-not $afterLine.Contains('0.81.36')){throw 'source patch completed but APP_VERSION is not 0.81.36'}
+          if($afterLine.Contains('0.81.35')){throw 'source patch left old APP_VERSION declaration'}
 
-          if(-not $afterLine.Contains('0.81.36')){
-            Write-Host 'Node patch did not persist APP_VERSION; normalizing deployment version on the exact verified target.'
-            $old='const APP_VERSION = "0.81.35";'
-            $new='const APP_VERSION = "0.81.36";'
-            if(-not $after.Contains($old)){throw "expected shipped APP_VERSION declaration not found in $target"}
-            $after=$after.Replace($old,$new)
-            Set-Content -Path $target -Value $after -Encoding UTF8 -NoNewline
-          }
-
-          $final=Get-Content $target -Raw -Encoding UTF8
-          $finalLine=([regex]::Match($final,'[^\r\n]*APP_VERSION[^\r\n]*')).Value
-          Write-Host "final patched version: $finalLine"
           Write-Host "final patched sha256: $((Get-FileHash $target -Algorithm SHA256).Hash.ToLower())"
-          if(-not $finalLine.Contains('0.81.36')){throw 'runtime APP_VERSION normalization failed on exact target'}
-          if($finalLine.Contains('0.81.35')){throw 'runtime target still contains old APP_VERSION declaration'}
           node --check $target
+          if($LASTEXITCODE -ne 0){throw "patched runtime syntax check failed with exit code $LASTEXITCODE"}
 
       - name: Verify owner-function repairs
         shell: pwsh
@@ -103,6 +93,7 @@ jobs:
           console.log('UEP 0.81.36 source owner verification PASS');
           '@ | Set-Content verify-08136.js -Encoding UTF8
           node verify-08136.js
+          if($LASTEXITCODE -ne 0){throw "owner-function verification failed with exit code $LASTEXITCODE"}
 
       - name: Build 0.81.36 package
         shell: pwsh
