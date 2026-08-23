@@ -23,25 +23,18 @@ jobs:
           Expand-Archive source/UEP-update.zip app -Force
           $out=@()
           try {
-            $x=node scripts/patch-uep-0.81.29.js app 2>&1
-            $out += $x
-            node --check app/resources/app/gyomuon.js 2>&1 | ForEach-Object {$out += $_}
-            if($LASTEXITCODE -ne 0){throw 'gyomuon syntax failed'}
-            node --check app/resources/app/electron/google-data.cjs 2>&1 | ForEach-Object {$out += $_}
-            if($LASTEXITCODE -ne 0){throw 'google-data syntax failed'}
-            $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
-            $d=Get-Content app/resources/app/electron/google-data.cjs -Raw -Encoding UTF8
-            $out += 'APP29='+$g.Contains('const APP_VERSION = "0.81.29";')
-            $out += 'BLOCKS='+$d.Contains('selectionBlocks: rowsFrom("19_선택과목블록DB")')
-            $out += 'RULES='+$d.Contains('selectionRules: rowsFrom("41_선택과목규칙")')
-            $out += 'MISSING='+$g.Contains('미선택 오류')
+            node scripts/patch-uep-0.81.29.js app 2>&1 | ForEach-Object {$out += $_}
+            node --check app/resources/app/gyomuon.js 2>&1 | ForEach-Object {$out += $_};if($LASTEXITCODE -ne 0){throw 'gyomuon syntax failed'}
+            node --check app/resources/app/electron/google-data.cjs 2>&1 | ForEach-Object {$out += $_};if($LASTEXITCODE -ne 0){throw 'google-data syntax failed'}
+            $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8;$d=Get-Content app/resources/app/electron/google-data.cjs -Raw -Encoding UTF8
+            $checks=@{
+              APP29=$g.Contains('const APP_VERSION = "0.81.29";');BLOCKS=$d.Contains('selectionBlocks: rowsFrom("19_선택과목블록DB")');RULES=$d.Contains('selectionRules: rowsFrom("41_선택과목규칙")');CURRICULUM=$d.Contains('schoolCurriculumRows: rowsFrom("18_학교교육과정DB")');MISSING=$g.Contains('미선택 오류');OVER=$g.Contains('과다선택 오류');BLOCKDUP=$g.Contains('선택군 중복선택 오류');CROSS=$g.Contains('문·이과 교차오류');HIER=$g.Contains('과학과목 위계오류');SOURCE=$g.Contains('연결시트 18·19 / 규칙로그 41');ACTIVE=$g.Contains('data.rows.filter(uepSelectionActiveRow08129)')
+            }
+            foreach($k in $checks.Keys){$out += ($k+'='+$checks[$k]);if(-not $checks[$k]){throw ('missing '+$k)}}
             $out += 'RESULT=PASS'
-          } catch {
-            $out += ('RESULT=FAIL '+$_.Exception.Message)
-          }
+          } catch {$out += ('RESULT=FAIL '+$_.Exception.Message)}
           $out | Set-Content diag/08129-patch-test.txt -Encoding UTF8
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git config user.name 'github-actions[bot]';git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add diag/08129-patch-test.txt
-          git commit -m 'diag: record UEP 0.81.29 patch test' || echo no-change
+          git commit -m 'diag: record UEP 0.81.29 full invariant test' || echo no-change
           git push
