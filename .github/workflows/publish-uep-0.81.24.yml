@@ -1,0 +1,143 @@
+name: Publish UEP 0.81.24
+
+'on':
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/publish-uep-0.81.24.yml
+      - publish-uep-0.81.24.trigger
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download shipped 0.81.23
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,out | Out-Null
+          gh release download v0.81.23 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+
+      - name: Apply 0.81.24 runtime fixes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $patch=@'
+          const fs=require('fs');
+          const file='app/resources/app/gyomuon.js';
+          let s=fs.readFileSync(file,'utf8');
+
+          if(!s.includes('const APP_VERSION = "0.81.22";')) throw new Error('APP_VERSION 0.81.22 anchor missing');
+          s=s.replace('const APP_VERSION = "0.81.22";','const APP_VERSION = "0.81.24";');
+
+          const oldProfile='const raw=state?.settings?.userProfile||{}, session=state?.auth?.user||{};';
+          const newProfile='const raw=state?.settings?.userProfile||{}, session=state?.auth?.user||{}, current=state?.currentUser||{}, remembered=state?.auth?.rememberedUser||{};';
+          if(!s.includes(oldProfile)) throw new Error('currentUserProfile session anchor missing');
+          s=s.replace(oldProfile,newProfile);
+
+          const oldName='name:String(session.name||raw.name||state?.settings?.loginUserName||state?.settings?.teacherName||"").trim(),';
+          const newName='name:String(session.name||current.name||remembered.name||raw.name||state?.settings?.loginUserName||state?.settings?.teacherName||"").trim(),';
+          if(!s.includes(oldName)) throw new Error('currentUserProfile name anchor missing');
+          s=s.replace(oldName,newName);
+
+          const oldEmail='email:String(session.email||raw.email||""),';
+          const newEmail='email:String(session.email||current.email||remembered.email||raw.email||""),';
+          if(s.includes(oldEmail)) s=s.replace(oldEmail,newEmail);
+
+          const oldHeader='if(profileName&&p.name) profileName.textContent=p.name;';
+          const newHeader='const displayTeacherName=p.name||currentLoginTeacherName()||"사용자"; if(profileName) profileName.textContent=displayTeacherName;';
+          if(!s.includes(oldHeader)) throw new Error('profile header name anchor missing');
+          s=s.replace(oldHeader,newHeader);
+
+          const oldAvatar='if(profileAvatar&&p.name) profileAvatar.textContent=p.name.slice(0,1);';
+          const newAvatar='if(profileAvatar) profileAvatar.textContent=(displayTeacherName||"U").slice(0,1);';
+          if(!s.includes(oldAvatar)) throw new Error('profile avatar anchor missing');
+          s=s.replace(oldAvatar,newAvatar);
+
+          fs.writeFileSync(file,s,'utf8');
+          '@
+          Set-Content patch-08124.cjs $patch -Encoding UTF8
+          node patch-08124.cjs
+          node --check app/resources/app/gyomuon.js
+
+      - name: Verify inherited and new fixes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $g=Get-Content 'app/resources/app/gyomuon.js' -Raw -Encoding UTF8
+          foreach($c in @(
+            'const APP_VERSION = "0.81.24";',
+            'current=state?.currentUser||{}',
+            'remembered=state?.auth?.rememberedUser||{}',
+            'displayTeacherName=p.name||currentLoginTeacherName()',
+            '__UEP08123_CACHE_COMPAT__',
+            'uep08123NormalizeReadonlyCache(cached.data)',
+            'readonlyCache?.timetableRows',
+            'readonlyCache?.notices'
+          )){ if(-not $g.Contains($c)){ throw "missing invariant: $c" } }
+          if($g.Contains('const APP_VERSION = "0.81.22";')){ throw 'stale runtime version remains' }
+
+      - name: Build 0.81.24 package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $pkg='app/resources/app/package.json'
+          $j=Get-Content $pkg -Raw -Encoding UTF8 | ConvertFrom-Json
+          $j.version='0.81.24'
+          $j | ConvertTo-Json -Depth 50 | Set-Content $pkg -Encoding UTF8
+          Compress-Archive -Path app/* -DestinationPath out/UEP-update.zip -Force
+          $hash=(Get-FileHash out/UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "UEP_SHA256=$hash" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "SHA256=$hash"
+
+      - name: Publish release safely
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $tag='v0.81.24'
+          gh release delete $tag --repo $env:GITHUB_REPOSITORY --yes --cleanup-tag 2>$null
+          $global:LASTEXITCODE=0
+          gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.24' --notes 'UEP 0.81.24: runtime version, user profile display, update channel consistency; inherits 0.81.23 dashboard/dorm fixes.' --draft
+          gh release upload $tag out/UEP-update.zip --repo $env:GITHUB_REPOSITORY --clobber
+          $assets=gh release view $tag --repo $env:GITHUB_REPOSITORY --json assets --jq '.assets[].name'
+          if($assets -notcontains 'UEP-update.zip'){ throw 'UEP-update.zip release asset missing' }
+          gh release edit $tag --repo $env:GITHUB_REPOSITORY --draft=false
+
+      - name: Promote both update manifests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $policy='uep-policy.json'
+          $p=Get-Content $policy -Raw -Encoding UTF8 | ConvertFrom-Json
+          $p.latestVersion='0.81.24'
+          $p.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.24/UEP-update.zip'
+          $p.sha256=$env:UEP_SHA256
+          $p.message='UEP 0.81.24 버전·사용자표시·업데이트경로 정합성 수정 및 대시보드/학사외출 수정 계승'
+          $p | ConvertTo-Json -Depth 50 | Set-Content $policy -Encoding UTF8
+
+          $manifest='uep-update.json'
+          $m=Get-Content $manifest -Raw -Encoding UTF8 | ConvertFrom-Json
+          $m.version='0.81.24'
+          $m.channel='stable'
+          $m.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.24/UEP-update.zip'
+          $m.sha256=$env:UEP_SHA256
+          $m.notes='UEP 0.81.24 버전·사용자표시·업데이트경로 정합성 수정'
+          $m | ConvertTo-Json -Depth 50 | Set-Content $manifest -Encoding UTF8
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add $policy $manifest
+          git commit -m 'release: promote UEP 0.81.24 auto-update'
+          git push origin HEAD:main
