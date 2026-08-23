@@ -1,0 +1,133 @@
+name: UEP 0.81.20 Promote After Live Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_live_test:
+        description: Type HOMEROOM-LIVE-PASS only after a real approved homeroom PC succeeds
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    if: ${{ inputs.confirm_live_test == 'HOMEROOM-LIVE-PASS' }}
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/0.81.20-school-read-api
+
+      - name: Guard against premature production promotion
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          if('${{ inputs.confirm_live_test }}' -ne 'HOMEROOM-LIVE-PASS'){throw 'real homeroom live test not confirmed'}
+          $policy=Get-Content uep-policy.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          if([string]$policy.latestVersion -ne '0.81.18'){throw 'unexpected production base version'}
+          if([string]$policy.schoolReadApiUrl -notmatch '^https://script\.google\.com/macros/s/[^/]+/exec(?:\?.*)?$'){throw 'School Read API endpoint missing'}
+
+      - name: Download shipped base
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.81.01 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
+
+      - name: Reconstruct through 0.81.18
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          2..18 | ForEach-Object {
+            $version='0.81.{0:d2}' -f $_
+            & "scripts/build-update-$version.ps1"
+            if($LASTEXITCODE-ne 0){throw "reconstruct failed: $version"}
+          }
+
+      - name: Apply verified 0.81.19 cleanup
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $patches=@(
+            'tools/apply-performance1-0.81.19.js',
+            'tools/apply-performance2-0.81.19.js',
+            'tools/apply-dashboardview-memoization-0.81.19.js',
+            'tools/apply-dashboardview-sort-rank-0.81.19.js',
+            'tools/apply-dashboard-calendar-mode-cache-0.81.19.js',
+            'tools/apply-openstudentdrawer-summary-pass-0.81.19.js',
+            'tools/apply-openstudentdrawer-status-pass-0.81.19.js',
+            'tools/apply-openstudentdrawer-after-index-0.81.19.js'
+          )
+          foreach($p in $patches){node $p app;if($LASTEXITCODE-ne 0){throw "0.81.19 patch failed: $p"}}
+
+      - name: Build final 0.81.20
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          & scripts/build-update-0.81.20.ps1
+          if($LASTEXITCODE-ne 0){throw '0.81.20 build failed'}
+          node --check app/resources/app/gyomuon.js
+          node --check app/resources/app/electron/main.cjs
+          node --check app/resources/app/electron/preload.cjs
+          node --check app/resources/app/electron/google-data.cjs
+
+      - name: Final production auth gates
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $m=Get-Content app/resources/app/electron/main.cjs -Raw -Encoding UTF8
+          $p=Get-Content app/resources/app/electron/preload.cjs -Raw -Encoding UTF8
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          $gd=Get-Content app/resources/app/electron/google-data.cjs -Raw -Encoding UTF8
+          $checks=[ordered]@{
+            version=$g.Contains('const APP_VERSION = "0.81.20";')
+            schoolReadPrimary=$m.Contains('__UEP_SCHOOL_READ_API_PRIMARY_08120__')
+            login=$m.Contains('uep:schoolReadLogin') -and $p.Contains('schoolReadLogin:') -and $g.Contains('window.schoolBoard.schoolReadLogin({name,email})')
+            verify=$m.Contains('uep:schoolReadSessionStatus') -and $g.Contains('schoolReadSessionStatus({verify:true})')
+            batchRead=$m.Contains('schoolReadBatchRead(spreadsheetId,ranges)')
+            noRememberBypass=(-not $g.Contains('if(state?.auth?.rememberUser&&state?.auth?.user){hideUserAuthGate();authSessionReady=true;state.auth.locked=false;}'))
+            noReadonlyOAuthFallback=(-not ($m -match 'getReadonlySheetsAuth[\s\S]{0,1800}readGoogleUserOAuth'))
+            noReadonlyServiceFallback=(-not ($m -match 'getReadonlySheetsAuth[\s\S]{0,1800}readEncrypted\(credentialPath\(\)\)'))
+            single06=$gd.Contains('"06_선택과목이력"') -and (-not $gd.Contains('06A_학생별선택과목'))
+          }
+          $checks.GetEnumerator()|ForEach-Object{Write-Host ("PROD GATE {0} = {1}" -f $_.Key,$_.Value)}
+          if($checks.Values-contains $false){throw 'production gate failed'}
+
+      - name: Package and publish v0.81.20
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          Compress-Archive -Path app/* -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          Set-Content UEP-update.sha256 $sha -Encoding ascii
+          $tag='v0.81.20'
+          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+          if($LASTEXITCODE -ne 0){
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --target 'fix/0.81.20-school-read-api' --title 'UEP 0.81.20 - School Read API' --notes '담임 개인 Google OAuth 및 로컬 서비스계정 의존을 제거하고 UEP 로그인 → 기기승인 → UEP Token → School Read API → 학교 데이터 읽기를 표준 경로로 적용한 버전입니다.'
+          }
+          gh release upload $tag UEP-update.zip UEP-update.sha256 --repo $env:GITHUB_REPOSITORY --clobber
+          "FINAL_SHA=$sha" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Enable 0.81.20 automatic update only after live-test confirmation
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $path='uep-policy.json'
+          $policy=Get-Content $path -Raw -Encoding UTF8 | ConvertFrom-Json
+          $policy.latestVersion='0.81.20'
+          $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.20/UEP-update.zip'
+          $policy.sha256=$env:FINAL_SHA
+          $policy.message='UEP 0.81.20 School Read API 담임 연결 안정화'
+          $policy | ConvertTo-Json -Depth 20 | Set-Content $path -Encoding UTF8
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add uep-policy.json
+          git commit -m 'Enable UEP 0.81.20 automatic update after homeroom live test'
+          git push origin HEAD:fix/0.81.20-school-read-api
