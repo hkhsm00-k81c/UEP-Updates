@@ -1,0 +1,634 @@
+UEP 0.81.26 STRUCTURE DIAGNOSIS
+
+
+
+function uepStudentApplicationDetail( COUNT=2
+
+function uepStudentApplicationView( COUNT=2
+
+function uepSubjectApplicationView( COUNT=2
+
+function uepSelectionErrors08105( COUNT=1
+
+async function saveDormOuting( COUNT=1
+
+__UEP_REFINEMENT_08107__ COUNT=1
+
+__UEP_08113_RESTORED_CURRICULUM_SDGS_BODY__ COUNT=1
+
+__UEP_08126_SELECTION_LAYOUT__ COUNT=1
+
+resolveSchoolServiceAccount COUNT=4
+
+schoolRead COUNT(main)=34
+
+saveDormOuting exposure COUNT=2
+
+
+
+=== CURRENT SELECTION 08107 AREA ===
+
+// __UEP_REFINEMENT_08107__
+function uepSelectionSubjectState(subject,term,errors){const related=(errors||[]).filter(e=>(String(e.term||'').includes(term)||!e.term)&&(String(e.detail||'').includes(subject)||String(e.subject||'')===subject));if(related.length)return {cls:'selection-subject-error',label:[...new Set(related.map(e=>String(e.type||'오류').replace(/오류|과목/g,'')))].join('·')};const linked=(errors||[]).some(e=>String(e.term||'').includes(term));return linked?{cls:'selection-subject-related',label:'연계 확인'}:{cls:'',label:'신청'};}
+function uepStudentApplicationDetail(row,errors){const student=row.__student,sms=uepSelectionSms(student,errors),className=String(student.className||recordStudentClass(student)||'').replace(/반+$/,'');const alert=errors.length?`<section class="selection-error-panel selection-error-first"><header><h3>먼저 확인할 신청 오류</h3><span>${errors.length}건</span></header>${errors.map(x=>`<article><b>${escapeHtml(x.type)}</b><em>${escapeHtml(x.term)}</em><p>${escapeHtml(x.detail)}</p></article>`).join('')}</section>`:'<section class="selection-safe-panel selection-safe-first"><b>✓ 선택과목 검증 정상</b><span>현재 신청자료에서 확인할 오류가 없습니다.</span></section>';return `<section class="curriculum-student-detail"><header><div><small>${escapeHtml(student.studentNo)} · ${escapeHtml(className)}반</small><h3>${escapeHtml(student.name)} 학생신청</h3></div>${uepSelectionErrorLabel(errors)}</header>${alert}<div class="curriculum-term-grid curriculum-term-grid-four">${["2-1","2-2","3-1","3-2"].map(term=>`<section><header><h3>${term.replace('-','학년 ')}학기</h3><span>${uepSelectionTermSubjects(row,term).length}과목</span></header>${uepSelectionTermSubjects(row,term).map(x=>{const state=uepSelectionSubjectState(x,term,errors);return `<article class="${state.cls}" title="${state.label}"><b>${escapeHtml(x)}</b><em>${escapeHtml(state.label)}</em></article>`;}).join('')||'<div class="selection-missing">미신청</div>'}</section>`).join('')}</div>${errors.length?`<section class="curriculum-message-panel"><header><div><small>STUDENT MESSAGE</small><h3>현재 오류 보완 문자</h3></div><button class="btn primary" data-copy-current-selection-sms>문자 복사</button></header><textarea id="currentSelectionSms" readonly>${escapeHtml(sms)}</textarea></section>`:''}</section>`;}
+function uepStudentApplicationView(){const data=uepSelectionDataset(),types=[...new Set(data.errors.map(x=>x.type))],allRows=data.rows,classRows=recordClassNo==='all'?allRows:allRows.filter(r=>recordStudentClass(r.__student)===String(recordClassNo)),visible=classRows.filter(r=>{const errs=data.errors.filter(e=>e.student.id===r.__student.id);return(!curriculumErrorOnly||errs.length)&&(curriculumErrorType==='all'||errs.some(e=>e.type===curriculumErrorType));});if(!recordStudentId||!classRows.some(r=>r.__student.id===recordStudentId))recordStudentId=classRows[0]?.__student.id||'';const chosen=classRows.find(r=>r.__student.id===recordStudentId)||classRows[0],errs=chosen?data.errors.filter(e=>e.student.id===chosen.__student.id):[];const classButton=(no,label)=>`<button data-record-class="${no}" class="${String(recordClassNo)===no?'active':''}"><b>${label}</b><span>${no==='all'?allRows.length:data.rows.filter(r=>recordStudentClass(r.__student)===no).length}명</span></button>`,classes=classButton('all','전체')+Array.from({length:9},(_,i)=>classButton(String(i+1),`${i+1}반`)).join('');const switcher=`<div class="record-query-switch curriculum-query-top"><button data-record-query="class" class="${recordQueryMode==='class'?'active':''}">반별 조회</button><button data-record-query="student" class="${recordQueryMode==='student'?'active':''}">개인별 조회</button></div>`;const picker=recordQueryMode==='student'?`<div class="uep-student-picker"><button data-uep-student-prev>‹</button><button class="uep-picker-main" data-open-student-picker><small>${recordClassNo==='all'?'전체 학생':recordClassNo+'반 학생'}</small><b>${escapeHtml(chosen?.__student.studentNo||'')} ${escapeHtml(chosen?.__student.name||'학생 선택')}</b></button><button data-uep-student-next>›</button><div class="uep-picker-menu" hidden><input data-uep-student-search placeholder="학번·이름 검색"><div>${classRows.map(r=>`<button data-record-student="${escapeHtml(r.__student.id)}">${escapeHtml(r.__student.studentNo)} ${escapeHtml(r.__student.name)}</button>`).join('')}</div></div></div>`:'';const controls=`<div class="curriculum-filter-bar">${switcher}<div class="record-class-cards">${classes}</div><label>오류유형<select data-curriculum-error-type><option value="all">전체 오류</option>${types.map(x=>`<option ${curriculumErrorType===x?'selected':''}>${escapeHtml(x)}</option>`).join('')}</select></label><button class="btn ${curriculumErrorOnly?'primary':'secondary'}" data-curriculum-error-only>${curriculumErrorOnly?'오류학생만 보는 중':'오류학생만 보기'}</button>${picker}</div>`;if(recordQueryMode==='student')return `${controls}${chosen?uepStudentApplicationDetail(chosen,errs):''}`;return `${controls}<div class="curriculum-class-list"><div class="curriculum-class-head"><span>학번·학생</span><span>2-1</span><span>2-2</span><span>3-1</span><span>3-2</span><span>상태</span></div>${visible.map(r=>{const es=data.errors.filter(e=>e.student.id===r.__student.id);return `<button data-record-student="${escapeHtml(r.__student.id)}"><b>${escapeHtml(r.__student.studentNo)} ${escapeHtml(r.__student.name)}</b>${["2-1","2-2","3-1","3-2"].map(t=>`<span>${uepSelectionTermSubjects(r,t).length}과목</span>`).join('')}<span>${uepSelectionErrorLabel(es)}</span></button>`;}).join('')||'<div class="query-empty"><b>조건에 맞는 학생이 없습니다.</b></div>'}</div>`;}
+function uepSubjectApplicationView(){const data=uepSelectionDataset(),terms=["2-1","2-2","3-1","3-2"],groups=data.subjects.filter(x=>x.term===curriculumTermFilter),selected=groups.find(x=>x.key===curriculumSubjectKey)||null,privacy=privacyModeEnabled();let detail='';if(selected){const rows=[...selected.students].sort(curriculumRosterSort==='class'?((a,b)=>String(a.student.studentNo).localeCompare(String(b.student.studentNo))):((a,b)=>(a.avg??99)-(b.avg??99)||String(a.student.studentNo).localeCompare(String(b.student.studentNo))));detail=`<section class="subject-roster-detail"><header><div><small>${selected.term}</small><h3>${escapeHtml(selected.subject)} 신청명단</h3></div><div class="roster-sort"><button data-roster-sort="grade" class="${curriculumRosterSort==='grade'?'active':''}">예상성적순</button><button data-roster-sort="class" class="${curriculumRosterSort==='class'?'active':''}">반·번호순</button></div></header><div class="selection-roster privacy-roster roster-six-columns ${privacy?'masked':''}"><div class="selection-roster-head"><span>학번·성명</span><span>현재반</span><span>구분</span><span>1학년 내신평균</span><span>예상등수</span><span>예상등급</span></div>${rows.map(x=>`<article><b class="privacy-sensitive-text">${privacy?'**** ＊＊＊':`${escapeHtml(x.student.studentNo)} ${escapeHtml(x.student.name)}`}</b><span>${escapeHtml(recordStudentClass(x.student))}반</span><span>${x.dorm?'<i class="dorm-badge">학사</i>':'-'}</span><span class="privacy-sensitive-text">${privacy?'＊.＊＊':x.avg==null?'성적 없음':x.avg.toFixed(2)}</span><span class="privacy-sensitive-text">${privacy?'＊위':x.expectedRank?`${x.expectedRank}위`:'-'}</span><span class="privacy-sensitive-text expected-grade-cell">${privacy?'＊등급':x.expectedGrade==='-'?'-':`${x.expectedGrade}등급`}</span></article>`).join('')}</div><p class="selection-estimate-note">예상등수·등급은 해당 과목 신청자의 1학년 내신 등급 평균을 사용한 상담용 추정치입니다.</p></section>`;}return `<div class="term-picker-cards">${terms.map(t=>`<button data-curriculum-term="${t}" class="${curriculumTermFilter===t?'active':''}"><b>${t.replace('-','학년 ')}학기</b><span>${data.subjects.filter(x=>x.term===t).length}과목</span></button>`).join('')}</div><div class="subject-card-grid">${groups.map(g=>`<button data-curriculum-subject="${escapeHtml(g.key)}" class="${g.key===curriculumSubjectKey?'active':''}"><small>${g.term}</small><b>${escapeHtml(g.subject)}</b><span>${g.students.length}명 · 예상 ${g.sectionCount}분반</span>${uepSubjectStatus(g)}</button>`).join('')}</div>${detail}`;}
+
+
+
+
+
+
+
+
+=== CURRENT SELECTION DATASET/ERROR AREA ===
+
+// __UEP_08113_RESTORED_SELECTION_DATASET__
+function uepSelectionDataset(){
+  const rows=uepActiveSelectionRows(),dorm=uepDormStudentIds(),applications=[];
+  rows.forEach(row=>{
+    const student=row.__student,avg=uepStudentGradeAverage(student.id);
+    ["2-1","2-2","3-1","3-2"].forEach(term=>uepSelectionTermSubjects(row,term).forEach(subject=>applications.push({term,subject,row,student,avg,dorm:dorm.has(String(student.id||student.studentNo||""))||dorm.has(String(student.studentNo||""))})));
+  });
+  const subjects=new Map();
+  applications.forEach(app=>{const key=`${app.term}|${app.subject}`;if(!subjects.has(key))subjects.set(key,{key,term:app.term,subject:app.subject,students:[]});subjects.get(key).students.push(app);});
+  subjects.forEach(group=>{group.students.sort((a,b)=>(a.avg??99)-(b.avg??99)||String(a.student.studentNo).localeCompare(String(b.student.studentNo)));const graded=group.students.filter(x=>x.avg!=null).length;group.students.forEach((x,i)=>{x.expectedRank=x.avg==null?null:i+1;x.expectedGrade=x.avg==null?"-":uepExpectedGrade(i+1,graded);});group.sectionCount=Math.max(1,Math.ceil(group.students.length/30));});
+  const errors=rows.flatMap(row=>uepSelectionErrors08105(row).map(error=>({row,student:row.__student,...error})));
+  return {rows,applications,subjects:[...subjects.values()].sort((a,b)=>a.term.localeCompare(b.term)||b.students.length-a.students.length||a.subject.localeCompare(b.subject,"ko")),errors};
+}
+function uepSelectionErrors08105(row){
+  const errors=uepSelectionErrors(row),terms=["2-1","2-2","3-1","3-2"];
+  const seen=new Map();
+  terms.forEach(term=>{
+    const subjects=uepSelectionTermSubjects(row,term);
+    if(!subjects.length&&!errors.some(x=>x.type==="신청 누락"&&x.term===term))errors.push({type:"신청 누락",term,detail:"해당 학기 선택과목이 비어 있습니다."});
+    subjects.forEach(subject=>{const normalized=subject.replace(/\s+/g,"");if(!seen.has(normalized))seen.set(normalized,[]);seen.get(normalized).push(term);});
+  });
+  seen.forEach((subjectTerms,subject)=>{if(subjectTerms.length>1)errors.push({type:"학기간 동일과목 중복",term:subjectTerms.join(" · "),detail:`${subject} 과목이 여러 학기에 중복 신청되었습니다.`});});
+  return errors;
+}
+
+
+// __UEP_08126_SELECTION_CONTINUITY__
+const __uepSelectionErrors08105_08126=uepSelectionErrors08105;
+uepSelectionErrors08105=function(row){
+  const errors=__uepSelectionErrors08105_08126(row);
+  const s21=uepSelectionTermSubjects(row,'2-1'),s22=uepSelectionTermSubjects(row,'2-2');
+  const groups=[['일본어',/일본어/],['중국어',/중국어/],['음악',/음악/],['미술',/미술/]];
+  groups.forEach(([label,rx])=>{const a=s21.find(x=>rx.test(String(x)))||'',b=s22.find(x=>rx.test(String(x)))||'';if(Boolean(a)!==Boolean(b)||(a&&b&&String(a).replace(/\s+/g,'')!==String(b).replace(/\s+/g,'')))errors.push({type:label+' 연계오류',term:'2-1 · 2-2',detail:'2학년 1·2학기 '+label+' 선택은 동일해야 합니다.'});});
+  const seen=new Set();return errors.filter(e=>{const k=[e.type,e.term,e.detail].join('|');if(seen.has(k))return false;seen.add(k);return true;});
+};
+
+
+
+=== CURRENT CANONICAL CURRICULUM AREA ===
+
+// __UEP_08113_RESTORED_CURRICULUM_SDGS_BODY__
+// __UEP_CURRICULUM_FINAL_08106__
+let curriculumWorkspaceMode="students",curriculumErrorOnly=false,curriculumErrorType="all",curriculumTermFilter="2-1",curriculumSubjectKey="",curriculumRosterSort="grade";
+function uepMainRecordTabs(){const tabs=[["activities","활동내역"],["sdgs","SDGs 연계 성장 프로파일"],["curriculum","교육과정"],["final","기록"]];return `<div class="record-main-tabs">${tabs.map(([id,label])=>`<button data-record-mode="${id}" class="${recordMode===id?'active':''}"><b>${label}</b><small>${id==='activities'?'학생 활동 사실 확인':id==='sdgs'?'진로·전공·탐구주제·사회적 가치 연계':id==='curriculum'?'학기별 선택과목':'학생 성장 자료'}</small></button>`).join('')}</div>`;}
+function uepCurriculumNav(){return `<div class="selection-analysis-tabs curriculum-final-tabs"><button data-curriculum-workspace="students" class="${curriculumWorkspaceMode==='students'?'active':''}">학생신청</button><button data-curriculum-workspace="subjects" class="${curriculumWorkspaceMode==='subjects'?'active':''}">과목별 신청현황</button></div>`;}
+function uepSelectionErrorLabel(errors){return errors.length?`<span class="selection-error-count">${errors.length}건 확인</span>`:'<span class="selection-ok">정상</span>';}
+function uepStudentApplicationDetail(row,errors){const student=row.__student;const sms=uepSelectionSms(student,errors);return `<section class="curriculum-student-detail"><header><div><small>${escapeHtml(student.studentNo)} · ${escapeHtml(student.className||'')}반</small><h3>${escapeHtml(student.name)} 학생신청</h3></div>${uepSelectionErrorLabel(errors)}</header><div class="curriculum-term-grid">${["2-1","2-2","3-1","3-2"].map(term=>`<section><header><h3>${term.replace('-','학년 ')}학기</h3><span>${uepSelectionTermSubjects(row,term).length}과목</span></header>${uepSelectionTermSubjects(row,term).map(x=>`<article><b>${escapeHtml(x)}</b><em>신청</em></article>`).join('')||'<div class="selection-missing">미신청</div>'}</section>`).join('')}</div>${errors.length?`<section class="selection-error-panel"><header><h3>확인할 신청 오류</h3><span>${errors.length}건</span></header>${errors.map(x=>`<article><b>${escapeHtml(x.type)}</b><em>${escapeHtml(x.term)}</em><p>${escapeHtml(x.detail)}</p></article>`).join('')}</section><section class="curriculum-message-panel"><header><div><small>STUDENT MESSAGE</small><h3>현재 오류 보완 문자</h3></div><button class="btn primary" data-copy-current-selection-sms>문자 복사</button></header><textarea id="currentSelectionSms" readonly>${escapeHtml(sms)}</textarea></section>`:'<section class="selection-safe-panel"><b>✓ 선택과목 검증 정상</b><span>현재 신청자료에서 확인할 오류가 없습니다.</span></section>'}</section>`;}
+function uepStudentApplicationView(){const data=uepSelectionDataset(),types=[...new Set(data.errors.map(x=>x.type))],classRows=data.rows.filter(r=>recordStudentClass(r.__student)===String(recordClassNo));const visible=classRows.filter(r=>{const errs=data.errors.filter(e=>e.student.id===r.__student.id);return (!curriculumErrorOnly||errs.length)&&(curriculumErrorType==='all'||errs.some(e=>e.type===curriculumErrorType));});if(!recordStudentId||!classRows.some(r=>r.__student.id===recordStudentId))recordStudentId=classRows[0]?.__student.id||'';const chosen=classRows.find(r=>r.__student.id===recordStudentId)||classRows[0];const errs=chosen?data.errors.filter(e=>e.student.id===chosen.__student.id):[];const classes=Array.from({length:9},(_,i)=>String(i+1)).map(no=>`<button data-record-class="${no}" class="${recordClassNo===no?'active':''}"><b>${no}반</b><span>${data.rows.filter(r=>recordStudentClass(r.__student)===no).length}명</span></button>`).join('');const controls=`<div class="curriculum-filter-bar"><div class="record-class-cards">${classes}</div><label>오류유형<select data-curriculum-error-type><option value="all">전체 오류</option>${types.map(x=>`<option ${curriculumErrorType===x?'selected':''}>${escapeHtml(x)}</option>`).join('')}</select></label><button class="btn ${curriculumErrorOnly?'primary':'secondary'}" data-curriculum-error-only>${curriculumErrorOnly?'오류학생만 보는 중':'오류학생만 보기'}</button></div>`;if(recordQueryMode==='student')return `${controls}<div class="record-query-switch"><button data-record-query="class">반별 조회</button><button class="active">개인별 조회</button></div><div class="uep-student-picker"><button data-uep-student-prev>‹</button><button class="uep-picker-main" data-open-student-picker><small>${recordClassNo}반 학생</small><b>${escapeHtml(chosen?.__student.studentNo||'')} ${escapeHtml(chosen?.__student.name||'학생 선택')}</b></button><button data-uep-student-next>›</button><div class="uep-picker-menu" hidden><input data-uep-student-search placeholder="학번·이름 검색"><div>${classRows.map(r=>`<button data-record-student="${escapeHtml(r.__student.id)}">${escapeHtml(r.__student.studentNo)} ${escapeHtml(r.__student.name)}</button>`).join('')}</div></div></div>${chosen?uepStudentApplicationDetail(chosen,errs):''}`;return `${controls}<div class="record-query-switch"><button class="active">반별 조회</button><button data-record-query="student">개인별 조회</button></div><div class="curriculum-class-list"><div class="curriculum-class-head"><span>학번·학생</span><span>2-1</span><span>2-2</span><span>3-1</span><span>3-2</span><span>상태</span></div>${visible.map(r=>{const es=data.errors.filter(e=>e.student.id===r.__student.id);return `<button data-record-student="${escapeHtml(r.__student.id)}"><b>${escapeHtml(r.__student.studentNo)} ${escapeHtml(r.__student.name)}</b>${["2-1","2-2","3-1","3-2"].map(t=>`<span>${uepSelectionTermSubjects(r,t).length}과목</span>`).join('')}<span>${uepSelectionErrorLabel(es)}</span></button>`;}).join('')||'<div class="query-empty"><b>조건에 맞는 학생이 없습니다.</b></div>'}</div>`;}
+function uepSubjectStatus(group){const n=group.students.length;if(n<10)return '<i class="subject-risk close">폐강위기</i>';if(n<20)return '<i class="subject-risk watch">개설확인</i>';if(Math.ceil(n/group.sectionCount)>30)return '<i class="subject-risk crowd">과밀가능</i>';return '<i class="subject-risk stable">안정</i>';}
+function uepSubjectApplicationView(){const data=uepSelectionDataset(),terms=["2-1","2-2","3-1","3-2"],groups=data.subjects.filter(x=>x.term===curriculumTermFilter);const selected=groups.find(x=>x.key===curriculumSubjectKey)||null;const privacy=privacyModeEnabled();let detail='';if(selected){const rows=[...selected.students].sort(curriculumRosterSort==='class'?((a,b)=>String(a.student.studentNo).localeCompare(String(b.student.studentNo))):((a,b)=>(a.avg??99)-(b.avg??99)||String(a.student.studentNo).localeCompare(String(b.student.studentNo))));detail=`<section class="subject-roster-detail"><header><div><small>${selected.term}</small><h3>${escapeHtml(selected.subject)} 신청명단</h3></div><div class="roster-sort"><button data-roster-sort="grade" class="${curriculumRosterSort==='grade'?'active':''}">예상성적순</button><button data-roster-sort="class" class="${curriculumRosterSort==='class'?'active':''}">반·번호순</button></div></header><div class="selection-roster privacy-roster ${privacy?'masked':''}"><div class="selection-roster-head"><span>학번·성명</span><span>현재반</span><span>구분</span><span>1학년 내신평균</span><span>예상등수</span><span>예상등급</span></div>${rows.map(x=>`<article><b class="privacy-sensitive-text">${privacy?'**** ＊＊＊':`${escapeHtml(x.student.studentNo)} ${escapeHtml(x.student.name)}`}</b><span>${escapeHtml(recordStudentClass(x.student))}반</span><span>${x.dorm?'<i class="dorm-badge">학사</i>':'-'}</span><span class="privacy-sensitive-text">${privacy?'＊.＊＊':x.avg==null?'성적 없음':x.avg.toFixed(2)}</span><span class="privacy-sensitive-text">${privacy?'＊위':x.expectedRank?`${x.expectedRank}위`:'-'}</span><span class="privacy-sensitive-text">${privacy?'＊등급':x.expectedGrade==='-'?'-':`${x.expectedGrade}등급`}</span></article>`).join('')}</div><p class="selection-estimate-note">예상등수·등급은 해당 과목 신청자의 1학년 내신 등급 평균을 사용한 상담용 추정치입니다.</p></section>`;}
+  return `<div class="term-picker-cards">${terms.map(t=>`<button data-curriculum-term="${t}" class="${curriculumTermFilter===t?'active':''}"><b>${t.replace('-','학년 ')}학기</b><span>${data.subjects.filter(x=>x.term===t).length}과목</span></button>`).join('')}</div><div class="subject-card-grid">${groups.map(g=>`<button data-curriculum-subject="${escapeHtml(g.key)}" class="${g.key===curriculumSubjectKey?'active':''}"><small>${g.term}</small><b>${escapeHtml(g.subject)}</b><span>${g.students.length}명 · 예상 ${g.sectionCount}분반</span>${uepSubjectStatus(g)}</button>`).join('')}</div>${detail}`;}
+function uepCurriculumFinalView(){return `<div class="module-page records-v0601 curriculum-final-page">${uepMainRecordTabs()}${uepCurriculumNav()}${curriculumWorkspaceMode==='students'?uepStudentApplicationView():uepSubjectApplicationView()}</div>`;}
+
+
+=== CURRENT DORM SAVE ===
+
+async function saveDormOuting(payload={}){
+  const allowedRoles=new Set(['admin','grade_head','grade_manager','homeroom']);
+  if(payload.role&&!allowedRoles.has(String(payload.role)))throw new Error('학사외출 교사등록 권한이 없습니다.');
+  const date=String(payload.date||'').slice(0,10),category=String(payload.category||'외출'),studentNo=String(payload.studentNo||'').replace(/\D/g,''),name=String(payload.name||'').trim();
+  if(!date||!studentNo||!name)throw new Error('학생·학번·날짜 정보를 확인해 주세요.');
+  const home=/퇴소|귀가/.test(category),outTime=String(payload.outTime||''),returnTime=String(payload.returnTime||'');
+  if(!outTime)throw new Error('외출·귀가 시간을 입력해 주세요.');
+  if(!home&&!returnTime)throw new Error('복귀 예정시간을 입력해 주세요.');
+  const account=await resolveSchoolServiceAccount();if(!validateServiceAccount(account))throw new Error('학교 공용 Google 쓰기 연결을 찾지 못했습니다.');
+  const token=await getSheetsToken(account),now=new Date().toISOString(),id=String(payload.id||`OUT-TEACHER-${crypto.randomUUID()}`),grade=String(payload.grade||studentNo.slice(0,1)||'1'),className=String(payload.className||studentNo.slice(1,2)||''),number=String(payload.number||studentNo.slice(-2)).replace(/^0/,'');
+  const existing=await readSheetBatch(token,UEP_SPREADSHEET_ID,["'02_학사외출_일자별'!A3:AD5000"]),matrix=existing?.[0]?.values||[],headers=(matrix[0]||[]).map(x=>String(x||'').trim()),col=(...names)=>names.map(n=>headers.indexOf(n)).find(i=>i>=0);
+  const dcol=col('외출일자','신청일자','운영일','일자','날짜'),ncol=col('학번','학생학번'),idcol=col('학생ID','학생 ID'),ccol=col('외출구분','신청구분','구분'),tcol=col('외출시간','출발예정시간','출발시간');
+  const duplicate=matrix.slice(1).some(r=>String(r[dcol]||'').slice(0,10)===date&&((ncol>=0&&String(r[ncol]||'').replace(/\.0$/,'')===studentNo)||(idcol>=0&&String(r[idcol]||'')===String(payload.studentId||'')))&&String(r[ccol]||'')===category&&String(r[tcol]||'')===outTime);
+  if(duplicate)throw new Error('같은 학생의 동일한 학사외출 기록이 이미 있습니다.');
+  const row=[[id,'',date,String(payload.studentId||''),grade,className,number,name,'교사등록',category,home?'귀가형':'복귀형',outTime,home?'':returnTime,home?returnTime:'',String(payload.reason||''),String(payload.destination||''),String(payload.guardian||''),String(payload.note||''),String(payload.status||'확인'),now,now,'UEP반영',now,String(payload.writer||''),'','','Y','교사 직접등록','담임·관리자 직접 확인',now]];
+  await appendSheetValues(token,UEP_SPREADSHEET_ID,"'02_학사외출_일자별'!A:AD",row);
+  liveDataCache=null;liveDataFetchedAt=0;const data=await fetchLiveData({force:true});return {ok:true,id,data,record:{id,studentId:String(payload.studentId||''),studentNo,name,date,className,number,category,outTime,returnTime,reason:String(payload.reason||''),destination:String(payload.destination||''),note:String(payload.note||''),confirmed:String(payload.writer||''),status:'확인'}};
+}
+
+=== IPC/PRELOAD REFERENCES ===
+
+-- save-dorm-outing --
+
+-- saveDormOuting --
+
+A:R",row);
+  liveDataCache=null;liveDataFetchedAt=0;
+  return {ok:true,id,record:{id,studentId:String(payload.studentId||""),studentNo:String(payload.studentNo||""),name:String(payload.name||""),grade:String(payload.grade||"1"),className:String(payload.className||""),createdAt:String(payload.createdAt||now),area:String(payload.area||""),type:String(payload.type||"학생 상담"),memo:String(payload.memo||""),action:String(payload.action||""),nextDate:String(payload.nextDate||""),status:String(payload.status||"진행중"),group:String(payload.group||""),stage:String(payload.stage||""),discoveryReason:String(payload.discoveryReason||""),writer:String(payload.writer||""),modifiedAt:now}};
+}
+
+
+async function saveDormOuting(payload={}){
+  const allowedRoles=new Set(['admin','grade_head','grade_manager','homeroom']);
+  if(payload.role&&!allowedRoles.has(String(payload.role)))throw new Error('학사외출 교사등록 권한이 없습니다.');
+  const date=String(payload.date||'').slice(0,10),category=String(payload.category||'외출'),studentNo=String(payload.studentNo||'').replace(/\D/g,''),name=String(payload.name||'').trim();
+  if(!date||!studentNo||!name)throw new Error('학생·학번·날짜 정보를 확인해 주세요.');
+  const home=/퇴소|귀가/.test(category),outTime=String(payload.outTime||''),returnTime=String(payload.returnTime||'');
+  if(!outTime)throw new Error('외출·귀가 시간을 입력해 주세요.');
+  if(!home&&!returnTime)throw new Error('복귀 예정시간을 입력해 주세요.');
+  const account=await resolveSchoolServiceAccount();if(!validateServiceAccount(account))throw new Error('학교 공용 Google 쓰기 연결을 찾지 못했습니다.');
+  const token=await getSheetsToken(account),now=new Date().toISOString(),id=String(payload.id||`OUT-TEACHER-${crypto.randomUUID()}`),grade=String(payload.grade||studentNo.slice(0,1)||'1'),className=String(payload.className||studentNo.slice(1,2)||''),number=String(payload.number||studentNo.slice(-2)).replace(/^0/,'');
+  const existing=await readSheetBatch(token,UEP_SPREADSHEET_ID,["'02_학사외출_일자별'!A3:AD5000"]),matrix=existing?.[0]?.values||[],headers=(matrix[0]||[]).map(x=>String(x||'').trim()),col=(...names)=>names.map(n=>headers.indexOf(n)).find(i=>i>
+
+d={}) => saveProgramOperation(payload));
+ipcMain.handle("attendance:officialSave", async (_event, payload={}) => saveOfficialAttendance(payload));
+ipcMain.handle("attendance:officialDelete", async (_event, id="") => deleteOfficialAttendance(id));
+ipcMain.handle("attendance:lateSave", async (_event, payload={}) => saveLateAttendance(payload));
+ipcMain.handle("attendance:lateDelete", async (_event, id="") => deleteLateAttendance(id));
+ipcMain.handle("counsel:save", async (_event, payload={}) => saveCounselRecord(payload));
+ipcMain.handle("studentGuidance:save", async (_event, payload={}) => saveStudentGuidanceRecord(payload));
+  ipcMain.handle("dormOuting:save", async (_event, payload={}) => saveDormOuting(payload));
+ipcMain.handle("dormRule:save", async (_event, payload={}) => saveDormRule(payload));
+ipcMain.handle("dormRule:delete", async (_event, id="") => deleteDormRule(id));
+ipcMain.handle("nightDuty:save", async (_event, payload={}) => saveNightSupervisor(payload));
+ipcMain.handle("lunchDuty:save", async (_event, payload={}) => saveLunchDuty(payload));
+
+async function readNoticeSheetMatrix(token, sheetName, range) {
+  const result = await readSheetBatch(token, UEP_SPREADSHEET_ID, [`'${sheetName}'!${range}`]);
+  return result?.[0]?.values || [];
+}
+function noticePayloadRow(payload={}, id, nowIso, headerNames=[]) {
+  const now = new Date(nowIso);
+  const values={
+    "공지ID":id,"학년도":String(payload.schoolYear||now.getFullYear()),"구분":String(payload.type||"공지"),
+    "제목":String(payload.title||"").trim(),"내용":String(payload.content||"").trim(),
+    "대상학년":String(payload.targetGrade||"1"),"대상반":String(payload.targetClass||"전체"),
+    "게시일":String(payload.postDate||nowIso.slice(0,10)),"마감일시":String(payload.deadline||""),
+    "확인필요":payload.confirmRequired===false?"N":"Y","제출필요":payload.submitRequired?"Y":"N",
+    "담당부서":String(payload.department||"1학년부"),"담당자":String(payload.author||""),"상태":String(payload.status||"게시"),
+    "수정일시":nowIso,"수정자":String(payload.author||"UEP"),"비고":String(payload.note||"UEP 화면 입력"),
+    "공지성격":String(payload.noticeKind||payload.type||"일
+
+-- school-read --
+
+auth.recovery.json");
+// __UEP_GOOGLE_OAUTH_CANONICAL_08073__
+const googleUserOAuthCanonicalRoot = () => path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'UNHO Education Platform');
+const googleUserOAuthCanonicalPath = () => path.join(googleUserOAuthCanonicalRoot(), 'google-user-oauth.bin');
+const googleUserOAuthCanonicalRecoveryPath = () => path.join(googleUserOAuthCanonicalRoot(), 'google-user-oauth.recovery.json');
+const neisApiKeyPath = () => path.join(stableUserDataRoot(), "neis-api-key.bin");
+const schoolReadDevicePath = () => path.join(stableUserDataRoot(), "uep-device-id.txt");
+const schoolReadSessionPath = () => path.join(stableUserDataRoot(), "uep-school-read-session.bin");
+const neisCachePath = () => path.join(stableUserDataRoot(), "neis-dashboard-cache.json");
+
+const comciganCachePath = () => path.join(stableUserDataRoot(), "comcigan-timetable-cache.json");
+async function migrateStableUserFile(fileName) {
+  const target=path.join(stableUserDataRoot(),fileName), legacy=path.join(legacyUserDataRoot(),fileName);
+  try { await fs.access(target); return; } catch {}
+  try { await fs.mkdir(stableUserDataRoot(),{recursive:true}); await fs.copyFile(legacy,target); } catch {}
+}
+async function migrateStableUserData() {
+  // Local State에는 Windows safeStorage가 사용하는 Chromium OS encryption key 정보가 들어 있습니다.
+  // 기존 버전의 userData에서 최초 1회 같이 옮겨야 기존 암호문을 복호화할 가능성이 유지됩니다.
+  for (const fileName of ["Local State","school-board-state.json","google-service-account.bin","google-service-account.recovery.json","google-user-oauth.bin","google-user-oauth.recovery.json","neis-api-key.bin","neis-dashboard-cache.json","comcigan-timetable-cache.json"]) await migrateStableUserFile(fileName);
+}
+let comciganWindow = null;
+let mainWindow = null;
+let shutdownStarted = false;
+
+async function appendShutdownLog(message) {
+  try {
+    const file = path.join(stableUserDataRoot(), "shutdown-diagnostics.log");
+    await fs.mkdir(stableUserDataRoot(), { recursive: true });
+    await fs.appendFile(file, `${new Date().toISOString()} ${message}\n`, "utf8");
+  } catch 
+
+-- schoolRead --
+
+h = () => path.join(stableUserDataRoot(), "google-user-oauth.bin");
+const googleUserOAuthRecoveryPath = () => path.join(stableUserDataRoot(), "google-user-oauth.recovery.json");
+// __UEP_GOOGLE_OAUTH_CANONICAL_08073__
+const googleUserOAuthCanonicalRoot = () => path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'UNHO Education Platform');
+const googleUserOAuthCanonicalPath = () => path.join(googleUserOAuthCanonicalRoot(), 'google-user-oauth.bin');
+const googleUserOAuthCanonicalRecoveryPath = () => path.join(googleUserOAuthCanonicalRoot(), 'google-user-oauth.recovery.json');
+const neisApiKeyPath = () => path.join(stableUserDataRoot(), "neis-api-key.bin");
+const schoolReadDevicePath = () => path.join(stableUserDataRoot(), "uep-device-id.txt");
+const schoolReadSessionPath = () => path.join(stableUserDataRoot(), "uep-school-read-session.bin");
+const neisCachePath = () => path.join(stableUserDataRoot(), "neis-dashboard-cache.json");
+
+const comciganCachePath = () => path.join(stableUserDataRoot(), "comcigan-timetable-cache.json");
+async function migrateStableUserFile(fileName) {
+  const target=path.join(stableUserDataRoot(),fileName), legacy=path.join(legacyUserDataRoot(),fileName);
+  try { await fs.access(target); return; } catch {}
+  try { await fs.mkdir(stableUserDataRoot(),{recursive:true}); await fs.copyFile(legacy,target); } catch {}
+}
+async function migrateStableUserData() {
+  // Local State에는 Windows safeStorage가 사용하는 Chromium OS encryption key 정보가 들어 있습니다.
+  // 기존 버전의 userData에서 최초 1회 같이 옮겨야 기존 암호문을 복호화할 가능성이 유지됩니다.
+  for (const fileName of ["Local State","school-board-state.json","google-service-account.bin","google-service-account.recovery.json","google-user-oauth.bin","google-user-oauth.recovery.json","neis-api-key.bin","neis-dashboard-cache.json","comcigan-timetable-cache.json"]) await migrateStableUserFile(fileName);
+}
+let comciganWindow = null;
+let mainWindow = null;
+let shutdownStarted = false;
+
+async function appendShutdownLog(message) {
+  try {
+    const file = path.join(stableUserDataRoot(), "shutdown-diagnostics.log");
+
+
+RecoveryPath = () => path.join(stableUserDataRoot(), "google-user-oauth.recovery.json");
+// __UEP_GOOGLE_OAUTH_CANONICAL_08073__
+const googleUserOAuthCanonicalRoot = () => path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'UNHO Education Platform');
+const googleUserOAuthCanonicalPath = () => path.join(googleUserOAuthCanonicalRoot(), 'google-user-oauth.bin');
+const googleUserOAuthCanonicalRecoveryPath = () => path.join(googleUserOAuthCanonicalRoot(), 'google-user-oauth.recovery.json');
+const neisApiKeyPath = () => path.join(stableUserDataRoot(), "neis-api-key.bin");
+const schoolReadDevicePath = () => path.join(stableUserDataRoot(), "uep-device-id.txt");
+const schoolReadSessionPath = () => path.join(stableUserDataRoot(), "uep-school-read-session.bin");
+const neisCachePath = () => path.join(stableUserDataRoot(), "neis-dashboard-cache.json");
+
+const comciganCachePath = () => path.join(stableUserDataRoot(), "comcigan-timetable-cache.json");
+async function migrateStableUserFile(fileName) {
+  const target=path.join(stableUserDataRoot(),fileName), legacy=path.join(legacyUserDataRoot(),fileName);
+  try { await fs.access(target); return; } catch {}
+  try { await fs.mkdir(stableUserDataRoot(),{recursive:true}); await fs.copyFile(legacy,target); } catch {}
+}
+async function migrateStableUserData() {
+  // Local State에는 Windows safeStorage가 사용하는 Chromium OS encryption key 정보가 들어 있습니다.
+  // 기존 버전의 userData에서 최초 1회 같이 옮겨야 기존 암호문을 복호화할 가능성이 유지됩니다.
+  for (const fileName of ["Local State","school-board-state.json","google-service-account.bin","google-service-account.recovery.json","google-user-oauth.bin","google-user-oauth.recovery.json","neis-api-key.bin","neis-dashboard-cache.json","comcigan-timetable-cache.json"]) await migrateStableUserFile(fileName);
+}
+let comciganWindow = null;
+let mainWindow = null;
+let shutdownStarted = false;
+
+async function appendShutdownLog(message) {
+  try {
+    const file = path.join(stableUserDataRoot(), "shutdown-diagnostics.log");
+    await fs.mkdir(stableUserDataRoot(), { recursive: true });
+    await fs.appendFile(fi
+
+ if (safeStorage.isEncryptionAvailable()) await fs.writeFile(filePath, safeStorage.encryptString(JSON.stringify(recovered))); } catch {}
+        return recovered;
+      }
+    } catch {}
+  }
+  const backup = `${filePath}.unreadable-${Date.now()}.bak`;
+  try { await fs.rename(filePath, backup); } catch {}
+  const error = new Error("저장된 보안 인증정보를 복호화할 수 없습니다. 서비스 계정 JSON을 다시 등록해 주세요.");
+  error.code = "UEP_SAFE_STORAGE_DECRYPT_FAILED";
+  throw error;
+}
+
+
+// __UEP_SCHOOL_READ_API_PRIMARY_08120__
+// __UEP_SCHOOL_READ_ENDPOINT_FALLBACK_08121__
+const UEP_SCHOOL_READ_API_FALLBACK='https://script.google.com/macros/s/AKfycbyLEEam4L2sX653pii69TC3_84wTyfAed_UL8HRY6PBG467im1LmZJ0CIpSKSOj4r6-0w/exec';
+let schoolReadPolicyCache={url:'',expiresAt:0};
+function schoolReadError(message,code='UEP_SCHOOL_READ_ERROR'){const e=new Error(message);e.code=code;return e;}
+async function loadSchoolReadApiUrl(){
+  if(schoolReadPolicyCache.url&&schoolReadPolicyCache.expiresAt>Date.now())return schoolReadPolicyCache.url;
+  let response;
+  try{response=await net.fetch(UEP_UPDATE_POLICY_URL,{cache:'no-store'});}catch(error){throw schoolReadError('UEP School Read API 설정을 확인하지 못했습니다.','UEP_SCHOOL_READ_POLICY_UNAVAILABLE');}
+  if(!response.ok)throw schoolReadError('UEP School Read API 설정 조회 실패 ('+response.status+')','UEP_SCHOOL_READ_POLICY_UNAVAILABLE');
+  const policy=await response.json();
+  const url=String(policy?.schoolReadApiUrl||UEP_SCHOOL_READ_API_FALLBACK||'').trim();
+  if(!/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec(?:\?.*)?$/i.test(url))throw schoolReadError('UEP School Read API 배포 URL이 아직 등록되지 않았습니다.','UEP_SCHOOL_READ_NOT_CONFIGURED');
+  schoolReadPolicyCache={url,expiresAt:Date.now()+10*60*1000};
+  return url;
+}
+async function getOrCreateSchoolReadDeviceId(){
+  try{const saved=String(await fs.readFile(schoolReadDevicePath(),'utf8')).trim();if(saved)return saved;}catch{}
+  const id='UEP-'+crypto.randomUUID();
+  await fs.mkdir(path.dirname(schoolReadDevicePath()),{recursive:true});
+  await fs.writeFile(schoolReadDevicePath(),id,'utf8');
+  return id;
+}
+async function readSchoolR
+
+iteFile(filePath, safeStorage.encryptString(JSON.stringify(recovered))); } catch {}
+        return recovered;
+      }
+    } catch {}
+  }
+  const backup = `${filePath}.unreadable-${Date.now()}.bak`;
+  try { await fs.rename(filePath, backup); } catch {}
+  const error = new Error("저장된 보안 인증정보를 복호화할 수 없습니다. 서비스 계정 JSON을 다시 등록해 주세요.");
+  error.code = "UEP_SAFE_STORAGE_DECRYPT_FAILED";
+  throw error;
+}
+
+
+// __UEP_SCHOOL_READ_API_PRIMARY_08120__
+// __UEP_SCHOOL_READ_ENDPOINT_FALLBACK_08121__
+const UEP_SCHOOL_READ_API_FALLBACK='https://script.google.com/macros/s/AKfycbyLEEam4L2sX653pii69TC3_84wTyfAed_UL8HRY6PBG467im1LmZJ0CIpSKSOj4r6-0w/exec';
+let schoolReadPolicyCache={url:'',expiresAt:0};
+function schoolReadError(message,code='UEP_SCHOOL_READ_ERROR'){const e=new Error(message);e.code=code;return e;}
+async function loadSchoolReadApiUrl(){
+  if(schoolReadPolicyCache.url&&schoolReadPolicyCache.expiresAt>Date.now())return schoolReadPolicyCache.url;
+  let response;
+  try{response=await net.fetch(UEP_UPDATE_POLICY_URL,{cache:'no-store'});}catch(error){throw schoolReadError('UEP School Read API 설정을 확인하지 못했습니다.','UEP_SCHOOL_READ_POLICY_UNAVAILABLE');}
+  if(!response.ok)throw schoolReadError('UEP School Read API 설정 조회 실패 ('+response.status+')','UEP_SCHOOL_READ_POLICY_UNAVAILABLE');
+  const policy=await response.json();
+  const url=String(policy?.schoolReadApiUrl||UEP_SCHOOL_READ_API_FALLBACK||'').trim();
+  if(!/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec(?:\?.*)?$/i.test(url))throw schoolReadError('UEP School Read API 배포 URL이 아직 등록되지 않았습니다.','UEP_SCHOOL_READ_NOT_CONFIGURED');
+  schoolReadPolicyCache={url,expiresAt:Date.now()+10*60*1000};
+  return url;
+}
+async function getOrCreateSchoolReadDeviceId(){
+  try{const saved=String(await fs.readFile(schoolReadDevicePath(),'utf8')).trim();if(saved)return saved;}catch{}
+  const id='UEP-'+crypto.randomUUID();
+  await fs.mkdir(path.dirname(schoolReadDevicePath()),{recursive:true});
+  await fs.writeFile(schoolReadDevicePath(),id,'utf8');
+  return id;
+}
+async function readSchoolReadSession(){
+  try{const value=await readEncrypted(s
+
+kup = `${filePath}.unreadable-${Date.now()}.bak`;
+  try { await fs.rename(filePath, backup); } catch {}
+  const error = new Error("저장된 보안 인증정보를 복호화할 수 없습니다. 서비스 계정 JSON을 다시 등록해 주세요.");
+  error.code = "UEP_SAFE_STORAGE_DECRYPT_FAILED";
+  throw error;
+}
+
+
+// __UEP_SCHOOL_READ_API_PRIMARY_08120__
+// __UEP_SCHOOL_READ_ENDPOINT_FALLBACK_08121__
+const UEP_SCHOOL_READ_API_FALLBACK='https://script.google.com/macros/s/AKfycbyLEEam4L2sX653pii69TC3_84wTyfAed_UL8HRY6PBG467im1LmZJ0CIpSKSOj4r6-0w/exec';
+let schoolReadPolicyCache={url:'',expiresAt:0};
+function schoolReadError(message,code='UEP_SCHOOL_READ_ERROR'){const e=new Error(message);e.code=code;return e;}
+async function loadSchoolReadApiUrl(){
+  if(schoolReadPolicyCache.url&&schoolReadPolicyCache.expiresAt>Date.now())return schoolReadPolicyCache.url;
+  let response;
+  try{response=await net.fetch(UEP_UPDATE_POLICY_URL,{cache:'no-store'});}catch(error){throw schoolReadError('UEP School Read API 설정을 확인하지 못했습니다.','UEP_SCHOOL_READ_POLICY_UNAVAILABLE');}
+  if(!response.ok)throw schoolReadError('UEP School Read API 설정 조회 실패 ('+response.status+')','UEP_SCHOOL_READ_POLICY_UNAVAILABLE');
+  const policy=await response.json();
+  const url=String(policy?.schoolReadApiUrl||UEP_SCHOOL_READ_API_FALLBACK||'').trim();
+  if(!/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec(?:\?.*)?$/i.test(url))throw schoolReadError('UEP School Read API 배포 URL이 아직 등록되지 않았습니다.','UEP_SCHOOL_READ_NOT_CONFIGURED');
+  schoolReadPolicyCache={url,expiresAt:Date.now()+10*60*1000};
+  return url;
+}
+async function getOrCreateSchoolReadDeviceId(){
+  try{const saved=String(await fs.readFile(schoolReadDevicePath(),'utf8')).trim();if(saved)return saved;}catch{}
+  const id='UEP-'+crypto.randomUUID();
+  await fs.mkdir(path.dirname(schoolReadDevicePath()),{recursive:true});
+  await fs.writeFile(schoolReadDevicePath(),id,'utf8');
+  return id;
+}
+async function readSchoolReadSession(){
+  try{const value=await readEncrypted(schoolReadSessionPath());return value&&typeof value==='object'?value:null;}catch{return null;}
+}
+async function saveSchoolReadSession(value){await sa
+
+le-${Date.now()}.bak`;
+  try { await fs.rename(filePath, backup); } catch {}
+  const error = new Error("저장된 보안 인증정보를 복호화할 수 없습니다. 서비스 계정 JSON을 다시 등록해 주세요.");
+  error.code = "UEP_SAFE_STORAGE_DECRYPT_FAILED";
+  throw error;
+}
+
+
+// __UEP_SCHOOL_READ_API_PRIMARY_08120__
+// __UEP_SCHOOL_READ_ENDPOINT_FALLBACK_08121__
+const UEP_SCHOOL_READ_API_FALLBACK='https://script.google.com/macros/s/AKfycbyLEEam4L2sX653pii69TC3_84wTyfAed_UL8HRY6PBG467im1LmZJ0CIpSKSOj4r6-0w/exec';
+let schoolReadPolicyCache={url:'',expiresAt:0};
+function schoolReadError(message,code='UEP_SCHOOL_READ_ERROR'){const e=new Error(message);e.code=code;return e;}
+async function loadSchoolReadApiUrl(){
+  if(schoolReadPolicyCache.url&&schoolReadPolicyCache.expiresAt>Date.now())return schoolReadPolicyCache.url;
+  let response;
+  try{response=await net.fetch(UEP_UPDATE_POLICY_URL,{cache:'no-store'});}catch(error){throw schoolReadError('UEP School Read API 설정을 확인하지 못했습니다.','UEP_SCHOOL_READ_POLICY_UNAVAILABLE');}
+  if(!response.ok)throw schoolReadError('UEP School Read API 설정 조회 실패 ('+response.status+')','UEP_SCHOOL_READ_POLICY_UNAVAILABLE');
+  const policy=await response.json();
+  const url=String(policy?.schoolReadApiUrl||UEP_SCHOOL_READ_API_FALLBACK||'').trim();
+  if(!/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec(?:\?.*)?$/i.test(url))throw schoolReadError('UEP School Read API 배포 URL이 아직 등록되지 않았습니다.','UEP_SCHOOL_READ_NOT_CONFIGURED');
+  schoolReadPolicyCache={url,expiresAt:Date.now()+10*60*1000};
+  return url;
+}
+async function getOrCreateSchoolReadDeviceId(){
+  try{const saved=String(await fs.readFile(schoolReadDevicePath(),'utf8')).trim();if(saved)return saved;}catch{}
+  const id='UEP-'+crypto.randomUUID();
+  await fs.mkdir(path.dirname(schoolReadDevicePath()),{recursive:true});
+  await fs.writeFile(schoolReadDevicePath(),id,'utf8');
+  return id;
+}
+async function readSchoolReadSession(){
+  try{const value=await readEncrypted(schoolReadSessionPath());return value&&typeof value==='object'?value:null;}catch{return null;}
+}
+async function saveSchoolReadSession(value){await saveEncrypted(schoolReadSessi
+
+ePath, backup); } catch {}
+  const error = new Error("저장된 보안 인증정보를 복호화할 수 없습니다. 서비스 계정 JSON을 다시 등록해 주세요.");
+  error.code = "UEP_SAFE_STORAGE_DECRYPT_FAILED";
+  throw error;
+}
+
+
+// __UEP_SCHOOL_READ_API_PRIMARY_08120__
+// __UEP_SCHOOL_READ_ENDPOINT_FALLBACK_08121__
+const UEP_SCHOOL_READ_API_FALLBACK='https://script.google.com/macros/s/AKfycbyLEEam4L2sX653pii69TC3_84wTyfAed_UL8HRY6PBG467im1LmZJ0CIpSKSOj4r6-0w/exec';
+let schoolReadPolicyCache={url:'',expiresAt:0};
+function schoolReadError(message,code='UEP_SCHOOL_READ_ERROR'){const e=new Error(message);e.code=code;return e;}
+async function loadSchoolReadApiUrl(){
+  if(schoolReadPolicyCache.url&&schoolReadPolicyCache.expiresAt>Date.now())return schoolReadPolicyCache.url;
+  let response;
+  try{response=await net.fetch(UEP_UPDATE_POLICY_URL,{cache:'no-store'});}catch(error){throw schoolReadError('UEP School Read API 설정을 확인하지 못했습니다.','UEP_SCHOOL_READ_POLICY_UNAVAILABLE');}
+  if(!response.ok)throw schoolReadError('UEP School Read API 설정 조회 실패 ('+response.status+')','UEP_SCHOOL_READ_POLICY_UNAVAILABLE');
+  const policy=await response.json();
+  const url=String(policy?.schoolReadApiUrl||UEP_SCHOOL_READ_API_FALLBACK||'').trim();
+  if(!/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec(?:\?.*)?$/i.test(url))throw schoolReadError('UEP School Read API 배포 URL이 아직 등록되지 않았습니다.','UEP_SCHOOL_READ_NOT_CONFIGURED');
+  schoolReadPolicyCache={url,expiresAt:Date.now()+10*60*1000};
+  return url;
+}
+async function getOrCreateSchoolReadDeviceId(){
+  try{const saved=String(await fs.readFile(schoolReadDevicePath(),'utf8')).trim();if(saved)return saved;}catch{}
+  const id='UEP-'+crypto.randomUUID();
+  await fs.mkdir(path.dirname(schoolReadDevicePath()),{recursive:true});
+  await fs.writeFile(schoolReadDevicePath(),id,'utf8');
+  return id;
+}
+async function readSchoolReadSession(){
+  try{const value=await readEncrypted(schoolReadSessionPath());return value&&typeof value==='object'?value:null;}catch{return null;}
+}
+async function saveSchoolReadSession(value){await saveEncrypted(schoolReadSessionPath(),value);return value;}
+async function clea
+
+RAGE_DECRYPT_FAILED";
+  throw error;
+}
+
+
+// __UEP_SCHOOL_READ_API_PRIMARY_08120__
+// __UEP_SCHOOL_READ_ENDPOINT_FALLBACK_08121__
+const UEP_SCHOOL_READ_API_FALLBACK='https://script.google.com/macros/s/AKfycbyLEEam4L2sX653pii69TC3_84wTyfAed_UL8HRY6PBG467im1LmZJ0CIpSKSOj4r6-0w/exec';
+let schoolReadPolicyCache={url:'',expiresAt:0};
+function schoolReadError(message,code='UEP_SCHOOL_READ_ERROR'){const e=new Error(message);e.code=code;return e;}
+async function loadSchoolReadApiUrl(){
+  if(schoolReadPolicyCache.url&&schoolReadPolicyCache.expiresAt>Date.now())return schoolReadPolicyCache.url;
+  let response;
+  try{response=await net.fetch(UEP_UPDATE_POLICY_URL,{cache:'no-store'});}catch(error){throw schoolReadError('UEP School Read API 설정을 확인하지 못했습니다.','UEP_SCHOOL_READ_POLICY_UNAVAILABLE');}
+  if(!response.ok)throw schoolReadError('UEP School Read API 설정 조회 실패 ('+response.status+')','UEP_SCHOOL_READ_POLICY_UNAVAILABLE');
+  const policy=await response.json();
+  const url=String(policy?.schoolReadApiUrl||UEP_SCHOOL_READ_API_FALLBACK||'').trim();
+  if(!/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec(?:\?.*)?$/i.test(url))throw schoolReadError('UEP School Read API 배포 URL이 아직 등록되지 않았습니다.','UEP_SCHOOL_READ_NOT_CONFIGURED');
+  schoolReadPolicyCache={url,expiresAt:Date.now()+10*60*1000};
+  return url;
+}
+async function getOrCreateSchoolReadDeviceId(){
+  try{const saved=String(await fs.readFile(schoolReadDevicePath(),'utf8')).trim();if(saved)return saved;}catch{}
+  const id='UEP-'+crypto.randomUUID();
+  await fs.mkdir(path.dirname(schoolReadDevicePath()),{recursive:true});
+  await fs.writeFile(schoolReadDevicePath(),id,'utf8');
+  return id;
+}
+async function readSchoolReadSession(){
+  try{const value=await readEncrypted(schoolReadSessionPath());return value&&typeof value==='object'?value:null;}catch{return null;}
+}
+async function saveSchoolReadSession(value){await saveEncrypted(schoolReadSessionPath(),value);return value;}
+async function clearSchoolReadSession(){try{await fs.unlink(schoolReadSessionPath());}catch(error){if(error?.code!=='ENOENT')throw error;}liveDataCache=nul
+
+CK_08121__
+const UEP_SCHOOL_READ_API_FALLBACK='https://script.google.com/macros/s/AKfycbyLEEam4L2sX653pii69TC3_84wTyfAed_UL8HRY6PBG467im1LmZJ0CIpSKSOj4r6-0w/exec';
+let schoolReadPolicyCache={url:'',expiresAt:0};
+function schoolReadError(message,code='UEP_SCHOOL_READ_ERROR'){const e=new Error(message);e.code=code;return e;}
+async function loadSchoolReadApiUrl(){
+  if(schoolReadPolicyCache.url&&schoolReadPolicyCache.expiresAt>Date.now())return schoolReadPolicyCache.url;
+  let response;
+  try{response=await net.fetch(UEP_UPDATE_POLICY_URL,{cache:'no-store'});}catch(error){throw schoolReadError('UEP School Read API 설정을 확인하지 못했습니다.','UEP_SCHOOL_READ_POLICY_UNAVAILABLE');}
+  if(!response.ok)throw schoolReadError('UEP School Read API 설정 조회 실패 ('+response.status+')','UEP_SCHOOL_READ_POLICY_UNAVAILABLE');
+  const policy=await response.json();
+  const url=String(policy?.schoolReadApiUrl||UEP_SCHOOL_READ_API_FALLBACK||'').trim();
+  if(!/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec(?:\?.*)?$/i.test(url))throw schoolReadError('UEP School Read API 배포 URL이 아직 등록되지 않았습니다.','UEP_SCHOOL_READ_NOT_CONFIGURED');
+  schoolReadPolicyCache={url,expiresAt:Date.now()+10*60*1000};
+  return url;
+}
+async function getOrCreateSchoolReadDeviceId(){
+  try{const saved=String(await fs.readFile(schoolReadDevicePath(),'utf8')).trim();if(saved)return saved;}catch{}
+  const id='UEP-'+crypto.randomUUID();
+  await fs.mkdir(path.dirname(schoolReadDevicePath()),{recursive:true});
+  await fs.writeFile(schoolReadDevicePath(),id,'utf8');
+  return id;
+}
+async function readSchoolReadSession(){
+  try{const value=await readEncrypted(schoolReadSessionPath());return value&&typeof value==='object'?value:null;}catch{return null;}
+}
+async function saveSchoolReadSession(value){await saveEncrypted(schoolReadSessionPath(),value);return value;}
+async function clearSchoolReadSession(){try{await fs.unlink(schoolReadSessionPath());}catch(error){if(error?.code!=='ENOENT')throw error;}liveDataCache=null;liveDataFetchedAt=0;return {ok:true};}
+async function schoolReadPost(action,payload={}){
+  const url=await loadSchoo
+
+lReadPolicyCache={url:'',expiresAt:0};
+function schoolReadError(message,code='UEP_SCHOOL_READ_ERROR'){const e=new Error(message);e.code=code;return e;}
+async function loadSchoolReadApiUrl(){
+  if(schoolReadPolicyCache.url&&schoolReadPolicyCache.expiresAt>Date.now())return schoolReadPolicyCache.url;
+  let response;
+  try{response=await net.fetch(UEP_UPDATE_POLICY_URL,{cache:'no-store'});}catch(error){throw schoolReadError('UEP School Read API 설정을 확인하지 못했습니다.','UEP_SCHOOL_READ_POLICY_UNAVAILABLE');}
+  if(!response.ok)throw schoolReadError('UEP School Read API 설정 조회 실패 ('+response.status+')','UEP_SCHOOL_READ_POLICY_UNAVAILABLE');
+  const policy=await response.json();
+  const url=String(policy?.schoolReadApiUrl||UEP_SCHOOL_READ_API_FALLBACK||'').trim();
+  if(!/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec(?:\?.*)?$/i.test(url))throw schoolReadError('UEP School Read API 배포 URL이 아직 등록되지 않았습니다.','UEP_SCHOOL_READ_NOT_CONFIGURED');
+  schoolReadPolicyCache={url,expiresAt:Date.now()+10*60*1000};
+  return url;
+}
+async function getOrCreateSchoolReadDeviceId(){
+  try{const saved=String(await fs.readFile(schoolReadDevicePath(),'utf8')).trim();if(saved)return saved;}catch{}
+  const id='UEP-'+crypto.randomUUID();
+  await fs.mkdir(path.dirname(schoolReadDevicePath()),{recursive:true});
+  await fs.writeFile(schoolReadDevicePath(),id,'utf8');
+  return id;
+}
+async function readSchoolReadSession(){
+  try{const value=await readEncrypted(schoolReadSessionPath());return value&&typeof value==='object'?value:null;}catch{return null;}
+}
+async function saveSchoolReadSession(value){await saveEncrypted(schoolReadSessionPath(),value);return value;}
+async function clearSchoolReadSession(){try{await fs.unlink(schoolReadSessionPath());}catch(error){if(error?.code!=='ENOENT')throw error;}liveDataCache=null;liveDataFetchedAt=0;return {ok:true};}
+async function schoolReadPost(action,payload={}){
+  const url=await loadSchoolReadApiUrl();
+  const response=await net.fetch(url,{method:'POST',headers:{'content-type':'application/json;charset=UTF-8','accept':'application/json'},body:JSON.stringify(
+
+}
+async function loadSchoolReadApiUrl(){
+  if(schoolReadPolicyCache.url&&schoolReadPolicyCache.expiresAt>Date.now())return schoolReadPolicyCache.url;
+  let response;
+  try{response=await net.fetch(UEP_UPDATE_POLICY_URL,{cache:'no-store'});}catch(error){throw schoolReadError('UEP School Read API 설정을 확인하지 못했습니다.','UEP_SCHOOL_READ_POLICY_UNAVAILABLE');}
+  if(!response.ok)throw schoolReadError('UEP School Read API 설정 조회 실패 ('+response.status+')','UEP_SCHOOL_READ_POLICY_UNAVAILABLE');
+  const policy=await response.json();
+  const url=String(policy?.schoolReadApiUrl||UEP_SCHOOL_READ_API_FALLBACK||'').trim();
+  if(!/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec(?:\?.*)?$/i.test(url))throw schoolReadError('UEP School Read API 배포 URL이 아직 등록되지 않았습니다.','UEP_SCHOOL_READ_NOT_CONFIGURED');
+  schoolReadPolicyCache={url,expiresAt:Date.now()+10*60*1000};
+  return url;
+}
+async function getOrCreateSchoolReadDeviceId(){
+  try{const saved=String(await fs.readFile(schoolReadDevicePath(),'utf8')).trim();if(saved)return saved;}catch{}
+  const id='UEP-'+crypto.randomUUID();
+  await fs.mkdir(path.dirname(schoolReadDevicePath()),{recursive:true});
+  await fs.writeFile(schoolReadDevicePath(),id,'utf8');
+  return id;
+}
+async function readSchoolReadSession(){
+  try{const value=await readEncrypted(schoolReadSessionPath());return value&&typeof value==='object'?value:null;}catch{return null;}
+}
+async function saveSchoolReadSession(value){await saveEncrypted(schoolReadSessionPath(),value);return value;}
+async function clearSchoolReadSession(){try{await fs.unlink(schoolReadSessionPath());}catch(error){if(error?.code!=='ENOENT')throw error;}liveDataCache=null;liveDataFetchedAt=0;return {ok:true};}
+async function schoolReadPost(action,payload={}){
+  const url=await loadSchoolReadApiUrl();
+  const response=await net.fetch(url,{method:'POST',headers:{'content-type':'application/json;charset=UTF-8','accept':'application/json'},body:JSON.stringify({action,...payload})});
+  let data={};try{data=await response.json();}catch{}
+  if(!response.ok)throw schoolReadError(data?.message||('School Read API
+
+iresAt>Date.now())return schoolReadPolicyCache.url;
+  let response;
+  try{response=await net.fetch(UEP_UPDATE_POLICY_URL,{cache:'no-store'});}catch(error){throw schoolReadError('UEP School Read API 설정을 확인하지 못했습니다.','UEP_SCHOOL_READ_POLICY_UNAVAILABLE');}
+  if(!response.ok)throw schoolReadError('UEP School Read API 설정 조회 실패 ('+response.status+')','UEP_SCHOOL_READ_POLICY_UNAVAILABLE');
+  const policy=await response.json();
+  const url=String(policy?.schoolReadApiUrl||UEP_SCHOOL_READ_API_FALLBACK||'').trim();
+  if(!/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec(?:\?.*)?$/i.test(url))throw schoolReadError('UEP School Read API 배포 URL이 아직 등록되지 않았습니다.','UEP_SCHOOL_READ_NOT_CONFIGURED');
+  schoolReadPolicyCache={url,expiresAt:Date.now()+10*60*1000};
+  return url;
+}
+async function getOrCreateSchoolReadDeviceId(){
+  try{const saved=String(await fs.readFile(schoolReadDevicePath(),'utf8')).trim();if(saved)return saved;}catch{}
+  const id='UEP-'+crypto.randomUUID();
+  await fs.mkdir(path.dirname(schoolReadDevicePath()),{recursive:true});
+  await fs.writeFile(schoolReadDevicePath(),id,'utf8');
+  return id;
+}
+async function readSchoolReadSession(){
+  try{const value=await readEncrypted(schoolReadSessionPath());return value&&typeof value==='object'?value:null;}catch{return null;}
+}
+async function saveSchoolReadSession(value){await saveEncrypted(schoolReadSessionPath(),value);return value;}
+async function clearSchoolReadSession(){try{await fs.unlink(schoolReadSessionPath());}catch(error){if(error?.code!=='ENOENT')throw error;}liveDataCache=null;liveDataFetchedAt=0;return {ok:true};}
+async function schoolReadPost(action,payload={}){
+  const url=await loadSchoolReadApiUrl();
+  const response=await net.fetch(url,{method:'POST',headers:{'content-type':'application/json;charset=UTF-8','accept':'application/json'},body:JSON.stringify({action,...payload})});
+  let data={};try{data=await response.json();}catch{}
+  if(!response.ok)throw schoolReadError(data?.message||('School Read API HTTP '+response.status),data?.code||'UEP_SCHOOL_READ_HTTP_ERROR');
+  return data;
+}
+async functio
+
+=== CSS 08107/08126 ===
+
+/* __UEP_REFINEMENT_STYLE_08107__ */
+.curriculum-query-top{order:-3;flex:1 1 100%;margin:0}.curriculum-filter-bar .record-class-cards{order:-2;display:grid;grid-template-columns:repeat(10,minmax(78px,1fr));gap:8px}.curriculum-filter-bar>label,.curriculum-filter-bar>[data-curriculum-error-only]{order:-1}.curriculum-filter-bar .uep-student-picker{order:2;flex:1 1 100%;margin:4px 0 0;grid-template-columns:44px minmax(300px,520px) 44px}.selection-error-first,.selection-safe-first{margin:16px 0}.selection-error-first{border:1px solid #efb8a8;background:#fff8f5}.curriculum-term-grid-four{display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:12px;align-items:start}.curriculum-term-grid-four>section{min-width:0}.curriculum-term-grid article.selection-subject-error{background:#fff0eb;border-left:4px solid #d65d45;padding-left:10px}.curriculum-term-grid article.selection-subject-error em{color:#a33e2e;font-weight:800}.curriculum-term-grid article.selection-subject-related{background:#fff8dc;border-left:4px solid #d5a829;padding-left:10px}.roster-six-columns .selection-roster-head,.roster-six-columns article{display:grid!important;grid-template-columns:minmax(190px,1.45fr) .55fr .55fr .9fr .7fr .7fr!important;align-items:center;gap:10px}.expected-grade-cell{display:block!important}.neis-rule-modal{position:fixed;inset:0;z-index:9999;background:#163b4259;display:grid;place-items:center;padding:30px}.neis-rule-modal>section{width:min(980px,96vw);max-height:88vh;overflow:auto;background:#fff;border-radius:22px;padding:22px;box-shadow:0 24px 80px #183b3b40}.neis-rule-modal header{display:flex;justify-content:space-between;gap:20px}.neis-rule-modal header>button{border:0;background:#edf5f3;border-radius:50%;width:40px;height:40px;font-size:24px}.neis-rule-list{display:grid;gap:9px;margin:18px 0}.neis-rule-list article{display:grid;grid-template-columns:180px minmax(300px,1fr) 72px 72px;gap:8px}.neis-rule-list article.disabled{opacity:.55}.neis-rule-list input{border:1px solid #cbdedb;border-radius:9px;padding:10px}.neis-rule-list button{border:1px solid #cbdedb;background:#fff;border-radius:9px}.neis-rule-modal footer{display:flex;justify-content:space-between;gap:10px}@media(max-width:1450px){.curriculum-filter-bar .record-class-cards{grid-template-columns:repeat(5,1fr)}.curriculum-term-grid-four{grid-template-columns:repeat(2,minmax(0,1fr))!important}}@media(max-width:850px){.curriculum-term-grid-four{grid-template-columns:1fr!important}.roster-six-columns .selection-roster-head,.roster-six-columns article{grid-template-columns:1fr 1fr!important}.neis-rule-list article{grid-template-columns:1fr}}
+
+
+/* __UEP_08126_SELECTION_LAYOUT__ */
+.curriculum-filter-bar{display:flex!important;flex-wrap:nowrap!important;align-items:center!important;gap:8px!important;overflow-x:auto!important;white-space:nowrap!important}
+.curriculum-filter-bar .record-query-switch,.curriculum-filter-bar>label,.curriculum-filter-bar>.btn,.curriculum-filter-bar .uep-student-picker{flex:0 0 auto!important}
+.curriculum-filter-bar .record-class-cards{display:flex!important;flex-wrap:nowrap!important;gap:4px!important;flex:0 0 auto!important}
+.curriculum-filter-bar .record-class-cards button{min-width:58px!important}
+.curriculum-term-grid-four{display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:12px!important}
+.selection-roster.roster-six-columns .selection-roster-head,.selection-roster.roster-six-columns article{display:grid!important;grid-template-columns:minmax(210px,2fr) 90px 90px 140px 110px 110px!important;align-items:center!important}
+.selection-roster.roster-six-columns .expected-grade-cell{grid-column:6!important;white-space:nowrap!important}
+
+
+/* __UEP_08126_SELECTION_LAYOUT__ */
+.curriculum-filter-bar{display:flex!important;flex-wrap:nowrap!important;align-items:center!important;gap:8px!important;overflow-x:auto!important;white-space:nowrap!important}
+.curriculum-filter-bar .record-query-switch,.curriculum-filter-bar>label,.curriculum-filter-bar>.btn,.curriculum-filter-bar .uep-student-picker{flex:0 0 auto!important}
+.curriculum-filter-bar .record-class-cards{display:flex!important;flex-wrap:nowrap!important;gap:4px!important;flex:0 0 auto!important}
+.curriculum-filter-bar .record-class-cards button{min-width:58px!important}
+.curriculum-term-grid-four{display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:12px!important}
+.selection-roster.roster-six-columns .selection-roster-head,.selection-roster.roster-six-columns article{display:grid!important;grid-template-columns:minmax(210px,2fr) 90px 90px 140px 110px 110px!important;align-items:center!important}
+.selection-roster.roster-six-columns .expected-grade-cell{grid-column:6!important;white-space:nowrap!important}
