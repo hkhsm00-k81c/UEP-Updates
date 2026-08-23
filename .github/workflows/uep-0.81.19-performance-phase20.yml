@@ -1,0 +1,53 @@
+name: UEP 0.81.19 Performance Phase20
+on:
+  push:
+    branches: [audit/0.81.19-performance-phase20]
+    paths:
+      - tools/apply-openstudentdrawer-summary-pass-0.81.19.js
+      - .github/workflows/uep-0.81.19-performance-phase20.yml
+  workflow_dispatch:
+jobs:
+  verify-openstudentdrawer-summary:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download shipped 0.81.01 base
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.81.01 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
+      - name: Reconstruct production through 0.81.18
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          2..18 | ForEach-Object { $version='0.81.{0:d2}' -f $_; $script="scripts/build-update-$version.ps1"; if(-not (Test-Path $script)){throw "missing $script"}; & $script }
+      - name: Apply verified 0.81.19 performance patches through Phase16
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node ./tools/apply-performance1-0.81.19.js app; if($LASTEXITCODE -ne 0){throw 'phase1 failed'}
+          node ./tools/apply-performance2-0.81.19.js app; if($LASTEXITCODE -ne 0){throw 'phase2 failed'}
+          node ./tools/apply-dashboardview-memoization-0.81.19.js app; if($LASTEXITCODE -ne 0){throw 'phase13 failed'}
+          node ./tools/apply-dashboardview-sort-rank-0.81.19.js app; if($LASTEXITCODE -ne 0){throw 'phase14 failed'}
+          node ./tools/apply-dashboard-calendar-mode-cache-0.81.19.js app; if($LASTEXITCODE -ne 0){throw 'phase16 failed'}
+      - name: Apply Phase20 openStudentDrawer summary optimization
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node ./tools/apply-openstudentdrawer-summary-pass-0.81.19.js app
+          if($LASTEXITCODE -ne 0){throw 'phase20 applicator failed'}
+          node --check app/resources/app/gyomuon.js
+      - name: Verify old repeated scans are removed
+        shell: pwsh
+        run: |
+          $text=Get-Content app/resources/app/gyomuon.js -Raw
+          if($text -match 'participationPrograms\.filter\(p=>p\.__isSelected\)\.length'){throw 'selectedCount filter remains'}
+          if($text -match 'participationPrograms\.filter\(p=>p\.__isAfter\)\.length'){throw 'afterCount filter remains'}
+          if($text -match 'participationPrograms\.filter\(p=>p\.__isCommon\)\.length'){throw 'commonCount filter remains'}
+          if($text -notmatch 'for\(const p of participationPrograms\)'){throw 'single-pass summary loop missing'}
+          if($text -notmatch 'linkedReportIds\.add\(reportId\)'){throw 'linked report id collection missing'}
+          Write-Host 'openStudentDrawer single-pass summary optimization verified'
