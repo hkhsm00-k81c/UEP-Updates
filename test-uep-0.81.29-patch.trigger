@@ -1,1 +1,1 @@
-test 0.81.29 patch 2026-08-23
+test 0.81.29 patch full invariants 2026-08-23
