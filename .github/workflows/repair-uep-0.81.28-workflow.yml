@@ -1,0 +1,42 @@
+name: Repair UEP 0.81.28 Workflow
+
+'on':
+  push:
+    paths:
+      - .github/workflows/repair-uep-0.81.28-workflow.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Repair replacement boundaries
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('.github/workflows/publish-uep-0.81.28.yml')
+          s=p.read_text(encoding='utf-8')
+          fixes={
+            "detail+'\\nfunction uepStudentApplicationView('":"detail",
+            "studentView+'\\nfunction uepSubjectStatus('":"studentView",
+            "subjectView+'\\nfunction uepCurriculumFinalView('":"subjectView",
+          }
+          changed=0
+          for old,new in fixes.items():
+              if old in s:
+                  s=s.replace(old,new)
+                  changed+=1
+          if changed != 3:
+              raise SystemExit(f'expected 3 boundary fixes, got {changed}')
+          p.write_text(s,encoding='utf-8')
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/workflows/publish-uep-0.81.28.yml
+          git commit -m 'fix: correct 0.81.28 function replacement boundaries'
+          git push
