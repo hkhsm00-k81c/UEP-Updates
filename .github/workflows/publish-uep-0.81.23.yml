@@ -1,0 +1,156 @@
+name: Publish UEP 0.81.23 Auto Update
+
+'on':
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/publish-uep-0.81.23.yml
+      - publish-uep-0.81.23.trigger
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download shipped 0.81.22
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,out | Out-Null
+          gh release download v0.81.22 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+
+      - name: Apply verified 0.81.23 runtime patch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $patch = @'
+          const fs=require('fs');
+          const file='app/resources/app/gyomuon.js';
+          let s=fs.readFileSync(file,'utf8');
+          const marker='__UEP08123_CACHE_COMPAT__';
+          if(s.includes(marker)) throw new Error('0.81.23 marker already present in source');
+
+          const anchor='function masterTimetableRows({grade=1,classNo="",teacher=""}={}){';
+          if(!s.includes(anchor)) throw new Error('masterTimetableRows anchor missing');
+          const helper=`/* ${marker} */
+          function uep08123TeacherKey(value){
+            return String(value||'').replace(/\\s+/g,'').replace(/(선생님|교사)$/,'').trim();
+          }
+          function uep08123FirstArray(...values){
+            for(const value of values){ if(Array.isArray(value)&&value.length) return value; }
+            return [];
+          }
+          function uep08123NormalizeReadonlyCache(data){
+            if(!data||typeof data!=='object') return data;
+            if(!Array.isArray(data.timetableRows)||!data.timetableRows.length){
+              const rows=uep08123FirstArray(data.timetableMaster,data.masterTimetableRows,data.teacherTimetableRows,data.timetable?.rows,data.timetable?.timetableRows,data.timetable?.masterRows);
+              if(rows.length) data.timetableRows=rows;
+            }
+            if(!Array.isArray(data.notices)||!data.notices.length){
+              const rows=uep08123FirstArray(data.workNotices,data.directNotices,data.schoolNotices,data.work?.notices,data.operations?.notices);
+              if(rows.length) data.notices=rows;
+            }
+            if(!Array.isArray(data.dormOutings)||!data.dormOutings.length){
+              const rows=uep08123FirstArray(data.dormOutingRows,data.outings,data.dorm?.outings,data.dormitory?.outings);
+              if(rows.length) data.dormOutings=rows;
+            }
+            if(!Array.isArray(data.schoolDeadlines)||!data.schoolDeadlines.length){
+              const rows=uep08123FirstArray(data.deadlines,data.workDeadlines,data.work?.deadlines);
+              if(rows.length) data.schoolDeadlines=rows;
+            }
+            return data;
+          }
+          `;
+          s=s.replace(anchor,helper+'\n'+anchor);
+
+          let cacheAssignCount=0;
+          s=s.replace(/readonlyCache\s*=\s*cached\.data;/g,()=>{
+            cacheAssignCount++;
+            return 'readonlyCache=uep08123NormalizeReadonlyCache(cached.data);';
+          });
+          if(cacheAssignCount<2) throw new Error('expected at least two cached.data assignments, got '+cacheAssignCount);
+
+          const teacherOld='if(teacher&&String(row["교사명"]||"").trim()!==String(teacher).trim())return false;';
+          const teacherNew='if(teacher&&uep08123TeacherKey(row["교사명"]||row["교사"]||row.teacher||"")!==uep08123TeacherKey(teacher))return false;';
+          if(!s.includes(teacherOld)) throw new Error('teacher exact-match anchor missing');
+          s=s.replace(teacherOld,teacherNew);
+
+          const dormOld="if(dormOutingIsMedical(item))return false;\n  if(item?.operationIncluded===false)return true;";
+          const dormNew="if(dormOutingIsMedical(item))return false;\n  const movementKind=[item?.category,item?.type,item?.outingType,item?.status,item?.note].map(v=>String(v||'')).join(' ');\n  if(/늦은\\s*입소|재입소|입소|외출\\s*후\\s*복귀|복귀/.test(movementKind))return false;\n  if(item?.operationIncluded===false)return true;";
+          if(!s.includes(dormOld)) throw new Error('dorm exclusion anchor missing');
+          s=s.replace(dormOld,dormNew);
+
+          fs.writeFileSync(file,s,'utf8');
+          console.log(JSON.stringify({cacheAssignCount,marker:true,teacherCompat:true,dormLateEntry:true}));
+          '@
+          Set-Content -Path patch-08123.cjs -Value $patch -Encoding UTF8
+          node patch-08123.cjs
+          node --check app/resources/app/gyomuon.js
+
+      - name: Verify patch invariants
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $g='app/resources/app/gyomuon.js'
+          $text=Get-Content $g -Raw -Encoding UTF8
+          foreach($c in @('__UEP08123_CACHE_COMPAT__','uep08123NormalizeReadonlyCache(cached.data)','uep08123TeacherKey(row["교사명"]','readonlyCache?.notices','readonlyCache?.timetableRows','function updateDormOutingCount()')){
+            if(-not $text.Contains($c)){ throw "missing invariant: $c" }
+          }
+          if($text -notmatch '늦은\\s\*입소\|재입소\|입소'){ throw 'late-entry movement invariant missing' }
+          $normalized=([regex]::Matches($text,'uep08123NormalizeReadonlyCache\(cached\.data\)')).Count
+          if($normalized -lt 2){ throw "cache normalization is not wired to both load paths: $normalized" }
+          Write-Host "Verified normalization paths: $normalized"
+
+      - name: Build 0.81.23 update package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $pkg='app/resources/app/package.json'
+          $j=Get-Content $pkg -Raw | ConvertFrom-Json
+          $j.version='0.81.23'
+          $j | ConvertTo-Json -Depth 50 | Set-Content $pkg -Encoding UTF8
+          Compress-Archive -Path app/* -DestinationPath out/UEP-update.zip -Force
+          $hash=(Get-FileHash out/UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "UEP_SHA256=$hash" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "SHA256=$hash"
+
+      - name: Publish GitHub release v0.81.23
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $tag='v0.81.23'
+          $notes='UEP 0.81.23: dashboard timetable/work cache compatibility and dorm late-entry reporting fix.'
+          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+          if($LASTEXITCODE -eq 0){
+            gh release upload $tag out/UEP-update.zip --repo $env:GITHUB_REPOSITORY --clobber
+          }else{
+            gh release create $tag out/UEP-update.zip --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.23' --notes $notes
+          }
+
+      - name: Promote homeroom stable policy
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $path='uep-policy.json'
+          $policy=Get-Content $path -Raw -Encoding UTF8 | ConvertFrom-Json
+          $policy.latestVersion='0.81.23'
+          $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.23/UEP-update.zip'
+          $policy.sha256=$env:UEP_SHA256
+          $policy.message='UEP 0.81.23 대시보드 시간표·학교업무 연결 및 학사 늦은 입소 보고 수정'
+          $policy | ConvertTo-Json -Depth 50 | Set-Content $path -Encoding UTF8
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add $path
+          git commit -m 'release: promote UEP 0.81.23 auto-update'
+          git push origin HEAD:main
