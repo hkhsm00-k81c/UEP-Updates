@@ -1,0 +1,143 @@
+name: Publish UEP 0.81.29 Counseling Stable
+
+'on':
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/publish-uep-0.81.29.yml
+      - scripts/patch-uep-0.81.29.js
+      - publish-uep-0.81.29.trigger
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download shipped 0.81.28
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,out | Out-Null
+          gh release download v0.81.28 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+
+      - name: Apply 0.81.29 sheet-driven selection patch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node scripts/patch-uep-0.81.29.js app
+          node --check app/resources/app/gyomuon.js
+          node --check app/resources/app/electron/google-data.cjs
+
+      - name: Verify counseling invariants
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          $d=Get-Content app/resources/app/electron/google-data.cjs -Raw -Encoding UTF8
+          foreach($check in @(
+            'const APP_VERSION = "0.81.29";',
+            'function uepSelectionErrors08129(',
+            'readonlyCache?.selectionBlocks',
+            'readonlyCache?.selectionRules',
+            'readonlyCache?.schoolCurriculumRows',
+            '미선택 오류','과다선택 오류','선택군 중복선택 오류','학기간 동일과목 중복','문·이과 교차오류','과학과목 위계오류','계열연계',
+            '검증기준 · ',
+            'data.rows.filter(uepSelectionActiveRow08129)'
+          )){if(-not $g.Contains($check)){throw "renderer invariant missing: $check"}}
+          foreach($check in @(
+            '"18_학교교육과정DB"','"19_선택과목블록DB"','"41_선택과목규칙"',
+            'schoolCurriculumRows: rowsFrom("18_학교교육과정DB")',
+            'selectionBlocks: rowsFrom("19_선택과목블록DB")',
+            'selectionRules: rowsFrom("41_선택과목규칙")'
+          )){if(-not $d.Contains($check)){throw "School Read invariant missing: $check"}}
+          if($g.Contains('2학년 1·2학기 음악 선택은 동일해야 합니다.')){throw 'legacy exact-music rule remains'}
+          if($g.Contains('2학년 1·2학기 중국어 선택은 동일해야 합니다.')){throw 'legacy exact-language rule remains'}
+
+      - name: Verify actual connected rule sheets
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          # Build must require the central sheet keys; runtime will fail visibly if School Read cannot supply them.
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          foreach($check in @('18·19 / 규칙로그 41','actual < pick','actual > pick')){
+            if(-not $g.Contains($check)){throw "rule-source marker missing: $check"}
+          }
+
+      - name: Build 0.81.29 package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $pkg='app/resources/app/package.json'
+          $j=Get-Content $pkg -Raw -Encoding UTF8 | ConvertFrom-Json
+          $j.version='0.81.29'
+          $j | ConvertTo-Json -Depth 50 | Set-Content $pkg -Encoding UTF8
+          Compress-Archive -Path app/* -DestinationPath out/UEP-update.zip -Force
+          $hash=(Get-FileHash out/UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "UEP_SHA256=$hash" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Publish v0.81.29
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $tag='v0.81.29'
+          gh release delete $tag --repo $env:GITHUB_REPOSITORY --yes --cleanup-tag 2>$null
+          $global:LASTEXITCODE=0
+          gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.29' --notes 'Counseling stable: sheet-driven elective blocks/rules, missing and over-selection, duplicate, continuity and science hierarchy checks, active-student filtering.' --draft
+          gh release upload $tag out/UEP-update.zip --repo $env:GITHUB_REPOSITORY --clobber
+          gh release edit $tag --repo $env:GITHUB_REPOSITORY --draft=false
+
+      - name: Promote every updater field to 0.81.29
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $url='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.29/UEP-update.zip'
+          $notes='선택과목 상담 안정판: 기본정보 18·19 + 규칙로그 41 단일기준, 미선택·과다·중복·계열연계·과학위계 검증'
+          $manifest=@{version='0.81.29';channel='stable';downloadUrl=$url;sha256=$env:UEP_SHA256;notes=$notes} | ConvertTo-Json
+          Set-Content uep-update.json $manifest -Encoding UTF8
+          Set-Content uep-version.json $manifest -Encoding UTF8
+          $policy=Get-Content uep-policy.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          $policy.latestVersion='0.81.29'
+          $policy.downloadUrl=$url
+          $policy.sha256=$env:UEP_SHA256
+          $policy.message=$notes
+          if($policy.homeroomStableVersion){$policy.homeroomStableVersion='0.81.29'}
+          if($policy.sharedBoardStableVersion){$policy.sharedBoardStableVersion='0.81.29'}
+          $policy | ConvertTo-Json -Depth 50 | Set-Content uep-policy.json -Encoding UTF8
+          $u=Get-Content uep-update.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          $v=Get-Content uep-version.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          $p=Get-Content uep-policy.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          foreach($x in @($u,$v)){if($x.version -ne '0.81.29' -or $x.downloadUrl -ne $url -or $x.sha256 -ne $env:UEP_SHA256){throw 'manifest promotion mismatch'}}
+          if($p.latestVersion -ne '0.81.29' -or $p.downloadUrl -ne $url -or $p.sha256 -ne $env:UEP_SHA256){throw 'policy promotion mismatch'}
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add uep-update.json uep-version.json uep-policy.json
+          git commit -m 'release: promote UEP 0.81.29 all updater fields'
+          git push
+
+      - name: Final release consistency check
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force verify | Out-Null
+          gh release download v0.81.29 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir verify
+          $actual=(Get-FileHash verify/UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          if($actual -ne $env:UEP_SHA256){throw 'published ZIP SHA mismatch'}
+          Expand-Archive verify/UEP-update.zip verify/app -Force
+          $g=Get-Content verify/app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          $pkg=Get-Content verify/app/resources/app/package.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          if(-not $g.Contains('const APP_VERSION = "0.81.29";')){throw 'published runtime is not 0.81.29'}
+          if($pkg.version -ne '0.81.29'){throw 'published package is not 0.81.29'}
+          Write-Host 'UEP 0.81.29 release package and updater manifests are consistent.'
