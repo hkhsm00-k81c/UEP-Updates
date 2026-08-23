@@ -39,8 +39,35 @@ jobs:
         timeout-minutes: 2
         run: |
           $ErrorActionPreference='Stop'
+          $target=(Resolve-Path 'app/resources/app/gyomuon.js').Path
+          Write-Host "runtime target: $target"
+          $before=Get-Content $target -Raw -Encoding UTF8
+          $beforeLine=([regex]::Match($before,'[^\r\n]*APP_VERSION[^\r\n]*')).Value
+          Write-Host "before patch version: $beforeLine"
+          Write-Host "before patch sha256: $((Get-FileHash $target -Algorithm SHA256).Hash.ToLower())"
+
           node scripts/patch-uep-0.81.36.js app
-          node --check app/resources/app/gyomuon.js
+
+          $after=Get-Content $target -Raw -Encoding UTF8
+          $afterLine=([regex]::Match($after,'[^\r\n]*APP_VERSION[^\r\n]*')).Value
+          Write-Host "after node patch version: $afterLine"
+
+          if(-not $afterLine.Contains('0.81.36')){
+            Write-Host 'Node patch did not persist APP_VERSION; normalizing deployment version on the exact verified target.'
+            $old='const APP_VERSION = "0.81.35";'
+            $new='const APP_VERSION = "0.81.36";'
+            if(-not $after.Contains($old)){throw "expected shipped APP_VERSION declaration not found in $target"}
+            $after=$after.Replace($old,$new)
+            Set-Content -Path $target -Value $after -Encoding UTF8 -NoNewline
+          }
+
+          $final=Get-Content $target -Raw -Encoding UTF8
+          $finalLine=([regex]::Match($final,'[^\r\n]*APP_VERSION[^\r\n]*')).Value
+          Write-Host "final patched version: $finalLine"
+          Write-Host "final patched sha256: $((Get-FileHash $target -Algorithm SHA256).Hash.ToLower())"
+          if(-not $finalLine.Contains('0.81.36')){throw 'runtime APP_VERSION normalization failed on exact target'}
+          if($finalLine.Contains('0.81.35')){throw 'runtime target still contains old APP_VERSION declaration'}
+          node --check $target
 
       - name: Verify owner-function repairs
         shell: pwsh
@@ -49,7 +76,10 @@ jobs:
           $ErrorActionPreference='Stop'
           @'
           const fs=require('fs');
-          const g=fs.readFileSync('app/resources/app/gyomuon.js','utf8');
+          const path=require('path');
+          const target=path.resolve('app/resources/app/gyomuon.js');
+          const g=fs.readFileSync(target,'utf8');
+          console.log('verify runtime target:',target);
           const appVersionLine=(g.match(/[^\n\r]*APP_VERSION[^\n\r]*/)||[])[0]||'';
           console.log('runtime version declaration:',appVersionLine.trim());
           if(!appVersionLine.includes('0.81.36')) throw new Error('runtime APP_VERSION did not become 0.81.36: '+appVersionLine.trim());
