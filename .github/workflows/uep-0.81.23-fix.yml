@@ -17,6 +17,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Download shipped 0.81.22
         shell: pwsh
         env:
@@ -26,43 +27,113 @@ jobs:
           New-Item -ItemType Directory -Force source,app,out | Out-Null
           gh release download v0.81.22 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
           Expand-Archive source/UEP-update.zip app -Force
-      - name: Patch dashboard and dorm runtime
+
+      - name: Patch 0.81.23 runtime paths
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $patch = @'
+          const fs=require('fs');
+          const file='app/resources/app/gyomuon.js';
+          let s=fs.readFileSync(file,'utf8');
+          const marker='__UEP08123_CACHE_COMPAT__';
+          if(s.includes(marker)) throw new Error('0.81.23 marker already present in 0.81.22 source');
+
+          const anchor='function masterTimetableRows({grade=1,classNo="",teacher=""}={}){';
+          if(!s.includes(anchor)) throw new Error('masterTimetableRows anchor missing');
+          const helper=`/* ${marker} */
+          function uep08123TeacherKey(value){
+            return String(value||'').replace(/\\s+/g,'').replace(/(선생님|교사)$/,'').trim();
+          }
+          function uep08123FirstArray(...values){
+            for(const value of values){ if(Array.isArray(value)&&value.length) return value; }
+            return [];
+          }
+          function uep08123NormalizeReadonlyCache(data){
+            if(!data||typeof data!=='object') return data;
+            if(!Array.isArray(data.timetableRows)||!data.timetableRows.length){
+              const rows=uep08123FirstArray(
+                data.timetableMaster,
+                data.masterTimetableRows,
+                data.teacherTimetableRows,
+                data.timetable?.rows,
+                data.timetable?.timetableRows,
+                data.timetable?.masterRows
+              );
+              if(rows.length) data.timetableRows=rows;
+            }
+            if(!Array.isArray(data.notices)||!data.notices.length){
+              const rows=uep08123FirstArray(
+                data.workNotices,
+                data.directNotices,
+                data.schoolNotices,
+                data.work?.notices,
+                data.operations?.notices
+              );
+              if(rows.length) data.notices=rows;
+            }
+            if(!Array.isArray(data.dormOutings)||!data.dormOutings.length){
+              const rows=uep08123FirstArray(
+                data.dormOutingRows,
+                data.outings,
+                data.dorm?.outings,
+                data.dormitory?.outings
+              );
+              if(rows.length) data.dormOutings=rows;
+            }
+            if(!Array.isArray(data.schoolDeadlines)||!data.schoolDeadlines.length){
+              const rows=uep08123FirstArray(data.deadlines,data.workDeadlines,data.work?.deadlines);
+              if(rows.length) data.schoolDeadlines=rows;
+            }
+            return data;
+          }
+          `;
+          s=s.replace(anchor,helper+'\n'+anchor);
+
+          let cacheAssignCount=0;
+          s=s.replace(/readonlyCache\s*=\s*cached\.data;/g,()=>{
+            cacheAssignCount++;
+            return 'readonlyCache=uep08123NormalizeReadonlyCache(cached.data);';
+          });
+          if(cacheAssignCount<2) throw new Error('expected at least two cached.data assignments, got '+cacheAssignCount);
+
+          const teacherOld='if(teacher&&String(row["교사명"]||"").trim()!==String(teacher).trim())return false;';
+          const teacherNew='if(teacher&&uep08123TeacherKey(row["교사명"]||row["교사"]||row.teacher||"")!==uep08123TeacherKey(teacher))return false;';
+          if(!s.includes(teacherOld)) throw new Error('teacher exact-match anchor missing');
+          s=s.replace(teacherOld,teacherNew);
+
+          const dormOld="if(dormOutingIsMedical(item))return false;\n  if(item?.operationIncluded===false)return true;";
+          const dormNew="if(dormOutingIsMedical(item))return false;\n  const movementKind=[item?.category,item?.type,item?.outingType,item?.status,item?.note].map(v=>String(v||'')).join(' ');\n  if(/늦은\\s*입소|재입소|입소|외출\\s*후\\s*복귀|복귀/.test(movementKind))return false;\n  if(item?.operationIncluded===false)return true;";
+          if(!s.includes(dormOld)) throw new Error('dorm exclusion anchor missing');
+          s=s.replace(dormOld,dormNew);
+
+          fs.writeFileSync(file,s,'utf8');
+          console.log(JSON.stringify({cacheAssignCount,marker:true,teacherCompat:true,dormLateEntry:true}));
+          '@
+          Set-Content -Path patch-08123.cjs -Value $patch -Encoding UTF8
+          node patch-08123.cjs
+          node --check app/resources/app/gyomuon.js
+
+      - name: Verify 0.81.23 patch invariants
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
           $g='app/resources/app/gyomuon.js'
           $text=Get-Content $g -Raw -Encoding UTF8
-          # 0.81.22 readonly cache is healthy, but dashboard placeholders can remain after async refresh.
-          # Force dashboard rerender after a successful readonly refresh by wrapping the refresh function's resolved result.
-          if($text -notmatch '__UEP08123_DASHBOARD_REFRESH__'){
-            $text += @'
+          $checks=@(
+            '__UEP08123_CACHE_COMPAT__',
+            'uep08123NormalizeReadonlyCache(cached.data)',
+            'uep08123TeacherKey(row["교사명"]',
+            '늦은\\s*입소|재입소|입소',
+            'readonlyCache?.notices',
+            'readonlyCache?.timetableRows',
+            'function updateDormOutingCount()'
+          )
+          foreach($c in $checks){ if(-not $text.Contains($c)){ throw "missing invariant: $c" } }
+          $normalized=([regex]::Matches($text,'uep08123NormalizeReadonlyCache\(cached\.data\)')).Count
+          if($normalized -lt 2){ throw "cache normalization is not wired to both load paths: $normalized" }
+          Write-Host "Verified cache normalization paths: $normalized"
 
-          /* __UEP08123_DASHBOARD_REFRESH__ */
-          (function(){
-            const rerenderDashboard=()=>{ try{ if(typeof render==='function' && (typeof currentPage==='undefined' || currentPage==='dashboard')) render('dashboard'); }catch(e){} };
-            const old=window.schoolBoard && window.schoolBoard.readReadonlyCache;
-            if(window.schoolBoard && typeof old==='function'){
-              window.schoolBoard.readReadonlyCache=async function(...args){ const r=await old.apply(this,args); setTimeout(rerenderDashboard,0); return r; };
-            }
-            window.addEventListener('focus',()=>setTimeout(rerenderDashboard,0));
-          })();
-          '@
-          }
-          # Treat any same-day dorm outing/late-entry record as reportable. The old empty-state path was too narrow (home-going only).
-          if($text -notmatch '__UEP08123_DORM_REPORTABLE__'){
-            $text += @'
-
-          /* __UEP08123_DORM_REPORTABLE__ */
-          (function(){
-            window.uepDormReportableToday=function(rows){
-              const key=(typeof dateKey==='function')?dateKey(new Date()):new Date().toISOString().slice(0,10);
-              return (Array.isArray(rows)?rows:[]).filter(r=>String(r.date||r.outDate||r.entryDate||'').slice(0,10)===key && !(typeof dormOutingExcludedByRule==='function' && dormOutingExcludedByRule(r)));
-            };
-          })();
-          '@
-          }
-          Set-Content $g $text -Encoding UTF8
-          node --check $g
       - name: Set version 0.81.23
         shell: pwsh
         run: |
@@ -72,6 +143,7 @@ jobs:
           $j.version='0.81.23'
           $j | ConvertTo-Json -Depth 50 | Set-Content $pkg -Encoding UTF8
           Compress-Archive -Path app/* -DestinationPath out/UEP-update.zip -Force
+
       - name: Publish RC artifact
         uses: actions/upload-artifact@v4
         with:
