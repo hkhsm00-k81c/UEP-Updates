@@ -1,0 +1,54 @@
+name: UEP 0.81.19 Performance Phase24
+on:
+  push:
+    branches: [audit/0.81.19-performance-phase24]
+    paths:
+      - tools/apply-openstudentdrawer-after-index-0.81.19.js
+      - .github/workflows/uep-0.81.19-performance-phase24.yml
+  workflow_dispatch:
+jobs:
+  verify-after-school-preindex:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download shipped 0.81.01 base
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.81.01 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
+      - name: Reconstruct production through 0.81.18
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          2..18 | ForEach-Object { $version='0.81.{0:d2}' -f $_; $script="scripts/build-update-$version.ps1"; if(-not (Test-Path $script)){throw "missing $script"}; & $script }
+      - name: Apply verified performance patches through Phase21
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node ./tools/apply-performance1-0.81.19.js app; if($LASTEXITCODE -ne 0){throw 'phase1 failed'}
+          node ./tools/apply-performance2-0.81.19.js app; if($LASTEXITCODE -ne 0){throw 'phase2 failed'}
+          node ./tools/apply-dashboardview-memoization-0.81.19.js app; if($LASTEXITCODE -ne 0){throw 'phase13 failed'}
+          node ./tools/apply-dashboardview-sort-rank-0.81.19.js app; if($LASTEXITCODE -ne 0){throw 'phase14 failed'}
+          node ./tools/apply-dashboard-calendar-mode-cache-0.81.19.js app; if($LASTEXITCODE -ne 0){throw 'phase16 failed'}
+          node ./tools/apply-openstudentdrawer-summary-pass-0.81.19.js app; if($LASTEXITCODE -ne 0){throw 'phase20 failed'}
+          node ./tools/apply-openstudentdrawer-status-pass-0.81.19.js app; if($LASTEXITCODE -ne 0){throw 'phase21 failed'}
+      - name: Apply Phase24 after-school preindex optimization
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node ./tools/apply-openstudentdrawer-after-index-0.81.19.js app
+          if($LASTEXITCODE -ne 0){throw 'phase24 applicator failed'}
+          node --check app/resources/app/gyomuon.js
+      - name: Verify per-group raw scan removed
+        shell: pwsh
+        run: |
+          $text=Get-Content app/resources/app/gyomuon.js -Raw
+          if($text -match 'rawParticipationPrograms\.filter\(p=>p\.__isAfter&&'){throw 'per-group after-school raw scan remains'}
+          if($text -notmatch 'const afterRows=rawParticipationPrograms\.filter\(p=>p\.__isAfter\)'){throw 'afterRows cache missing'}
+          if($text -notmatch 'const afterRowsByCourse=new Map\(\)'){throw 'after-school index missing'}
+          if($text -notmatch 'groupedAfterSchoolCourses\(afterRows\)'){throw 'grouped after-school call not using cached rows'}
+          Write-Host 'openStudentDrawer after-school preindex optimization verified'
