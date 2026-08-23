@@ -29,7 +29,7 @@ jobs:
           gh release download v0.81.30 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
           Expand-Archive source/UEP-update.zip app -Force
 
-      - name: Apply student selection visibility fix
+      - name: Apply student selection and subject popup fix
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
@@ -47,8 +47,14 @@ jobs:
             'data-record-student=',
             'data-uep-student-prev',
             'data-uep-student-next',
-            'uepOpenSubjectModal08128(curriculumSubjectKey)'
+            "$$('[data-curriculum-subject]').forEach",
+            'uepOpenSubjectModal08128(curriculumSubjectKey)',
+            '<span>학사여부</span>',
+            '<span>1학년 내신평균</span>',
+            '<span>예상등수</span>',
+            '<span>예상등급</span>'
           )){if(-not $g.Contains($check)){throw "missing 0.81.31 invariant: $check"}}
+          if($g.Contains("$('[data-curriculum-subject]').forEach")){throw 'broken single-element subject card binding remains'}
 
       - name: Build 0.81.31 package
         shell: pwsh
@@ -72,7 +78,7 @@ jobs:
           gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
           if($LASTEXITCODE -eq 0){ gh release delete $tag --repo $env:GITHUB_REPOSITORY --yes --cleanup-tag }
           $global:LASTEXITCODE=0
-          gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.31' --notes 'Student selection fix: clicking a student now shows the selected-student counseling detail immediately above the class roster while preserving prev/next navigation and the subject roster popup.' --draft
+          gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.31' --notes 'Student selection and subject popup fix: selected student detail appears immediately above the roster, prev/next navigation is preserved, and every subject card opens the applicant popup with dormitory, grade, expected rank and expected grade.' --draft
           gh release upload $tag out/UEP-update.zip --repo $env:GITHUB_REPOSITORY --clobber
           gh release edit $tag --repo $env:GITHUB_REPOSITORY --draft=false
 
@@ -81,7 +87,7 @@ jobs:
         run: |
           $ErrorActionPreference='Stop'
           $url='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.31/UEP-update.zip'
-          $notes='학생 선택 클릭 시 상담 상세를 즉시 상단 표시하고 좌우이동·과목팝업 유지'
+          $notes='학생 선택 상세 상단 표시·좌우이동 및 과목카드 신청학생 팝업 연결 수정'
           $manifest=@{version='0.81.31';channel='stable';downloadUrl=$url;sha256=$env:UEP_SHA256;notes=$notes} | ConvertTo-Json
           Set-Content uep-update.json $manifest -Encoding UTF8
           Set-Content uep-version.json $manifest -Encoding UTF8
@@ -114,4 +120,5 @@ jobs:
           $pkg=Get-Content verify/app/resources/app/package.json -Raw -Encoding UTF8 | ConvertFrom-Json
           if(-not $g.Contains('const APP_VERSION = "0.81.31";')){throw 'published runtime is not 0.81.31'}
           if($pkg.version -ne '0.81.31'){throw 'published package is not 0.81.31'}
-          Write-Host 'UEP 0.81.31 package and updater manifests are consistent.'
+          if(-not $g.Contains("$$('[data-curriculum-subject]').forEach")){throw 'published runtime is missing subject popup binding'}
+          Write-Host 'UEP 0.81.31 package, subject popup binding and updater manifests are consistent.'
