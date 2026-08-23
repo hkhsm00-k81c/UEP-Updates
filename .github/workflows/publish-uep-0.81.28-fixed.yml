@@ -1,0 +1,98 @@
+name: Publish UEP 0.81.28 Fixed
+
+'on':
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/publish-uep-0.81.28-fixed.yml
+      - scripts/patch-uep-0.81.28.js
+      - publish-uep-0.81.28-fixed.trigger
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download shipped 0.81.27
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,out | Out-Null
+          gh release download v0.81.27 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+
+      - name: Apply structural selection patch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node scripts/patch-uep-0.81.28.js app
+          node --check app/resources/app/gyomuon.js
+
+      - name: Verify 0.81.28 invariants
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          foreach($name in @('uepStudentApplicationDetail','uepStudentApplicationView','uepSubjectApplicationView','uepSelectionErrors08105','uepSelectionSubjectState')){
+            $pattern='(?m)^\s*function\s+'+[regex]::Escape($name)+'\s*\('
+            $count=([regex]::Matches($g,$pattern)).Count
+            if($count -ne 1){throw "$name declaration count=$count"}
+          }
+          foreach($check in @('const APP_VERSION = "0.81.28";','중국어·일본어·인공지능 기초','정보·제2외국어 계열오류','예술계열 연계오류','과학과목 위계오류','careerSupportMarkup(student,bundle,false)','오류종류','uepOpenSubjectModal08128','신청 '+"'+selected.students.length+'"+'명 · 예상')){
+            if(-not $g.Contains($check)){throw "missing invariant: $check"}
+          }
+          if($g.Contains('2학년 1·2학기 음악 선택은 동일해야 합니다.')){throw 'legacy same-name music rule remains'}
+          if($g.Contains('2학년 1·2학기 중국어 선택은 동일해야 합니다.')){throw 'legacy same-name language rule remains'}
+
+      - name: Build 0.81.28 package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $pkg='app/resources/app/package.json'
+          $j=Get-Content $pkg -Raw -Encoding UTF8 | ConvertFrom-Json
+          $j.version='0.81.28'
+          $j | ConvertTo-Json -Depth 50 | Set-Content $pkg -Encoding UTF8
+          Compress-Archive -Path app/* -DestinationPath out/UEP-update.zip -Force
+          $hash=(Get-FileHash out/UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "UEP_SHA256=$hash" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Publish v0.81.28
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $tag='v0.81.28'
+          gh release delete $tag --repo $env:GITHUB_REPOSITORY --yes --cleanup-tag 2>$null
+          $global:LASTEXITCODE=0
+          gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.28' --notes 'Selection model consolidation: mode-specific controls, selection groups, career context, actual-error highlighting, grouped subject cards and popup rosters.' --draft
+          gh release upload $tag out/UEP-update.zip --repo $env:GITHUB_REPOSITORY --clobber
+          gh release edit $tag --repo $env:GITHUB_REPOSITORY --draft=false
+
+      - name: Promote all update manifests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $manifest=@{
+            version='0.81.28';channel='stable';downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.28/UEP-update.zip';sha256=$env:UEP_SHA256;notes='선택과목 구조 단일화 2차: 조회흐름·선택군·오류시각화·상담정보·과목별 팝업'
+          } | ConvertTo-Json
+          Set-Content uep-update.json $manifest -Encoding UTF8
+          Set-Content uep-version.json $manifest -Encoding UTF8
+          $policy=Get-Content uep-policy.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          $policy.latestVersion='0.81.28'
+          if($policy.homeroomStableVersion){$policy.homeroomStableVersion='0.81.28'}
+          if($policy.sharedBoardStableVersion){$policy.sharedBoardStableVersion='0.81.28'}
+          $policy | ConvertTo-Json -Depth 50 | Set-Content uep-policy.json -Encoding UTF8
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add uep-update.json uep-version.json uep-policy.json
+          git commit -m 'release: promote UEP 0.81.28 all manifests'
+          git push
