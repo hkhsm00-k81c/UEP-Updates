@@ -31,45 +31,57 @@ jobs:
           $ErrorActionPreference='Stop'
           @'
           const fs=require('fs');
-          const p='app/resources/app/gyomuon.js';
-          const s=fs.readFileSync(p,'utf8');
-          const terms=['정규시간','야간시간','학교 캘린더','공휴일','민감정보 보안','과목별 신청현황','공결·지각 학생','공결 현황','출석인정','조퇴','6~7','6-7'];
-          function functionAround(idx){
-            const before=s.slice(0,idx);
-            const re=/function\s+([A-Za-z0-9_$]+)\s*\([^)]*\)\s*\{/g;
-            let m,last=null;while((m=re.exec(before)))last=m;
-            if(!last)return null;
-            return {name:last[1],start:last.index};
-          }
-          let out='# UEP 0.81.35 Structural Runtime Map\n\n';
-          out+='Generated from shipped `v0.81.35` `resources/app/gyomuon.js`.\n\n';
-          for(const term of terms){
-            out+='## '+term+'\n\n';
-            let start=0,count=0;
-            while(count<12){
-              const i=s.indexOf(term,start); if(i<0)break;
-              const fn=functionAround(i);
-              out+='- index: '+i+'; enclosing function: '+(fn?fn.name:'(top-level/arrow/minified block)')+'\n';
-              const snippet=s.slice(Math.max(0,i-500),Math.min(s.length,i+900)).replace(/\r?\n/g,' ');
-              out+='```text\n'+snippet.replace(/```/g,'` ` `')+'\n```\n\n';
-              start=i+term.length;count++;
+          const s=fs.readFileSync('app/resources/app/gyomuon.js','utf8');
+
+          function extractFunction(name){
+            const sig=new RegExp('function\\s+'+name.replace(/[$]/g,'\\$&')+'\\s*\\([^)]*\\)\\s*\\{');
+            const m=s.match(sig); if(!m)return null;
+            const start=m.index, brace=s.indexOf('{',start); let depth=0, quote='', esc=false;
+            for(let i=brace;i<s.length;i++){
+              const c=s[i], n=s[i+1];
+              if(quote){ if(esc){esc=false;continue;} if(c==='\\'){esc=true;continue;} if(c===quote)quote=''; continue; }
+              if(c==='"'||c==="'"||c==='`'){quote=c;continue;}
+              if(c==='/'&&n==='*'){const j=s.indexOf('*/',i+2); if(j<0)break; i=j+1;continue;}
+              if(c==='/'&&n==='/'){const j=s.indexOf('\n',i+2); if(j<0)break; i=j;continue;}
+              if(c==='{')depth++; else if(c==='}'&&--depth===0)return s.slice(start,i+1);
             }
-            if(!count)out+='- NOT FOUND\n\n';
+            return null;
+          }
+          function snippets(term,limit=8){
+            let out=[],pos=0;
+            while(out.length<limit){const i=s.indexOf(term,pos);if(i<0)break;out.push({i,text:s.slice(Math.max(0,i-650),Math.min(s.length,i+1100)).replace(/\r?\n/g,' ')});pos=i+term.length;}
+            return out;
+          }
+          const owners=[
+            'calendarDayTone','calendarMarkup','schoolEventsForDate','allSchoolEvents',
+            'dashboardTimetableAutoMode','dashboardTimetableHeaderControlsMarkup','dashboardTimetablePanelMarkup','dashboardPersonalWeekMarkup','dashboardNightWeekMarkup',
+            'settingsView','openDashboardStudentStatus','attendanceView','render','bindEvents'
+          ];
+          let out='# UEP 0.81.35 Structural Runtime Map — Owner Functions\n\nGenerated from the shipped `v0.81.35` runtime. This map is the required reference before 0.81.36 source-level repair.\n\n';
+          for(const name of owners){
+            const body=extractFunction(name);
+            out+='## function '+name+'\n\n';
+            out+=body?'```js\n'+body.replace(/```/g,'` ` `')+'\n```\n\n':'- NOT FOUND as named function\n\n';
+          }
+          const terms=['data-dashboard-timetable-mode','calendarDayTone(','공휴일','민감정보 보안','data-sensitive-password-set','과목별 신청현황','공결·지각 학생','official','출석인정','조퇴','data-calendar-date','data-dashboard-student-status'];
+          out+='## Coupling / call-site snippets\n\n';
+          for(const term of terms){
+            out+='### '+term+'\n\n';
+            const a=snippets(term); if(!a.length){out+='- NOT FOUND\n\n';continue;}
+            for(const x of a)out+='- index '+x.i+'\n```text\n'+x.text.replace(/```/g,'` ` `')+'\n```\n\n';
           }
           out+='## Injected repair blocks\n\n';
-          for(const marker of ['UEP_08132_INTERACTION_REPAIR_START','UEP_08133_CURRICULUM_SECURITY_START','UEP_08134_CURRICULUM_SECURITY_START','UEP_08135_RUNTIME_REPAIR_START']){
-            out+='- '+marker+': '+(s.includes(marker)?'present':'absent')+'\n';
-          }
+          for(const marker of ['UEP_08132_INTERACTION_REPAIR_START','UEP_08133_CURRICULUM_SECURITY_START','UEP_08134_CURRICULUM_SECURITY_START','UEP_08135_RUNTIME_REPAIR_START'])out+='- '+marker+': '+(s.includes(marker)?'present':'absent')+'\n';
           fs.mkdirSync('diagnostics',{recursive:true});
-          fs.writeFileSync('diagnostics/uep-0.81.35-structural-map.md',out,'utf8');
-          '@ | Set-Content inspect.js -Encoding UTF8
-          node inspect.js
+          fs.writeFileSync('diagnostics/uep-0.81.35-owner-map.md',out,'utf8');
+          '@ | Set-Content inspect-owner.js -Encoding UTF8
+          node inspect-owner.js
       - name: Commit structural map
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add diagnostics/uep-0.81.35-structural-map.md
+          git add diagnostics/uep-0.81.35-owner-map.md
           git diff --cached --quiet
-          if($LASTEXITCODE -ne 0){git commit -m 'diag: persist UEP 0.81.35 structural runtime map';git push}
+          if($LASTEXITCODE -ne 0){git commit -m 'diag: persist UEP 0.81.35 owner-function map';git push}
