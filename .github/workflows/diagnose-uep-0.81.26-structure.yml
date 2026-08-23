@@ -1,0 +1,82 @@
+name: Diagnose UEP 0.81.26 Structure
+
+'on':
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/diagnose-uep-0.81.26-structure.yml
+      - diagnose-uep-0.81.26-structure.trigger
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download UEP 0.81.26
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,diagnostics | Out-Null
+          gh release download v0.81.26 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+      - name: Inspect renderer and main process ownership
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $js='app/resources/app/gyomuon.js'
+          $main='app/resources/app/electron/main.cjs'
+          $css=if(Test-Path 'app/resources/app/gyomuon.css'){'app/resources/app/gyomuon.css'}else{'app/resources/app/style.css'}
+          $script=@'
+          const fs=require('fs');
+          const [jsFile,mainFile,cssFile,outFile]=process.argv.slice(2);
+          const g=fs.readFileSync(jsFile,'utf8'),m=fs.readFileSync(mainFile,'utf8'),c=fs.readFileSync(cssFile,'utf8');
+          const count=(s,x)=>s.split(x).length-1;
+          const section=(s,start,end,limit=12000)=>{const a=s.indexOf(start);if(a<0)return '[MISSING '+start+']';const b=end?s.indexOf(end,a+start.length):-1;return s.slice(a,b>=0?b:Math.min(s.length,a+limit));};
+          const lines=[];
+          lines.push('UEP 0.81.26 STRUCTURE DIAGNOSIS');
+          lines.push('');
+          for(const name of ['function uepStudentApplicationDetail(','function uepStudentApplicationView(','function uepSubjectApplicationView(','function uepSelectionErrors08105(','async function saveDormOuting(']) lines.push(name+' COUNT='+count(g+"\n"+m,name));
+          lines.push('__UEP_REFINEMENT_08107__ COUNT='+count(g,'__UEP_REFINEMENT_08107__'));
+          lines.push('__UEP_08113_RESTORED_CURRICULUM_SDGS_BODY__ COUNT='+count(g,'__UEP_08113_RESTORED_CURRICULUM_SDGS_BODY__'));
+          lines.push('__UEP_08126_SELECTION_LAYOUT__ COUNT='+count(c,'__UEP_08126_SELECTION_LAYOUT__'));
+          lines.push('resolveSchoolServiceAccount COUNT='+count(m,'resolveSchoolServiceAccount'));
+          lines.push('schoolRead COUNT(main)='+count(m,'schoolRead'));
+          lines.push('saveDormOuting exposure COUNT='+count(m,'saveDormOuting'));
+          lines.push('');
+          lines.push('=== CURRENT SELECTION 08107 AREA ===');
+          lines.push(section(g,'// __UEP_REFINEMENT_08107__','// __UEP_08113_RESTORED_SELECTION_DATASET__'));
+          lines.push('=== CURRENT SELECTION DATASET/ERROR AREA ===');
+          lines.push(section(g,'// __UEP_08113_RESTORED_SELECTION_DATASET__','// __UEP_08113_RESTORED_CURRICULUM_SDGS_BODY__'));
+          lines.push('=== CURRENT CANONICAL CURRICULUM AREA ===');
+          lines.push(section(g,'// __UEP_08113_RESTORED_CURRICULUM_SDGS_BODY__','function uepSdgsEvidenceBridge'));
+          lines.push('=== CURRENT DORM SAVE ===');
+          lines.push(section(m,'async function saveDormOuting(payload={})','async function saveStudentGuidanceRecord(payload={})'));
+          lines.push('=== IPC/PRELOAD REFERENCES ===');
+          for(const needle of ['save-dorm-outing','saveDormOuting','school-read','schoolRead']){
+            lines.push('-- '+needle+' --');
+            let i=0,n=0;while((i=m.indexOf(needle,i))>=0&&n<12){lines.push(m.slice(Math.max(0,i-700),Math.min(m.length,i+1400)));i+=needle.length;n++;}
+          }
+          lines.push('=== CSS 08107/08126 ===');
+          lines.push(section(c,'/* __UEP_REFINEMENT_STYLE_08107__ */','/* __UEP_OPERATIONS_STYLE_08108__ */',16000));
+          lines.push(section(c,'/* __UEP_08126_SELECTION_LAYOUT__ */',null,8000));
+          fs.writeFileSync(outFile,lines.join('\n\n'),'utf8');
+          '@
+          Set-Content inspect-08126.cjs $script -Encoding UTF8
+          node inspect-08126.cjs $js $main $css diagnostics/uep-0.81.26-structure.txt
+      - name: Persist diagnosis
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add diagnostics/uep-0.81.26-structure.txt
+          git commit -m 'diag: record UEP 0.81.26 structural ownership' || exit 0
+          git pull --rebase origin main
+          git push origin HEAD:main
