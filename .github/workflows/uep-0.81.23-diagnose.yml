@@ -17,8 +17,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Download 0.81.22 shipped package
+      - name: Download shipped 0.81.22
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -26,60 +25,60 @@ jobs:
           $ErrorActionPreference='Stop'
           New-Item -ItemType Directory -Force source,app,diagnostics | Out-Null
           gh release download v0.81.22 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
-          Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
+          Expand-Archive source/UEP-update.zip app -Force
 
-      - name: Capture exact runtime symbols
+      - name: Trace cache producer and consumer paths
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          $g='app/resources/app/gyomuon.js'
-          if(-not (Test-Path $g)){ throw 'gyomuon.js missing' }
-          $lines=Get-Content $g -Encoding UTF8
-
-          function Write-Anchors([string]$out,[string[]]$anchors,[int]$before=6,[int]$after=10,[int]$perAnchor=4){
-            "SOURCE: $g" | Set-Content $out -Encoding UTF8
-            foreach($a in $anchors){
-              Add-Content $out ("`n### ANCHOR: {0}" -f $a) -Encoding UTF8
-              $matches=@()
-              for($i=0;$i -lt $lines.Count;$i++){ if($lines[$i].Contains($a)){ $matches += $i } }
-              Add-Content $out ("COUNT={0}" -f $matches.Count) -Encoding UTF8
-              foreach($h in ($matches | Select-Object -First $perAnchor)){
-                Add-Content $out ("@@ line {0}" -f ($h+1)) -Encoding UTF8
-                $s=[Math]::Max(0,$h-$before); $e=[Math]::Min($lines.Count-1,$h+$after)
-                for($j=$s;$j -le $e;$j++){ Add-Content $out ("{0,6}: {1}" -f ($j+1),$lines[$j]) -Encoding UTF8 }
+          function Extract-Function([string]$file,[string]$name,[string]$out){
+            $ls=Get-Content $file -Encoding UTF8
+            $start=-1
+            for($i=0;$i -lt $ls.Count;$i++){ if($ls[$i] -match ("function\s+"+[regex]::Escape($name)+"\s*\(")){ $start=$i; break } }
+            if($start -lt 0){ "NOT_FOUND $name" | Set-Content $out -Encoding UTF8; return }
+            $depth=0; $seen=$false; $buf=New-Object System.Collections.Generic.List[string]
+            for($i=$start;$i -lt $ls.Count;$i++){
+              $line=$ls[$i]; $buf.Add(("{0,6}: {1}" -f ($i+1),$line))
+              foreach($c in $line.ToCharArray()){
+                if($c -eq '{'){ $depth++; $seen=$true }
+                elseif($c -eq '}'){ $depth-- }
               }
+              if($seen -and $depth -le 0){ break }
+              if($buf.Count -gt 180){ break }
+            }
+            $buf | Set-Content $out -Encoding UTF8
+          }
+          $g='app/resources/app/gyomuon.js'
+          Extract-Function $g 'masterTeacherTimetableData' 'diagnostics/08123-fn-masterTeacherTimetableData.txt'
+          Extract-Function $g 'personalTimetableData' 'diagnostics/08123-fn-personalTimetableData.txt'
+          Extract-Function $g 'directNoticeRows' 'diagnostics/08123-fn-directNoticeRows.txt'
+          Extract-Function $g 'todayOperationsMarkup' 'diagnostics/08123-fn-todayOperationsMarkup.txt'
+          Extract-Function $g 'updateDormOutingCount' 'diagnostics/08123-fn-updateDormOutingCount.txt'
+          Extract-Function $g 'dormOutingExcludedByRule' 'diagnostics/08123-fn-dormOutingExcludedByRule.txt'
+
+          $out='diagnostics/08123-cache-producer-keys.txt'
+          'CACHE PRODUCER KEY TRACE' | Set-Content $out -Encoding UTF8
+          foreach($file in @('app/resources/app/main.js','app/resources/app/preload.js','app/resources/app/gyomuon.js')){
+            if(-not(Test-Path $file)){continue}
+            Add-Content $out "`n===== $file =====" -Encoding UTF8
+            $ls=Get-Content $file -Encoding UTF8
+            $patterns=@('timetableRows','notices','dormOutings','dormRules','schoolDeadlines','workNotices','readonly','previewReadonlySync','readReadonlyCache')
+            $seen=New-Object 'System.Collections.Generic.HashSet[int]'
+            for($i=0;$i -lt $ls.Count;$i++){
+              $hit=$false; foreach($p in $patterns){if($ls[$i].Contains($p)){$hit=$true;break}}
+              if(-not $hit){continue}
+              $s=[Math]::Max(0,$i-3);$e=[Math]::Min($ls.Count-1,$i+5)
+              for($j=$s;$j -le $e;$j++){if($seen.Add($j)){Add-Content $out ("{0,6}: {1}" -f ($j+1),$ls[$j]) -Encoding UTF8}}
             }
           }
-
-          Write-Anchors 'diagnostics/08123-timetable-exact.txt' @(
-            'personalTimetableData','dashboardPersonalWeekMarkup','timetableRows','teacherTimetable',
-            'readonlyCache?.timetable','readonlyCache.timetable','readonlyCache?.teacherTimetable',
-            'renderTimetable','renderDashboard'
-          ) 5 9 4
-
-          Write-Anchors 'diagnostics/08123-work-exact.txt' @(
-            'directNoticeRows','dashboardDeadlineItems','workBoardData','readonlyCache?.work','readonlyCache.work',
-            'renderWork','operationsMarkup','dashboardOperations','directNotices'
-          ) 5 9 4
-
-          Write-Anchors 'diagnostics/08123-dorm-exact.txt' @(
-            'updateDormOutingCount','dormOutingExcludedByRule','dormOutingRows','dormOuting','renderDorm',
-            'sendDorm','dormReport','reportDorm','sendMail','mailAlerts.dormOuting'
-          ) 5 10 5
-
-          Write-Anchors 'diagnostics/08123-gate-exact.txt' @(
-            'schoolReadSessionStatus','refreshReadonlyCacheSilently','previewReadonlySync','readReadonlyCache',
-            'googleConnectionStatus?.ok','readonlyCache=cached.data','readonlyCache = cached.data'
-          ) 5 9 5
-
-      - name: Persist exact diagnostics
+      - name: Persist path traces
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add diagnostics/08123-*-exact.txt
+          git add diagnostics/08123-fn-*.txt diagnostics/08123-cache-producer-keys.txt
           git diff --cached --quiet
-          if($LASTEXITCODE -eq 0){ Write-Host 'No diagnostic changes to commit'; exit 0 }
-          git commit -m 'diag: persist exact 0.81.23 runtime symbols'
+          if($LASTEXITCODE -eq 0){exit 0}
+          git commit -m 'diag: persist 0.81.23 cache producer and consumer traces'
           git push origin HEAD:fix/0.81.23-dashboard-dorm-sync
