@@ -1,0 +1,62 @@
+name: Diagnose UEP 0.81.24 Session Version Update Paths
+
+'on':
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/diag-uep-0.81.24-session-version.yml
+      - diag-uep-0.81.24.trigger
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download shipped 0.81.23
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,diagnostics | Out-Null
+          gh release download v0.81.23 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+      - name: Trace version session updater and dashboard paths
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $out='diagnostics/08124-session-version-paths.txt'
+          'UEP 0.81.24 TARGET TRACE' | Set-Content $out -Encoding UTF8
+          foreach($file in @('app/resources/app/gyomuon.js','app/resources/app/main.js','app/resources/app/preload.js')){
+            if(-not(Test-Path $file)){continue}
+            Add-Content $out "`n===== $file =====" -Encoding UTF8
+            $ls=Get-Content $file -Encoding UTF8
+            $patterns=@('APP_VERSION','currentLoginTeacherName','userProfile','loginTeacher','teacherName','userName','sidebar','profile','updateManifestUrl','checkUpdate','applyUpdate','latestVersion','uep-update.json','uep-policy.json','timetableRows','notices','???')
+            $seen=New-Object 'System.Collections.Generic.HashSet[int]'
+            for($i=0;$i -lt $ls.Count;$i++){
+              $hit=$false; foreach($p in $patterns){if($ls[$i].Contains($p)){$hit=$true;break}}
+              if(-not $hit){continue}
+              $s=[Math]::Max(0,$i-5);$e=[Math]::Min($ls.Count-1,$i+8)
+              for($j=$s;$j -le $e;$j++){
+                if($seen.Add($j)){Add-Content $out ("{0,6}: {1}" -f ($j+1),$ls[$j]) -Encoding UTF8}
+              }
+            }
+          }
+          $pkg=Get-Content 'app/resources/app/package.json' -Raw -Encoding UTF8 | ConvertFrom-Json
+          Add-Content $out "`nPACKAGE_VERSION=$($pkg.version)" -Encoding UTF8
+      - name: Persist diagnostics
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add diagnostics/08124-session-version-paths.txt
+          git diff --cached --quiet
+          if($LASTEXITCODE -eq 0){exit 0}
+          git commit -m 'diag: persist 0.81.24 session version paths'
+          git push origin HEAD:main
