@@ -1,0 +1,66 @@
+name: UEP 0.81.20 Auth Runtime Audit
+on:
+  push:
+    branches: [fix/0.81.20-school-read-api]
+    paths:
+      - .github/workflows/uep-0.81.20-auth-runtime-audit.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download shipped base
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.81.01 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
+      - name: Reconstruct production through 0.81.18
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          2..18 | ForEach-Object { $version='0.81.{0:d2}' -f $_; & "scripts/build-update-$version.ps1" }
+      - name: Apply verified 0.81.19 patches
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $patches=@(
+            'tools/apply-performance1-0.81.19.js',
+            'tools/apply-performance2-0.81.19.js',
+            'tools/apply-dashboardview-memoization-0.81.19.js',
+            'tools/apply-dashboardview-sort-rank-0.81.19.js',
+            'tools/apply-dashboard-calendar-mode-cache-0.81.19.js',
+            'tools/apply-openstudentdrawer-summary-pass-0.81.19.js',
+            'tools/apply-openstudentdrawer-status-pass-0.81.19.js',
+            'tools/apply-openstudentdrawer-after-index-0.81.19.js'
+          )
+          foreach($p in $patches){ node $p app; if($LASTEXITCODE -ne 0){throw "patch failed: $p"} }
+      - name: Capture auth runtime context
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force auth-audit | Out-Null
+          $files=@(
+            'app/resources/app/gyomuon.js',
+            'app/resources/app/electron/preload.cjs',
+            'app/resources/app/electron/main.cjs',
+            'app/resources/app/electron/google-data.cjs'
+          )
+          $patterns='google:|googleCredential|selectGoogle|previewReadonly|readReadonly|service.account|serviceAccount|google-service-account|oauth|refresh.token|access.token|school.read|School Read|deviceId|userAccount|login|token|resolveSchool'
+          foreach($f in $files){
+            "===== $f =====" | Add-Content auth-audit/AUTH-RUNTIME.txt
+            Select-String -Path $f -Pattern $patterns -CaseSensitive:$false -Context 8,20 | Out-String -Width 500 | Add-Content auth-audit/AUTH-RUNTIME.txt
+          }
+          Get-Content app/resources/app/electron/main.cjs -Raw | Set-Content auth-audit/main.cjs.txt
+          Get-Content app/resources/app/electron/google-data.cjs -Raw | Set-Content auth-audit/google-data.cjs.txt
+          Get-Content app/resources/app/electron/preload.cjs -Raw | Set-Content auth-audit/preload.cjs.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UEP-0.81.20-auth-runtime-audit
+          path: auth-audit
