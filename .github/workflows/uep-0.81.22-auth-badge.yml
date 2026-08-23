@@ -6,6 +6,7 @@ name: UEP 0.81.22 School Read Auth Badge
       - fix/0.81.22-auth-badge
     paths:
       - .github/workflows/uep-0.81.22-auth-badge.yml
+      - tools/apply-auth-badge-0.81.22.js
   workflow_dispatch:
 
 permissions:
@@ -31,40 +32,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          $g='app/resources/app/gyomuon.js'
-          $js=Get-Content $g -Raw -Encoding UTF8
-          $js=[regex]::Replace($js,'const APP_VERSION\s*=\s*["''][^"'']+["''];','const APP_VERSION = "0.81.22";',1)
-          if($js -notmatch '__UEP_SCHOOL_READ_BADGE_08122__'){
-            $patch=@'
-
-// __UEP_SCHOOL_READ_BADGE_08122__
-(function installSchoolReadAuthBadgeSync(){
-  async function syncSchoolReadAuthBadge(){
-    try{
-      if(!window.schoolBoard?.schoolReadSessionStatus)return;
-      const status=await window.schoolBoard.schoolReadSessionStatus({verify:false});
-      const authenticated=Boolean(status?.authenticated);
-      const nodes=[...document.querySelectorAll('button,span,div,a')];
-      for(const node of nodes){
-        const text=String(node.textContent||'').trim();
-        if(authenticated && text==='인증 필요'){
-          node.dataset.uepSchoolReadAuthBadge='1';
-          node.textContent='연결됨';
-          node.title='UEP School Read API 인증 정상';
-        }else if(!authenticated && node.dataset?.uepSchoolReadAuthBadge==='1' && text==='연결됨'){
-          node.textContent='인증 필요';
-          node.title='UEP 로그인이 필요합니다.';
-        }
-      }
-    }catch(error){console.warn('[UEP] School Read auth badge sync failed',error);}
-  }
-  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>{syncSchoolReadAuthBadge();setInterval(syncSchoolReadAuthBadge,5000);},{once:true});
-  else {syncSchoolReadAuthBadge();setInterval(syncSchoolReadAuthBadge,5000);}
-})();
-'@
-            $js += $patch
-          }
-          Set-Content -LiteralPath $g -Value $js -Encoding UTF8 -NoNewline
+          node tools/apply-auth-badge-0.81.22.js app
 
       - name: Verify patch
         shell: pwsh
