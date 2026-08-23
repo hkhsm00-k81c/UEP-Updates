@@ -1,0 +1,121 @@
+name: UEP 0.81.22 School Read Auth Badge
+
+on:
+  push:
+    branches: [fix/0.81.22-auth-badge]
+    paths:
+      - .github/workflows/uep-0.81.22-auth-badge.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-release-promote:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download 0.81.21 shipped package
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.81.21 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
+
+      - name: Patch auth badge to School Read API state
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $g='app/resources/app/gyomuon.js'
+          $js=Get-Content $g -Raw -Encoding UTF8
+          $js=[regex]::Replace($js,'const APP_VERSION\s*=\s*["''][^"'']+["''];','const APP_VERSION = "0.81.22";',1)
+          if($js -notmatch '__UEP_SCHOOL_READ_BADGE_08122__'){
+            $patch=@'
+
+// __UEP_SCHOOL_READ_BADGE_08122__
+(function installSchoolReadAuthBadgeSync(){
+  async function syncSchoolReadAuthBadge(){
+    try{
+      if(!window.schoolBoard?.schoolReadSessionStatus)return;
+      const status=await window.schoolBoard.schoolReadSessionStatus({verify:false});
+      const authenticated=Boolean(status?.authenticated);
+      const nodes=[...document.querySelectorAll('button,span,div,a')];
+      for(const node of nodes){
+        const text=String(node.textContent||'').trim();
+        if(authenticated && text==='인증 필요'){
+          node.dataset.uepSchoolReadAuthBadge='1';
+          node.textContent='연결됨';
+          node.title='UEP School Read API 인증 정상';
+        }else if(!authenticated && node.dataset?.uepSchoolReadAuthBadge==='1' && text==='연결됨'){
+          node.textContent='인증 필요';
+          node.title='UEP 로그인이 필요합니다.';
+        }
+      }
+    }catch(error){console.warn('[UEP] School Read auth badge sync failed',error);}
+  }
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>{syncSchoolReadAuthBadge();setInterval(syncSchoolReadAuthBadge,5000);},{once:true});
+  else {syncSchoolReadAuthBadge();setInterval(syncSchoolReadAuthBadge,5000);}
+})();
+'@
+            $js += $patch
+          }
+          Set-Content -LiteralPath $g -Value $js -Encoding UTF8 -NoNewline
+
+      - name: Verify patch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $g='app/resources/app/gyomuon.js'
+          $js=Get-Content $g -Raw -Encoding UTF8
+          if(-not $js.Contains('const APP_VERSION = "0.81.22";')){throw 'version patch missing'}
+          if(-not $js.Contains('__UEP_SCHOOL_READ_BADGE_08122__')){throw 'auth badge patch missing'}
+          if(-not $js.Contains('schoolReadSessionStatus({verify:false})')){throw 'School Read session badge binding missing'}
+          node --check $g
+
+      - name: Build update package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Compress-Archive -Path app/* -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          Set-Content UEP-update.sha256 $sha -Encoding ascii
+          Write-Host "UEP 0.81.22 SHA256=$sha"
+
+      - name: Publish v0.81.22
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $tag='v0.81.22'
+          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+          if($LASTEXITCODE -ne 0){
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --target 'fix/0.81.22-auth-badge' --title 'UEP 0.81.22 - School Read 인증 상태 표시 수정' --notes 'School Read API 로그인 세션이 정상일 때 우상단 구 인증 배지를 연결됨으로 표시하도록 수정합니다.'
+          }
+          gh release upload $tag UEP-update.zip UEP-update.sha256 --repo $env:GITHUB_REPOSITORY --clobber
+
+      - name: Promote main auto-update policy to 0.81.22
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $sha=(Get-Content UEP-update.sha256 -Raw).Trim()
+          git fetch origin main
+          git checkout main
+          git pull --ff-only origin main
+          $policy=Get-Content uep-policy.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          $policy.latestVersion='0.81.22'
+          $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.22/UEP-update.zip'
+          $policy.sha256=$sha
+          $policy.message='UEP 0.81.22 School Read API 인증 상태 표시 수정'
+          $policy | ConvertTo-Json -Depth 10 | Set-Content uep-policy.json -Encoding UTF8
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add uep-policy.json
+          git commit -m 'release: promote UEP 0.81.22 auto-update'
+          git push origin main
