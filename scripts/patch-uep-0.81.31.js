@@ -5,19 +5,20 @@ const appDir=path.join(appRoot,'resources','app');
 const jsFile=path.join(appDir,'gyomuon.js');
 let s=fs.readFileSync(jsFile,'utf8');
 
-// Normalize every runtime APP_VERSION declaration to 0.81.31. Previous builds can
-// contain more than one declaration after historical patching, so replacing only
-// the first 0.81.30 occurrence is not sufficient.
+// Normalize every runtime APP_VERSION declaration to 0.81.31.
 const anyVersionRegex=/const\s+APP_VERSION\s*=\s*['\"][^'\"]+['\"]\s*;/g;
 const versionDecls=s.match(anyVersionRegex)||[];
 if(versionDecls.length<1) throw new Error('APP_VERSION declaration missing');
 s=s.replace(anyVersionRegex,'const APP_VERSION = "0.81.31";');
 
-// Selected-student detail belongs immediately below the filters, not after the full roster.
-const oldReturn='return controls+list+detail;';
-const newReturn='return controls+detail+list;';
-if(s.includes(oldReturn)) s=s.replace(oldReturn,newReturn);
-if(!s.includes(newReturn)) throw new Error('unified student view return order missing');
+// Selected-student detail belongs immediately below the filters, before the class roster.
+// Match structurally so whitespace/minification differences do not break the patch.
+const oldReturnRegex=/return\s+controls\s*\+\s*list\s*\+\s*detail\s*;/g;
+const goodReturnRegex=/return\s+controls\s*\+\s*detail\s*\+\s*list\s*;/g;
+if(oldReturnRegex.test(s)) s=s.replace(oldReturnRegex,'return controls+detail+list;');
+if(goodReturnRegex.test(s)) s=s.replace(goodReturnRegex,'return controls+detail+list;');
+if(!/return\s+controls\s*\+\s*detail\s*\+\s*list\s*;/.test(s)) throw new Error('unified student view return order missing');
+if(/return\s+controls\s*\+\s*list\s*\+\s*detail\s*;/.test(s)) throw new Error('legacy unified student return order remains');
 
 // Student row clicks keep the unified list/detail view; no separate query mode.
 s=s.replaceAll("recordStudentId=b.dataset.recordStudent;recordQueryMode='student';render('records');","recordStudentId=b.dataset.recordStudent;render('records');");
@@ -46,4 +47,5 @@ fs.writeFileSync(cssFile,c,'utf8');
 const written=fs.readFileSync(jsFile,'utf8');
 const versions=[...written.matchAll(/const\s+APP_VERSION\s*=\s*['\"]([^'\"]+)['\"]\s*;/g)].map(m=>m[1]);
 if(!versions.length||versions.some(v=>v!=='0.81.31')) throw new Error('written runtime versions mismatch: '+versions.join(','));
+if(!/return\s+controls\s*\+\s*detail\s*\+\s*list\s*;/.test(written)) throw new Error('written selected-student detail order mismatch');
 console.log('UEP 0.81.31 patch applied; APP_VERSION declarations=',versions.length,'subject bindings repaired=',badMatches.length+legacyMatches.length);
