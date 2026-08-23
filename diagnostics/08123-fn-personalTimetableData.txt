@@ -1,0 +1,41 @@
+  6865: function personalTimetableData() {
+  6866:   const teacher=String(currentLoginTeacherName()||state.settings.comciganTeacher||state.settings.teacherName||"담당교사").trim();
+  6867:   // 홍석민 교사는 사용자가 제공한 2026학년도 공식 교사시간표 PDF를
+  6868:   // 최우선 기준으로 사용해 잘못 매칭된 컴시간 자료가 표시되지 않게 합니다.
+  6869:   const masterReference=masterTeacherTimetableData(teacher);
+  6870:   if(masterReference)return masterReference;
+  6871:   // 연결 전 고정/샘플 교사시간표는 오인 가능성이 있어 배포판에서 사용하지 않는다.
+  6872:   const timetable=neisData?.timetable||{};
+  6873:   const teacherMap=timetable.teachers||{};
+  6874:   const all=timetable.teacherTimetable||{};
+  6875:   let teacherKey="";
+  6876:   for(const [key,value] of Object.entries(teacherMap||{})){
+  6877:     const name=typeof value==="string"?value:(value?.name||value?.teacherName||value?.label||"");
+  6878:     if(String(name).trim()===teacher){teacherKey=key;break;}
+  6879:   }
+  6880:   let source=all?.[teacherKey]||all?.[teacher]||null;
+  6881:   if(!source&&Array.isArray(all)) source=all.find(row=>String(row?.teacher||row?.teacherName||row?.name||"").trim()===teacher);
+  6882:   const week=Array.from({length:7},()=>Array(5).fill(""));
+  6883:   let found=0,changed=0;
+  6884:   const setCell=(period,day,cell)=>{
+  6885:     const p=Number(period),d=Number(day);const normalized=normalizeTeacherTimetableCell(cell);
+  6886:     if(!normalized||p<1||p>7||d<0||d>4)return;
+  6887:     week[p-1][d]=`${normalized.subject}|${normalized.room}${normalized.changed?"|changed":""}`;found+=1;if(normalized.changed)changed+=1;
+  6888:   };
+  6889:   if(Array.isArray(source)){
+  6890:     if(source.length>=5&&source.slice(0,5).every(day=>Array.isArray(day))){
+  6891:       source.slice(0,5).forEach((day,d)=>day.forEach((cell,index)=>setCell(cell?.classTime||cell?.period||cell?.classTimeNum||index+1,d,cell)));
+  6892:     }else{
+  6893:       source.forEach((cell,index)=>{
+  6894:         const d=Number(cell?.dayIndex??cell?.weekdayIndex??cell?.day??cell?.weekDay??-1);
+  6895:         const day=d>=1&&d<=5?d-1:d;
+  6896:         setCell(cell?.classTime||cell?.period||cell?.classTimeNum||Math.floor(index/5)+1,day,cell);
+  6897:       });
+  6898:     }
+  6899:   }else if(source&&typeof source==="object"){
+  6900:     const dayKeys=[["월","monday","mon","1"],["화","tuesday","tue","2"],["수","wednesday","wed","3"],["목","thursday","thu","4"],["금","friday","fri","5"]];
+  6901:     dayKeys.forEach((keys,d)=>{const day=keys.map(k=>source[k]).find(Boolean);if(Array.isArray(day))day.forEach((cell,index)=>setCell(cell?.classTime||cell?.period||index+1,d,cell));});
+  6902:   }
+  6903:   if(found)return {week,days:["월","화","수","목","금"],teacher,source:neisData?.offline?"컴시간 저장자료":"컴시간 실시간",reference:false,changed};
+  6904:   return {week:[],days:["월","화","수","목","금"],teacher,source:"연결 대기",reference:false,changed:0};
+  6905: }
