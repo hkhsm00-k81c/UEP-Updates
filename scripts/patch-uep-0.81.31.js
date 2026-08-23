@@ -5,16 +5,19 @@ const appDir=path.join(appRoot,'resources','app');
 const jsFile=path.join(appDir,'gyomuon.js');
 let s=fs.readFileSync(jsFile,'utf8');
 
-// Normalize the runtime version structurally. Do not depend on whitespace or quote style.
-const versionRegex=/const\s+APP_VERSION\s*=\s*['\"]0\.81\.30['\"]\s*;/;
-if(!versionRegex.test(s)) throw new Error('0.81.30 runtime version declaration missing');
-s=s.replace(versionRegex,'const APP_VERSION = "0.81.31";');
+// Normalize every runtime APP_VERSION declaration to 0.81.31. Previous builds can
+// contain more than one declaration after historical patching, so replacing only
+// the first 0.81.30 occurrence is not sufficient.
+const anyVersionRegex=/const\s+APP_VERSION\s*=\s*['\"][^'\"]+['\"]\s*;/g;
+const versionDecls=s.match(anyVersionRegex)||[];
+if(versionDecls.length<1) throw new Error('APP_VERSION declaration missing');
+s=s.replace(anyVersionRegex,'const APP_VERSION = "0.81.31";');
 
 // Selected-student detail belongs immediately below the filters, not after the full roster.
 const oldReturn='return controls+list+detail;';
 const newReturn='return controls+detail+list;';
-if(!s.includes(oldReturn)) throw new Error('unified student view return anchor missing');
-s=s.replace(oldReturn,newReturn);
+if(s.includes(oldReturn)) s=s.replace(oldReturn,newReturn);
+if(!s.includes(newReturn)) throw new Error('unified student view return order missing');
 
 // Student row clicks keep the unified list/detail view; no separate query mode.
 s=s.replaceAll("recordStudentId=b.dataset.recordStudent;recordQueryMode='student';render('records');","recordStudentId=b.dataset.recordStudent;render('records');");
@@ -27,9 +30,7 @@ const legacyRenderRegex=/\$\$\('\[data-curriculum-subject\]'\)\.forEach\(b=>b\.o
 const badMatches=s.match(badSingleRegex)||[];
 const legacyMatches=s.match(legacyRenderRegex)||[];
 s=s.replace(badSingleRegex,goodSubjectBinding).replace(legacyRenderRegex,goodSubjectBinding);
-const subjectBindFixes=badMatches.length+legacyMatches.length;
 
-if(!/const\s+APP_VERSION\s*=\s*['\"]0\.81\.31['\"]\s*;/.test(s)) throw new Error('0.81.31 runtime version not applied');
 if(!s.includes(goodSubjectBinding)) throw new Error('subject popup binding missing after repair');
 if(/(?<!\$)\$\('\[data-curriculum-subject\]'\)\.forEach/.test(s)) throw new Error('single-element subject binding remains after repair');
 if(legacyRenderRegex.test(s)) throw new Error('legacy subject render binding remains after repair');
@@ -43,6 +44,6 @@ c+='\n/* UEP 0.81.31 selected-student detail visibility + subject card interacti
 fs.writeFileSync(jsFile,s,'utf8');
 fs.writeFileSync(cssFile,c,'utf8');
 const written=fs.readFileSync(jsFile,'utf8');
-const actual=(written.match(/const\s+APP_VERSION\s*=\s*['\"]([^'\"]+)['\"]\s*;/)||[])[1]||'missing';
-if(actual!=='0.81.31') throw new Error('written runtime version mismatch: '+actual);
-console.log('UEP 0.81.31 patch applied; runtime=',actual,'subject bindings repaired=',subjectBindFixes);
+const versions=[...written.matchAll(/const\s+APP_VERSION\s*=\s*['\"]([^'\"]+)['\"]\s*;/g)].map(m=>m[1]);
+if(!versions.length||versions.some(v=>v!=='0.81.31')) throw new Error('written runtime versions mismatch: '+versions.join(','));
+console.log('UEP 0.81.31 patch applied; APP_VERSION declarations=',versions.length,'subject bindings repaired=',badMatches.length+legacyMatches.length);
