@@ -1,0 +1,89 @@
+name: UEP 0.81.19 Finalize Batch
+on:
+  push:
+    branches: [audit/0.81.19-finalize-batch]
+    paths:
+      - .github/workflows/uep-0.81.19-finalize-batch.yml
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  finalize:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download shipped base
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.81.01 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
+      - name: Reconstruct production through 0.81.18
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          2..18 | ForEach-Object { $version='0.81.{0:d2}' -f $_; $script="scripts/build-update-$version.ps1"; if(-not (Test-Path $script)){throw "missing $script"}; & $script }
+      - name: Apply all verified 0.81.19 cleanup patches
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $patches=@(
+            'tools/apply-performance1-0.81.19.js',
+            'tools/apply-performance2-0.81.19.js',
+            'tools/apply-dashboardview-memoization-0.81.19.js',
+            'tools/apply-dashboardview-sort-rank-0.81.19.js',
+            'tools/apply-dashboard-calendar-mode-cache-0.81.19.js',
+            'tools/apply-openstudentdrawer-summary-pass-0.81.19.js',
+            'tools/apply-openstudentdrawer-status-pass-0.81.19.js',
+            'tools/apply-openstudentdrawer-after-index-0.81.19.js'
+          )
+          foreach($p in $patches){ if(-not(Test-Path $p)){throw "missing $p"}; node $p app; if($LASTEXITCODE -ne 0){throw "patch failed: $p"} }
+      - name: Final syntax and regression gates
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $g='app/resources/app/gyomuon.js'
+          $c='app/resources/app/gyomuon.css'
+          $d='app/resources/app/electron/google-data.cjs'
+          $m='app/resources/app/electron/main.cjs'
+          node --check $g
+          node --check $d
+          node --check $m
+          $js=Get-Content $g -Raw -Encoding UTF8
+          $data=Get-Content $d -Raw -Encoding UTF8
+          $main=Get-Content $m -Raw -Encoding UTF8
+          $checks=[ordered]@{
+            version=$js.Contains('const APP_VERSION = "0.81.19";')
+            single06=$data.Contains('"06_선택과목이력"') -and (-not $data.Contains('06A_학생별선택과목'))
+            dashboard=$js.Contains('function dashboardView(')
+            studentDrawer=$js.Contains('function openStudentDrawer(')
+            curriculum=$js.Contains('function uepCurriculumFinalView()') -and $js.Contains('function uepStudentApplicationView()')
+            sdgs=$js.Contains('function uepSdgsEvidenceBridge()')
+            recordcheck=$js.Contains('window.uepMountRecordbookValidator')
+            schoolResolver=$main.Contains('resolveSchoolServiceAccount')
+            afterIndex=$js.Contains('const afterRowsByCourse=new Map()')
+          }
+          $checks.GetEnumerator()|ForEach-Object{Write-Host ("FINAL GATE {0} = {1}" -f $_.Key,$_.Value)}
+          if($checks.Values-contains $false){throw '0.81.19 final regression gate failed'}
+      - name: Final residual audits
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          if(Test-Path 'tools/audit-openstudentdrawer-0.81.19.js'){ node tools/audit-openstudentdrawer-0.81.19.js app; if($LASTEXITCODE -ne 0){throw 'student drawer audit failed'} }
+          if(Test-Path 'scripts/verify-css-cleanup-0.81.17.js'){ node scripts/verify-css-cleanup-0.81.17.js app; if($LASTEXITCODE -ne 0){throw 'css gate failed'} }
+      - name: Build final candidate package
+        id: package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Compress-Archive -Path app/* -DestinationPath UEP-0.81.19-final-candidate.zip -CompressionLevel Optimal
+          $sha=(Get-FileHash UEP-0.81.19-final-candidate.zip -Algorithm SHA256).Hash.ToLower()
+          "sha=$sha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "FINAL PACKAGE SHA256=$sha"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UEP-0.81.19-Final-Candidate
+          path: UEP-0.81.19-final-candidate.zip
