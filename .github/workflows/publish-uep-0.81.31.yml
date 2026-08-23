@@ -13,14 +13,20 @@ name: Publish UEP 0.81.31 Student Selection Fix
 permissions:
   contents: write
 
+concurrency:
+  group: publish-uep-0.81.31
+  cancel-in-progress: true
+
 jobs:
   publish:
     runs-on: windows-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
       - name: Download shipped 0.81.30
         shell: pwsh
+        timeout-minutes: 2
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -31,6 +37,7 @@ jobs:
 
       - name: Apply student selection and subject popup fix
         shell: pwsh
+        timeout-minutes: 2
         run: |
           $ErrorActionPreference='Stop'
           node scripts/patch-uep-0.81.31.js app
@@ -38,26 +45,37 @@ jobs:
 
       - name: Verify student selection invariants
         shell: pwsh
+        timeout-minutes: 2
         run: |
           $ErrorActionPreference='Stop'
-          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
-          foreach($check in @(
+          @'
+          const fs=require('fs');
+          const g=fs.readFileSync('app/resources/app/gyomuon.js','utf8');
+          const checks=[
             'const APP_VERSION = "0.81.31";',
             'return controls+detail+list;',
             'data-record-student=',
             'data-uep-student-prev',
             'data-uep-student-next',
-            "$$('[data-curriculum-subject]').forEach",
-            'uepOpenSubjectModal08128(curriculumSubjectKey)',
+            "$$('[data-curriculum-subject]').forEach(b=>b.onclick=()=>{curriculumSubjectKey=b.dataset.curriculumSubject;uepOpenSubjectModal08128(curriculumSubjectKey);});",
+            'function uepOpenSubjectModal08128(',
             '<span>학사여부</span>',
             '<span>1학년 내신평균</span>',
             '<span>예상등수</span>',
             '<span>예상등급</span>'
-          )){if(-not $g.Contains($check)){throw "missing 0.81.31 invariant: $check"}}
-          if($g.Contains("$('[data-curriculum-subject]').forEach")){throw 'broken single-element subject card binding remains'}
+          ];
+          for(const x of checks) if(!g.includes(x)) throw new Error('missing 0.81.31 invariant: '+x);
+          const bad=/(?<!\$)\$\('\[data-curriculum-subject\]'\)\.forEach/g;
+          if(bad.test(g)) throw new Error('broken single-element subject card binding remains');
+          const legacy=/\$\$\('\[data-curriculum-subject\]'\)\.forEach\(b=>b\.onclick=\(\)=>\{curriculumSubjectKey=b\.dataset\.curriculumSubject;render\('records'\);\}\);/;
+          if(legacy.test(g)) throw new Error('legacy subject-card render binding remains');
+          console.log('0.81.31 student navigation and subject popup invariants PASS');
+          '@ | Set-Content verify-08131.js -Encoding UTF8
+          node verify-08131.js
 
       - name: Build 0.81.31 package
         shell: pwsh
+        timeout-minutes: 3
         run: |
           $ErrorActionPreference='Stop'
           $pkg='app/resources/app/package.json'
@@ -70,6 +88,7 @@ jobs:
 
       - name: Publish v0.81.31
         shell: pwsh
+        timeout-minutes: 3
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -84,6 +103,7 @@ jobs:
 
       - name: Promote updater fields to 0.81.31
         shell: pwsh
+        timeout-minutes: 2
         run: |
           $ErrorActionPreference='Stop'
           $url='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.31/UEP-update.zip'
@@ -102,11 +122,11 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add uep-update.json uep-version.json uep-policy.json
-          git commit -m 'release: promote UEP 0.81.31 all updater fields'
-          git push
+          if(-not (git diff --cached --quiet)){git commit -m 'release: promote UEP 0.81.31 all updater fields';git push}
 
       - name: Final release consistency check
         shell: pwsh
+        timeout-minutes: 2
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -120,5 +140,5 @@ jobs:
           $pkg=Get-Content verify/app/resources/app/package.json -Raw -Encoding UTF8 | ConvertFrom-Json
           if(-not $g.Contains('const APP_VERSION = "0.81.31";')){throw 'published runtime is not 0.81.31'}
           if($pkg.version -ne '0.81.31'){throw 'published package is not 0.81.31'}
-          if(-not $g.Contains("$$('[data-curriculum-subject]').forEach")){throw 'published runtime is missing subject popup binding'}
-          Write-Host 'UEP 0.81.31 package, subject popup binding and updater manifests are consistent.'
+          if(-not $g.Contains('function uepOpenSubjectModal08128(')){throw 'published runtime is missing subject popup function'}
+          Write-Host 'UEP 0.81.31 package and updater manifests are consistent.'
