@@ -25,25 +25,18 @@ jobs:
           gh release download v0.81.28 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
           Expand-Archive source/UEP-update.zip app -Force
           @'
-          const fs=require('fs');
-          const p='app/resources/app/gyomuon.js';
-          const lines=fs.readFileSync(p,'utf8').split(/\r?\n/);
-          const pats=['schoolRead','school read','sheetName','sheetData','basicInfo','규칙로그','기본정보','06_선택과목이력','18_학교교육과정DB','19_선택과목블록DB','41_선택과목규칙','snapshot','getSheet','sheetRows','linked'];
+          const fs=require('fs'),path=require('path');
+          const root='app/resources/app';
+          const files=[];
+          (function walk(d){for(const e of fs.readdirSync(d,{withFileTypes:true})){const p=path.join(d,e.name);if(e.isDirectory())walk(p);else if(/\.js$/i.test(e.name))files.push(p);}})(root);
+          const pats=['readReadonlyCache','previewReadonlySync','subjectSelections','06_선택과목이력','schoolRead','sheetName','sheetRows','getSheet','googleapis','spreadsheets.values','readonlyCache','normalizeReadonlyCache'];
           const out=[];
-          for(const pat of pats){
-            out.push('===== '+pat+' =====');
-            let n=0;
-            for(let i=0;i<lines.length&&n<40;i++){
-              if(lines[i].toLowerCase().includes(pat.toLowerCase())){
-                out.push(...lines.slice(Math.max(0,i-2),Math.min(lines.length,i+3)), '---'); n++;
-              }
-            }
-          }
+          for(const f of files){const lines=fs.readFileSync(f,'utf8').split(/\r?\n/);let fileHit=false;for(const pat of pats){let n=0;for(let i=0;i<lines.length&&n<30;i++){if(lines[i].toLowerCase().includes(pat.toLowerCase())){if(!fileHit){out.push('\n######## '+f+' ########');fileHit=true;}out.push('===== '+pat+' @'+(i+1)+' =====',...lines.slice(Math.max(0,i-3),Math.min(lines.length,i+4)),'---');n++;}}}}
           fs.writeFileSync('diag/08129-sheet-hooks.txt',out.join('\n'),'utf8');
           '@ | Set-Content inspect.js -Encoding UTF8
           node inspect.js
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add diag/08129-sheet-hooks.txt
-          git commit -m 'diag: capture 0.81.28 sheet hooks for 0.81.29' || echo no-change
+          git commit -m 'diag: capture all 0.81.28 sheet hooks for 0.81.29' || echo no-change
           git push
