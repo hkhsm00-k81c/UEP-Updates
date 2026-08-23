@@ -1,0 +1,63 @@
+name: Diagnose UEP 0.81.26 Selection and Dorm Report
+
+'on':
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/diag-uep-0.81.26-selection-dorm.yml
+      - diag-uep-0.81.26.trigger
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download shipped 0.81.25
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,diagnostics | Out-Null
+          gh release download v0.81.25 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+      - name: Capture exact selection and dorm report code paths
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $out='diagnostics/08126-selection-dorm-paths.txt'
+          'UEP 0.81.26 SELECTION + DORM REPORT TRACE' | Set-Content $out -Encoding UTF8
+          foreach($file in @('app/resources/app/gyomuon.js','app/resources/app/main.js','app/resources/app/preload.js')){
+            if(-not(Test-Path $file)){continue}
+            Add-Content $out "`n===== $file =====" -Encoding UTF8
+            $ls=Get-Content $file -Encoding UTF8
+            $patterns=@(
+              '학생신청','과목별 신청현황','오류유형','오류학생만 보기','반별 조회','개인별 조회','예상등급','예상등수',
+              '문이과','교차','중복과목','과학위계','일본어','중국어','음악','미술','2학년 1학기','2학년 2학기',
+              '학사 외출 및 퇴소 현황','학사외출','퇴소 현황','늦은 입소','전문사감','메일','문자','sendMail','sendDorm','dormReport','reportText','reportSubject'
+            )
+            $seen=New-Object 'System.Collections.Generic.HashSet[int]'
+            for($i=0;$i -lt $ls.Count;$i++){
+              $hit=$false; foreach($p in $patterns){if($ls[$i].Contains($p)){$hit=$true;break}}
+              if(-not $hit){continue}
+              $s=[Math]::Max(0,$i-18);$e=[Math]::Min($ls.Count-1,$i+28)
+              for($j=$s;$j -le $e;$j++){
+                if($seen.Add($j)){Add-Content $out ("{0,6}: {1}" -f ($j+1),$ls[$j]) -Encoding UTF8}
+              }
+            }
+          }
+      - name: Persist diagnostics
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add diagnostics/08126-selection-dorm-paths.txt
+          git diff --cached --quiet
+          if($LASTEXITCODE -eq 0){exit 0}
+          git commit -m 'diag: capture 0.81.26 selection and dorm report paths'
+          git push origin HEAD:main
