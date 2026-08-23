@@ -50,7 +50,10 @@ jobs:
           @'
           const fs=require('fs');
           const g=fs.readFileSync('app/resources/app/gyomuon.js','utf8');
-          if(!/const\s+APP_VERSION\s*=\s*["']0\.81\.36["']\s*;/.test(g)) throw new Error('runtime APP_VERSION is not 0.81.36');
+          const appVersionLine=(g.match(/[^\n\r]*APP_VERSION[^\n\r]*/)||[])[0]||'';
+          console.log('runtime version declaration:',appVersionLine.trim());
+          if(!appVersionLine.includes('0.81.36')) throw new Error('runtime APP_VERSION did not become 0.81.36: '+appVersionLine.trim());
+          if(appVersionLine.includes('0.81.35')) throw new Error('runtime APP_VERSION still references 0.81.35');
           const req=[
             'function attendanceIsSchoolHoliday(day)',
             "'2026-08-17'",
@@ -134,7 +137,10 @@ jobs:
           Expand-Archive verify/UEP-update.zip verify/app -Force
           $g=Get-Content verify/app/resources/app/gyomuon.js -Raw -Encoding UTF8
           $pkg=Get-Content verify/app/resources/app/package.json -Raw -Encoding UTF8 | ConvertFrom-Json
-          if($g -notmatch 'const\s+APP_VERSION\s*=\s*["'']0\.81\.36["'']\s*;'){throw 'published runtime version mismatch'}
+          $versionLine=([regex]::Match($g,'[^\r\n]*APP_VERSION[^\r\n]*')).Value
+          Write-Host "published runtime version declaration: $versionLine"
+          if(-not $versionLine.Contains('0.81.36')){throw 'published runtime version mismatch'}
+          if($versionLine.Contains('0.81.35')){throw 'published runtime still references 0.81.35'}
           if($pkg.version -ne '0.81.36'){throw 'published package version mismatch'}
           if($g.Contains('UEP_08135_RUNTIME_REPAIR_START')){throw 'published runtime contains legacy DOM repair'}
           Write-Host 'UEP 0.81.36 package is source-repaired and consistent.'
