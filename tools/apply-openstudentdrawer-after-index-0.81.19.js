@@ -1,0 +1,10 @@
+const fs=require('fs'),path=require('path');
+const root=process.argv[2]||'app';
+const file=path.join(root,'resources/app/gyomuon.js');
+let text=fs.readFileSync(file,'utf8');
+const before='const afterForStudent=groupedAfterSchoolCourses(rawParticipationPrograms.filter(p=>p.__isAfter)).map(group=>{ const courseKey=String(group.programId||group.courseId||group.id).replace(/^after-course-/,""); const courseRows=rawParticipationPrograms.filter(p=>p.__isAfter&&(String(p.programId||p.courseId||p.id).replace(/^after-(?:master|session)-/,"")===courseKey||(p.actualTitle||p.title)===(group.actualTitle||group.title)));';
+const after='const afterRows=rawParticipationPrograms.filter(p=>p.__isAfter); const afterRowsByCourse=new Map(); for(const row of afterRows){ const key=String(row.programId||row.courseId||row.id).replace(/^after-(?:master|session)-/,""); if(key){ if(!afterRowsByCourse.has(key))afterRowsByCourse.set(key,[]); afterRowsByCourse.get(key).push(row); } const titleKey=`title:${row.actualTitle||row.title||""}`; if(titleKey!=="title:"){ if(!afterRowsByCourse.has(titleKey))afterRowsByCourse.set(titleKey,[]); afterRowsByCourse.get(titleKey).push(row); } } const afterForStudent=groupedAfterSchoolCourses(afterRows).map(group=>{ const courseKey=String(group.programId||group.courseId||group.id).replace(/^after-course-/,""); const titleKey=`title:${group.actualTitle||group.title||""}`; const byCourse=afterRowsByCourse.get(courseKey)||[]; const byTitle=afterRowsByCourse.get(titleKey)||[]; const courseRows=byCourse.length?byCourse:byTitle;';
+if(!text.includes(before)) throw new Error('after-school grouping expected shape not found');
+text=text.replace(before,after);
+fs.writeFileSync(file,text);
+console.log('Applied openStudentDrawer after-school preindex optimization');
