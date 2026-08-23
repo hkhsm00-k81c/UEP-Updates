@@ -1,0 +1,79 @@
+name: Diagnose UEP 0.81.27 Selection Model
+
+'on':
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/diag-uep-0.81.27-selection-model.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download shipped 0.81.27
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,diagnostics | Out-Null
+          gh release download v0.81.27 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+
+      - name: Extract selection ownership, rules, events and counseling sources
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $script=@'
+          const fs=require('fs');
+          const s=fs.readFileSync('app/resources/app/gyomuon.js','utf8');
+          const main=fs.readFileSync('app/resources/app/electron/main.cjs','utf8');
+          const keys=[
+            'function uepSelectionErrors(',
+            'function uepSelectionErrors08105(',
+            'function uepStudentApplicationView(',
+            'function uepStudentApplicationDetail(',
+            'function uepSubjectApplicationView(',
+            'data-uep-student-prev',
+            'data-uep-student-next',
+            'data-record-class',
+            'data-record-query',
+            'data-curriculum-error-only',
+            'data-curriculum-error-type',
+            '진로희망','추천계열','대학적성','적성','계열',
+            '문·이과','교차지원','과학과목 위계','예술과목 연계','제2외국어 연계'
+          ];
+          const out=[];
+          out.push('UEP 0.81.27 SELECTION MODEL DIAGNOSIS');
+          out.push('');
+          for(const key of keys){
+            const hits=[];let pos=0;
+            while((pos=s.indexOf(key,pos))>=0){hits.push(pos);pos+=key.length;}
+            out.push(`=== ${key} | COUNT=${hits.length} ===`);
+            hits.slice(0,8).forEach((i,n)=>{out.push(`--- HIT ${n+1} @ ${i} ---`);out.push(s.slice(Math.max(0,i-700),Math.min(s.length,i+2200)));});
+            out.push('');
+          }
+          out.push('=== MAIN DORM SAVE OCCURRENCES ===');
+          for(const key of ['async function saveDormOuting','ipcMain.handle','appendSheetValues','fetchLiveData({force:true})']){
+            const i=main.indexOf(key);out.push(`--- ${key} @ ${i} ---`);if(i>=0)out.push(main.slice(Math.max(0,i-500),Math.min(main.length,i+2500)));
+          }
+          fs.writeFileSync('diagnostics/uep-0.81.27-selection-model.txt',out.join('\n'),'utf8');
+          '@
+          Set-Content diag-selection-08127.cjs $script -Encoding UTF8
+          node diag-selection-08127.cjs
+
+      - name: Persist diagnosis
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add diagnostics/uep-0.81.27-selection-model.txt
+          git commit -m 'diag: record UEP 0.81.27 selection model' || exit 0
+          git push
