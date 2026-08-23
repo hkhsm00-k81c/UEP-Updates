@@ -28,7 +28,7 @@ jobs:
           gh release download v0.81.22 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
           Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
 
-      - name: Capture compact root-path reports
+      - name: Capture exact runtime symbols
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
@@ -36,38 +36,50 @@ jobs:
           if(-not (Test-Path $g)){ throw 'gyomuon.js missing' }
           $lines=Get-Content $g -Encoding UTF8
 
-          function Write-Hits([string]$out,[string[]]$patterns,[int]$before=4,[int]$after=8,[int]$limit=16){
+          function Write-Anchors([string]$out,[string[]]$anchors,[int]$before=6,[int]$after=10,[int]$perAnchor=4){
             "SOURCE: $g" | Set-Content $out -Encoding UTF8
-            $hitLines = New-Object System.Collections.Generic.List[int]
-            for($i=0; $i -lt $lines.Count; $i++){
-              foreach($p in $patterns){ if($lines[$i].Contains($p)){ $hitLines.Add($i); break } }
+            foreach($a in $anchors){
+              Add-Content $out ("`n### ANCHOR: {0}" -f $a) -Encoding UTF8
+              $matches=@()
+              for($i=0;$i -lt $lines.Count;$i++){ if($lines[$i].Contains($a)){ $matches += $i } }
+              Add-Content $out ("COUNT={0}" -f $matches.Count) -Encoding UTF8
+              foreach($h in ($matches | Select-Object -First $perAnchor)){
+                Add-Content $out ("@@ line {0}" -f ($h+1)) -Encoding UTF8
+                $s=[Math]::Max(0,$h-$before); $e=[Math]::Min($lines.Count-1,$h+$after)
+                for($j=$s;$j -le $e;$j++){ Add-Content $out ("{0,6}: {1}" -f ($j+1),$lines[$j]) -Encoding UTF8 }
+              }
             }
-            $selected=@($hitLines | Sort-Object -Unique | Select-Object -First $limit)
-            foreach($h in $selected){
-              Add-Content $out ("`n@@ HIT line {0}: {1}" -f ($h+1),$lines[$h].Trim()) -Encoding UTF8
-              $s=[Math]::Max(0,$h-$before); $e=[Math]::Min($lines.Count-1,$h+$after)
-              for($j=$s;$j -le $e;$j++){ Add-Content $out ("{0,6}: {1}" -f ($j+1),$lines[$j]) -Encoding UTF8 }
-            }
-            Add-Content $out ("`nHIT_COUNT={0}; SHOWN={1}" -f $hitLines.Count,$selected.Count) -Encoding UTF8
           }
 
-          Write-Hits 'diagnostics/08123-dashboard-timetable.txt' @('personalTimetableData','dashboardPersonalWeekMarkup','timetableRows','teacherTimetable','readonlyCache?.timetable','readonlyCache.timetable','시간표') 5 10 18
-          Write-Hits 'diagnostics/08123-dashboard-work.txt' @('directNoticeRows','dashboardDeadlineItems','workBoardData','readonlyCache?.work','readonlyCache.work','operations','업무·공지','학교업무') 5 10 18
-          Write-Hits 'diagnostics/08123-dorm-mail.txt' @('dormOuting','dorm outing','학사외출','귀가','입소','늦은 입소','late','mail','메일','보고문','sendMail') 5 10 28
-          Write-Hits 'diagnostics/08123-readonly-gate.txt' @('schoolReadSessionStatus','googleConnectionStatus','refreshReadonlyCacheSilently','previewReadonlySync','readReadonlyCache','readonlyCache=') 5 10 22
+          Write-Anchors 'diagnostics/08123-timetable-exact.txt' @(
+            'personalTimetableData','dashboardPersonalWeekMarkup','timetableRows','teacherTimetable',
+            'readonlyCache?.timetable','readonlyCache.timetable','readonlyCache?.teacherTimetable',
+            'renderTimetable','renderDashboard'
+          ) 5 9 4
 
-          foreach($f in @('diagnostics/08123-dashboard-timetable.txt','diagnostics/08123-dashboard-work.txt','diagnostics/08123-dorm-mail.txt','diagnostics/08123-readonly-gate.txt')){
-            if((Get-Item $f).Length -lt 200){ throw "diagnostic too small: $f" }
-          }
+          Write-Anchors 'diagnostics/08123-work-exact.txt' @(
+            'directNoticeRows','dashboardDeadlineItems','workBoardData','readonlyCache?.work','readonlyCache.work',
+            'renderWork','operationsMarkup','dashboardOperations','directNotices'
+          ) 5 9 4
 
-      - name: Persist compact diagnostics
+          Write-Anchors 'diagnostics/08123-dorm-exact.txt' @(
+            'updateDormOutingCount','dormOutingExcludedByRule','dormOutingRows','dormOuting','renderDorm',
+            'sendDorm','dormReport','reportDorm','sendMail','mailAlerts.dormOuting'
+          ) 5 10 5
+
+          Write-Anchors 'diagnostics/08123-gate-exact.txt' @(
+            'schoolReadSessionStatus','refreshReadonlyCacheSilently','previewReadonlySync','readReadonlyCache',
+            'googleConnectionStatus?.ok','readonlyCache=cached.data','readonlyCache = cached.data'
+          ) 5 9 5
+
+      - name: Persist exact diagnostics
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add diagnostics/08123-*.txt
+          git add diagnostics/08123-*-exact.txt
           git diff --cached --quiet
           if($LASTEXITCODE -eq 0){ Write-Host 'No diagnostic changes to commit'; exit 0 }
-          git commit -m 'diag: persist compact 0.81.23 root path reports'
+          git commit -m 'diag: persist exact 0.81.23 runtime symbols'
           git push origin HEAD:fix/0.81.23-dashboard-dorm-sync
