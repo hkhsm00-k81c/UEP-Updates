@@ -1,0 +1,1225 @@
+UEP 0.81.24 TARGET TRACE
+
+===== app/resources/app/gyomuon.js =====
+    74:   dormOutings: [],
+    75:   settings: {
+    76:     autoStart: true,
+    77:     setupCompleted: false,
+    78:     setupCompletedVersion: "",
+    79:     userProfile: {
+    80:       name: "",
+    81:       primaryRole: "homeroom",
+    82:       secondaryRole: "",
+    83:       grade: "1",
+    84:       classNo: "",
+    85:       department: "1학년부"
+    86:     },
+    87:     alwaysOnTop: false,
+    96:       unhoLlm: "https://unho.kr/",
+    97:       messengerPath: "",
+    98:       comtimePath: "",
+    99:     },
+   100:     manualCalendar: [],
+   101:     updateManifestUrl: "",
+   102:     programSheetUrl: "",
+   103:     programSheetName: "프로그램",
+   104:     referenceData: structuredClone(SOURCE_REFERENCE_DATA),
+   105:     dataConnections: {
+   106:       studentMaster: {
+   107:         label: "학생 기본정보",
+   108:         fileTitle: "2026. 운호고 입학생 기초자료",
+   109:         spreadsheetId: "1IxBIpw3CKzVqWVaPPhFfdBC5DV8mMzQrXmN6o9KUavQ",
+   254: let selectedStudentId = "";
+   255: let studentDashboardSubmode = "dashboard";
+   256: const studentSensitiveRevealKeys = new Set();
+   257: let studentAlertMode = "all";
+   258: let studentAlertClass = "all";
+   259: const APP_VERSION = "0.81.22";
+   260: const SUBJECT_REAPPLICATION_FORM_URL = "https://docs.google.com/forms/d/e/1FAIpQLSd7_E_Kb8HGEgjyEqtXs_Ykvy5L_c96ILIQ06OBV-MV_1dc0A/viewform?usp=dialog";
+   261: const samples = {
+   262:   students: [
+   263:     ["1101", "김도윤", "1반", "재학", "조회 가능"],
+   264:     ["1102", "박서준", "1반", "재학", "확인 필요"],
+   265:     ["1103", "이민준", "1반", "재학", "조회 가능"],
+   266:     ["1201", "최지우", "2반", "재학", "조회 가능"],
+   267:   ],
+   369:       ...baseState.settings,
+   370:       ...(saved.settings || {}),
+   371:       links: { ...baseState.settings.links, ...((saved.settings || {}).links || {}) },
+   372:       widgetSettings: { ...baseState.settings.widgetSettings, ...((saved.settings || {}).widgetSettings || {}) },
+   373:       neis: { ...baseState.settings.neis, ...((saved.settings || {}).neis || {}) },
+   374:       userProfile: { ...baseState.settings.userProfile, ...((saved.settings || {}).userProfile || {}) },
+   375:       dataConnections: { ...baseState.settings.dataConnections, ...((saved.settings || {}).dataConnections || {}) },
+   376:       referenceData: { ...baseState.settings.referenceData, ...((saved.settings || {}).referenceData || {}) },
+   377:     },
+   378:   };
+   379: }
+   380: 
+   381: async function load() {
+   382:   // 영속 상태를 읽기 전에는 화면 렌더/이벤트가 기본값을 저장하지 못하도록 부팅 장벽을 둡니다.
+  1669:       operationState:dormRuleOperationStateForCategory($('#dormRuleCategory').value),
+  1670:       actualExit:$('#dormRuleActualExit')?.value||'',actualReentry:$('#dormRuleActualReentry')?.value||'',
+  1671:       priorNightAcademyHome:$('#dormRulePriorNightAcademyHome').checked,
+  1672:       formRequired:$('#dormRuleFormRequired').checked,
+  1673:       individualOutingAllowed:$('#dormRuleIndividualOutingAllowed').checked,
+  1674:       writer:currentLoginTeacherName()||'UEP',source:copyMode?'UEP 규칙센터 복사':existing?'UEP 규칙센터 수정':'UEP 규칙센터 추가'
+  1675:     };
+  1676:     const button=event.submitter||$('#dormRuleEditorForm .btn.primary');if(button){button.disabled=true;button.textContent='시트 저장 중…';}
+  1677:     try{
+  1678:       const result=await window.schoolBoard?.saveDormRule?.(out);
+  1679:       if(!result?.ok) throw new Error(result?.reason||'학사외출 규칙 저장 실패');
+  1680:       const saved=result.record||{...out,id:result.id||out.id};
+  1681:       const next=(Array.isArray(readonlyCache?.dormRules)?readonlyCache.dormRules:rules).filter(x=>String(x.id)!==String(saved.id));
+  1682:       next.push(saved);setDormRuleCache(next);closeDrawer();render('dorm');toast(copyMode?'규칙 복사본을 시트에 저장했습니다.':existing?'학사외출 규칙을 시트에 수정 저장했습니다.':'학사외출 규칙을 시트에 추가했습니다.');
+  1685: }
+  1686: async function confirmDormRule(ruleId){
+  1687:   const rules=dormRuleHistory(), rule=rules.find(x=>String(x.id)===String(ruleId));if(!rule)return;
+  1688:   if(!confirm(`${rule.name} 규칙을 현재 판정에 사용하도록 활성화할까요?\n필요하면 먼저 수정 버튼에서 구분·날짜·시간을 조정하세요.`))return;
+  1689:   try{
+  1690:     const result=await window.schoolBoard?.saveDormRule?.({...rule,active:true,writer:currentLoginTeacherName()||'UEP',source:'UEP 규칙센터 활성화'});
+  1691:     if(!result?.ok)throw new Error(result?.reason||'활성화 실패');
+  1692:     const saved=result.record||{...rule,active:true};const next=(readonlyCache?.dormRules||rules).filter(x=>String(x.id)!==String(ruleId));next.push(saved);setDormRuleCache(next);render('dorm');toast('학사외출 규칙을 활성화했습니다.');
+  1693:   }catch(error){toast(error?.message||'학사외출 규칙 활성화에 실패했습니다.');}
+  1694: }
+  1695: async function deleteDormRule(ruleId){
+  1696:   const rules=dormRuleHistory(), rule=rules.find(x=>String(x.id)===String(ruleId));if(!rule)return;
+  1697:   if(!confirm(`${rule.name} 규칙을 규칙로그 시트에서도 삭제할까요?`))return;
+  1698:   try{
+  2327:   $("#drawer").classList.remove("hidden");$("#drawerBackdrop").classList.remove("hidden");$("#lateCancel").onclick=closeDrawer;
+  2328:   if(row&&$("#lateDelete"))$("#lateDelete").onclick=async()=>{await deleteLateAttendanceRow(row);closeDrawer();};
+  2329:   $("#lateAttendanceEditor").onsubmit=async event=>{event.preventDefault();const student=students.find(st=>String(st.studentNo)===String($("#lateStudent").value));if(!student)return toast("학생을 선택하세요.");
+  2330:     const previous=(readonlyCache?.lateAttendance||[]).filter(x=>String(x.studentId)===String(student.id)&&String(x.id)!==String(row?.id||""));
+  2331:     const minutes=Number($("#lateMinutes").value||0), cumulativeCount=previous.length+1, cumulativeMinutes=previous.reduce((sum,x)=>sum+Number(x.minutes||0),0)+minutes;
+  2332:     const payload={id:row?.id||"",studentId:student.id,studentNo:student.studentNo,name:student.name,grade:String(student.studentNo||"").slice(0,1),className:classNumberOf(student),date:$("#lateDate").value,time:$("#lateTime").value,reason:$("#lateReason").value.trim(),minutes,cumulativeCount,cumulativeMinutes,guidance:$("#lateGuidance").value,note:$("#lateNote").value.trim(),editor:currentLoginTeacherName()};
+  2333:     try{const result=await window.schoolBoard.saveLateAttendance(payload);readonlyCache=result?.data||readonlyCache;attendanceViewDate=payload.date;closeDrawer();render("attendance");toast(row?"지각 기록을 수정했습니다.":"지각 기록을 등록했습니다.");}catch(error){toast(error?.message||"지각 저장에 실패했습니다.");}
+  2334:   };
+  2335: }
+  2336: async function deleteLateAttendanceRow(row){
+  2337:   if(currentRoleId()!=="admin"||!row?.id)return;
+  2338:   if(!confirm(`${row.date} ${row.studentNo} ${row.name} 지각 기록을 삭제할까요?`))return;
+  2339:   try{const result=await window.schoolBoard.deleteLateAttendance(row.id);readonlyCache=result?.data||readonlyCache;render("attendance");toast("지각 기록을 삭제했습니다.");}catch(error){toast(error?.message||"지각 삭제에 실패했습니다.");}
+  2340: }
+  2714:   return '';
+  2715: }
+  2716: function inputCenterProgramIdentity(p={}){
+  2717:   const group=inputCenterProgramGroup(p);
+  2718:   const title=String(p.actualTitle||p.title||p.name||'').normalize('NFKC').trim().replace(/\s+/g,' ');
+  2719:   const teacher=String(p.teacher||p.teacherName||p.instructor||'').normalize('NFKC').trim().replace(/\s+/g,' ');
+  2720:   const semester=inputCenterProgramSemester(p);
+  2721:   // 방과후/야간심화 readonly 데이터는 차시·출석 결합 과정에서 행별 임시 ID가 달라질 수 있습니다.
+  2722:   // 연결목록은 강좌 마스터를 선택하는 곳이므로 학기+유형+강좌명+담당교사 기준으로 1회만 노출합니다.
+  2723:   if(group==='after'||group==='night') return `${group}|${semester}|${title}|${teacher}`;
+  2724:   const id=String(p.id||p.programId||p.afterId||p.afterSchoolId||p.activityId||p.masterId||'').trim();
+  2725:   if(id) return `${group}|${id}`;
+  2726:   return `${group}|${semester}|${title}|${teacher}`;
+  2727: }
+  2885:   const isProgramReport=inputCenterConfig.type==='보고서·탐구보고서'||inputCenterConfig.subtype==='보고서 제출'||rows.some(x=>/보고서/.test(String(x.detectedType||'')));
+  2886:   const batchId=`IN-${new Date().toISOString().replace(/[-:.TZ]/g,'').slice(0,14)}-${Math.random().toString(36).slice(2,6).toUpperCase()}`;
+  2887:   const selectedProgram=(readonlyCache?.programs||[]).find(p=>String(p.id||p.programId||'')===String(inputCenterConfig.programId||''));
+  2888:   const resolvedType=isProgramReport?'보고서·탐구보고서':inputCenterConfig.type;
+  2889:   const resolvedTitle=inputCenterConfig.title.trim()||String(rows[0]?.fileName||'입력센터 자료').replace(/\.[^.]+$/,'');
+  2890:   const payload={batchId,source:inputCenterConfig.source,type:resolvedType,subtype:inputCenterConfig.subtype,storageMode:inputCenterConfig.storageMode,title:resolvedTitle,semester:inputCenterConfig.semester,teacher:currentLoginTeacherName()||currentUser?.name||'',programId:inputCenterConfig.programId||'',programKind:selectedProgram?.kind||'',programName:selectedProgram?.actualTitle||selectedProgram?.title||'',batchScope:inputCenterConfig.batchScope,batchGrade:inputCenterConfig.batchGrade,batchClass:inputCenterConfig.batchClass,batchStudentNo:inputCenterConfig.batchStudentNo,pagesPerStudent:Number(inputCenterConfig.pagesPerStudent||1),expectedCount:inputCenterBatchExpectedCount(),records:rows.map(x=>({...x,programId:inputCenterConfig.programId||'',programKind:selectedProgram?.kind||'',programName:selectedProgram?.actualTitle||selectedProgram?.title||'',reportFields:x.reportFields||[],submittedAt:x.submittedAt||''}))};
+  2891:   let result=await window.schoolBoard?.saveInputRecords?.(payload); if(!result?.ok)return toast(result?.reason||'입력자료를 저장하지 못했습니다.');
+  2892:   if(inputCenterConfig.storageMode==='uep'&&result?.requiresConfirmation){
+  2893:     const programLabel=selectedProgram?`${selectedProgram.kind==='common'?'공통활동':'선택활동'} · ${selectedProgram.actualTitle||selectedProgram.title||inputCenterConfig.programId}`:'선택 프로그램';
+  2894:     const summary=`등록 대상: ${programLabel}\n\n신규 ${result.newCount||0}건 · 중복 ${result.duplicateCount||0}건 · 갱신 ${result.updateCount||0}건\n중복 자료는 저장하지 않고, 기존 학생·프로그램 보고서가 있으면서 제출시각이 달라진 자료는 갱신합니다.\n\n계속 저장할까요?`;
+  2895:     if(!confirm(summary))return toast('영구 저장을 취소했습니다. 기존 자료는 변경되지 않았습니다.');
+  2896:     result=await window.schoolBoard?.saveInputRecords?.({...payload,confirmed:true}); if(!result?.ok)return toast(result?.reason||'입력자료를 저장하지 못했습니다.');
+  2897:   }
+  2898:   if(inputCenterConfig.storageMode==='local') inputCenterLocalHistory.unshift(...rows.map(r=>({...r,source:payload.source,type:payload.type,subtype:payload.subtype,title:payload.title||r.fileName,storageMode:'local',savedAt:new Date().toISOString(),createdAt:new Date().toISOString()})));
+  3445:   {id:"vice_principal",name:"교감",scope:"학교 전체 현황 열람·승인·감사 확인"},
+  3446:   {id:"principal",name:"교장",scope:"학교 전체 요약 현황·통계·최종 승인 열람"}
+  3447: ];
+  3448: 
+  3449: function currentUserProfile(){
+  3450:   const raw=state?.settings?.userProfile||{}, session=state?.auth?.user||{};
+  3451:   return {
+  3452:     id:String(session.id||raw.id||""),
+  3453:     email:String(session.email||raw.email||""),
+  3454:     name:String(session.name||raw.name||state?.settings?.loginUserName||state?.settings?.teacherName||"").trim(),
+  3455:     primaryRole:String(session.primaryRole||raw.primaryRole||state?.settings?.currentRole||"admin"),
+  3456:     secondaryRole:String(session.secondaryRole||raw.secondaryRole||""),
+  3457:     grade:String(session.grade||raw.grade||state?.settings?.neis?.grade||"1"),
+  3458:     classNo:String(session.classNo||raw.classNo||""),
+  3459:     department:String(session.department||raw.department||"1학년부")
+  3460:   };
+  3461: }
+  3462: function currentRoleId(){return currentUserProfile().primaryRole||"admin";}
+  3467:   return roleName(p.primaryRole);
+  3468: }
+  3469: function refreshHeaderRoleBadge(){
+  3470:   const roleChip=document.getElementById("headerRoleChip");
+  3471:   const versionChip=document.getElementById("headerVersionChip");
+  3472:   const profileName=document.querySelector(".profile b");
+  3473:   const profileMeta=document.querySelector(".profile small");
+  3474:   const profileAvatar=document.querySelector(".profile > div");
+  3475:   const p=currentUserProfile();
+  3476:   const role=currentRoleId();
+  3477:   if(roleChip){
+  3478:     roleChip.textContent=currentRoleDisplay();
+  3479:     roleChip.dataset.role=role;
+  3480:   }
+  3481:   if(versionChip)versionChip.textContent=`v${APP_VERSION}`;
+  3482:   if(profileName&&p.name) profileName.textContent=p.name;
+  3483:   if(profileMeta) profileMeta.textContent=[p.department,currentRoleDisplay()].filter(Boolean).join(" · ");
+  3484:   if(profileAvatar&&p.name) profileAvatar.textContent=p.name.slice(0,1);
+  3485:   const profileBox=document.querySelector('.profile');
+  3486:   if(profileBox){profileBox.setAttribute('role','button');profileBox.setAttribute('tabindex','0');profileBox.title='계정 메뉴';}
+  3487: }
+  3488: 
+  3489: let authSessionReady=false;
+  3490: function roleFromAccount(account){
+  3491:   const role=String(account?.role||'').trim(), admin=String(account?.admin||'').toUpperCase()==='Y';
+  3492:   if(admin)return {primaryRole:'admin',secondaryRole:/학년부장/.test(role)?'grade_head':''};
+  3493:   if(/학년부장/.test(role))return {primaryRole:'grade_head',secondaryRole:''};
+  3494:   if(/학년총무/.test(role))return {primaryRole:'grade_manager',secondaryRole:'homeroom'};
+  3556:   const remembered=state?.auth?.rememberedUser||state?.auth?.user;const canContinue=remembered&&remembered.name&&remembered.email&&!switchUser;
+  3557:   gate.innerHTML=`<section class="user-auth-card"><div class="user-auth-brand"><span>U</span><div><small>UNHO EDUCATION PLATFORM</small><h2>${locked?'UEP 화면 잠금':'사용자 확인'}</h2><p>${locked?'학생정보 보호를 위해 현재 화면을 잠갔습니다.':'학교에 등록된 이메일을 기준으로 사용자를 확인합니다. 최고관리자는 신규 PC에서도 안전하게 진입할 수 있습니다.'}</p></div></div>${canContinue?`<button class="user-auth-remembered" id="rememberedUserContinue"><b>${escapeHtml(remembered.name)}</b><span>${escapeHtml(maskEmail(remembered.email))}</span><small>${locked?'계속 사용':'자동 로그인 사용자'}</small></button><button class="user-auth-text" id="useDifferentUser">다른 사용자로 로그인</button>`:`<form id="userAuthForm"><label>교사 이름<input id="userAuthName" autocomplete="name" required placeholder="예: 홍석민"></label><label>교사 이메일<input id="userAuthEmail" type="email" autocomplete="email" required placeholder="학교에 등록된 이메일"></label><label class="user-auth-check"><input id="userAuthRemember" type="checkbox"> 이 PC에서 자동 로그인</label><p id="userAuthMessage" class="user-auth-message"></p><button class="btn primary" type="submit">UEP 시작</button></form>`}<div class="user-auth-exit-row"><button type="button" class="user-auth-text danger" id="userAuthExit">UEP 종료</button></div><footer>PC 인증과 사용자 확인은 별도입니다. 상담 메모와 개인 권한은 현재 로그인 교사를 기준으로 표시됩니다.</footer></section>`;
+  3558:   document.getElementById('useDifferentUser')?.addEventListener('click',()=>renderUserAuthGate({locked:false,switchUser:true}));
+  3559:   document.getElementById('userAuthExit')?.addEventListener('click',async()=>{if(confirm('UEP를 종료할까요?'))await window.schoolBoard?.close?.();});
+  3560:   document.getElementById('rememberedUserContinue')?.addEventListener('click',async()=>{const status=await window.schoolBoard?.schoolReadSessionStatus?.({verify:true});if(!status?.authenticated)return renderUserAuthGate({switchUser:true});const a=status.user||{},account={id:String(a.userId||remembered.id||''),email:String(a.email||remembered.email||'').trim(),name:String(a.name||remembered.name||'').trim(),role:String(a.role||''),admin:a.isAdmin?'Y':'N',grade:String(a.grade||'1'),classNo:String(a.homeroom||''),department:String(a.department||((a.grade||1)+'학년부')),active:true,activeRaw:'Y'};state.auth.user=accountToSession(account);googleConnectionStatus={ok:true,encryption:true,mode:'school_read_api'};await save();hideUserAuthGate();refreshReadonlyCacheSilently({force:true,rerender:false}).catch(()=>{});navigate(state.activePage||'dashboard');});
+  3561:   document.getElementById('userAuthForm')?.addEventListener('submit',async event=>{event.preventDefault();const name=document.getElementById('userAuthName')?.value,email=document.getElementById('userAuthEmail')?.value;const submit=event.submitter||document.querySelector('#userAuthForm button[type="submit"]');if(submit){submit.disabled=true;submit.textContent='확인 중…';}try{if(!window.schoolBoard?.schoolReadLogin)throw new Error('이 UEP 빌드에는 School Read API 로그인이 없습니다.');const result=await window.schoolBoard.schoolReadLogin({name,email});if(!result?.ok){authGateMessage(result?.message||'UEP 로그인에 실패했습니다.');return;}const a=result.user||{};const account={id:String(a.userId||''),email:String(a.email||email||'').trim(),name:String(a.name||name||'').trim(),role:String(a.role||''),admin:a.isAdmin?'Y':'N',grade:String(a.grade||'1'),classNo:String(a.homeroom||''),department:String(a.department||((a.grade||1)+'학년부')),active:true,activeRaw:'Y'};const user=accountToSession(account),remember=Boolean(document.getElementById('userAuthRemember')?.checked);state.auth.user=user;state.auth.rememberUser=remember;state.auth.rememberedUser=remember?{id:user.id,name:user.name,email:user.email}:null;state.settings.userProfile={...state.settings.userProfile,...user};state.settings.loginUserName=user.name;googleConnectionStatus={ok:true,encryption:true,mode:'school_read_api'};await save();hideUserAuthGate();const synced=await window.schoolBoard?.previewReadonlySync?.();if(synced?.ok){const cached=await window.schoolBoard?.readReadonlyCache?.();if(cached?.ok){readonlyCache=uep08123NormalizeReadonlyCache(cached.data);googleConnectionError='';}}else if(synced){googleConnectionError=synced.reason||'학교 데이터 동기화에 실패했습니다.';}startReadonlyAutoRefresh();navigate(state.activePage||'dashboard');}catch(error){authGateMessage(error?.message||'UEP 로그인에 실패했습니다.');}finally{if(submit){submit.disabled=false;submit.textContent='UEP 시작';}}});
+  3562: }
+  3563: async function restoreRememberedSessionImmediately(){
+  3564:   const remembered=state?.auth?.rememberUser?state?.auth?.rememberedUser:null;
+  3565:   const savedUser=state?.auth?.user;
+  3566:   if(!remembered?.name||!remembered?.email||!savedUser?.name||!savedUser?.email)return false;
+  3567:   const sameName=String(savedUser.name).trim()===String(remembered.name).trim();
+  3568:   const sameEmail=String(savedUser.email).trim().toLowerCase()===String(remembered.email).trim().toLowerCase();
+  3569:   if(!sameName||!sameEmail)return false;
+  3570:   if(!window.schoolBoard?.schoolReadSessionStatus)return false;
+  3571:   const status=await window.schoolBoard.schoolReadSessionStatus({verify:true});
+  3572:   if(!status?.authenticated)return false;
+  3573:   const a=status.user||{};const account={id:String(a.userId||remembered?.id||savedUser?.id||''),email:String(a.email||remembered?.email||savedUser?.email||'').trim(),name:String(a.name||remembered?.name||savedUser?.name||'').trim(),role:String(a.role||''),admin:a.isAdmin?'Y':'N',grade:String(a.grade||'1'),classNo:String(a.homeroom||''),department:String(a.department||((a.grade||1)+'학년부')),active:true,activeRaw:'Y'};state.auth.user=accountToSession(account);state.settings.userProfile={...state.settings.userProfile,...state.auth.user};state.settings.loginUserName=state.auth.user.name;googleConnectionStatus={ok:true,encryption:true,mode:'school_read_api'};
+  3574:   const gate=document.getElementById('userAuthGate');
+  3575:   if(gate){
+  3576:     document.body.classList.add('uep-auth-locked');gate.classList.remove('hidden');
+  3577:     gate.innerHTML=`<section class="user-auth-card auto-login-transition"><div class="user-auth-brand"><span>U</span><div><small>UNHO EDUCATION PLATFORM</small><h2>자동 로그인 중…</h2><p>${escapeHtml(state.auth.user.name)} · ${escapeHtml(maskEmail(state.auth.user.email))}</p></div></div><div class="auto-login-progress"><i></i></div><footer>승인된 UEP 세션을 확인했습니다.</footer></section>`;
+  3578:     await new Promise(resolve=>setTimeout(resolve,220));
+  3579:   }
+  3580:   await save();
+  3581:   hideUserAuthGate();
+  3586:   const savedUser=state?.auth?.user;
+  3587:   if(remembered?.name&&remembered?.email&&window.schoolBoard?.schoolReadSessionStatus){
+  3588:     try{
+  3589:       const status=await window.schoolBoard.schoolReadSessionStatus({verify:true});
+  3590:       if(status?.authenticated){
+  3591:         const a=status.user||{};const account={id:String(a.userId||remembered?.id||savedUser?.id||''),email:String(a.email||remembered?.email||savedUser?.email||'').trim(),name:String(a.name||remembered?.name||savedUser?.name||'').trim(),role:String(a.role||''),admin:a.isAdmin?'Y':'N',grade:String(a.grade||'1'),classNo:String(a.homeroom||''),department:String(a.department||((a.grade||1)+'학년부')),active:true,activeRaw:'Y'};state.auth.user=accountToSession(account);state.settings.userProfile={...state.settings.userProfile,...state.auth.user};state.settings.loginUserName=state.auth.user.name;googleConnectionStatus={ok:true,encryption:true,mode:'school_read_api'};
+  3592:         await save();
+  3593:         hideUserAuthGate();
+  3594:         return true;
+  3595:       }
+  3596:     }catch(error){console.warn('[UEP] 저장된 School Read 세션 확인 실패',error);}
+  3597:   }
+  3598:   state.auth.user=null;
+  3599:   authSessionReady=false;
+  3605: async function lockCurrentUser(){state.auth.locked=true;await save();closeAccountPopover();renderUserAuthGate({locked:true});}
+  3606: async function switchCurrentUser(){await window.schoolBoard?.schoolReadLogout?.();googleConnectionStatus={ok:false,encryption:true,mode:'school_read_api'};state.auth.user=null;state.auth.locked=true;await save();closeAccountPopover();renderUserAuthGate({switchUser:true});}
+  3607: async function logoutCurrentUser(){await window.schoolBoard?.schoolReadLogout?.();googleConnectionStatus={ok:false,encryption:true,mode:'school_read_api'};state.auth.user=null;state.auth.rememberUser=false;state.auth.rememberedUser=null;state.auth.locked=true;await save();closeAccountPopover();renderUserAuthGate({switchUser:true});}
+  3608: function closeAccountPopover(){document.querySelector('.account-popover')?.remove();}
+  3609: function openAccountPopover(){
+  3610:   closeAccountPopover();const p=currentUserProfile(),profile=document.querySelector('.profile');if(!profile||!authSessionReady)return;const pop=document.createElement('div');pop.className='account-popover';pop.innerHTML=`<div class="account-popover-head"><span>${escapeHtml((p.name||'U').slice(0,1))}</span><div><b>${escapeHtml(p.name||'사용자')}</b><small>${escapeHtml([p.department,currentRoleDisplay()].filter(Boolean).join(' · '))}</small><em>${escapeHtml(maskEmail(p.email))}</em></div></div><button data-account-lock>화면 잠금<small>현재 화면을 가립니다</small></button><button data-account-switch>다른 사용자로 전환<small>교사명·이메일 다시 입력</small></button><button class="danger" data-account-logout>로그아웃<small>자동 로그인도 해제</small></button>`;document.body.appendChild(pop);const r=profile.getBoundingClientRect();pop.style.left=`${Math.max(12,r.left)}px`;pop.style.bottom=`${Math.max(12,window.innerHeight-r.top+8)}px`;pop.querySelector('[data-account-lock]').onclick=lockCurrentUser;pop.querySelector('[data-account-switch]').onclick=switchCurrentUser;pop.querySelector('[data-account-logout]').onclick=logoutCurrentUser;setTimeout(()=>document.addEventListener('pointerdown',accountPopoverOutside,{once:true}),0);
+  3611: }
+  3612: function accountPopoverOutside(event){if(!event.target.closest('.account-popover')&&!event.target.closest('.profile'))closeAccountPopover();}
+  3613: 
+  3614: 
+  3615: const SETUP_WIZARD_STEPS=[
+  3616:   {icon:"👋",title:"UEP 사용 등록",desc:"사용자 확인과 권한 신청부터 시작합니다.",body:"학생 개인정보 보호를 위해 사용자·기기 승인을 전제로 설정합니다. 승인 전에는 관리 권한을 부여하지 않습니다."},
+  3617:   {icon:"👤",title:"사용자·역할 신청",desc:"사용자 이름과 실제 담당 역할을 신청합니다.",body:"홍석민은 최초 관리자·1학년부장 기준입니다. 다른 사용자의 선택은 권한 부여가 아니라 승인 요청 정보입니다."},
+  3618:   {icon:"🏫",title:"학교·담당 범위",desc:"운호고등학교의 담당 학년·반·부서를 지정합니다.",body:"담임도 학년 학생자료를 조회할 수 있으며, 담임반 업무수정과 타반 개인정보 보호를 분리 적용합니다. 학년부장·관리자는 담당 범위 전체를 조회합니다."},
+  3619:   {icon:"☁",title:"UEP 데이터 연결",desc:"기본정보·응답·데이터처리·규칙로그 연결 상태를 확인합니다.",body:"서비스 계정은 Windows 보안 저장소에 보관하고 UEP 표준 구글시트는 권한에 따라 조회·제한적 양방향 수정합니다."},
+  3620:   {icon:"▦",title:"NEIS 시간표",desc:"학교·학년·반과 기준일을 지정해 학급시간표를 확인합니다.",body:"공개 조회를 우선 사용하고 실패 시 마지막 정상 저장자료를 유지합니다."},
+  3627: let setupWizardActive=false;
+  3628: let setupWizardPreview="";
+  3629: 
+  3630: function setupWizardProfileMarkup(){
+  3631:   const p=currentUserProfile();
+  3632:   return `<div class="setup-profile-grid">
+  3633:     <label>사용자 이름<input id="wizardUserName" value="${escapeHtml(p.name)}" placeholder="예: 홍석민" autocomplete="off"></label>
+  3634:     <label>주 역할<select id="wizardRole">${UEP_ROLES.map(role=>`<option value="${role.id}" ${p.primaryRole===role.id?'selected':''}>${role.name}</option>`).join('')}</select></label>
+  3635:     <label>겸임 역할<select id="wizardSecondaryRole"><option value="">없음</option><option value="grade_head" ${p.secondaryRole==='grade_head'?'selected':''}>학년부장</option><option value="grade_manager" ${p.secondaryRole==='grade_manager'?'selected':''}>학년총무</option><option value="homeroom" ${p.secondaryRole==='homeroom'?'selected':''}>담임교사</option><option value="subject" ${p.secondaryRole==='subject'?'selected':''}>교과담당</option></select></label>
+  3636:     <div class="setup-known-user"><b>UEP 관리자 기준</b><span>홍석민 · 관리자 + 1학년부장</span><button type="button" class="btn secondary" data-wizard-hong>홍석민 기준 적용</button></div>
+  3637:   </div>`;
+  3638: }
+  3639: function setupWizardScopeMarkup(){
+  3640:   const p=currentUserProfile();
+  3641:   const isHomeroom=p.primaryRole==="homeroom"||p.secondaryRole==="homeroom";
+  3642:   const isGradeWide=p.primaryRole==="admin"||p.primaryRole==="grade_head"||p.secondaryRole==="grade_head";
+  3643:   const classMarkup=isHomeroom?`<label>담임 반<select id="wizardHomeClass"><option value="">반 선택</option>${Array.from({length:14},(_,i)=>i+1).map(v=>`<option value="${v}" ${String(v)===p.classNo?'selected':''}>${v}반</option>`).join('')}</select></label>`:`<div class="setup-scope-readonly"><small>담당 반</small><b>${isGradeWide?'반 없음 · 학년 전체':'담임 아님'}</b><span>현재 역할에서는 담임반을 지정하지 않습니다.</span></div>`;
+  3644:   return `<div class="setup-profile-grid">
+  3645:     <label>학교<input id="wizardSchoolName" value="${escapeHtml(state.settings.neis?.schoolName||'운호고등학교')}" readonly></label>
+  3646:     <label>학년도<input id="wizardSchoolYear" value="2026" readonly></label>
+  3647:     <label>담당 학년<select id="wizardGrade">${[1,2,3].map(v=>`<option value="${v}" ${String(v)===p.grade?'selected':''}>${v}학년</option>`).join('')}</select></label>
+  3648:     ${classMarkup}
+  3649:     <label class="wide">부서<input id="wizardDepartment" value="${escapeHtml(p.department)}" placeholder="예: 1학년부"></label>
+  3650:   </div>`;
+  3651: }
+  3652: function setupWizardConnectionMarkup(){
+  3708:   if(setupWizardStep===1){
+  3709:     const name=String($("#wizardUserName")?.value||p.name||"").trim();
+  3710:     let primaryRole=String($("#wizardRole")?.value||p.primaryRole||"admin");
+  3711:     let secondaryRole=String($("#wizardSecondaryRole")?.value||"");
+  3712:     if(name==="홍석민"){ primaryRole="admin"; secondaryRole="grade_head"; }
+  3713:     state.settings.userProfile={...p,name,primaryRole,secondaryRole};
+  3714:     state.settings.currentRole=primaryRole;
+  3715:     state.settings.loginUserName=name;
+  3716:     state.settings.teacherName=name;
+  3717:   }
+  3718:   if(setupWizardStep===2){
+  3719:     const grade=String($("#wizardGrade")?.value||p.grade||"1");
+  3720:     const activeProfile=currentUserProfile();
+  3721:     const isHomeroom=activeProfile.primaryRole==="homeroom"||activeProfile.secondaryRole==="homeroom";
+  3722:     const classNo=isHomeroom?String($("#wizardHomeClass")?.value||""):"";
+  3723:     const department=String($("#wizardDepartment")?.value||p.department||"").trim();
+  3724:     state.settings.userProfile={...activeProfile,grade,classNo,department};
+  3725:     state.settings.grade=grade;
+  3726:     state.settings.neis={...state.settings.neis,grade,...(classNo?{classNo}:{})};
+  3727:   }
+  3728:   if(setupWizardStep===5){
+  3729:     $$("[data-wizard-widget]").forEach(input=>{
+  3730:       const key=input.dataset.wizardWidget;
+  3731:       state.settings.widgetSettings[key]={...(state.settings.widgetSettings[key]||{}),visible:Boolean(input.checked)};
+  3732:     });
+  3824:     renderSetupWizard();
+  3825:   });
+  3826:   $("[data-setup-finish]")?.addEventListener("click",()=>{
+  3827:     saveWizardCurrentStep();
+  3828:     state.settings.setupCompleted=true;
+  3829:     state.settings.setupCompletedVersion=APP_VERSION;
+  3830:     save();
+  3831:     refreshHeaderRoleBadge();
+  3832:   try {
+  3833:     const bootContent=document.getElementById('pageContent');
+  3834:     if(bootContent && !String(bootContent.innerHTML||'').trim()){
+  3835:       state.activePage='dashboard';
+  3836:       navigate('dashboard');
+  3837:     }
+  3886:   const old=document.getElementById('studentGuidanceLayer');if(old)old.remove();
+  3887:   const students=(readonlyCache?.students||[]).filter(s=>String(s.status||'재학')==='재학').sort((a,b)=>String(a.studentNo||'').localeCompare(String(b.studentNo||''),'ko'));
+  3888:   const classes=[...new Set(students.map(s=>String(classNumberOf(s)||'')).filter(Boolean))].sort((a,b)=>Number(a)-Number(b));
+  3889:   const todayValue=dateKey(new Date());
+  3890:   const layer=document.createElement('div');layer.id='studentGuidanceLayer';layer.className='issue-layer';
+  3891:   layer.innerHTML=`<div class="issue-dialog student-guidance-dialog"><header><div><small>STUDENT GUIDANCE</small><h3>학생지도 기록</h3><p>반과 학생을 선택하고 날짜와 지도내용을 기록합니다.</p></div><button type="button" data-guidance-close>×</button></header><form id="studentGuidanceForm"><div class="student-guidance-grid"><label>반 선택<select id="studentGuidanceClass" required><option value="">반 선택</option>${classes.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}반</option>`).join('')}</select></label><label>학생 선택<select id="studentGuidanceStudent" required disabled><option value="">학생 선택</option></select></label></div><label>지도 날짜<input id="studentGuidanceDate" type="date" value="${escapeHtml(todayValue)}" required></label><label>지도 내용<textarea id="studentGuidanceMemo" rows="7" required placeholder="학생에게 지도한 내용, 약속사항, 추후 확인할 내용을 기록해 주세요."></textarea></label><div class="issue-meta">지도교사 ${escapeHtml(currentLoginTeacherName()||currentUser?.name||roleName(currentRoleId())||'')} · 기본정보 연결시트 46_학생지도기록 저장</div><div class="modal-actions"><button type="button" class="btn secondary" data-guidance-close>취소</button><button class="btn primary" type="submit">지도 기록 저장</button></div></form></div>`;
+  3892:   document.body.appendChild(layer);
+  3893:   const classSelect=layer.querySelector('#studentGuidanceClass'),studentSelect=layer.querySelector('#studentGuidanceStudent');
+  3894:   const fillStudents=()=>{const c=String(classSelect.value||'');const rows=students.filter(st=>String(classNumberOf(st))===c);studentSelect.innerHTML=`<option value="">학생 선택</option>${rows.map(st=>`<option value="${escapeHtml(st.id||st.studentNo||'')}">${escapeHtml(`${st.studentNo||''} ${st.name||''}`)}</option>`).join('')}`;studentSelect.disabled=!c;};
+  3895:   classSelect.onchange=fillStudents;
+  3896:   studentSelect.onchange=()=>{selectedStudentId=studentSelect.value||"";updateStudentSignalIndicator();};
+  3897:   const closeGuidance=()=>{layer.remove();updateStudentSignalIndicator();};
+  3898:   layer.querySelectorAll('[data-guidance-close]').forEach(b=>b.onclick=closeGuidance);layer.onclick=e=>{if(e.target===layer)closeGuidance();};
+  3899:   layer.querySelector('#studentGuidanceForm').onsubmit=async e=>{e.preventDefault();const id=studentSelect.value,student=students.find(st=>String(st.id||st.studentNo||'')===String(id));if(!student)return toast('학생을 선택해 주세요.');const memo=layer.querySelector('#studentGuidanceMemo').value.trim();if(!memo)return toast('지도 내용을 입력해 주세요.');const payload={studentId:String(student.id||''),studentNo:String(student.studentNo||''),name:String(student.name||''),grade:String(student.grade||'1'),className:String(classNumberOf(student)||''),number:String(student.number||''),guidanceDate:String(layer.querySelector('#studentGuidanceDate').value||todayValue),memo,writer:String(currentLoginTeacherName()||currentUser?.name||roleName(currentRoleId())||''),status:'기록'};const saveBtn=layer.querySelector('button[type="submit"]');saveBtn.disabled=true;saveBtn.textContent='저장 중…';try{const result=await window.schoolBoard?.saveStudentGuidanceRecord?.(payload);if(!result?.ok)throw new Error(result?.reason||'학생지도 기록 저장 실패');readonlyCache.studentGuidanceRecords=Array.isArray(readonlyCache.studentGuidanceRecords)?[result.record,...readonlyCache.studentGuidanceRecords]:[result.record];layer.remove();toast(`${student.studentNo} ${student.name} 학생지도 기록을 저장했습니다.`);}catch(error){saveBtn.disabled=false;saveBtn.textContent='지도 기록 저장';toast(error?.message||'학생지도 기록 저장에 실패했습니다.');}};
+  3900:   setTimeout(()=>classSelect?.focus(),30);
+  3901: }
+  3902: function openIssueReportDialog(){
+  3903:   const old=document.getElementById("issueReportLayer");if(old)old.remove();
+  3904:   const layer=document.createElement("div");layer.id="issueReportLayer";layer.className="issue-layer";
+  3905:   layer.innerHTML=`<div class="issue-dialog"><header><div><small>UEP FEEDBACK</small><h3>오류 신고</h3></div><button type="button" data-issue-close>×</button></header><form id="issueReportForm"><label>발견한 화면<input id="issuePage" value="${escapeHtml(pageTitles[state.activePage]?.[0]||state.activePage||'')}" required></label><label>오류 유형<select id="issueType"><option>화면 표시</option><option>데이터 연결</option><option>기능 작동</option><option>속도·안정성</option><option>개선 제안</option></select></label><label>오류 내용<textarea id="issueDescription" rows="5" required placeholder="어떤 동작을 했을 때 무엇이 잘못 보였는지 적어주세요."></textarea></label><label>재현 방법<textarea id="issueSteps" rows="3" placeholder="예: 학생정보 → 1반 → 학생 클릭"></textarea></label><div class="issue-meta">버전 v${APP_VERSION} · ${escapeHtml(roleName(currentRoleId()))} · ${new Date().toLocaleString('ko-KR')}</div><div class="modal-actions"><button type="button" class="btn secondary" data-issue-close>취소</button><button class="btn primary">신고 저장</button></div></form></div>`;
+  3906:   document.body.appendChild(layer);
+  3907:   layer.querySelectorAll('[data-issue-close]').forEach(b=>b.onclick=()=>layer.remove());
+  3908:   layer.onclick=e=>{if(e.target===layer)layer.remove();};
+  3909:   layer.querySelector('#issueReportForm').onsubmit=async e=>{e.preventDefault();state.issueReports.unshift({id:`ISS-${Date.now()}`,createdAt:new Date().toISOString(),reporter:roleName(currentRoleId()),page:layer.querySelector('#issuePage').value.trim(),type:layer.querySelector('#issueType').value,description:layer.querySelector('#issueDescription').value.trim(),steps:layer.querySelector('#issueSteps').value.trim(),version:APP_VERSION,status:'new',adminNote:'',updatedAt:''});await save();layer.remove();toast('오류 신고를 이 PC에 저장했습니다. 관리자 화면에서 확인할 수 있습니다.');if(state.activePage==='settings')render('settings');};
+  3910:   setTimeout(()=>layer.querySelector('#issueDescription')?.focus(),30);
+  3911: }
+  3912: function openIssueManager(){
+  3913:   const old=document.getElementById("issueReportLayer");if(old)old.remove();
+  3914:   const reports=state.issueReports||[];const layer=document.createElement('div');layer.id='issueReportLayer';layer.className='issue-layer';
+  3915:   layer.innerHTML=`<div class="issue-dialog issue-manager"><header><div><small>ADMIN CONSOLE</small><h3>오류 신고 관리</h3></div><button type="button" data-issue-close>×</button></header><div class="issue-summary"><b>전체 ${reports.length}건</b><span>접수 ${reports.filter(r=>r.status==='new').length} · 확인 중 ${reports.filter(r=>r.status==='checking').length} · 완료 ${reports.filter(r=>r.status==='fixed').length}</span></div><div class="issue-list">${reports.length?reports.map(r=>`<article data-issue-id="${escapeHtml(r.id)}"><div class="issue-item-head"><span class="issue-state ${escapeHtml(r.status)}">${issueStatusLabel(r.status)}</span><b>${escapeHtml(r.page)} · ${escapeHtml(r.type)}</b><small>v${escapeHtml(r.version||'')} · ${escapeHtml(formatSyncTime(r.createdAt))}</small></div><p>${escapeHtml(r.description)}</p>${r.steps?`<small>재현: ${escapeHtml(r.steps)}</small>`:''}<div class="issue-admin-row"><select data-issue-status><option value="new" ${r.status==='new'?'selected':''}>접수</option><option value="checking" ${r.status==='checking'?'selected':''}>확인 중</option><option value="fixed" ${r.status==='fixed'?'selected':''}>수정 완료</option><option value="hold" ${r.status==='hold'?'selected':''}>보류</option></select><input data-issue-note value="${escapeHtml(r.adminNote||'')}" placeholder="관리자 메모·수정 버전"><button class="btn primary" data-issue-save>저장</button></div></article>`).join(''):`<div class="empty-box">접수된 오류 신고가 없습니다.</div>`}</div><div class="modal-actions"><button class="btn secondary" data-issue-close>닫기</button></div></div>`;
+  3916:   document.body.appendChild(layer);layer.querySelectorAll('[data-issue-close]').forEach(b=>b.onclick=()=>layer.remove());
+  3917:   layer.querySelectorAll('[data-issue-save]').forEach(button=>button.onclick=async()=>{const card=button.closest('[data-issue-id]');const item=reports.find(r=>r.id===card.dataset.issueId);if(!item)return;item.status=card.querySelector('[data-issue-status]').value;item.adminNote=card.querySelector('[data-issue-note]').value.trim();item.updatedAt=new Date().toISOString();await save();toast('신고 처리 상태를 저장했습니다.');layer.remove();openIssueManager();});
+  3970:   return [
+  3971:     {name:'UEP 표준 구글시트',ok:Boolean(readonlyCache?.students?.length&&!googleConnectionError),note:readonlyCache?.students?.length?`${readonlyCache.students.length}명 학생 인식`:'연결 확인 필요'},
+  3972:     {name:'사용자 계정 승인표',ok:Boolean((readonlyCache?.userAccounts||[]).length),note:`${(readonlyCache?.userAccounts||[]).filter(a=>a.active!==false).length}명 승인`},
+  3973:     {name:'현재 사용자 권한',ok:Boolean(account&&account.active!==false),note:account?`${account.name} · ${account.admin==='Y'?'관리자':account.role||'교과담당'}`:'계정표 일치 확인 필요'},
+  3974:     {name:'권한별 조회범위',ok:Boolean(currentTeacherAccessScope()?.label),note:currentTeacherAccessScope()?.label||'확인 필요'},
+  3975:     {name:'업데이트 정보',ok:Boolean(state.settings.updateManifestUrl),note:state.settings.updateManifestUrl?'업데이트 확인 주소 등록':'manifest 주소 등록 필요'},
+  3976:     {name:'Google API 보호',ok:true,note:'120초 캐시 · 429 재시도 · 순차 batch 조회'},
+  3977:     {name:'런타임 진단',ok:true,note:'오류·중복 DOM·리소스 점검 활성'}
+  3978:   ];
+  3979: }
+  3980: 
+  3981: function settingsTabsMarkup(){
+  3982:   const tabs=[
+  3983:     ["basic","01 기본·연결"],
+  4004:   const connectionRows = [
+  4005:     ["학생정보", readonlyCache?.students?.length], ["학사생", readonlyCache?.dormStudents?.length], ["학사외출", readonlyCache?.dormOutings?.length],
+  4006:     ["성적", readonlyCache?.scoreRecords?.length], ["수능최저", readonlyCache?.admissionMinimums?.length], ["대학입결", readonlyCache?.admissionCuts?.length],
+  4007:   ];
+  4008:   const neisStatus = neisData?.ok ? (neisData.offline ? ["저장자료 표시", "warn"] : ["실시간 연결됨", ""]) : neisLoading ? ["불러오는 중", "warn"] : ["연결 확인", "error"];
+  4009:   const profile=currentUserProfile(), access=currentTeacherAccessScope();
+  4010: 
+  4011:   const header=(title,desc,badge)=>`${settingsTabsMarkup()}<section class="settings-section-head"><div><small>UEP SETTINGS</small><h2>${title}</h2><p>${desc}</p></div><span>${badge}</span></section>`;
+  4012: 
+  4013:   if(settingsPanel==="security") return `<div class="module-page settings-v064 settings-final">
+  4014:     ${header("사용자·보안","계정 승인과 역할, 민감정보 보호를 관리합니다.","관리자·학년부장")}
+  4015:     <article class="setting-card sensitive-security-settings"><div><small>PRIVACY · SECURITY</small><h3>🔒 민감정보 보안</h3><p>교육비지원 · 요보호학생 · 위기학생 상세정보의 열람 비밀번호를 관리합니다.</p><p class="settings-help">상세정보는 1차 블라인드 후 비밀번호 인증을 거쳐 확인하며 인증은 10분 동안 유지됩니다.</p></div><div class="sensitive-security-status"><b>${sensitivePasswordConfigured()?'비밀번호 설정됨':'비밀번호 설정 필요'}</b><button type="button" class="btn primary" data-sensitive-password-set>${sensitivePasswordConfigured()?'비밀번호 변경':'비밀번호 설정'}</button><button type="button" class="btn secondary" data-sensitive-lock>즉시 잠금</button></div></article>
+  4016:     <article class="setting-card role-settings-card"><div class="connection-title"><div><h3>사용자·권한 프로필</h3><p>현재 로그인 사용자의 역할과 담당 범위를 확인합니다.</p></div><span class="state">${escapeHtml(currentRoleDisplay())}</span></div><div class="user-profile-summary"><div><small>사용자</small><b>${escapeHtml(profile.name||"미설정")}</b></div><div><small>부서</small><b>${escapeHtml(profile.department||"미설정")}</b></div><div><small>조회 범위</small><b>${escapeHtml(access.label)}</b></div></div><p class="safe-note">담임은 학년 자료를 조회할 수 있고 타반 연락정보는 기본 마스킹합니다. 성적·응답·정규화 원천자료는 UEP에서 직접 수정하지 않습니다.</p></article>
+  4017:     <article class="setting-card access-control-card"><div class="connection-title"><div><h3>사용자·권한 승인</h3><p>01_사용자계정의 사용여부·역할·담당학년·담임반을 기준으로 로그인과 조회범위를 제어합니다.</p></div><span class="state connected">계정표 승인</span></div><div class="connection-actions"><button class="btn primary" type="button" data-access-control>권한 승인 제어판</button></div><p class="safe-note">신규 사용자 등록은 표준 구글시트에서 관리하고 UEP에서는 승인상태와 역할을 조정합니다.</p></article>
+  4018:   </div>`;
+  4019: 
+  4020:   if(settingsPanel==="operations") return `<div class="module-page settings-v064 settings-final">
+  4021:     ${header("알림·운영","실제 운영 중 필요한 알림과 오류 신고만 관리합니다.","운영 설정")}
+  4022:     <article class="setting-card mail-alert-settings"><h3>메일 알림</h3><p>필요한 운영 알림만 선택합니다. 발송 기준 시각은 일과운영시간과 연동합니다.</p><div class="mail-alert-grid">${[["dormOuting","학사외출"],["afternoonStudy","오후자습 현황"],["night1","야자1 현황"],["night2","야자2 현황"],["nightException","야간 이상상황"],["nightSummary","야간 종료 종합"]].map(([key,label])=>`<label><input type="checkbox" data-mail-alert="${key}" ${state.settings.mailAlerts?.[key]?"checked":""}> ${label}</label>`).join("")}</div><small>※ 실제 자동메일 발송은 연결된 UEP 데이터처리 메일 트리거가 이 설정값을 읽도록 연동됩니다.</small></article>
+  4023:     <article class="setting-card issue-admin-card"><div class="connection-title"><div><h3>오류 신고 관리</h3><p>사용자가 저장한 오류 신고를 확인하고 처리 상태와 수정 버전을 기록합니다.</p></div><span class="state">${(state.issueReports||[]).filter(r=>r.status!=='fixed').length}건 처리 중</span></div><div class="connection-actions"><button class="btn secondary" data-open-issue-report>새 신고 작성</button><button class="btn primary" data-open-issue-manager>신고 관리</button></div><p class="safe-note">현재는 PC 로컬 저장 방식이며 중앙 수집은 관리자 서버 또는 관리 시트 연결 단계에서 확장합니다.</p></article>
+  4024:   </div>`;
+  4026:   if(settingsPanel==="system") return `<div class="module-page settings-v064 settings-final">
+  4027:     ${header("시스템 관리","연결상태·배포 준비·업데이트처럼 평소에는 건드리지 않는 관리 도구입니다.","관리자 점검")}
+  4028:     <article class="setting-card health-check-card"><div class="connection-title"><div><h3>연결 진단</h3><p>필수 탭과 주요 데이터가 정상적으로 읽히는지 한 번에 확인합니다.</p></div><span class="state ${googleConnectionError?'error':'connected'}">${googleConnectionError?'확인 필요':'정상'}</span></div><div class="health-list">${connectionHealthRows().map(row=>`<div><span>${row.ok?'✓':'!'}</span><b>${row.name}</b><small>${row.ok?'인식':'확인 필요'}</small></div>`).join('')}</div>${googleConnectionError?`<div class="connection-error-detail"><b>최근 오류</b><span>${escapeHtml(googleConnectionError)}</span></div>`:''}<div class="connection-actions"><button class="btn primary" data-run-health-check>다시 진단</button></div></article>
+  4029:     <article class="setting-card"><h3>조회 연결 상태</h3><p>UEP 기준 구글시트에 실제 자료가 있는 항목을 확인합니다.</p>${connectionRows.map(([label,count]) => `<div class="setting-row"><span><b>${label}</b><small>${Number(count || 0).toLocaleString()}건 인식</small></span><span>${count ? "연결" : "자료 확인"}</span></div>`).join("")}</article>
+  4030:     <article class="setting-card release-readiness-card"><div class="connection-title"><div><h3>배포 준비 점검</h3><p>교사용 배포 전에 필수 연결·계정·권한·업데이트·API 보호 상태를 확인합니다.</p></div><span class="state ${releaseReadinessRows().every(row=>row.ok)?'connected':'warn'}">${releaseReadinessRows().every(row=>row.ok)?'배포 준비':'확인 필요'}</span></div><div class="health-list release-health-list">${releaseReadinessRows().map(row=>`<div><span>${row.ok?'✓':'!'}</span><b>${escapeHtml(row.name)}</b><small>${escapeHtml(row.note)}</small></div>`).join('')}</div><div class="connection-actions"><button class="btn primary" type="button" data-access-control>권한 점검</button><button class="btn secondary" data-run-health-check>연결 다시 진단</button></div><p class="safe-note">자동 설치·롤백은 현재 비활성화되어 있습니다.</p></article>
+  4031:     <article class="setting-card update-settings-card"><div class="connection-title"><div><h3>UEP 업데이트</h3><p>현재 버전 ${APP_VERSION} · 담임 배포판부터는 앱 내부 업데이트 채널을 사용합니다.</p></div><span class="state connected">업데이트 확인 작동</span></div><form id="updateSettingsForm" class="update-settings-form"><input id="updateManifestUrl" type="url" value="${escapeHtml(state.settings.updateManifestUrl||'')}" placeholder="https://.../uep-update.json"><button class="btn secondary" type="submit">주소 저장</button><button class="btn primary" type="button" data-check-update>업데이트 확인</button></form><div class="update-roadmap"><span class="done">① 동일 빌드</span><span class="done">② 버전 확인</span><span class="done">③ 업데이트 채널</span><span class="done">④ 앱 내부 적용·롤백</span></div><div id="updateCheckResult" class="update-check-result"><small>새 버전 확인 → 무결성 검증 → 앱 내부 적용 → 실패 시 이전판 복구 방식입니다.</small></div></article>
+  4032:     <article class="setting-card"><div class="connection-title"><div><h3>UEP 정보</h3><p>UNHO Education Platform · Connect Data. Grow Students.</p></div><span class="state">v${APP_VERSION}</span></div><div class="setting-row"><span><b>기준 데이터</b><small>표준 구글시트 연결</small></span><span>${escapeHtml(readonlyCache?.sourceName||'연결 확인')}</span></div></article>
+  4033:   </div>`;
+  4034: 
+  4035:   // 01 기본·연결 — 초기 설치와 연결 문제가 있을 때만 사용하는 영역
+  4036:   return `<div class="module-page settings-v064 settings-final">
+  4037:     ${header("기본·연결","초기 설치와 데이터 연결, NEIS 연동을 관리합니다.","학교 공용")}
+  4038:     <article class="setting-card setup-wizard-card"><div><small>UEP SETUP GUIDE</small><h3>초기 설정 마법사</h3><p>처음 설치하거나 학교·계정·연결 정보를 다시 잡을 때만 사용합니다. 기존 설정은 유지됩니다.</p></div><button class="btn primary" type="button" data-setup-wizard>설정 마법사 시작</button></article>
+  4039:     <article class="setting-card connection-overview"><div class="connection-title"><div><h3>UEP 구글시트 연결</h3><p>표준 구글시트를 조회하고 허용된 운영정보만 안전하게 양방향 수정합니다.</p></div><span class="state ${googleStatus[1]}">${googleStatus[0]}</span></div><div class="readonly-rule"><b>현재 기준</b><span>${escapeHtml(readonlyCache?.sourceName || "2026_운호고_UEP_DB_v1.0_Dev")} · 학생ID 기준 결합</span></div>${googleConnectionError ? `<div class="connection-error-detail"><b>오류 내용</b><span>${escapeHtml(googleConnectionError)}</span></div>` : ""}<div class="connection-actions"><button class="btn secondary" data-oauth-guide>${credentialReady ? "서비스 계정 JSON 변경" : "서비스 계정 JSON 등록"}</button><button class="btn primary" data-readonly-sync>지금 새로고침</button></div><p class="safe-note">서비스 계정 JSON은 Windows 보안 저장소에 암호화하여 보관합니다.</p></article>
+  4040:     <article class="setting-card neis-settings-card"><div class="connection-title"><div><h3>NEIS 급식·시간표</h3><p>학교명으로 학교코드를 찾아 급식과 학급 시간표를 자동 조회합니다.</p></div><span class="state ${neisStatus[1]}">${neisStatus[0]}</span></div><form id="neisSettingsForm" class="neis-settings-form"><label>학교명<input id="neisSchoolName" required value="${escapeHtml(state.settings.neis.schoolName)}"></label><label>학년<select id="neisGrade">${[1,2,3].map((value) => `<option ${String(value) === String(state.settings.neis.grade) ? "selected" : ""}>${value}</option>`).join("")}</select></label><label>반<select id="neisClass">${Array.from({length:9},(_,index)=>index+1).map((value) => `<option ${String(value) === String(state.settings.neis.classNo) ? "selected" : ""}>${value}</option>`).join("")}</select></label><label class="neis-key-label">인증키<input id="neisApiKey" type="password" autocomplete="off" placeholder="${state.settings.neis.apiKeyConfigured?"등록됨 · 변경할 때만 입력":"발급받은 인증키 입력"}"></label><label class="neis-key-toggle"><input id="neisUseApiKey" type="checkbox" ${state.settings.neis.useApiKey?"checked":""}> 인증키 사용</label><button class="btn primary">저장 후 불러오기</button></form>${neisError ? `<div class="connection-error-detail"><b>${neisData?.offline ? "저장자료 안내" : "연결 오류"}</b><span>${escapeHtml(neisError)}</span></div>` : ""}<div class="connection-actions"><button class="btn secondary" data-neis-refresh>NEIS 다시 불러오기</button><button class="btn secondary" data-neis-clear-cache>저장자료 지우기</button></div><p class="safe-note">실시간 연결이 실패하면 마지막 정상 조회자료를 저장자료로 구분해 표시합니다.</p></article>
+  4734: function closeCounselSidePanel(){document.querySelector('.counsel-side-panel')?.remove();document.body.classList.remove('counsel-panel-open');updateStudentSignalIndicator();}
+  4735: function openCounselSidePanel(studentId,editId=''){
+  4736:   const student=currentCounselStudent(studentId);if(!student)return toast('학생정보를 찾지 못했습니다.');
+  4737:   closeCounselSidePanel();
+  4738:   const records=growthCounselRecords(student.id), edit=editId?records.find(row=>String(row.id)===String(editId)):null;
+  4739:   const teacherKey=String(currentNoticeUserId()||currentLoginTeacherName()||'user').replace(/[^0-9a-z가-힣_.@-]/gi,'_');
+  4740:   const draftKey=`uep:counsel:draft:${teacherKey}:${student.id||student.studentNo}`;
+  4741:   let draft='';try{draft=localStorage.getItem(draftKey)||'';}catch{}
+  4742:   const candidate=findDashboardCounselCandidate(student.id);
+  4743:   const panel=document.createElement('aside');panel.className='counsel-side-panel';panel.dataset.studentSignalId=String(student.id||student.studentNo||'');
+  4744:   panel.innerHTML=`<header><div><small>PRIVATE COUNSEL MEMO</small><h3>${escapeHtml(student.studentNo||'')} ${escapeHtml(student.name||'')}</h3><p>내 상담메모 · 작성자 본인만 표시</p></div><button type="button" data-counsel-panel-close>×</button></header><div class="counsel-side-body">${candidate?`<section class="counsel-recommend-context"><h4>UEP 추천 근거</h4>${(candidate.reasons||[]).slice(0,3).map(x=>`<p>• ${escapeHtml(x)}</p>`).join('')}</section>`:''}<section class="counsel-compose"><h4>${edit?'메모 수정':'새 상담 메모'}</h4><textarea rows="8" data-counsel-panel-memo placeholder="학생을 보면서 필요한 상담 메모를 남겨주세요.">${escapeHtml(edit?.memo||(edit?'':draft)||'')}</textarea><div class="counsel-side-actions">${edit?'<button type="button" class="btn secondary" data-counsel-panel-cancel-edit>새 메모로 전환</button>':''}<button type="button" class="btn secondary" data-counsel-panel-draft>임시저장</button><button type="button" class="btn primary" data-counsel-panel-save>${edit?'수정 저장':'저장'}</button></div><small><b>임시저장</b>은 이 PC에만 저장되고 상담완료로 처리되지 않습니다. <b>저장</b>은 상담기록 시트에 확정 저장됩니다.</small></section><section class="counsel-my-history"><h4>내 이전 상담메모</h4>${records.length?records.map(row=>`<button type="button" data-counsel-panel-edit="${escapeHtml(row.id||'')}"><span><b>${escapeHtml((row.createdAt||'').replace('T',' ').slice(0,16))}</b><small>${escapeHtml((row.modifiedAt&&row.modifiedAt!==row.createdAt)?'수정됨':'')}</small></span><p>${escapeHtml(row.memo||'')}</p></button>`).join(''):'<p class="empty">이 학생에게 남긴 상담 메모가 없습니다.</p>'}</section></div>`;
+  4745:   document.body.appendChild(panel);document.body.classList.add('counsel-panel-open');updateStudentSignalIndicator();
+  4746:   panel.querySelector('[data-counsel-panel-close]').onclick=closeCounselSidePanel;
+  4747:   panel.querySelector('[data-counsel-panel-cancel-edit]')?.addEventListener('click',()=>openCounselSidePanel(student.id));
+  4751:     try{localStorage.setItem(draftKey,memo);}catch{return toast('이 PC에 임시저장하지 못했습니다.');}
+  4752:     toast('상담 메모를 이 PC에 임시저장했습니다.');
+  4753:   };
+  4754:   panel.querySelector('[data-counsel-panel-save]').onclick=async()=>{
+  4755:     const memo=panel.querySelector('[data-counsel-panel-memo]')?.value?.trim();if(!memo)return toast('상담 메모를 입력해 주세요.');
+  4756:     const now=new Date().toISOString(), payload={id:edit?.id||'',studentId:student.id,studentNo:student.studentNo,name:student.name,grade:student.grade||'1',className:student.className||'',createdAt:edit?.createdAt||now,area:'상담메모',type:'교사 메모',memo,action:'',nextDate:'',status:'완료',group:candidate?.group||'',stage:candidate?.stage||'',discoveryReason:(candidate?.reasons||[]).join(' · '),writer:currentLoginTeacherName()||'사용자'};
+  4757:     const saveBtn=panel.querySelector('[data-counsel-panel-save]');saveBtn.disabled=true;saveBtn.textContent='저장 중…';
+  4758:     try{const result=await window.schoolBoard?.saveCounselRecord?.(payload);if(!result?.ok)throw new Error(result?.reason||'상담메모 저장 실패');const list=Array.isArray(readonlyCache.counselRecords)?[...readonlyCache.counselRecords]:[];const ix=list.findIndex(x=>String(x.id)===String(result.record?.id||result.id));if(ix>=0)list[ix]=result.record;else list.unshift(result.record);readonlyCache.counselRecords=list;try{localStorage.removeItem(draftKey);}catch{}__uepDashboardCounselCache=null;openCounselSidePanel(student.id);toast('상담 메모를 시트에 저장했습니다.');}catch(error){saveBtn.disabled=false;saveBtn.textContent=edit?'수정 저장':'저장';toast(error?.message||'상담 메모 저장에 실패했습니다.');}
+  4759:   };
+  4760: }
+  4761: function growthCenterMarkup(){
+  4762:   const candidates=dashboardCounselCandidates();
+  4763:   const candidateMap=new Map(candidates.map(row=>[String(classNumberOf(row.student)),row]));
+  4764:   const teacher=String(currentLoginTeacherName()||'').trim();const connected=teacher?(Array.isArray(readonlyCache?.counselRecords)?readonlyCache.counselRecords:[]).filter(row=>String(row.writer||'').trim()===teacher):[];const local=teacher?(Array.isArray(state.growthCounselRecords)?state.growthCounselRecords:[]).filter(row=>String(row.writer||'').trim()===teacher):[];const records=[...connected,...local.filter(x=>!connected.some(y=>String(y.id)===String(x.id)))].sort((a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
+  4765:   const todayKey=dateKey(today);
+  4766:   const followups=records.filter(row=>row.status!=='완료'&&row.nextDate&&row.nextDate<=todayKey);
+  4767:   const admissionRecords=records.filter(row=>row.area==='입시');
+  4768:   const classCards=Array.from({length:9},(_,index)=>{
+  4769:     const cls=String(index+1),x=candidateMap.get(cls);
+  4770:     if(!x)return `<article class="growth-class-candidate empty"><header><b>${cls}반</b><small>현재 추천 없음</small></header><p>현재 우선순위 기준에 해당하는 학생이 없습니다.</p></article>`;
+  4771:     return `<button class="growth-class-candidate" data-counsel-student="${escapeHtml(x.student.id||'')}"><header><b>${cls}반</b><small>현재 1순위</small></header><strong>${escapeHtml(x.student.studentNo)} ${escapeHtml(x.student.name)}</strong><span>${escapeHtml((x.tags||[]).slice(0,2).join(' · ')||'상담 추천')}</span><p>${escapeHtml(x.reasons?.[0]||'상담 추천')}</p><em>상담 완료/제외 시 다음 학생 자동 승계</em></button>`;
+  4772:   }).join('');
+  4931:     afterPrograms,
+  4932:     career:studentCareerSupportBase_(student,bundle)
+  4933:   };
+  4934: }
+  4935: function studentCareerSupportBase_(student,bundle){
+  4936:   const profile=student?.careerProfile||{};
+  4937:   const rows=(bundle?.selected||[]);
+  4938:   const first=(...values)=>values.map(v=>String(v??"").trim()).find(Boolean)||"-";
+  4939:   const hopeTrack=first(profile.hopeTrack,rows[0]?.track,rows[0]?.hopeTrack,rows[0]?.careerTrack,rows[0]?.trackHope,profile.track,student?.hopeTrack,student?.careerTrack,student?.desiredTrack);
+  4940:   const hopeMajor=first(profile.hopeMajor,rows[0]?.major,rows[0]?.hopeMajor,rows[0]?.careerMajor,rows[0]?.majorHope,profile.major,student?.hopeMajor,student?.careerMajor,student?.desiredMajor);
+  4941:   const aptitude=first(profile.universityAptitude,student?.universityAptitude,student?.aptitudeData,profile.aptitude,student?.careerAptitude,student?.career,"-");
+  4942:   const text=`${hopeTrack} ${hopeMajor}`.replace(/-/g,"");
+  4943:   const scores={"문과":0,"이과":0,"예체능":0};
+  4944:   const add=(key,rx,w=1)=>{const m=text.match(rx);if(m)scores[key]+=m.length*w;};
+  4945:   add("문과",/인문|국문|영문|언어|문학|사학|역사|철학|사회|정치|외교|행정|법학|경제|경영|회계|무역|교육|심리|언론|미디어|관광|사회복지/g);
+  4946:   add("이과",/자연|수학|통계|물리|화학|생명|지구과학|공학|컴퓨터|소프트웨어|인공지능|데이터|의학|의예|치의|한의|약학|간호|보건|건축|전자|전기|기계|반도체|환경|식품/g);
+  4947:   add("예체능",/미술|디자인|음악|성악|작곡|악기|체육|스포츠|무용|연기|연극|영화|영상|애니|만화|공예|사진|실용음악/g);
+  4948:   const ranked=Object.entries(scores).sort((a,b)=>b[1]-a[1]);
+  4949:   let recommendation="혼합";
+  5679:   const evidenceText=[...areaSummary.map(([k,v])=>`${k} ${v}건`),`프로그램 ${programs.length}건`,`보고서 ${uniqueReports.length}건`].join(' · ');
+  5680: 
+  5681:   const details=[...sdgMap.values()].map(x=>`<button class="growth-sdg-chip ${x.evidence.length?'active':''}" data-sdgs-detail="${x.no}"><b>${x.no}</b><span>${escapeHtml(x.name)}</span><small>${x.evidence.length?`${x.evidence.length}건 연결`:'현재 근거 없음'}</small></button>`).join('');
+  5682:   const detailNo=Number(recordSdgsDetail||0); const detail=detailNo?sdgMap.get(detailNo):null;
+  5683: 
+  5684:   return `<div class="growth-profile-v081">
+  5685:     <section class="growth-profile-intro"><div><small>STUDENT GROWTH STORY · UNESCO SCHOOL</small><h2>${escapeHtml(student.name)} 생활기록부 핵심 성장 프로파일</h2><p><b>활동의 나열이 아니라 학생의 스토리를 봅니다.</b> 우리 학교의 유네스코 교육 방향과 학교교육과정(자율·진로·동아리·봉사), 선택활동, 교과·탐구·보고서를 진로·전공과 SDGs의 관점에서 함께 읽어 학생의 관심·문제의식·성장 흐름을 확인합니다.</p></div><span>17개 목표를 채우는 것이 목적이 아닙니다.</span></section>
+  5686: 
+  5687:     <section class="growth-story-card"><header><div><small>CORE STORY</small><h3>이 학생을 설명하는 현재의 성장 스토리</h3></div><span>생활기록부 전체 연결</span></header><p>${escapeHtml(storyText)}</p><div class="growth-story-source">${escapeHtml(evidenceText)}</div></section>
+  5688: 
+  5689:     <div class="growth-axis-grid">
+  5690:       <section><small>01 CAREER · MAJOR</small><h3>진로·전공 관심</h3><b>${escapeHtml(hope.join(' · ')||'진로 관심 형성 중')}</b><p>${selected.length?`선택과목 · ${escapeHtml(selected.slice(0,6).join(' · '))}`:'선택과목 연결 자료를 확인합니다.'}</p></section>
+  5691:       <section><small>02 EXPLORATION</small><h3>핵심 탐구주제</h3><b>${escapeHtml(topicText)}</b><p>보고서와 진로활동에서 반복·심화되는 주제를 중심으로 봅니다.</p></section>
+  5692:       <section><small>03 VALUE · SDGs</small><h3>사회적 가치·SDGs</h3><div class="growth-value-mini">${valueCards}</div></section>
+  5693:       <section><small>04 EVIDENCE FLOW</small><h3>학교교육과정 속 근거</h3><b>${activityRows.length+programs.length+uniqueReports.length}건 연결</b><p>${escapeHtml(areaSummary.map(([k,v])=>`${k} ${v}`).join(' · ')||'활동 근거 연결 중')}</p></section>
+  5960:     const scholarshipCard=makeActivityCard(groupDefs[2]);
+  5961:     const outsideCard=makeActivityCard(groupDefs[3]);
+  5962:     const insideCard=makeActivityCard(groupDefs[4]);
+  5963:     const career=studentCareerSupport(student,bundle);
+  5964:     const careerValues=[career.hopeTrack,career.hopeMajor,career.aptitude].filter(v=>v&&v!=="-");
+  5965:     const careerCard=`<section class="record-history-group record-career-profile compact"><header><h3>진로희망</h3><span>${careerValues.length?"등록":"0건"}</span></header>${careerValues.length?`<div class="career-support-strip compact record-career-strip"><span><small>진로희망계열</small><b>${escapeHtml(career.hopeTrack)}</b></span><span><small>진로희망전공</small><b>${escapeHtml(career.hopeMajor)}</b></span><span><small>대학적성데이터</small><b>${escapeHtml(career.aptitude)}</b></span></div>`:'<div class="empty-inline">연결 자료 없음</div>'}</section>`;
+  5966:     return `<div class="record-history-grid record-history-three-columns record-history-layout-v700"><div class="record-history-small-stack">${officeCard}${careerCard}</div><div class="record-history-small-stack">${clubCard}${scholarshipCard}</div><div class="record-history-volunteer-stack">${outsideCard}</div><div class="record-history-inside-full">${insideCard}</div></div>`
+  5967:   }
+  5968:   if(recordMode==='sdgs') return sdgsDashboard(student,bundle);
+  5969:   if(recordMode==='curriculum'){
+  5970:     const byTerm=new Map();bundle.selected.forEach(x=>{const key=x.term||x.semester||'학기 미분류';if(!byTerm.has(key))byTerm.set(key,[]);byTerm.get(key).push(x);});
+  5971:     const errors=selectionErrorsForStudent(student);const errorPanel=errors.length?`<section class="selection-error-panel"><header><div><small>ERROR REVIEW</small><h3>선택과목 오류검토</h3></div><span>${errors.length}건 확인 필요</span></header>${errors.map(x=>`<article><b>${escapeHtml(x.type)}</b><em>${escapeHtml(x.severity)}</em><p>${escapeHtml(x.detail||[x.subject,x.terms].filter(Boolean).join(' · '))}</p><small>${escapeHtml([x.subject,x.terms,x.status].filter(Boolean).join(' · '))}</small></article>`).join('')}</section>`:`<section class="selection-safe-panel"><b>✓ 선택과목 검증 정상</b><span>현재 선택과목 기준 문·이과 교차지원·과학과목 위계·학기간 중복과목 오류가 없습니다.</span></section>`;
+  5972:     const profilePanel=`<section class="curriculum-career-profile subtle"><header><div><small>CAREER REFERENCE</small><h3>선택과목 상담 참고정보</h3></div><span>05_대학적성데이터</span></header>${careerSupportMarkup(student,bundle,true)}</section>`;
+  5973:     const submit=selectionSubmissionInfo(bundle);
+  5974:     return `<div class="curriculum-summary"><b>${escapeHtml(student?.name||'학생')} 선택과목</b><span>${bundle.selected.length}과목</span><small>최종 신청 ${escapeHtml(submit.date)} · ${submit.count}차 신청 · 8/3 안내 후 ${submit.modifiedAfterNotice?'수정함':'추가 수정 없음'}</small></div>${profilePanel}${errorPanel}<div class="curriculum-term-grid">${['2학년 1학기','2학년 2학기','3학년 1학기','3학년 2학기'].map(term=>{const rows=byTerm.get(term)||[];return `<section><header><h3>${escapeHtml(term)}</h3><span>${rows.length}과목</span></header>${rows.map(x=>`<article><b>${escapeHtml(x.subject)}</b><small>${escapeHtml([x.group,x.track,x.major].filter(Boolean).join(' · '))}</small><em>${escapeHtml(x.status||'상담용 신청')}</em></article>`).join('')||'<div class="empty-inline">신청 없음</div>'}</section>`;}).join('')}</div>${curriculumMessagePanel(student,bundle)}`;
+  5975:   }
+  5976:   return recordWriterWorkspace(student,bundle);
+  5977: }
+  5978: function recordsView() {
+  5979:   const allStudents=readonlyCache?.students||[];
+  5980:   const classStudents=allStudents.filter(s=>recordStudentClass(s)===String(recordClassNo)).sort((a,b)=>Number(a.number||0)-Number(b.number||0));
+  5981:   if(!recordStudentId||!allStudents.some(s=>s.id===recordStudentId))recordStudentId=(classStudents[0]||allStudents[0])?.id||"";
+  5982:   let student=allStudents.find(s=>s.id===recordStudentId)||classStudents[0]||allStudents[0];
+  6149:   const autonomyReports=reports.filter(r=>programAreaKind(reportProgram(r)||{type:r.kind||r.area||''})==='autonomy');
+  6150:   const careerReports=reports.filter(r=>programAreaKind(reportProgram(r)||{type:r.kind||r.area||''})==='career');
+  6151:   const participantKeys=new Set([...selected,...after].flatMap(p=>(p.students||[]).map(st=>attendanceStudentKey(st)||`${st.studentNo||st.number||""}|${st.name||""}`).filter(Boolean)));
+  6152:   const teacherMap=new Map();
+  6153:   [...selected,...after].forEach(p=>{
+  6154:     const raw=String(p.teacher||p.teacherName||p.manager||p.instructor||"").trim(); if(!raw)return;
+  6155:     raw.split(/[,/·]/).map(x=>x.trim()).filter(Boolean).forEach(name=>{
+  6156:       if(!teacherMap.has(name))teacherMap.set(name,{name,selected:0,after:0,night:0,hours:0,students:new Set(),programs:0});
+  6157:       const row=teacherMap.get(name),hours=programDurationHours(p); row.programs+=1;row.hours+=hours;
+  6158:       if(p.kind==="selected"||p.kind==="general")row.selected+=hours;
+  6159:       else if(/야간심화|심화수업/.test(`${p.afterType||""} ${p.type||""} ${p.title||""}`))row.night+=hours;
+  6160:       else row.after+=hours;
+  6161:       (p.students||[]).forEach(st=>row.students.add(attendanceStudentKey(st)||`${st.studentNo||st.number||""}|${st.name||""}`));
+  6162:     });
+  6366:   return `<div class="module-page student-alert-center"><section class="student-alert-hero"><div><small>UEP ACTION CENTER</small><h2>학생 통합알림센터</h2><p>프로그램·보고서·선택과목·출결 상태를 한 곳에서 확인하고 필요한 학생 안내문을 생성합니다. 기존 각 메뉴의 안내 기능은 그대로 유지합니다.</p></div><span>자동 대상 발굴</span></section><div class="student-alert-summary"><span><b>${countBy("report")}</b>보고서 미제출</span><span><b>${countBy("selection")}</b>선택과목 수정</span><span><b>${countBy("attendance")}</b>출결 확인</span><span><b>${countBy("schedule")}</b>일정 대상</span></div><section class="student-alert-controls"><div class="student-alert-tabs">${cats.map(cat=>`<button data-student-alert-mode="${cat}" class="${studentAlertMode===cat?'active':''}">${cat==="all"?"전체":studentAlertLabel(cat)} <b>${countBy(cat)}</b></button>`).join("")}</div><div class="student-alert-classes">${classButtons}</div></section><section class="student-alert-list">${filtered.length?filtered.map(group=>`<article class="student-alert-row kind-${group.category}"><div><small>${escapeHtml(studentAlertLabel(group.category))}${group.date?` · ${escapeHtml(group.date)}`:""}</small><h3>${escapeHtml(group.title)}</h3><p>${escapeHtml(group.meta||`${group.count||0}명`)}</p><div class="student-alert-names">${(group.rows||[]).slice(0,8).map(row=>`<span>${escapeHtml(`${row.studentNo||""} ${row.name||""}`.trim())}</span>`).join("")}${(group.rows||[]).length>8?`<em>외 ${(group.rows||[]).length-8}명</em>`:""}</div></div><button class="btn primary" data-student-alert-message="${escapeHtml(group.id)}">안내문 생성</button></article>`).join(""):'<div class="empty-state"><b>현재 안내가 필요한 항목이 없습니다.</b><span>제출·수정 상태가 바뀌면 자동으로 목록도 갱신됩니다.</span></div>'}</section></div>`;
+  6367: }
+  6368: function autoAlertOwnerKey(){return String(currentWorkAudienceContext().name||"사용자").trim()||"사용자";}
+  6369: function autoNoticeReceiptId(source,id){return `AUTO:${String(source||'notice')}:${String(id||'').trim()}`;}
+  6370: function currentAutoReceipt(source,id){
+  6371:   const noticeId=autoNoticeReceiptId(source,id), userId=currentNoticeUserId(), teacher=currentLoginTeacherName();
+  6372:   const local=state?.autoNoticeReceipts?.[`${noticeId}|${userId||teacher}`];
+  6373:   if(local)return local;
+  6374:   return (readonlyCache?.noticeReceipts||[]).find(row=>String(row.noticeId||'')===noticeId&&((userId&&String(row.userId||'')===userId)||String(row.teacher||'').trim()===teacher))||null;
+  6375: }
+  6376: function autoNoticeIsDismissed(source,id){return Boolean(currentAutoReceipt(source,id)?.dismissed);}
+  6377: function autoNoticeGovernanceKey(source,id){return `${String(source||'notice')}:${String(id||'').trim()}`;}
+  6378: function autoNoticeGovernance(source,id){
+  6379:   return state?.autoNoticeGovernance?.[autoNoticeGovernanceKey(source,id)]||null;
+  6387:   if(!currentUserCanManageNotices())return false;
+  6388:   const allowed=new Set(['approved','handled','blocked','pending']);
+  6389:   if(!allowed.has(status))return false;
+  6390:   const key=autoNoticeGovernanceKey(source,id);
+  6391:   state.autoNoticeGovernance=state.autoNoticeGovernance||{};
+  6392:   state.autoNoticeGovernance[key]={status,note,by:currentLoginTeacherName()||'관리자',at:new Date().toISOString()};
+  6393:   await save();
+  6394:   return true;
+  6395: }
+  6396: async function bulkAutoNoticeGovernance(status){
+  6397:   if(!currentUserCanManageNotices())return;
+  6398:   const rows=automaticDeadlineAlerts({includePast:true,includeDismissed:true,includeUnapproved:true})
+  6399:     .filter(item=>item.days>=-3&&item.days<=7&&autoNoticeGovernanceStatus(item.source,item.id)==='pending');
+  6400:   if(!rows.length)return toast('검토할 자동공지 후보가 없습니다.');
+  6401:   const label=status==='approved'?'승인':status==='handled'?'확인':status==='blocked'?'불가(해제)':'처리';
+  6402:   if(!confirm(`현재 자동공지 후보 ${rows.length}건을 일괄 ${label} 처리할까요?`))return;
+  6403:   state.autoNoticeGovernance=state.autoNoticeGovernance||{};
+  6404:   const now=new Date().toISOString(),by=currentLoginTeacherName()||'관리자';
+  6405:   rows.forEach(item=>{state.autoNoticeGovernance[autoNoticeGovernanceKey(item.source,item.id)]={status,note:`관리자 일괄 ${label}`,by,at:now};});
+  6406:   await save();render(state.activePage||'dashboard');toast(`자동공지 ${rows.length}건을 ${label} 처리했습니다.`);
+  6407: }
+  6408: 
+  6409: async function saveAutoNoticeReceipt(source,id,change={}){
+  6410:   const mine=currentTeacherHomeroomClass();
+  6411:   const classMatch=String(mine||'').match(/(?:^|\D)(\d{1,2})(?:반)?$/); const classNo=classMatch?classMatch[1]:'';
+  6412:   const noticeId=autoNoticeReceiptId(source,id), userId=currentNoticeUserId(), teacher=currentLoginTeacherName()||'사용자';
+  6413:   const key=`${noticeId}|${userId||teacher}`, previous=currentAutoReceipt(source,id)||{};
+  6414:   const payload={noticeId,userId,teacher,grade:'1',classNo,sourceType:String(source||'자동공지'),read:true,...change};
+  6415:   state.autoNoticeReceipts=state.autoNoticeReceipts||{};
+  6416:   state.autoNoticeReceipts[key]={...previous,...payload,modifiedAt:new Date().toISOString()};
+  6417:   try{await save();}catch{}
+  6418:   try{
+  6419:     const result=await window.schoolBoard?.saveNoticeReceipt?.(payload);
+  6420:     if(!result?.ok){toast(`알림 상태는 이 PC에 반영했습니다. 시트 동기화: ${result?.reason||'저장 실패'}`);return true;}
+  6429:   state.autoAlertAcks=state.autoAlertAcks||{};state.autoAlertAcks[autoAlertAckKey(item)]={at:new Date().toISOString(),title:item.title};await save();render(state.activePage);toast("오늘 확인한 자동알림으로 처리했습니다.");
+  6430: }
+  6431: 
+  6432: function currentUserCanManageNotices(){return currentRoleId()==="admin"||currentUserIsGradeHead();}
+  6433: function currentNoticeUserId(){
+  6434:   return String(state?.auth?.user?.id||state?.auth?.user?.email||state?.currentUser?.id||state?.currentUser?.email||currentLoginTeacherName()||"").trim();
+  6435: }
+  6436: function connectedNoticeVisibleToCurrentUser(item){
+  6437:   if(!item)return false;
+  6438:   const grade=String(item.targetGrade||"").replace(/[^0-9]/g,"");
+  6439:   if(grade&&grade!=="1"&&!currentUserCanManageNotices())return false;
+  6440:   const target=String(item.targetClass||"전체").trim();
+  6441:   if(!target||target==="전체"||/전체|1~9|1-9/.test(target))return true;
+  6442:   if(currentUserCanManageNotices())return true;
+  6445:   const mineNo=mine.split("-")[1];
+  6446:   return target.split(/[,·\s]+/).some(v=>String(v).replace(/[^0-9]/g,"")===mineNo||String(v)===mine);
+  6447: }
+  6448: function directNoticeRows({activeOnly=true}={}){
+  6449:   const todayKey=dateKey(today);
+  6450:   const connected=(Array.isArray(readonlyCache?.notices)?readonlyCache.notices:[]).filter(connectedNoticeVisibleToCurrentUser);
+  6451:   const local=workBoardData("notice").filter(workItemVisibleToCurrentUser).filter(x=>!connected.some(n=>String(n.id)===String(x.id)));
+  6452:   return [...connected,...local].filter(item=>{
+  6453:     if(item?.status==="삭제"||item?.status==="종료"||item?.done)return false;
+  6454:     if(!activeOnly)return true;
+  6455:     const start=String(item.postDate||item.date||"").slice(0,10), end=String(item.endDate||"").slice(0,10);
+  6456:     if(start&&start>todayKey)return false;
+  6457:     if(end&&end<todayKey)return false;
+  6458:     return true;
+  6459:   }).sort((a,b)=>Number(Boolean(b.important))-Number(Boolean(a.important))||String(b.postDate||b.date||"").localeCompare(String(a.postDate||a.date||"")));
+  6460: }
+  6461: function currentNoticeReceipt(item){
+  6462:   const name=currentLoginTeacherName(), userId=currentNoticeUserId();
+  6463:   return (item?.receipts||[]).find(row=>(userId&&String(row.userId||"")===userId)||String(row.teacher||"").trim()===name)||null;
+  6464: }
+  6465: function noticeExpectedCount(item){
+  6466:   const target=String(item?.targetClass||"전체");
+  6467:   if(!target||target==="전체"||/전체|1~9|1-9/.test(target))return 9;
+  6468:   const nums=[...new Set((target.match(/\d+/g)||[]).map(Number).filter(n=>n>=1&&n<=9))];
+  6469:   return Math.max(1,nums.length||1);
+  6470: }
+  6545:   const reportStudents=dashboardReportGroups(report);
+  6546:   if(reportStudents.length)result.push({id:"auto:report",category:"report",title:"학생 보고서 미제출",count:reportStudents.length,meta:`${scope.label} · ${reportStudents.length}명 확인 필요`});
+  6547:   if(selection.length)result.push({id:"auto:selection",category:"selection",title:"선택과목 수정 필요",count:selection.length,meta:`${scope.label} · ${selection.length}명 오류 확인`});
+  6548:   const schedule=studentScheduleAlertGroups().find(group=>{const d=daysFromToday(group.date);return d!=null&&d>=0&&d<=2;});
+  6549:   if(schedule)result.push({id:`auto:schedule:${schedule.id}`,category:"schedule",title:schedule.title,count:schedule.count,meta:`${schedule.meta} · 프로그램 일정`});
+  6550:   const teacherName=currentLoginTeacherName();
+  6551:   const todayNight=(readonlyCache?.nightSupervisors||[]).find(row=>String(row?.date||'').slice(0,10)===dateKey(today)&&String(row?.teacher||'').trim()===String(teacherName||'').trim());
+  6552:   if(todayNight)result.unshift({id:`auto:overtime:${dateKey(today)}:${teacherName}`,category:"overtime",title:"오늘 야자감독 · 초과근무 신청 확인",count:"",meta:`${todayNight.start||'19:20'}~${todayNight.end||'21:30'} · ${todayNight.place||'면학관'} · 16:00 이전 신청 권장`});
+  6553:   return options.includeAcked?result:result.filter(item=>!autoAlertIsAcked(item));
+  6554: }
+  6555: 
+  6556: function openAutoWorkAlertDetail(itemId){
+  6557:   const item=teacherAutoWorkAlerts({includeAcked:true}).find(x=>String(x.id)===String(itemId));
+  6558:   if(!item)return toast("자동알림을 찾지 못했습니다.");
+  6559:   const detail=item.category==="report"?"학생 보고서 미제출 현황입니다. 대상 학생과 제출 안내가 필요한지 확인하세요.":item.category==="selection"?"선택과목 오류 또는 수정 제출이 필요한 학생 현황입니다.":item.category==="schedule"?"가까운 프로그램 일정입니다. 대상 학생과 운영 준비사항을 확인하세요.":item.category==="overtime"?"오늘 야자감독 일정이 있습니다. 초과근무 신청 여부를 확인하세요. 확인 버튼을 누르면 오늘은 같은 자동알림을 다시 표시하지 않습니다.":"확인이 필요한 자동알림입니다.";
+  6560:   $("#drawerKicker").textContent="AUTO NOTICE";$("#drawerTitle").textContent=item.title;
+  6782:   for(const value of values){ if(Array.isArray(value)&&value.length) return value; }
+  6783:   return [];
+  6784: }
+  6785: function uep08123NormalizeReadonlyCache(data){
+  6786:   if(!data||typeof data!=='object') return data;
+  6787:   if(!Array.isArray(data.timetableRows)||!data.timetableRows.length){
+  6788:     const rows=uep08123FirstArray(data.timetableMaster,data.masterTimetableRows,data.teacherTimetableRows,data.timetable?.rows,data.timetable?.timetableRows,data.timetable?.masterRows);
+  6789:     if(rows.length) data.timetableRows=rows;
+  6790:   }
+  6791:   if(!Array.isArray(data.notices)||!data.notices.length){
+  6792:     const rows=uep08123FirstArray(data.workNotices,data.directNotices,data.schoolNotices,data.work?.notices,data.operations?.notices);
+  6793:     if(rows.length) data.notices=rows;
+  6794:   }
+  6795:   if(!Array.isArray(data.dormOutings)||!data.dormOutings.length){
+  6796:     const rows=uep08123FirstArray(data.dormOutingRows,data.outings,data.dorm?.outings,data.dormitory?.outings);
+  6797:     if(rows.length) data.dormOutings=rows;
+  6798:   }
+  6799:   if(!Array.isArray(data.schoolDeadlines)||!data.schoolDeadlines.length){
+  6800:     const rows=uep08123FirstArray(data.deadlines,data.workDeadlines,data.work?.deadlines);
+  6801:     if(rows.length) data.schoolDeadlines=rows;
+  6804: }
+  6805: 
+  6806: function masterTimetableRows({grade=1,classNo="",teacher=""}={}){
+  6807:   // 배포판에서는 연결 전 샘플/고정 시간표를 실제 자료처럼 표시하지 않는다.
+  6808:   // 시간표마스터가 구글시트에서 정상 수신된 경우에만 렌더링한다.
+  6809:   const rows=Array.isArray(readonlyCache?.timetableRows)?readonlyCache.timetableRows:[];
+  6810:   return rows.filter(row=>{
+  6811:     if(String(row["학년도"]||"")!=="2026"||String(row["학기"]||"")!=="2")return false;
+  6812:     if(grade&&String(row["학년"]||"")!==String(grade))return false;
+  6813:     if(classNo&&String(row["반"]||"")!==String(classNo))return false;
+  6814:     if(teacher&&uep08123TeacherKey(row["교사명"]||row["교사"]||row.teacher||"")!==uep08123TeacherKey(teacher))return false;
+  6815:     return String(row["적용상태"]||"확정").trim()!=="취소";
+  6816:   });
+  6817: }
+  6892:   const subject=String(cell.subject||cell.subjectName||cell.name||cell.course||cell.className||"").trim();
+  6893:   const room=String(cell.location||cell.room||cell.classroom||cell.gradeClass||cell.classNo||"").trim();
+  6894:   return subject?{subject,room,changed:Boolean(cell.isChanged||cell.changed||cell.changeInfo),changeInfo:cell.changeInfo||""}:null;
+  6895: }
+  6896: function personalTimetableData() {
+  6897:   const teacher=String(currentLoginTeacherName()||state.settings.comciganTeacher||state.settings.teacherName||"담당교사").trim();
+  6898:   // 홍석민 교사는 사용자가 제공한 2026학년도 공식 교사시간표 PDF를
+  6899:   // 최우선 기준으로 사용해 잘못 매칭된 컴시간 자료가 표시되지 않게 합니다.
+  6900:   const masterReference=masterTeacherTimetableData(teacher);
+  6901:   if(masterReference)return masterReference;
+  6902:   // 연결 전 고정/샘플 교사시간표는 오인 가능성이 있어 배포판에서 사용하지 않는다.
+  6903:   const timetable=neisData?.timetable||{};
+  6904:   const teacherMap=timetable.teachers||{};
+  6905:   const all=timetable.teacherTimetable||{};
+  6906:   let teacherKey="";
+  6907:   for(const [key,value] of Object.entries(teacherMap||{})){
+  6908:     const name=typeof value==="string"?value:(value?.name||value?.teacherName||value?.label||"");
+  6909:     if(String(name).trim()===teacher){teacherKey=key;break;}
+  6910:   }
+  6911:   let source=all?.[teacherKey]||all?.[teacher]||null;
+  6912:   if(!source&&Array.isArray(all)) source=all.find(row=>String(row?.teacher||row?.teacherName||row?.name||"").trim()===teacher);
+  6913:   const week=Array.from({length:7},()=>Array(5).fill(""));
+  6914:   let found=0,changed=0;
+  6915:   const setCell=(period,day,cell)=>{
+  6916:     const p=Number(period),d=Number(day);const normalized=normalizeTeacherTimetableCell(cell);
+  6917:     if(!normalized||p<1||p>7||d<0||d>4)return;
+  6918:     week[p-1][d]=`${normalized.subject}|${normalized.room}${normalized.changed?"|changed":""}`;found+=1;if(normalized.changed)changed+=1;
+  6919:   };
+  6920:   if(Array.isArray(source)){
+  7014:     ["mine", "개인 시간표", "내 수업"],
+  7015:     ["homeroom", "학급 시간표", "학년·반 조회"],
+  7016:     ["student", "학생 개인 시간표", "선택과목 위치"],
+  7017:     ["teacher", "교사별 시간표", "컴시간 교사 검색"],
+  7018:   ];
+  7019:   const teacherNames = schoolTeacherNames();
+  7020:   const content = {
+  7021:     mine: `<div class="timetable-toolbar"><div><b>개인 시간표</b><small>대시보드와 동일한 내 수업 시간표</small></div><div><button class="btn secondary" data-print-timetable>인쇄</button><button class="btn secondary" data-reference="homeroom-timetable">학급 시간표</button><button class="btn secondary" data-widget-settings="timetable">⚙ 시간표 설정</button></div></div><div class="card timetable-full">${personalTimetableMarkup()}</div>`,
+  7022:     homeroom: `<div class="timetable-toolbar neis-timetable-toolbar inline-timetable-toolbar"><div><b>${escapeHtml(neisData?.school?.schoolName||state.settings.neis.schoolName)}</b><small>${escapeHtml(state.settings.neis.grade)}학년 ${escapeHtml(state.settings.neis.classNo)}반 · ${escapeHtml(timetableWeekLabel(neisData?.date||dateKey(new Date())))}</small></div><form id="inlineTimetableNeisForm"><button type="button" class="btn secondary timetable-week-arrow" data-inline-timetable-prev>‹</button><label class="timetable-week-picker"><span>주간</span><input type="date" id="inlineTimetableDate" value="${escapeHtml(neisData?.date||dateKey(new Date()))}"><b>${escapeHtml(timetableWeekLabel(neisData?.date||dateKey(new Date())))}</b></label><button type="button" class="btn secondary timetable-week-arrow" data-inline-timetable-next>›</button><select id="inlineTimetableGrade">${[1,2,3].map(v=>`<option ${String(v)===String(state.settings.neis.grade)?"selected":""}>${v}</option>`).join("")}</select><select id="inlineTimetableClass">${Array.from({length:9},(_,i)=>i+1).map(v=>`<option ${String(v)===String(state.settings.neis.classNo)?"selected":""}>${v}</option>`).join("")}</select><button class="btn primary">조회</button><button type="button" class="btn secondary" data-inline-neis-today>오늘</button><button type="button" class="btn secondary" data-inline-neis-refresh>새로고침</button></form></div><div class="card timetable-full inline-class-timetable">${classTimetableMarkup()}</div>`,
+  7023:     student: studentTimetableMarkup(),
+  7024:     teacher: (()=>{const selected=teacherNames.includes(state.settings.comciganTeacher)?state.settings.comciganTeacher:(teacherNames[0]||"");return `<div class="teacher-timetable-search"><div><small>UEP MASTER · TEACHER</small><h3>교사별 시간표</h3><p>17_시간표마스터에 실제 수업이 있는 교사만 가나다순으로 표시합니다. 이름을 클릭하면 바로 시간표를 확인할 수 있습니다.</p></div><div class="teacher-search-row"><input class="search" id="teacherTimetableSearch" list="teacherTimetableNames" placeholder="교사 이름 검색" value="${escapeHtml(selected)}"><datalist id="teacherTimetableNames">${teacherNames.map(name=>`<option value="${escapeHtml(name)}"></option>`).join("")}</datalist><button class="btn secondary" id="teacherTimetableApply">시간표 보기</button><button class="btn primary" id="teacherTimetableOpen">컴시간 원본 열기</button></div><div class="teacher-list-preview">${teacherNames.map(name=>`<button class="${name===selected?"active":""}" data-teacher-name="${escapeHtml(name)}">${escapeHtml(name)}</button>`).join("")}</div></div><div class="card timetable-full teacher-master-timetable">${teacherMasterTimetableMarkup(selected)}</div>`;})(),
+  7025:   }[state.timetableTab] || `<div class="card timetable-full">${personalTimetableMarkup()}</div>`;
+  7026:   return `<div class="module-page timetable-page"><div class="timetable-tabs timetable-tabs-four">${tabs.map((tab) => `<button class="${state.timetableTab === tab[0] ? "active" : ""}" data-timetable-tab="${tab[0]}"><b>${tab[1]}</b><small>${tab[2]}</small></button>`).join("")}</div>${content}</div>`;
+  7027: }
+  7028: 
+  7029: function homeroomWeekMarkup() {
+  7030:   return `<div class="connection-guide"><span>NEIS</span><h3>학급시간표를 조회하세요</h3><p>정적 예시 시간표는 제거했습니다. 실제 학년·반을 선택한 NEIS 자료만 표시합니다.</p><button class="btn primary" data-reference="homeroom-timetable">학급 시간표 조회</button></div>`;
+  7031: }
+  7032: 
+  7133:   $$("#drawerBody [data-dashboard-calendar-register]").forEach(button=>button.onclick=()=>{calendarSelectedDate=button.dataset.dashboardCalendarRegister||key;state.calendarMode="month";closeDrawer();navigate("calendar");toast("선택한 날짜에서 일정을 등록하세요.");});
+  7134:   $$("#drawerBody [data-dashboard-calendar-full]").forEach(button=>button.onclick=()=>{calendarSelectedDate=button.dataset.dashboardCalendarTarget||key;state.calendarMode=button.dataset.dashboardCalendarFull||"month";calendarHubMode="schedule";closeDrawer();navigate("calendar");});
+  7135: }
+  7136: 
+  7137: function currentUserOvertimeTasks(){
+  7138:   const person=currentLoginTeacherName();
+  7139:   if(!person)return [];
+  7140:   const overtime=[];
+  7141:   if(dashboardDutyStatus('night').state==='on'){
+  7142:     overtime.push({
+  7143:       title:'야자감독으로 인해 초과근무 신청',
+  7144:       type:'초과근무',
+  7145:       due:'오늘 16:00 이전 신청',
+  7146:       source:'night-duty'
+  7185:   const connectedCount=(readonlyCache?.programs||[]).length;
+  7186:   return `<div class="uep-simple-list">${list.length?list.map((p,i)=>`<button ${p.kind==="calendar-first-grade"?`data-school-event="${escapeHtml(p.id)}"`:p.kind==="after"?`data-after-program="${escapeHtml(p.id)}"`:`data-program="${escapeHtml(p.id)}"`}><i>${String(p.time||"종일").slice(0,5)}</i><span><b>${escapeHtml(p.actualTitle||p.title||"프로그램")}</b><small>${escapeHtml(p.place||p.department||"장소 확인")}</small></span><em>›</em></button>`).join(""):`<div class="uep-empty-state uep-empty-program"><span class="uep-empty-icon">♧</span><div><b>오늘 운영되는 프로그램이 없습니다.</b><small>방학 중에는 예정 프로그램이 없을 수 있습니다.</small></div><footer><em>연결 프로그램 ${connectedCount}건</em><button data-page="programs">전체 프로그램 ›</button></footer></div>`}</div>`;
+  7187: }
+  7188: 
+  7189: function dashboardCompactNoticesMarkup(){
+  7190:   const connected=Array.isArray(readonlyCache?.notices)?readonlyCache.notices:[]; const local=workBoardData("notice").filter(workItemVisibleToCurrentUser); const rawSource=[...local,...(connected.length?connected:(state.gradeNotices||[]))]; const source=rawSource.filter(item=>String(item?.title||"").trim()!=="방학식 학생 안내 확인"); const rows=source.slice(0,4);
+  7191:   return `<div class="uep-simple-list">${rows.length?rows.map((n,i)=>`<button ${local.includes(n)?`data-work-edit="notice" data-work-id="${escapeHtml(n.id||"")}"`:`data-connected-notice="${escapeHtml(n.id||"")}"`}><i>${i+1}</i><span><b>${escapeHtml(n.title||"학년 공지")}</b><small>${escapeHtml(n.author||n.department||"1학년부")} · ${escapeHtml(n.deadline||n.date||"확인")}</small></span><em>›</em></button>`).join(""):`<div class="uep-empty-state uep-empty-notice"><span class="uep-empty-icon">♢</span><div><b>새로 확인할 공지가 없습니다.</b><small>학년부 공지가 등록되면 이곳에 바로 표시됩니다.</small></div><footer><em>연결 공지 ${source.length}건</em><button data-page="work">공지 확인 ›</button></footer></div>`}</div>`;
+  7192: }
+  7193: 
+  7194: 
+  7195: 
+  7196: function currentLoginTeacherName(){
+  7197:   const candidates=[
+  7198:     state?.auth?.user?.name,
+  7199:     state?.currentUser?.name,
+  7200:     state?.settings?.loginUserName,
+  7201:     state?.settings?.teacherName,
+  7202:     state?.settings?.userName,
+  7203:     document.querySelector(".profile b")?.textContent
+  7204:   ];
+  7205:   return String(candidates.find(value=>String(value||"").trim())||"").trim();
+  7206: }
+  7207: 
+  7208: function firstGradeDutyHighlightNames(){
+  7209:   const homeroom = (SOURCE_REFERENCE_DATA?.homeroom || [])
+  7210:     .filter(row => String(row?.[0] || "") === "1")
+  7211:     .map(row => String(row?.[2] || "").trim())
+  7215:     .map(row => String(row?.person || "").trim())
+  7216:     .filter(Boolean);
+  7217:   return new Set([...homeroom, ...gradeHead]);
+  7218: }
+  7219: 
+  7220: function dashboardNextDuty(type, person=currentLoginTeacherName()){
+  7221:   const source=type==="lunch"?(readonlyCache?.lunchDuties||[]):(readonlyCache?.nightSupervisors||[]);
+  7222:   const todayKey=dateKey(today);
+  7223:   const row=source.filter(item=>String(item.date||"").slice(0,10)>todayKey && String(item.teacher||"").trim()===person)
+  7224:     .sort((a,b)=>String(a.date||"").localeCompare(String(b.date||"")))[0];
+  7225:   if(!row)return null;
+  7226:   const d=new Date(`${String(row.date).slice(0,10)}T12:00:00`);
+  7227:   const dateLabel=Number.isNaN(d.getTime())?String(row.date||"").slice(0,10):`${d.getMonth()+1}월 ${d.getDate()}일`;
+  7228:   const dutyLabel=type==="lunch"?String(row.dutyType||"").trim():String(row.place||"").trim();
+  7229:   return {row,label:`다음 ${dateLabel}`,detail:[dutyLabel,[row.start,row.end].filter(Boolean).join("~")].filter(Boolean).join(" · ")};
+  7230: }
+  7231: function dashboardDutyStatus(type){
+  7232:   const key=dateKey(today), person=currentLoginTeacherName();
+  7233:   if(type==="lunch"){
+  7234:     const manual=state.settings?.lunchDutyOverrides?.[key];
+  7235:     if(manual){
+  7236:       if(manual.enabled!==false)return {state:"on",label:"오늘 담당",detail:[manual.time,manual.place].filter(Boolean).join(" · "),rows:[manual]};
+  7237:       const next=dashboardNextDuty("lunch",person);return {state:"off",label:"오늘 없음",detail:next?[next.label,next.detail].filter(Boolean).join(" · "):"다음 일정 없음",rows:[]};
+  7238:     }
+  7239:     const rows=(readonlyCache?.lunchDuties||[]).filter(row=>String(row.date||"").slice(0,10)===key && String(row.teacher||"").trim()===person);
+  7240:     if(rows.length){const kinds=[...new Set(rows.map(r=>r.dutyType).filter(Boolean))].join(" · "); const time=[rows[0].start,rows[0].end].filter(Boolean).join("~"); return {state:"on",label:"오늘 담당",detail:[time,kinds].filter(Boolean).join(" · "),rows};}
+  7264:   if(neisData?.ok) return `<section class="duty-calendar-meal empty"><header><div><small>TODAY MEAL</small><h3>오늘 급식정보</h3></div><time>${escapeHtml(dateKey(today))}</time></header><p>급식 없음</p><small>방학·휴업일이거나 오늘 실시되는 급식이 없습니다.</small></section>`;
+  7265:   return `<section class="duty-calendar-meal empty"><header><div><small>TODAY MEAL</small><h3>오늘 급식정보</h3></div><time>${escapeHtml(dateKey(today))}</time></header><p>급식정보 조회 불가</p><small>${escapeHtml(neisError||'NEIS 급식 연결을 확인하세요.')}</small></section>`;
+  7266: }
+  7267: function dutyCalendarMarkup(type, baseDate=dutyCalendarCursor[type]){
+  7268:   const year=baseDate.getFullYear(), month=baseDate.getMonth();
+  7269:   const rows=dutyMonthRows(type,baseDate), person=currentLoginTeacherName(), title=type==="lunch"?"급식지도":"야자감독";
+  7270:   const grouped=rows.reduce((m,row)=>{const key=String(row.date||"").slice(0,10);(m[key]??=[]).push(row);return m;},{});
+  7271:   const firstDay=new Date(year,month,1).getDay(), days=new Date(year,month+1,0).getDate();
+  7272:   const cells=[];
+  7273:   for(let i=0;i<firstDay;i++) cells.push('<div class="duty-cal-cell empty" aria-hidden="true"></div>');
+  7274:   for(let day=1;day<=days;day++){
+  7275:     const key=`${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+  7276:     const list=grouped[key]||[];
+  7277:     const isToday=key===dateKey(today);
+  7325:     const teacher=$("#lunchDutyTeacher").value.trim(), dutyType=$("#lunchDutyType").value.trim();
+  7326:     if(!teacher)return toast('변경할 담당교사를 선택하세요.');
+  7327:     const submit=event.submitter; if(submit){submit.disabled=true;submit.textContent='저장 중…';}
+  7328:     try{
+  7329:       if(!window.schoolBoard?.saveLunchDuty) throw new Error('급식지도 저장 기능을 사용할 수 없습니다.');
+  7330:       const result=await window.schoolBoard.saveLunchDuty({id:row.id,date:row.date,originalTeacher:row.teacher,teacher,dutyType,role:currentRoleId(),requester:currentLoginTeacherName()});
+  7331:       if(!result?.ok)throw new Error(result?.reason||'저장하지 못했습니다.');
+  7332:       readonlyCache=result.data||readonlyCache;
+  7333:       renderDutyCalendarDrawer('lunch'); render('dashboard'); toast('급식지도 담당을 변경했습니다.');
+  7334:     }catch(error){toast(error?.message||'급식지도 변경 실패'); if(submit){submit.disabled=false;submit.textContent='시트에 저장';}}
+  7335:   };
+  7336: }
+  7337: 
+  7338: function bindNightDutyEditor(){
+  7354:     event.preventDefault();
+  7355:     const teacher=$("#nightDutyTeacher").value.trim();
+  7356:     if(!teacher)return toast('변경할 감독교사를 선택하세요.');
+  7357:     const submit=event.submitter; if(submit){submit.disabled=true;submit.textContent='저장 중…';}
+  7358:     try{
+  7359:       const result=await window.schoolBoard.saveNightSupervisor({id:row.id,date:row.date,teacher,role:currentRoleId(),requester:currentLoginTeacherName()});
+  7360:       if(!result?.ok)throw new Error(result?.reason||'저장하지 못했습니다.');
+  7361:       readonlyCache=result.data||readonlyCache;
+  7362:       renderDutyCalendarDrawer('night'); render('dashboard'); toast('야자감독 교사를 변경했습니다.');
+  7363:     }catch(error){toast(error?.message||'야자감독 변경 실패'); if(submit){submit.disabled=false;submit.textContent='시트에 저장';}}
+  7364:   };
+  7365: }
+  7366: function renderDutyCalendarDrawer(type){
+  7367:   const isLunch=type==='lunch';
+  7374: }
+  7375: function openTodayLunchSupervisorDrawer(){
+  7376:   const key=dateKey(today);
+  7377:   const rows=(readonlyCache?.lunchDuties||[]).filter(row=>String(row.date||'').slice(0,10)===key);
+  7378:   $("#drawerKicker").textContent='TODAY LUNCH DUTY';$("#drawerTitle").textContent='오늘의 급식지도';
+  7379:   const body=rows.length?rows.map(row=>`<div class="today-duty-person ${String(row.teacher||'').trim()===currentLoginTeacherName()?'mine':''}"><strong>${escapeHtml(row.teacher||'-')}</strong><span>${escapeHtml(row.dutyType||'급식실')}</span><small>${escapeHtml([row.start,row.end].filter(Boolean).join('~'))}</small></div>`).join(''):`<div class="night-supervisor-empty"><i>◇</i><b>오늘 급식지도 일정이 없습니다</b><span>42_급식지도계획의 오늘 날짜가 비어 있습니다.</span></div>`;
+  7380:   $("#drawerBody").innerHTML=`<div class="today-duty-list"><time>${escapeHtml(key)}</time>${body}</div><div class="drawer-actions"><button class="btn primary" data-reference="lunch-supervisor">빠른열기 · 급식지도 전체 보기</button></div>`;
+  7381:   $("#drawer").classList.remove('hidden');$("#drawerBackdrop").classList.remove('hidden');
+  7382:   $("#drawerBody [data-reference='lunch-supervisor']")?.addEventListener("click",()=>openReferenceDrawer("lunch-supervisor"));
+  7383: }
+  7384: 
+  7385: function openLunchDutyEditor(){
+  7386:   const key=dateKey(today);
+  7387:   const saved=state.settings?.lunchDutyOverrides?.[key]||{};
+  7394: }
+  7395: function openTodayNightSupervisorDrawer(){
+  7396:   const key=dateKey(today);
+  7397:   const rows=(readonlyCache?.nightSupervisors||[]).filter(row=>String(row.date||'').slice(0,10)===key);
+  7398:   $("#drawerKicker").textContent="TODAY NIGHT STUDY";$("#drawerTitle").textContent="오늘의 야자감독";
+  7399:   const body=rows.length?rows.map(row=>`<div class="today-duty-person ${String(row.teacher||'').trim()===currentLoginTeacherName()?'mine':''}"><strong>${escapeHtml(row.teacher||'-')}</strong><span>${escapeHtml(row.place||'면학관 2~3층')}</span><small>${escapeHtml([row.start,row.end].filter(Boolean).join('~'))}</small></div>`).join(''):`<div class="night-supervisor-empty"><i>◇</i><b>오늘 야자감독이 없습니다</b><span>43_야자감독계획의 오늘 날짜가 비어 있습니다.</span></div>`;
+  7400:   $("#drawerBody").innerHTML=`<div class="today-duty-list"><time>${escapeHtml(key)}</time>${body}</div><div class="drawer-actions"><button class="btn primary" data-reference="night-supervisor">빠른열기 · 야자감독 전체 보기</button></div>`;
+  7401:   $("#drawer").classList.remove("hidden");$("#drawerBackdrop").classList.remove("hidden");
+  7402:   $("#drawerBody [data-reference='night-supervisor']")?.addEventListener("click",()=>openReferenceDrawer("night-supervisor"));
+  7403: }
+  7404: 
+  7405: function dashboardDutyBadgesMarkup(){
+  7406:   const lunch=dashboardDutyStatus("lunch");
+  7407:   const night=dashboardDutyStatus("night");
+  7549:   return `<div class="uep-week-timetable"><div class="uep-week-corner">교시</div>${heads.map((day,i)=>`<div class="uep-week-head ${i===todayIndex?"today":""}"><b>${escapeHtml(String(day).replace(/요일/g,""))}</b></div>`).join("")}${cells.join("")}</div>`;
+  7550: }
+  7551: 
+  7552: function currentTeacherAccessScope(){
+  7553:   const role=currentRoleId();
+  7554:   const teacher=currentLoginTeacherName();
+  7555:   const profile=currentUserProfile();
+  7556:   const defaultGrade=String(profile.grade||state?.settings?.grade||state?.settings?.neis?.grade||1);
+  7557:   const homeroomRow=(SOURCE_REFERENCE_DATA?.homeroom||[]).find(row=>String(row?.[2]||'').trim()===teacher);
+  7558:   const grade=String(profile.grade||homeroomRow?.[0]||defaultGrade);
+  7559:   const classNo=String(profile.classNo||homeroomRow?.[1]||state?.settings?.neis?.classNo||'');
+  7560:   if(role==='grade_head'||role==='grade_manager') return {role,teacher,grade,classNo:'',label:`${grade}학년 전체 조회`};
+  7561:   if(role==='admin'||role==='vice_principal'||role==='principal') return {role,teacher,grade:'',classNo:'',label:'학교 전체 조회'};
+  7562:   if(role==='homeroom') return {role,teacher,grade,classNo,label:classNo?`${grade}학년 전체 조회 · ${classNo}반 업무수정`:`${grade}학년 전체 조회`};
+  7563:   return {role,teacher,grade,classNo,label:`${grade}학년 조회`};
+  7564: }
+  7565: function recordGradeClass(row){
+  7566:   const studentNo=String(row?.studentNo||row?.number||row?.studentNumber||'').replace(/\D/g,'');
+  7567:   const grade=String(row?.grade||row?.gradeNo||row?.studentGrade||(studentNo.length>=4?studentNo[0]:'')||'');
+  7579:     if(scope.classNo&&gc.classNo&&String(Number(gc.classNo))!==String(Number(scope.classNo)))return false;
+  7580:     return true;
+  7581:   });
+  7582: }
+  7583: function dashboardGradeScope(){
+  7584:   const profile=currentUserProfile();
+  7585:   const scope=currentTeacherAccessScope();
+  7586:   const grade=String(profile.grade||scope.grade||state?.settings?.neis?.grade||1);
+  7587:   return {grade,label:`${grade}학년 전체`};
+  7588: }
+  7589: function filterRowsForDashboardStatus(rows){
+  7590:   const scope=dashboardGradeScope();
+  7591:   if(!Array.isArray(rows))return [];
+  7592:   return rows.filter(row=>{
+  7593:     const gc=recordGradeClass(row);
+  7594:     return !scope.grade||!gc.grade||String(gc.grade)===String(scope.grade);
+  7595:   });
+  7596: }
+  7597: function dashboardOwnClassNo(){
+  7598:   const profile=currentUserProfile();
+  7599:   if(profile.classNo)return String(Number(profile.classNo));
+  7600:   const teacher=currentLoginTeacherName();
+  7601:   const row=(SOURCE_REFERENCE_DATA?.homeroom||[]).find(item=>String(item?.[2]||'').trim()===teacher);
+  7602:   return row?.[1]?String(Number(row[1])):'';
+  7603: }
+  7604: function resolveDashboardStudent(row){
+  7605:   const students=Array.isArray(readonlyCache?.students)?readonlyCache.students:[];
+  7606:   const ids=[row?.studentId,row?.studentID,row?.id,row?.studentNo,row?.studentNumber].map(value=>String(value||'').trim()).filter(Boolean);
+  7607:   const name=String(row?.name||row?.studentName||row?.displayName||'').trim();
+  7608:   const gc=recordGradeClass(row);
+  7842:   $$('#drawerBody [data-dashboard-status-page]').forEach(btn=>btn.onclick=()=>{closeDrawer();navigate(btn.dataset.dashboardStatusPage);});
+  7843: }
+  7844: 
+  7845: 
+  7846: function currentWorkAudienceContext(){
+  7847:   return {name:currentLoginTeacherName()||"홍석민",grade:"1학년",department:"1학년부",role:"담임·학년부"};
+  7848: }
+  7849: function workAudienceOptions(){return currentUserIsGradeHead()?["전체교사","1학년","2학년","3학년","행정실","교감","교장","특정부서","개인선택"]:["1학년","특정부서","개인선택"];}
+  7850: function normalizeWorkAudience(item){
+  7851:   const value=Array.isArray(item?.audience)?item.audience:(item?.target?[item.target]:[]);
+  7852:   return value.length?value:["전체교사"];
+  7853: }
+  7854: function workAudienceLabel(item){
+  7855:   const audience=normalizeWorkAudience(item);
+  7890: async function closePublishedNotice(item){
+  7891:   if(!currentUserCanManageNotices())return;
+  7892:   const collection=noticeCollectionState(item);
+  7893:   if(!collection.complete&&!confirm(`아직 ${collection.pending.join(' · ')}이(가) 처리되지 않았습니다. 그래도 공지를 내릴까요?`))return;
+  7894:   if(collection.complete&&!confirm('모든 대상 반의 처리가 완료되었습니다. 이 공지를 대시보드에서 내릴까요?'))return;
+  7895:   const payload={id:item.id,schoolYear:new Date().getFullYear(),noticeKind:item.noticeKind||item.type||'일반공지',type:'공지',title:item.title||'',content:item.content||item.memo||item.description||'',targetGrade:item.targetGrade||'1',targetClass:item.targetClass||'전체',postDate:item.postDate||item.date||dateKey(today),endDate:item.endDate||dateKey(today),deadlineType:item.deadlineType||'',deadline:item.deadline||'',department:item.department||'1학년부',author:item.author||currentLoginTeacherName()||'',confirmRequired:Boolean(item.confirmRequired),submitRequired:Boolean(item.submitRequired),homeroomNotice:Boolean(item.homeroomNotice),important:Boolean(item.important),topAlert:Boolean(item.topAlert),status:'종료',note:'관리자 공지 내리기'};
+  7896:   const result=await window.schoolBoard?.saveNotice?.(payload);
+  7897:   if(!result?.ok)return toast(result?.reason||'공지를 내리지 못했습니다.');
+  7898:   if(Array.isArray(readonlyCache?.notices)){const target=readonlyCache.notices.find(x=>String(x.id)===String(item.id));if(target)target.status='종료';}
+  7899:   closeDrawer();render(state.activePage||'dashboard');toast('공지를 내렸습니다. 기록은 그대로 보존됩니다.');
+  7900: }
+  7901: function openWorkNoticeDetail(itemId,source="connected"){
+  7902:   const local=workBoardData("notice").find(x=>String(x.id)===String(itemId));
+  7903:   const connected=(Array.isArray(readonlyCache?.notices)?readonlyCache.notices:[]).find(x=>String(x.id||x.noticeId||x.key||"")===String(itemId));
+  7904:   const item=connected||local;
+  7905:   if(!item)return toast("학교업무 공지를 찾지 못했습니다.");
+  7906:   const content=item.content||item.memo||item.description||item.detail||"등록된 상세 내용이 없습니다.";
+  7907:   const stateInfo=noticeActionState(item), expected=noticeExpectedCount(item), confirmCount=Number(item.confirmedCount||0), submitCount=Number(item.submittedCount||0);
+  7908:   const isHead=currentUserCanManageNotices();
+  7909:   const summary=isHead?`<div class="notice-progress-admin"><span><small>확인</small><b>${confirmCount}/${expected}</b></span>${item.submitRequired?`<span><small>제출</small><b>${submitCount}/${expected}</b></span>`:""}</div>`:`<div class="notice-progress-user"><span class="${stateInfo.confirmed?'done':'pending'}">${stateInfo.confirmed?'확인 완료':'미확인'}</span>${item.submitRequired?`<span class="${stateInfo.submitted?'done':'pending'}">${stateInfo.submitted?'제출 완료':'미제출'}</span>`:""}</div>`;
+  7910:   $("#drawerKicker").textContent="SCHOOL WORK NOTICE";$("#drawerTitle").textContent=item.title||"학교업무 공지";
+  7911:   $("#drawerBody").innerHTML=`<div class="work-notice-detail"><div class="history-summary"><span><small>성격</small><b>${escapeHtml(item.noticeKind||item.type||'일반공지')}</b></span><span><small>대상</small><b>${escapeHtml([item.targetGrade&&`${item.targetGrade}학년`,item.targetClass||'전체'].filter(Boolean).join(' · '))}</b></span><span><small>등록</small><b>${escapeHtml(item.author||item.department||"1학년부")}</b></span><span><small>게시</small><b>${escapeHtml(item.postDate||item.date||"-")}${item.endDate?` ~ ${escapeHtml(item.endDate)}`:''}</b></span></div>${summary}<section><h4>공지 내용</h4><p>${escapeHtml(content)}</p></section>${item.deadline?`<section class="notice-deadline-box"><h4>${escapeHtml(noticeDeadlineTypeLabel(item.deadlineType))}</h4><p>${escapeHtml(item.deadline)} · ${escapeHtml(noticeDeadlineStatus(item))}</p><small>공지 일정과 별개의 업무 처리 기한입니다.</small></section>`:''}${noticeClassCollectionMarkup(item)}<div class="drawer-actions">${isHead?`<button class="btn secondary" data-notice-edit="${escapeHtml(item.id||'')}">공지 수정</button><button class="btn ${noticeCollectionState(item).complete?'primary':'secondary'}" data-notice-close="${escapeHtml(item.id||'')}">공지 내리기</button>`:''}${!isHead&&item.confirmRequired&&!stateInfo.confirmed?`<button class="btn primary" data-notice-confirm="${escapeHtml(item.id||'')}">확인했습니다</button>`:''}${!isHead&&item.submitRequired&&!stateInfo.submitted?`<button class="btn primary" data-notice-submit="${escapeHtml(item.id||'')}">제출 완료</button>`:''}</div><p class="drawer-note">확인과 제출은 서로 다른 상태이며 44_공지확인현황에 공용으로 저장됩니다.</p></div>`;
+  7968:     </section>
+  7969:   </div>`;
+  7970: }
+  7971: 
+  7972: function currentTeacherHomeroomClass(){
+  7973:   const name=currentLoginTeacherName();
+  7974:   const row=(SOURCE_REFERENCE_DATA?.homeroom||[]).find(item=>String(item?.[0])==='1'&&String(item?.[2]||'').trim()===name);
+  7975:   return row?`${normalizeTimetableGradeClass(row).grade}-${normalizeTimetableGradeClass(row).classNo}`:'';
+  7976: }
+  7977: function currentUserIsGradeHead(){
+  7978:   const name=currentLoginTeacherName();
+  7979:   return (DUTY_ASSIGNMENTS||[]).some(row=>String(row?.department||'').trim()==='1학년부'&&String(row?.role||'').trim()==='부장'&&String(row?.person||'').trim()===name);
+  7980: }
+  7981: function completionStatusMarkup(item){
+  7982:   const required=(Array.isArray(item?.requiredClasses)&&item.requiredClasses.length?item.requiredClasses:['1-1','1-2','1-3','1-4','1-5','1-6','1-7','1-8','1-9']).map(String);
+  7983:   const completed=(Array.isArray(item?.confirmedClasses)?item.confirmedClasses:Array.isArray(item?.completedClasses)?item.completedClasses:[]).map(String);
+  7984:   if(currentUserIsGradeHead()){
+  7985:     return `<div class="class-completion-mini"><b>${completed.length}/${required.length}반 완료</b><span>${required.map(cls=>`<i class="${completed.includes(cls)?'done':'pending'}">${escapeHtml(cls.replace('1-',''))}반</i>`).join('')}</span></div>`;
+  7986:   }
+  8079: }
+  8080: function growthCounselRecords(studentId){
+  8081:   const connected=Array.isArray(readonlyCache?.counselRecords)?readonlyCache.counselRecords:[];
+  8082:   const local=Array.isArray(state.growthCounselRecords)?state.growthCounselRecords:[];
+  8083:   const merged=[...connected,...local.filter(x=>!connected.some(y=>String(y.id)===String(x.id)))];
+  8084:   const teacher=String(currentLoginTeacherName()||'').trim();
+  8085:   if(!teacher)return [];
+  8086:   return merged.filter(row=>String(row.studentId)===String(studentId)&&String(row.writer||'').trim()===teacher).sort((a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
+  8087: }
+  8088: 
+  8089: function findDashboardCounselCandidate(studentId){
+  8090:   let cached=__uepDashboardCounselCache;
+  8091:   let found=(cached?.rows||[]).find(row=>String(row.student.id)===String(studentId))||(cached?.all||[]).find(row=>String(row.student.id)===String(studentId));
+  8092:   if(found)return found;
+  8151:   const opt=(v,current)=>String(v)===String(current)?'selected':'';
+  8152:   $('#drawerBody').innerHTML=`<form id="growthCounselForm" class="duty-editor-form growth-counsel-form"><label>상담 영역<select id="growthCounselArea">${['입시','학습','진로','생활','출결','프로그램','보호자','기타'].map(v=>`<option value="${v}" ${opt(v,record.area||'입시')}>${v}</option>`).join('')}</select></label><label>상담 방식<select id="growthCounselType">${['학생 상담','학부모 상담','교사 협의','프로그램 추천'].map(v=>`<option ${opt(v,record.type||'학생 상담')}>${v}</option>`).join('')}</select></label><label>상담 내용<textarea id="growthCounselMemo" rows="6" required placeholder="상담 내용과 학생의 반응, 확인한 사항을 기록하세요.">${escapeHtml(record.memo||'')}</textarea></label><label>조치·후속 계획<textarea id="growthCounselAction" rows="4" placeholder="방과후 추천, 과목 보완, 다음 성적 확인 등">${escapeHtml(record.action||'')}</textarea></label><label>다음 확인일<input id="growthCounselNextDate" type="date" value="${escapeHtml(record.nextDate||'')}"></label><label>진행 상태<select id="growthCounselStatus">${['진행중','완료','보류'].map(v=>`<option value="${v}" ${opt(v,record.status||'진행중')}>${v}</option>`).join('')}</select></label><div class="modal-actions"><button type="button" class="btn secondary" data-close-drawer>취소</button><button class="btn primary">${existing?'수정 저장':'상담 기록 저장'}</button></div></form>`;
+  8153:   $('#drawer').classList.remove('hidden');$('#drawerBackdrop').classList.remove('hidden');
+  8154:   $('[data-close-drawer]')?.addEventListener('click',closeDrawer);
+  8155:   $('#growthCounselForm').onsubmit=async event=>{event.preventDefault();
+  8156:     const recordOut={id:record.id||`CNS-${Date.now()}`,studentId:student.id,studentNo:student.studentNo,name:student.name,grade:String(student.studentNo||'').slice(0,1)||'1',className:classNumberOf(student),group:record.group||candidate.group,stage:record.stage||candidate.stage,discoveryReason:record.discoveryReason||(candidate.reasons||[]).join(' · '),area:$('#growthCounselArea').value,type:$('#growthCounselType').value,memo:$('#growthCounselMemo').value.trim(),action:$('#growthCounselAction').value.trim(),nextDate:$('#growthCounselNextDate').value,status:$('#growthCounselStatus').value,createdAt:record.createdAt||new Date().toISOString(),writer:record.writer||currentLoginTeacherName()};
+  8157:     try{
+  8158:       const result=await window.schoolBoard.saveCounselRecord(recordOut);
+  8159:       if(!result?.ok)throw new Error(result?.reason||'상담기록 저장 실패');
+  8160:       const saved=result.record||{...recordOut,id:result.id||recordOut.id,modifiedAt:new Date().toISOString()};
+  8161:       readonlyCache=readonlyCache||{};
+  8162:       const list=Array.isArray(readonlyCache.counselRecords)?[...readonlyCache.counselRecords]:[];
+  8163:       const pos=list.findIndex(row=>String(row.id)===String(saved.id));
+  8164:       if(pos>=0)list[pos]={...list[pos],...saved};else list.unshift(saved);
+  8248: }
+  8249: function dashboardPersonalChecklist(){
+  8250:   return workBoardData('checklist').filter(item=>!item.done&&item.status!=='완료').sort((a,b)=>String(a.date||'9999').localeCompare(String(b.date||'9999'))).slice(0,3);
+  8251: }
+  8252: function todayOperationsMarkup() {
+  8253:   const notices=directNoticeRows().filter(item=>String(item.postDate||item.date||'').slice(0,10)===dateKey(today)||item.homeroomNotice||item.important).slice(0,3);
+  8254:   const deadlines=dashboardDeadlineItems();
+  8255:   const checklist=dashboardPersonalChecklist();
+  8256:   const isHead=currentUserCanManageNotices();
+  8257:   const manualNoticeBody=notices.map(item=>{const st=noticeActionState(item);const action=item.submitRequired&&!st.submitted?'제출':item.confirmRequired&&!st.confirmed?'확인':'열기';return `<button class="work-mini-item notice ${item.important?'important':''}" data-work-notice-detail="${escapeHtml(item.id||'')}" data-work-notice-source="connected"><span><b>${item.homeroomNotice?'<i>종례</i> ':''}${escapeHtml(item.title||'학교업무 공지')}</b><small>${escapeHtml(item.noticeKind||item.type||'공지')} · ${escapeHtml(item.author||item.department||'1학년부')}</small></span><em>${action}</em></button>`;}).join('');
+  8258:   const noticeBody=manualNoticeBody||`<div class="work-mini-empty">오늘 전달할 직접 공지가 없습니다.</div>`;
+  8259:   const deadlineBody=deadlines.length?deadlines.map(item=>`<button class="work-mini-item deadline ${item.days<0?'overdue':item.days<=1?'urgent':''}" data-auto-deadline-source="${escapeHtml(item.source)}" data-auto-deadline-id="${escapeHtml(String(item.id||''))}"><span><b><i>${escapeHtml(item.category)}</i> ${escapeHtml(item.title||'마감')}</b><small>${escapeHtml(item.due||'기한 확인')} · ${escapeHtml(item.meta||'')}</small></span><em>${deadlineBadge(item)}</em></button>`).join(''):`<div class="work-mini-empty">7일 이내 자동 마감공지가 없습니다.</div>`;
+  8260:   const checklistBody=checklist.length?checklist.map(item=>`<button class="work-mini-item checklist" data-work-edit="checklist" data-work-id="${escapeHtml(item.id||'')}"><span><b>${escapeHtml(item.title||'개인 업무')}</b><small>${escapeHtml(item.date||'기한 없음')}</small></span><em>미완료</em></button>`).join(''):`<div class="work-mini-empty">미완료 체크리스트가 없습니다.</div>`;
+  8261:   return `<article class="card task-card operations-card operations-card-v07668 widget-configurable" ${widgetAttrs('operations')}><div class="card-head"><div><span class="card-icon ci-blue">✓</span><strong>학교업무공지·마감</strong></div><div class="operation-head-tools"><span><b>${notices.length}</b> 직접공지</span><span><b>${deadlines.length}</b> 자동마감</span><button class="text-button notice-add-button" data-notice-add>＋ 공지</button></div></div><div class="work-four-grid"><section><header><b>오늘의 직접공지</b><button data-page="work">전체</button></header>${noticeBody}</section><section><header><b>자동 마감공지</b><button data-page="work">전체</button></header>${deadlineBody}</section><section><header><b>상담 필요</b><button data-student-counsel-route>전체</button></header>${dashboardCounselMarkup()}</section><section><header><b>내 체크리스트</b><button data-page="work">전체</button></header>${checklistBody}</section></div></article>`;
+  8262: }
+  8263: 
+  8264: function normalizeProgramTitle(value) {
+  8265:   return String(value || "").toLowerCase().replace(/[^0-9a-z가-힣]/g, "");
+  8266: }
+  8267: 
+  8268: function dashboardTodayProgramVisible(program){
+  8269:   if(!program)return false;
+  8368: 
+  8369: 
+  8370: function openMealDutyDrawer(){
+  8371:   const status=dashboardDutyStatus("lunch");
+  8372:   const rows=dutyMonthRows("lunch").filter(row=>row.date===dateKey(today));
+  8373:   const mine=rows.filter(row=>String(row.teacher||"").trim()===currentLoginTeacherName());
+  8374:   const meals=Array.isArray(neisData?.meals)?neisData.meals:[];
+  8375:   const dutyRows=rows.length?rows.map(row=>`<div class="duty-month-row ${String(row.teacher||'').trim()===currentLoginTeacherName()?'mine':''}"><strong>${escapeHtml(row.teacher||'-')}</strong><span>${escapeHtml(row.dutyType||'급식실')}</span><small>${escapeHtml([row.start,row.end].filter(Boolean).join('~'))}</small></div>`).join(""):`<div class="connection-guide compact"><span>◇</span><h3>오늘 급식지도 일정이 없습니다</h3><p>42_급식지도계획의 오늘 날짜를 확인하세요.</p></div>`;
+  8376:   const mealRows=neisData?.ok?(meals.length?`<div class="meal-detail-list">${meals.map(meal=>`<section><header><b>${escapeHtml(meal.mealType)}</b><span>${escapeHtml(meal.calories||"")}</span></header><div>${meal.menu.map(item=>`<p>${escapeHtml(item)}</p>`).join("")}</div></section>`).join("")}</div>`:`<div class="connection-guide compact"><span>🍽</span><h3>오늘 등록된 급식이 없습니다</h3><p>방학·휴업일이거나 NEIS에 식단이 없습니다.</p></div>`):`<div class="connection-guide compact"><span>!</span><h3>급식을 불러오지 못했습니다</h3><p>${escapeHtml(neisError||"NEIS 연결을 확인하세요.")}</p></div>`;
+  8377:   $("#drawerKicker").textContent="LUNCH · DUTY";
+  8378:   $("#drawerTitle").textContent="급식 및 지도";
+  8379:   $("#drawerBody").innerHTML=`<div class="meal-duty-combined"><section class="meal-duty-section duty-first"><header><div><small>TODAY DUTY</small><h3>오늘 급식지도</h3></div><span class="duty-state ${status.state}">${escapeHtml(status.label)}</span></header>${dutyRows}<button class="btn secondary" data-reference="lunch-supervisor">월간 급식지도 보기</button></section><section class="meal-duty-section"><header><div><small>TODAY MEAL</small><h3>오늘 급식메뉴</h3></div></header>${mealRows}</section></div>`;
+  8380:   $("#drawer").classList.remove("hidden"); $("#drawerBackdrop").classList.remove("hidden");
+  8381:   $("#drawerBody [data-reference='lunch-supervisor']")?.addEventListener("click",()=>openReferenceDrawer("lunch-supervisor"));
+  8382: }
+  8383: 
+  9193: async function saveStudentContactToSheet(student,field,value,index,label,embedded=false){
+  9194:   const access=studentAccessContext(student);
+  9195:   if(!access.canEditContact)return toast('이 학생의 연락정보 수정 권한이 없습니다.');
+  9196:   const button=document.querySelector('.contact-inline-save'); if(button){button.disabled=true;button.textContent='저장 중…';}
+  9197:   try{
+  9198:     const result=await window.schoolBoard?.saveStudentContact?.({studentId:student.id,studentNo:student.studentNo,className:student.className,field,value,role:access.role,requester:currentLoginTeacherName()});
+  9199:     if(!result?.ok)throw new Error(result?.reason||'시트 저장 실패');
+  9200:     readonlyCache=result.data||readonlyCache;
+  9201:     toast(`${label}를 UEP 기본정보 연결시트에 저장했습니다.`);
+  9202:     if(embedded&&state.activePage==='students'){render('students');window.scrollTo(0,0);}else openStudentDrawer(index);
+  9203:   }catch(error){toast(error?.message||`${label} 수정에 실패했습니다.`);if(embedded&&state.activePage==='students')render('students');else openStudentDrawer(index);}
+  9204: }
+  9205: function editStudentContact(student,field,label,index,button){
+  9206:   const access=studentAccessContext(student);
+ 10476:         openWidgetSettings(x.dataset.widgetSettings);
+ 10477:       }),
+ 10478:   );
+ 10479:   const teacherSearch = $("#teacherTimetableSearch");
+ 10480:   const showTeacherTimetable=async teacher=>{const name=String(teacher||"").trim();if(!name)return toast("교사 이름을 선택하세요.");state.settings.comciganTeacher=name;await save();render(calendarHubMode==="timetable"?"calendar":"timetable");};
+ 10481:   $$('[data-teacher-name]').forEach(button => button.onclick = () => showTeacherTimetable(button.dataset.teacherName || ""));
+ 10482:   const teacherApply=$("#teacherTimetableApply");
+ 10483:   if(teacherApply)teacherApply.onclick=()=>showTeacherTimetable(teacherSearch?.value||"");
+ 10484:   const teacherOpen = $("#teacherTimetableOpen");
+ 10485:   if (teacherOpen) teacherOpen.onclick = async () => {
+ 10486:     const teacher = teacherSearch?.value.trim() || "";
+ 10487:     if (!teacher) return toast("교사 이름을 선택하세요.");
+ 10488:     state.settings.comciganTeacher = teacher;
+ 10489:     await save();
+ 10530:     }
+ 10531:     await save();
+ 10532:     loadNeisDashboard(true);
+ 10533:   };
+ 10534:   const updateForm=$("#updateSettingsForm");
+ 10535:   if(updateForm) updateForm.onsubmit=async event=>{event.preventDefault();state.settings.updateManifestUrl=$("#updateManifestUrl").value.trim();await save();toast("업데이트 정보 주소를 저장했습니다.");};
+ 10536:   $$('[data-open-issue-report]').forEach(button=>button.onclick=openIssueReportDialog);
+ 10537:   $$('[data-open-issue-manager]').forEach(button=>button.onclick=()=>{if(currentRoleId()!=='admin')return toast('관리자만 신고 관리 화면을 열 수 있습니다.');openIssueManager();});
+ 10538:   $$('[data-run-health-check]').forEach(button=>button.onclick=async()=>{button.disabled=true;button.textContent='진단 중…';const result=await window.schoolBoard?.previewReadonlySync?.().catch(()=>null);if(result?.ok){readonlyCache=result.data;googleConnectionError='';}else if(result?.reason){googleConnectionError=result.reason;}button.disabled=false;render('settings');toast(googleConnectionError?'연결 진단에서 확인할 항목이 있습니다.':'필수 연결이 정상입니다.');});
+ 10539:   $$('[data-access-control]').forEach(button=>button.onclick=()=>openAccessControlPanel());
+ 10540:   $$('[data-inline-access-refresh]').forEach(button=>button.onclick=async()=>{const result=await window.schoolBoard?.readReadonlyCache?.();if(result?.ok){readonlyCache=result.data;render('settings');toast('사용자 계정표를 새로고침했습니다.');}else toast(result?.reason||'사용자 계정표를 새로고침하지 못했습니다.');});
+ 10541:   $$('[data-inline-access-user]').forEach(row=>{const id=row.dataset.inlineAccessUser,account=(readonlyCache?.userAccounts||[]).find(a=>String(a.id)===String(id));if(!account)return;row.querySelector('[data-inline-access-toggle]')?.addEventListener('click',async()=>{const p=currentUserProfile();if(account.active!==false&&String(account.id)===String(p.id))return toast('현재 로그인한 관리자 계정은 자기 자신을 중지할 수 없습니다.');const active=account.active===false;const result=await window.schoolBoard?.updateUserAccount?.({id,active});if(!result?.ok)return toast(result?.reason||'사용자 승인 상태를 저장하지 못했습니다.');const refreshed=await window.schoolBoard?.readReadonlyCache?.();if(refreshed?.ok)readonlyCache=refreshed.data;render('settings');toast(active?'사용 승인을 완료했습니다.':'사용을 중지했습니다.');});row.querySelector('[data-inline-access-save]')?.addEventListener('click',async()=>{const role=row.querySelector('[data-inline-access-role]')?.value||'',grade=row.querySelector('[data-inline-access-grade]')?.value||'1',classNo=row.querySelector('[data-inline-access-class]')?.value||'';const admin=role==='관리자';const result=await window.schoolBoard?.updateUserAccount?.({id,role:admin?'관리자':role,admin,grade,classNo,active:account.active!==false});if(!result?.ok)return toast(result?.reason||'권한을 저장하지 못했습니다.');const refreshed=await window.schoolBoard?.readReadonlyCache?.();if(refreshed?.ok)readonlyCache=refreshed.data;render('settings');toast('사용자 권한을 저장했습니다.');});});
+ 10542:   $$('[data-check-update]').forEach(button=>button.onclick=async()=>{const url=$("#updateManifestUrl")?.value.trim()||state.settings.updateManifestUrl||"";if(!url)return toast("업데이트 정보 JSON 주소를 먼저 입력하세요.");button.disabled=true;button.textContent="확인 중…";const result=await window.schoolBoard?.checkUpdate?.(url,APP_VERSION);button.disabled=false;button.textContent="업데이트 확인";const box=$("#updateCheckResult");if(!result?.ok){if(box)box.innerHTML=`<b>확인 실패</b><small>${escapeHtml(result?.reason||'업데이트 정보를 읽지 못했습니다.')}</small>`;return;}if(box)box.innerHTML=result.updateAvailable?`<b>새 버전 ${escapeHtml(result.version)} 사용 가능</b><small>${escapeHtml(result.notes||'새 버전이 있습니다.')} · 확인경로 ${escapeHtml(result.source||'자동')}</small><button class="btn primary" data-apply-update>업데이트 적용</button>`:`<b>최신 버전입니다</b><small>현재 ${APP_VERSION} · 확인경로 ${escapeHtml(result.source||'자동')}</small>`;const apply=$("[data-apply-update]");if(apply)apply.onclick=async()=>{if(!result.sha256)return toast("업데이트 정보에 SHA-256이 없어 자동 적용할 수 없습니다.");if(!confirm(`UEP ${result.version} 업데이트를 적용할까요?\n\n현재 설정·인증·연결 정보는 그대로 유지됩니다. 적용 후 UEP가 자동으로 다시 실행됩니다.`))return;apply.disabled=true;apply.textContent="다운로드·검증 중…";const applied=await window.schoolBoard?.applyUpdate?.({version:result.version,downloadUrl:result.downloadUrl,sha256:result.sha256});if(!applied?.ok){apply.disabled=false;apply.textContent="업데이트 적용";return toast(applied?.reason||"업데이트 적용에 실패했습니다.");}toast("업데이트 검증 완료 · UEP를 재시작하여 적용합니다.");};});
+ 10543:   const timetableForm = $("#timetableNeisForm");
+ 10544:   if (timetableForm) timetableForm.onsubmit = async (event) => {
+ 10545:     event.preventDefault();
+ 10546:     state.settings.neis.grade = $("#timetableGrade").value;
+ 10547:     state.settings.neis.classNo = $("#timetableClass").value;
+ 10548:     await save();
+ 10549:     loadNeisDashboard(true);
+ 10550:   };
+ 11173:   };
+ 11174: }
+ 11175: 
+ 11176: 
+ 11177: function openNoticeEditor(id=""){
+ 11178:   const now=dateKey(today), item=(readonlyCache?.notices||[]).find(row=>String(row.id)===String(id))||{};
+ 11179:   const isEdit=Boolean(item.id);
+ 11180:   openDrawer(isEdit?'학교업무 공지 수정':'학교업무 공지 등록','MANUAL NOTICE · UEP ↔ 40_공지마감');
+ 11181:   const noticeKind=item.noticeKind||item.type||'일반공지';
+ 11182:   $("#drawerBody").innerHTML=`<form id="noticeEditorForm" class="calendar-single-editor calendar-single-editor-v426"><div class="calendar-editor-grid"><label>공지 유형<select id="noticeKind"><option ${noticeKind==='일반공지'?'selected':''}>일반공지</option><option ${noticeKind==='확인요청'?'selected':''}>확인요청</option><option ${noticeKind==='제출요청'?'selected':''}>제출요청</option><option ${noticeKind==='종례전달'?'selected':''}>종례전달</option><option ${noticeKind==='긴급'?'selected':''}>긴급</option></select><small>유형에 따라 확인·제출·종례 기능이 자동 적용됩니다.</small></label><label>공지 시작일<input id="noticePostDate" type="date" value="${escapeHtml(item.postDate||now)}" required></label><label>공지 종료일<input id="noticeEndDate" type="date" value="${escapeHtml(item.endDate||'')}"></label><label class="wide">제목<input id="noticeTitle" type="text" tabindex="0" autocomplete="off" required value="${escapeHtml(item.title||'')}" placeholder="담임 선생님께 표시할 공지 제목"></label><label class="wide">내용<textarea id="noticeContent" tabindex="0" rows="6" required placeholder="공지 내용을 입력하세요.">${escapeHtml(item.detail||item.content||'')}</textarea></label><label>대상학년<input id="noticeTargetGrade" value="${escapeHtml(item.targetGrade||'1')}"></label><label>대상반<input id="noticeTargetClass" value="${escapeHtml(item.targetClass||'전체')}" placeholder="전체 또는 1,2,3"><small>전체 또는 여러 반(예: 1,3,5)</small></label><div class="notice-target-quick wide"><button type="button" data-notice-target="전체">전체</button>${Array.from({length:9},(_,i)=>`<button type="button" data-notice-target="${i+1}">${i+1}반</button>`).join("")}</div><label>마감 유형<select id="noticeDeadlineType"><option value="" ${!item.deadlineType?'selected':''}>마감 없음</option><option value="학생제출" ${item.deadlineType==='학생제출'?'selected':''}>학생 제출 마감</option><option value="담임확인" ${item.deadlineType==='담임확인'?'selected':''}>담임 확인 마감</option><option value="업무처리" ${item.deadlineType==='업무처리'?'selected':''}>업무 처리 마감</option></select><small>누가 무엇을 언제까지 해야 하는지 구분합니다.</small></label><label>마감일시<input id="noticeDeadline" type="datetime-local" value="${escapeHtml(item.deadline?String(item.deadline).slice(0,16):'')}"><small>공지 노출기간과 별개입니다.</small></label><label>담당부서<input id="noticeDepartment" value="${escapeHtml(item.department||'1학년부')}"></label><label>담당자<input id="noticeAuthor" value="${escapeHtml(item.author||currentLoginTeacherName()||'')}"></label><label class="check-label wide"><input id="noticeTopAlert" type="checkbox" ${item.topAlert||noticeKind==='긴급'?'checked':''}> 대시보드 상단 강조</label></div><div class="program-actions">${isEdit?'<button type="button" class="btn danger" id="noticeDelete">삭제</button>':''}<button type="button" class="btn secondary" id="noticeCancel">취소</button><button type="submit" class="btn primary">${isEdit?'수정 저장':'공지 등록'}</button></div></form><p class="drawer-note">직접 공지는 40_공지마감이 원본입니다. 확인·제출·종례 여부는 공지 유형에 따라 자동 적용됩니다.</p>`;
+ 11183:   $("#noticeCancel").onclick=closeDrawer;
+ 11184:   // 공지 제목·내용은 어떤 전역 드래그/단축키 상태와 관계없이 일반 텍스트 입력을 보장한다.
+ 11185:   ["noticeTitle","noticeContent"].forEach(id=>{const el=document.getElementById(id);if(el){el.readOnly=false;el.disabled=false;el.style.pointerEvents='auto';el.style.userSelect='text';}});
+ 11186:   requestAnimationFrame(()=>document.getElementById('noticeTitle')?.focus());
+ 11187:   $$('[data-notice-target]').forEach(btn=>btn.onclick=()=>{const input=$("#noticeTargetClass");if(!input)return;const v=btn.dataset.noticeTarget;if(v==='전체')input.value='전체';else{const current=input.value==='전체'?'':input.value;const parts=[...new Set(current.split(/[,·\s]+/).filter(Boolean).concat(v))];input.value=parts.join(',');}});
+ 11188:   const applyKind=()=>{const k=$("#noticeKind").value;if(k==='긴급')$("#noticeTopAlert").checked=true;};$("#noticeKind").onchange=applyKind;applyKind();
+ 11189:   $("#noticeEditorForm").onsubmit=async(e)=>{e.preventDefault();const k=$("#noticeKind").value;if($("#noticeDeadlineType").value&&!$("#noticeDeadline").value)return toast('마감 유형을 선택한 경우 마감일시도 입력해 주세요.');const payload={id:item.id||'',schoolYear:new Date().getFullYear(),noticeKind:k,type:'공지',title:$("#noticeTitle").value.trim(),content:$("#noticeContent").value.trim(),targetGrade:$("#noticeTargetGrade").value.trim(),targetClass:$("#noticeTargetClass").value.trim(),postDate:$("#noticePostDate").value,endDate:$("#noticeEndDate").value,deadlineType:$("#noticeDeadlineType").value,deadline:$("#noticeDeadlineType").value?$("#noticeDeadline").value:'',department:$("#noticeDepartment").value.trim(),author:$("#noticeAuthor").value.trim(),confirmRequired:['확인요청','제출요청','종례전달','긴급'].includes(k),submitRequired:k==='제출요청',homeroomNotice:k==='종례전달',important:k==='긴급',topAlert:$("#noticeTopAlert").checked||k==='긴급'};const result=await window.schoolBoard?.saveNotice?.(payload);if(!result?.ok)return toast(result?.reason||'공지를 저장하지 못했습니다.');await refreshReadonlyAfterNotice();closeDrawer();workBoardMode='notice';render(state.activePage==='work'?'work':'dashboard');toast(isEdit?'공지를 수정했습니다.':'학교업무 공지를 등록했습니다.');};
+ 11190:   $("#noticeDelete")?.addEventListener('click',async()=>{if(!confirm('이 공지를 삭제할까요?'))return;const result=await window.schoolBoard?.deleteNotice?.(item.id);if(!result?.ok)return toast(result?.reason||'공지 삭제 실패');await refreshReadonlyAfterNotice();closeDrawer();workBoardMode='notice';render(state.activePage==='work'?'work':'dashboard');toast('공지를 삭제했습니다.');});
+ 11199:   const refreshed=await window.schoolBoard?.readReadonlyCache?.();
+ 11200:   if(refreshed?.ok)readonlyCache=refreshed.data;
+ 11201: }
+ 11202: async function saveCurrentNoticeReceipt(item,change){
+ 11203:   const mine=currentTeacherHomeroomClass(), classNo=mine?mine.split('-')[1]:'';
+ 11204:   const payload={noticeId:item.id,userId:currentNoticeUserId(),teacher:currentLoginTeacherName()||'사용자',grade:'1',classNo,...change};
+ 11205:   const result=await window.schoolBoard?.saveNoticeReceipt?.(payload);if(!result?.ok){toast(result?.reason||'확인 상태를 저장하지 못했습니다.');return false;}await refreshReadonlyAfterNotice();return true;
+ 11206: }
+ 11207: function openConnectedNotice(id){ return openWorkNoticeDetail(id,"connected"); }
+ 11208: 
+ 11209: function openGradeNotice(id) {
+ 11210:   const notice = state.gradeNotices.find((item) => item.id === id);
+ 11211:   if (!notice) return;
+ 11212:   const className = "1-1";
+ 11295:       `<div class="drawer-section"><h4>외부 실행 전 확인</h4><div class="drawer-line"><span>담임 안내 초안</span><b>1건</b></div><div class="drawer-line"><span>출결 대량 반영</span><b>1건</b></div><p style="font-size:9px;color:#71859a">시험판에서는 실제 발송이나 반영이 실행되지 않습니다.</p></div>`,
+ 11296:     ],
+ 11297:     info: [
+ 11298:       "APP INFO",
+ 11299:       "UEP 기능 상태",
+ 11300:       `<div class="app-version-card"><span>UEP · SCHOOL OPERATIONS</span><b>v${APP_VERSION}</b><small>배포 준비 · 학생발굴 이동경로 정밀화 · 관리자 ZIP/교사용 단일 EXE 동일 빌드</small></div>
+ 11301:        <div class="drawer-section"><h4>현재 실제 작동</h4>${[
+ 11302:         `UEP 구글시트|${googleLabel}`,
+ 11303:         `NEIS 급식·시간표|${neisLabel}`,
+ 11304:         `프로그램·보고서|공통·선택·방과후 및 보고서 정규화`,
+ 11305:         `출결|공결·지각·야자QR 운영일 조회`,
+ 11306:         `생활기록부|근거선택·규칙검토·초안·최종요약`,
+ 11307:         `출력센터|보고서·학생자료·선택과목·출석부·성적`,
+ 11308:       ].map((x)=>{const [a,b]=x.split("|");return `<div class="drawer-line"><span>${a}</span><b>${escapeHtml(b)}</b></div>`;}).join("")}</div>
+ 11351:   const ids=new Set(dorm.flatMap(x=>[String(x.studentId||''),String(x.studentNo||'')]).filter(Boolean));
+ 11352:   const students=(ids.size?all.filter(s=>ids.has(String(s.id||''))||ids.has(String(s.studentNo||''))):all).filter(s=>String(s.status||'재학')==='재학').sort((a,b)=>String(a.studentNo||'').localeCompare(String(b.studentNo||''),'ko'));
+ 11353:   const layer=document.createElement('div');layer.className='issue-layer';layer.id='dormOutingTeacherLayer';
+ 11354:   layer.innerHTML=`<div class="issue-dialog dorm-outing-teacher-dialog"><header><div><small>DORMITORY · TEACHER ENTRY</small><h3>학사외출 교사 추가</h3><p>갑작스러운 병원 진료 등 학생 폼 제출이 어려운 경우 교사가 직접 기록합니다.</p></div><button type="button" data-outing-editor-close>×</button></header><form id="dormOutingTeacherForm"><div class="dorm-outing-editor-grid"><label>학생<select id="dormOutingTeacherStudent" required><option value="">학생 선택</option>${students.map(s=>`<option value="${escapeHtml(s.id||s.studentNo||'')}">${escapeHtml((s.studentNo||'')+' '+(s.name||''))}</option>`).join('')}</select></label><label>날짜<input id="dormOutingTeacherDate" type="date" value="${escapeHtml(dateKey(outingViewDate))}" required></label><label>구분<select id="dormOutingTeacherCategory"><option>외출</option><option>병원외출</option><option>퇴소</option><option>늦은 입소</option></select></label><label>외출시간<input id="dormOutingTeacherOut" type="time"></label><label>복귀·귀가 예정<input id="dormOutingTeacherReturn" type="time"></label><label>사유<input id="dormOutingTeacherReason" placeholder="예: 복통으로 병원 진료" required></label><label>목적지<input id="dormOutingTeacherDestination" placeholder="병원·자택 등"></label><label class="wide">비고<input id="dormOutingTeacherNote" placeholder="보호자 연락 여부 등"></label></div><div class="modal-actions"><button type="button" class="btn secondary" data-outing-editor-close>취소</button><button class="btn primary" type="submit">교사등록 저장</button></div></form></div>`;
+ 11355:   document.body.appendChild(layer);const close=()=>layer.remove();layer.querySelectorAll('[data-outing-editor-close]').forEach(b=>b.onclick=close);
+ 11356:   layer.querySelector('#dormOutingTeacherForm').onsubmit=async e=>{e.preventDefault();const id=layer.querySelector('#dormOutingTeacherStudent').value,student=students.find(s=>String(s.id||s.studentNo||'')===String(id));if(!student)return toast('학생을 선택하세요.');const payload={role:currentRoleId(),studentId:String(student.id||''),studentNo:String(student.studentNo||''),name:String(student.name||''),grade:String(student.grade||'1'),className:String(classNumberOf(student)||''),number:String(student.number||''),date:layer.querySelector('#dormOutingTeacherDate').value,category:layer.querySelector('#dormOutingTeacherCategory').value,outTime:layer.querySelector('#dormOutingTeacherOut').value,returnTime:layer.querySelector('#dormOutingTeacherReturn').value,reason:layer.querySelector('#dormOutingTeacherReason').value.trim(),destination:layer.querySelector('#dormOutingTeacherDestination').value.trim(),note:layer.querySelector('#dormOutingTeacherNote').value.trim(),status:'확인',writer:currentLoginTeacherName()||''};const btn=e.submitter;btn.disabled=true;btn.textContent='저장 중…';try{const result=await window.schoolBoard?.saveDormOuting?.(payload);if(!result?.ok)throw new Error(result?.reason||'저장 실패');readonlyCache=result.data||readonlyCache;close();openDormOutingDrawer();updateDormOutingCount();toast('학사외출을 교사등록으로 저장했습니다.');}catch(err){btn.disabled=false;btn.textContent='교사등록 저장';toast(err?.message||'학사외출 저장 실패');}};
+ 11357: }
+ 11358: function openDormOutingDrawer() {
+ 11359:   const viewKey = dateKey(outingViewDate);
+ 11360:   const liveOutings = (readonlyCache?.dormOutings || []).filter(item=>!dormOutingExcludedByRule(item));
+ 11361:   const items = liveOutings.filter((item) => item.date === viewKey);
+ 11362:   const monday = new Date(outingViewDate);
+ 11363:   const day = monday.getDay();
+ 11364:   monday.setDate(monday.getDate() - (day === 0 ? 6 : day - 1));
+ 11588: }
+ 11589: function contextNoticeText(){
+ 11590:   const student=currentContextStudent(); const name=student?.name?`${student.name} 학생`:"학생";
+ 11591:   if(state.activePage==='work'){
+ 11592:     const auto=teacherAutoWorkAlerts();
+ 11593:     const notices=workBoardData("notice").filter(workItemVisibleToCurrentUser).filter(x=>!x.done&&x.status!=="완료");
+ 11594:     const deadlines=workBoardData("deadline").filter(workItemVisibleToCurrentUser).filter(x=>!x.done&&x.status!=="완료");
+ 11595:     const lines=[`[운호고 학교업무 확인]`,``,`■ 자동 확인사항`,...(auto.length?auto.map(x=>`· ${x.title}: ${x.meta}`):["· 현재 자동 알림 없음"]),``,`■ 학교업무 공지`,...(notices.length?notices.slice(0,8).map(x=>`· ${x.title}${x.date?` (${x.date})`:""}`):["· 등록된 진행 공지 없음"]),``,`■ 일정·마감`,...(deadlines.length?deadlines.slice(0,8).map(x=>`· ${x.title} · ${x.due||x.date||"기한 확인"}`):["· 등록된 진행 마감 없음"])];
+ 11596:     return lines.join("\n");
+ 11597:   }
+ 11598:   if(state.activePage==='admissions'&&["inseoul","regional"].includes(admissionMode)){
+ 11599:     const label=admissionMode==='inseoul'?'인서울':'지거국'; return `[운호고 진학 준비도 안내]\n\n${name}의 ${label} 관리군 기준 진학 준비도를 확인했습니다.\n\n■ 확인 항목\n· 내신 및 최근 모의고사 성적\n· 방과후·야간심화수업 참여\n· 야간자율학습 이력\n· 선택프로그램 및 보고서\n· 진로계열 권장 선택과목\n\n현재 자료를 바탕으로 부족한 학습·활동을 확인하고 상담에 활용해 주시기 바랍니다.`;
+ 11600:   }
+ 11601:   const templates={students:`[운호고 학생정보 안내]\n\n${name}의 학교생활·연락·활동·프로그램 정보를 확인했습니다. 필요한 일정과 제출사항을 다시 확인해 주시기 바랍니다.`,scores:`[운호고 성적 확인 안내]\n\n${name}의 내신 및 모의고사 성적을 확인했습니다. 과목별 변화와 보완이 필요한 영역을 확인하여 학습 계획에 반영해 주시기 바랍니다.`,attendance:`[운호고 출결 확인 안내]\n\n${name}의 지각·공결·야간자율학습·프로그램 출결 현황을 확인해 주시기 바랍니다.`,programs:`[운호고 프로그램 안내]\n\n${name}이 신청하거나 참여하는 프로그램의 일시·장소·준비물·보고서 제출기한을 확인해 주시기 바랍니다.`,records:`[운호고 생활기록부 자료 확인 안내]\n\n${name}의 활동내역·교육과정·보고서 제출 현황을 확인해 주시기 바랍니다.`,admissions:`[운호고 진학 상담 안내]\n\n${name}의 내신·모의고사·수능최저·대학입결 자료를 바탕으로 진학 준비도를 확인했습니다.`};
+ 11602:   return templates[state.activePage]||`[운호고 안내]\n\n현재 조회 중인 ${pageTitles?.[state.activePage]?.[1]||'자료'}를 확인해 주시기 바랍니다.`;
+ 11603: }
+ 11616:   document.querySelector('.output-dialog-layer')?.remove(); const layer=document.createElement('div'); layer.className='output-dialog-layer'; layer.innerHTML=`<section class="output-dialog"><header><div><small>UEP OUTPUT</small><h3>${escapeHtml(title)}</h3></div><button type="button" data-output-close>×</button></header><textarea id="contextOutputText">${escapeHtml(text)}</textarea><footer><button class="btn secondary" data-output-close>닫기</button><button class="btn primary" id="copyContextOutput">전체 복사</button></footer></section>`; document.body.appendChild(layer); layer.querySelectorAll('[data-output-close]').forEach(b=>b.onclick=()=>layer.remove()); layer.onclick=e=>{if(e.target===layer)layer.remove()}; layer.querySelector('#copyContextOutput').onclick=async()=>{await navigator.clipboard.writeText(layer.querySelector('#contextOutputText').value);toast('안내문을 복사했습니다.');};
+ 11617: }
+ 11618: function printCurrentContext(){
+ 11619:   if(state.activePage==='work'){
+ 11620:     const popup=window.open("","_blank","width=980,height=760"); if(!popup)return toast("인쇄 창을 열지 못했습니다.");
+ 11621:     const auto=teacherAutoWorkAlerts(), notices=directNoticeRows(), deadlines=workBoardData("deadline").filter(workItemVisibleToCurrentUser), checklist=workBoardData("checklist");
+ 11622:     const rows=(title,items,formatter)=>`<section><h2>${title}</h2>${items.length?`<table><tbody>${items.map(x=>`<tr><td>${formatter(x)}</td></tr>`).join("")}</tbody></table>`:"<p>해당 항목이 없습니다.</p>"}</section>`;
+ 11623:     popup.document.write(`<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>UEP 학교업무</title><style>@page{size:A4 portrait;margin:14mm}body{font-family:"Malgun Gothic",sans-serif;color:#233b4d}header{border-bottom:3px solid #4fb6a4;margin-bottom:18px}h1{margin:8px 0}h2{font-size:15px;color:#167c6c;margin-top:22px}table{width:100%;border-collapse:collapse}td{border:1px solid #ccdbe1;padding:9px;font-size:12px}</style></head><body><header><small>UNHO EDUCATION PLATFORM</small><h1>학교업무 현황</h1><p>${escapeHtml(new Date().toLocaleString("ko-KR"))}</p></header>${rows("담임 자동알림",auto,x=>`${escapeHtml(x.title)} · ${escapeHtml(x.meta)}`)}${rows("학교업무 공지",notices,x=>`${escapeHtml(x.title)} · ${escapeHtml(x.department||x.author||"담당부서")} · ${escapeHtml(x.date||"")}`)}${rows("일정·마감",deadlines,x=>`${escapeHtml(x.title)} · ${escapeHtml(x.due||x.date||"기한 확인")}`)}${rows("개인 체크리스트",checklist,x=>`${escapeHtml(x.title)} · ${x.done?"완료":"진행"}`)}<script>window.onload=()=>window.print()<\/script></body></html>`); popup.document.close(); return;
+ 11624:   }
+ 11625:   if(state.activePage==='scores'&&currentContextStudent()){try{window.print();return;}catch(e){}}
+ 11626:   if(state.activePage==='students'&&studentFocusStudent()){try{window.print();return;}catch(e){}}
+ 11627:   window.print();
+ 11628: }
+ 11629: if ($("#layoutButton")) $("#layoutButton").onclick = () => state.activePage === "dashboard" ? toggleDashboardEditing() : navigate("dashboard");
+ 11630: if ($("#counselAction")) $("#counselAction").onclick = launchHeaderCounsel;
+ 11631: if ($("#noticeAction")) $("#noticeAction").onclick = () => openOutputDialog(contextNoticeText(), `${$("#pageTitle")?.textContent||"현재 화면"} 안내문`);
+ 11734:   if (temp) temp.textContent = `${weatherState.temp}℃`;
+ 11735:   if (text) text.textContent = `청주 · ${label.text}`;
+ 11736:   if (meta) meta.textContent = `체감 ${weatherState.feels}℃ · 강수확률 ${weatherState.rain}%`;
+ 11737: }
+ 11738: 
+ 11739: const profileBox=document.querySelector('.profile');
+ 11740: if(profileBox){profileBox.addEventListener('click',openAccountPopover);profileBox.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();openAccountPopover();}});}
+ 11741: setInterval(updateHeroClock, 1000);
+ 11742: setInterval(checkPeriodAlerts, 30000);
+ 11743: setInterval(() => { const minutes = Number(state.settings.neis?.autoRefreshMinutes || 30); if (minutes > 0 && neisData?.fetchedAt && Date.now() - new Date(neisData.fetchedAt).getTime() >= minutes * 60000) loadNeisDashboard(true); }, 60000);
+ 11744: 
+ 11745: // __UEP_GLOBAL_RENDER_BRIDGE_08087__
+ 11746: try {
+ 11747:   window.__uepNavigate = navigate;
+ 11748:   window.__uepRender = render;
+ 11847:     const waiting=rows.filter(x=>/대기/.test(x.status)).length,bad=rows.filter(x=>/지속|신규|재검토/.test(x.status)&&!/대기/.test(x.status)).length,resolved=rows.filter(x=>/해결/.test(x.status)).length;
+ 11848:     return `<section class="selection-error-history compact-089"><header><div><small>VALIDATION HISTORY</small><h3>사전 오류 재검증</h3></div><span>${bad?`확인 ${bad}`:resolved?`해결 ${resolved}`:'진행 중'}${waiting?` · 대기 ${waiting}`:''}</span></header><details><summary>오류 이력 보기</summary><div class="selection-error-history-grid">${rows.map(x=>`<article class="${/해결/.test(x.status)?'resolved':/대기/.test(x.status)?'waiting':'warning'}"><b>${escapeHtml(x.category||'오류 이력')}</b><em>${escapeHtml(x.status||'확인')}</em><p>${escapeHtml(x.mainMessage||x.preMessage||'세부내용 확인')}</p></article>`).join('')}</div></details></section>`;
+ 11849:   };
+ 11850: 
+ 11851:   function refineGrowthProfile(){
+ 11852:     const root=document.querySelector('.growth-profile-v082'); if(!root||root.dataset.ui089==='1')return;
+ 11853:     root.dataset.ui089='1';
+ 11854:     const intro=root.querySelector('.growth-profile-intro'),guide=root.querySelector('.growth-teacher-guide'),story=root.querySelector('.growth-story-card'),axis=root.querySelector('.growth-axis-grid'),lens=root.querySelector('.growth-sdg-lens');
+ 11855:     if(intro&&guide){
+ 11856:       const guideP=guide.querySelector('p')?.textContent?.trim()||'';
+ 11857:       const guideE=guide.querySelector('em')?.textContent?.trim()||'';
+ 11858:       const compact=document.createElement('details');compact.className='growth-guide-inline-089';compact.innerHTML=`<summary>왜 대학 인재상과 SDGs를 함께 보나요?</summary><p>${escapeHtml(guideP)}</p><em>${escapeHtml(guideE)}</em>`;
+ 11859:       intro.appendChild(compact);guide.remove();
+ 11860:     }
+ 11861:     if(story&&axis)story.insertAdjacentElement('afterend',axis);
+ 11862:     if(lens){
+ 11880:   setTimeout(refineGrowthProfile,0);
+ 11881: })();
+ 11882: 
+ 11883: // __UEP_SELECTION_SDGS_STYLE_08089__
+ 11884: try {
+ 11885:   const s=document.createElement('style');s.id='uep-selection-sdgs-08089';s.textContent="/* __UEP_SELECTION_SDGS_UI_08089__ */\r\n.selection-compare-panel.compact-089,.selection-error-history.compact-089{display:inline-block;vertical-align:top;width:calc(50% - 6px);min-height:0!important;padding:12px 14px!important;margin:8px 6px 8px 0!important;border-radius:14px!important}\r\n.selection-error-history.compact-089{margin-right:0!important}\r\n.selection-compare-panel.compact-089 header,.selection-error-history.compact-089 header{margin:0!important;align-items:center!important}\r\n.selection-compare-panel.compact-089 h3,.selection-error-history.compact-089 h3{font-size:15px!important;margin:2px 0!important}\r\n.selection-compare-panel.compact-089 p,.selection-error-history.compact-089 p{margin:6px 0!important}\r\n.selection-compare-panel.compact-089 details,.selection-error-history.compact-089 details{margin-top:7px!important}\r\n.selection-compare-panel.compact-089 summary,.selection-error-history.compact-089 summary{cursor:pointer;font-weight:800;color:#337b72}\r\n.selection-compare-card.waiting,.selection-error-history-grid article.waiting{background:#fff9e8!important;border-color:#ead7a3!important}\r\n.growth-profile-v082{display:flex;flex-direction:column;gap:10px}\r\n.growth-profile-v082 .growth-profile-intro{padding:16px 20px!important;min-height:0!important}\r\n.growth-profile-v082 .growth-profile-intro>div>p{margin:6px 0!important;line-height:1.5!important}\r\n.growth-guide-inline-089{margin-top:10px;border-top:1px solid #d9e8e4;padding-top:8px}\r\n.growth-guide-inline-089 summary{cursor:pointer;font-weight:800;color:#176f63}\r\n.growth-guide-inline-089 p{margin:8px 0 4px!important;font-size:13px}.growth-guide-inline-089 em{display:block;padding:8px 10px;border-radius:10px;background:#fff5d9;color:#88621d;font-style:normal;font-size:12px}\r\n.growth-profile-v082 .growth-story-card{padding:14px 18px!important}.growth-profile-v082 .growth-story-card>p{font-size:15px!important;line-height:1.55!important;margin:10px 0!important}\r\n.growth-profile-v082 .growth-axis-grid{display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:7px!important;margin:0!important}\r\n.growth-profile-v082 .growth-axis-grid>section{padding:10px 12px!important;min-height:0!important}.growth-profile-v082 .growth-axis-grid h3{font-size:13px!important;margin:3px 0!important}.growth-profile-v082 .growth-axis-grid b{font-size:13px!important}.growth-profile-v082 .growth-axis-grid p{font-size:11px!important;margin:4px 0 0!important}\r\n.growth-profile-v082 .growth-sdg-lens{padding:14px 16px!important}.growth-profile-v082 .growth-sdg-lens header{margin-bottom:8px!important}\r\n.growth-profile-v082 .growth-sdg-grid{display:grid!important;grid-template-columns:repeat(6,minmax(0,1fr))!important;gap:7px!important}\r\n.growth-profile-v082 .growth-sdg-chip{min-height:62px!important;padding:9px 10px!important}.growth-profile-v082 .growth-sdg-chip.confirmed{order:0;box-shadow:0 0 0 2px rgba(43,154,132,.24) inset!important}.growth-profile-v082 .growth-sdg-chip.possible{order:1;opacity:.72}.growth-sdg-empty-089{margin-top:8px}.growth-sdg-empty-089 summary{cursor:pointer;color:#76868b;font-size:12px}.growth-sdg-empty-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:7px;margin-top:7px}.growth-sdg-empty-grid .growth-sdg-chip{opacity:.42!important}\r\n.growth-profile-v082 .growth-sdg-detail{margin-top:10px!important;padding:12px 14px!important}.growth-profile-v082 .growth-sdg-detail article{padding:10px 12px!important;margin:6px 0!important}\r\n@media(max-width:1100px){.selection-compare-panel.compact-089,.selection-error-history.compact-089{display:block;width:100%;margin-right:0!important}.growth-profile-v082 .growth-axis-grid{grid-template-columns:repeat(2,1fr)!important}.growth-profile-v082 .growth-sdg-grid,.growth-sdg-empty-grid{grid-template-columns:repeat(4,1fr)!important}}";document.head.appendChild(s);
+ 11886: } catch(e) { console.warn('[UEP] 0.80.89 style injection skipped',e); }
+ 11887: 
+ 11888: // __UEP_FINAL_REFINEMENT_08090__
+ 11889: (function(){
+ 11890:   const esc=s=>typeof escapeHtml==='function'?escapeHtml(String(s??'')):String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+ 11891: 
+ 11892:   // Selection curriculum: show results, not explanatory process cards.
+ 11893:   if(typeof selectionComparisonMarkup==='function'){
+ 11914:       return sec.outerHTML;
+ 11915:     };
+ 11916:   }
+ 11917: 
+ 11918:   function refineGrowth090(){
+ 11919:     const root=document.querySelector('.growth-profile-v082');if(!root)return;
+ 11920:     // Always-visible university talent + UNESCO/SDGs rationale.
+ 11921:     const intro=root.querySelector('.growth-profile-intro');
+ 11922:     const guide=intro?.querySelector('.growth-guide-inline-089');
+ 11923:     if(guide&&guide.tagName==='DETAILS'){
+ 11924:       const title=guide.querySelector('summary')?.textContent?.trim()||'왜 대학 인재상과 SDGs를 함께 보나요?';
+ 11925:       const p=guide.querySelector('p')?.textContent?.trim()||'';
+ 11926:       const em=guide.querySelector('em')?.textContent?.trim()||'';
+ 11927:       const panel=document.createElement('section');panel.className='growth-guide-open-090';panel.innerHTML=`<b>SDGs 17개를 채우는 것이 목적이 아닙니다.</b><h4>${esc(title)}</h4><p>${esc(p)}</p>${em?`<em>${esc(em)}</em>`:''}`;
+ 11928:       guide.replaceWith(panel);
+ 11929:     }
+ 12208:   let busy=false;
+ 12209:   async function connectGoogleUser(){
+ 12210:     if(busy)return;busy=true;
+ 12211:     const btn=document.querySelector('[data-uep-google-oauth]');if(btn){btn.disabled=true;btn.textContent='Google 승인 진행 중…';}
+ 12212:     try{
+ 12213:       const profile=(typeof currentUserProfile==='function'?currentUserProfile():{})||{};
+ 12214:       const result=await window.schoolBoard?.authorizeGoogleUser?.({loginHint:String(profile.email||'')});
+ 12215:       if(!result?.ok){googleConnectionError=result?.reason||'학교 공용 연결 확인에 실패했습니다.'; if(typeof toast==='function')toast(googleConnectionError); try{render(state.activePage||'dashboard');}catch{} return;}
+ 12216:       const status=await window.schoolBoard?.googleCredentialStatus?.();if(status)googleConnectionStatus=status;
+ 12217:       if(result.syncOk===false){
+ 12218:         googleConnectionError=result.syncError||'Google 계정 승인은 완료되었지만 학교 시트 조회에 실패했습니다.';
+ 12219:         if(typeof toast==='function')toast(`학교 공용 연결 확인 완료 · 시트 조회 확인 필요: ${googleConnectionError}`);
+ 12220:       } else {
+ 12221:         googleConnectionError='';
+ 12222:         if(typeof toast==='function')toast('학교 공용 읽기 연결 및 학교 시트 동기화가 완료되었습니다.');
+ 12346:     }
+ 12347:     const evidenceMarkup=representatives.length?`<ul class="growth-sdg-evidence-list">${representatives.map(e=>`<li class="${e.strength==='confirmed'?'confirmed':'possible'}"><b>${escapeHtml(e.type||'근거')}</b><span>${escapeHtml(e.title||e.detail||'연결된 활동 근거')}</span></li>`).join('')}</ul>${ordered.length>representatives.length?`<small class="growth-sdg-more">외 ${ordered.length-representatives.length}건</small>`:''}`:'<p class="growth-sdg-empty">현재 연결된 실제 근거가 없습니다.</p>';
+ 12348:     return `<article class="growth-sdg-evidence-card ${cls}"><header><div><b>${x.no}</b><span>${escapeHtml(x.name)}</span></div><small>${label}</small></header>${evidenceMarkup}</article>`;
+ 12349:   }).join('');
+ 12350:   const detail=null;
+ 12351:   const sdgsEvidenceCardsRendered=true;return `<div class="growth-profile-v082"><section class="growth-profile-intro"><div><small>STUDENT GROWTH STORY · UNESCO SCHOOL</small><h2>${escapeHtml(student.name)} 생활기록부 핵심 성장 프로파일</h2><p><b>활동의 요약이 아니라 학생의 스토리를 읽습니다.</b> 운호고의 유네스코 교육기관으로서의 지속가능발전교육 방향과, 주요 대학 인재상에서 반복적으로 강조되는 학업·탐구·자기주도·문제해결·공동체 역량을 학생의 진로·전공, 자율·진로·동아리·봉사, 선택활동, 프로그램과 보고서의 실제 근거와 함께 살펴봅니다.</p></div><span></span></section><section class="growth-story-card"><header><div><small>CORE STORY</small><h3>이 학생을 설명하는 현재의 성장 스토리</h3></div><span>근거 기반</span></header><p>${escapeHtml(story)}</p><div class="growth-story-source">확인 근거 ${confirmed.reduce((n,x)=>n+x.evidence.filter(e=>e.strength==='confirmed').length,0)}건 · 연결 가능 근거 ${possible.reduce((n,x)=>n+x.evidence.length,0)+confirmed.reduce((n,x)=>n+x.evidence.filter(e=>e.strength==='possible').length,0)}건</div></section><div class="growth-axis-grid"><section><small>01 CAREER · MAJOR</small><h3>진로·전공 관심</h3><b>${escapeHtml(hope.join(' · ')||'진로 관심 형성 중')}</b><p>선택과목과 진로희망을 함께 봅니다.</p></section><section><small>02 EXPLORATION</small><h3>핵심 탐구주제</h3><b>${escapeHtml(topics.join(' · ')||'탐구주제 형성 중')}</b><p>보고서에서 반복·심화되는 주제를 확인합니다.</p></section><section><small>03 VALUE · SDGs</small><h3>사회적 가치·SDGs</h3><b>${confirmed.length?`${confirmed.length}개 목표 근거 확인`:'확정 근거 형성 중'}</b><p>명시된 활동 근거와 내용 기반 연결 가능성을 구분합니다.</p></section><section><small>04 EVIDENCE FLOW</small><h3>학교교육과정 속 근거</h3><b>${activities.length+volunteers.length+programs.length+uniqueReports.length}건 자료 연결</b><p>자율·진로·동아리·봉사·선택활동·프로그램·보고서를 함께 읽습니다.</p></section></div><section class="growth-teacher-guide"><header><div><small>WHY THIS LENS?</small><h3>왜 대학 인재상과 SDGs를 함께 보나요?</h3></div></header><p>대학이 요구하는 하나의 정답형 인재를 만드는 것이 아니라, 학생이 자신의 전공 관심을 깊이 탐구하면서 사회·공동체·환경·미래의 문제를 발견하고 자신의 관점으로 해석해 온 흔적을 찾기 위해서입니다. 유네스코 지속가능발전교육의 주제는 이러한 경험을 생활기록부 전반에서 연결해 읽는 가치의 렌즈로 활용합니다.</p><em>담임 지도: 무엇을 했는가 → 왜 관심을 가졌는가 → 어떤 문제를 발견했는가 → 생각이 어떻게 달라졌는가 → 다음 탐구로 어떻게 이어지는가</em></section><section class="growth-sdg-lens"><header><div><small>EVIDENCE-BASED SDGs</small><h3>SDGs 근거 지도</h3><p>카드가 활성화되려면 보고서·봉사·학교교육과정·선택활동·프로그램 등의 실제 근거가 있어야 합니다.</p></div><span>${confirmed.length}개 확인 · ${possible.length}개 가능</span></header><div class="growth-sdg-grid">${chips}</div>${detail?`<div class="growth-sdg-detail"><h4>SDG ${detail.no} ${escapeHtml(detail.name)}</h4>${detail.evidence.length?detail.evidence.map(e=>`<article><b>${escapeHtml(e.type)} · ${e.strength==='confirmed'?'근거 확인':'연결 가능'}</b><span>${escapeHtml(e.title)}</span><p>${escapeHtml((e.detail||'').slice(0,180)||'연결된 활동 근거')}</p></article>`).join(''):'<p>현재 연결 근거가 없습니다.</p>'}</div>`:''}</section></div>`;
+ 12352: }
+ 12353: 
+ 12354: function uepSchoolGrowthGapSummary(){
+ 12355:   const acts=readonlyCache?.activities||[],progs=readonlyCache?.programs||[],reports=readonlyCache?.reports||[];return {evidenceCount:acts.length+progs.length+reports.length,message:'프로그램 추천은 SDG 개수를 채우기보다 학생 활동에서 부족한 탐구·공동체·사회문제 경험을 보완하는 방향으로 해석합니다.'};
+ 12356: }
+ 12357: (function(){
+ 12358:   const enhance=()=>{document.querySelectorAll('h1,h2,h3').forEach(h=>{if(/프로그램추천|프로그램 추천/.test(h.textContent||'')){const root=h.closest('section,main,div');if(root&&!root.querySelector('[data-growth-program-guide]')){const n=document.createElement('div');n.dataset.growthProgramGuide='1';n.className='growth-program-guide';n.innerHTML='<b>학생 성장 근거 기반 프로그램 추천</b><span>단순히 SDG 빈칸을 채우는 추천이 아닙니다. 학생들의 진로·탐구·공동체·사회문제 경험과 유네스코 지속가능발전교육의 관점을 함께 분석하여 학교교육과정에서 보완할 경험을 제안합니다.</span>';root.insertBefore(n,h.nextSibling);}}});};new MutationObserver(()=>requestAnimationFrame(enhance)).observe(document.documentElement,{subtree:true,childList:true});setTimeout(enhance,500);
+ 12359: })();
+ 12396:     }catch(error){console.error('[UEP] render recovery watchdog',error);}
+ 12397:     if(tries<5)setTimeout(recover,900);
+ 12398:   };
+ 12399:   setTimeout(recover,700);
+ 12400: })();
+ 12401: const __uepFinalStyle090=document.createElement('style');__uepFinalStyle090.textContent="/* __UEP_FINAL_UI_08090__ */\r\n.selection-compare-panel.compact-089{display:none!important}\r\n.selection-result-090,.selection-validation-090{width:100%!important;margin:8px 0!important;padding:12px 14px!important;border-radius:14px!important}\r\n.selection-result-090 header,.selection-validation-090 header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}\r\n.selection-result-grid-090{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.selection-result-grid-090 article{border:1px solid #dbe7e4;border-radius:11px;padding:10px}.selection-result-grid-090 article>div{display:grid;grid-template-columns:70px 1fr;gap:6px;margin-top:6px}.selection-result-grid-090 p{margin:0}.selection-result-grid-090 p span{display:inline-block;margin:0 5px 3px 0}.selection-validation-090 details{display:block!important}.selection-validation-090 summary{display:none!important}\r\n.growth-profile-v082 .growth-profile-intro{display:grid!important;grid-template-columns:minmax(0,1.35fr) minmax(360px,.9fr)!important;gap:22px!important;align-items:start!important}.growth-guide-open-090{border-left:1px solid #cfe2dd;padding-left:20px}.growth-guide-open-090>b{display:inline-block;background:#e5f5ee;color:#147664;border-radius:999px;padding:8px 12px;margin-bottom:8px}.growth-guide-open-090 h4{margin:2px 0 8px;color:#176f63;font-size:14px}.growth-guide-open-090 p{font-size:12px!important;line-height:1.55!important;margin:0 0 7px!important}.growth-guide-open-090 em{display:block;background:#fff4d7;border-radius:10px;padding:7px 9px;color:#88621d;font-style:normal;font-size:11px}\r\n.growth-story-card.merged-090{padding:14px 18px!important}.growth-story-card.merged-090 .growth-axis-grid{margin-top:12px!important;display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:8px!important}.growth-story-card.merged-090 .growth-axis-grid>*{padding:10px!important;min-height:0!important}\r\n.growth-sdg-empty-089{display:none!important}.growth-sdg-lens .growth-sdg-grid{display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:10px!important;align-items:start!important}.growth-sdg-lens .growth-sdg-chip{height:auto!important;min-height:90px!important;padding:11px!important;cursor:default!important}.growth-sdg-chip .inline-evidence-090{display:block!important;position:static!important;margin-top:9px!important;padding-top:8px!important;border-top:1px solid #dce7e4!important;max-height:none!important;overflow:visible!important}.growth-sdg-chip .inline-evidence-090>*{display:block!important;margin:4px 0!important}\r\n@media(max-width:1100px){.growth-profile-v082 .growth-profile-intro{grid-template-columns:1fr!important}.growth-guide-open-090{border-left:0;border-top:1px solid #cfe2dd;padding:10px 0 0}.growth-sdg-lens .growth-sdg-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}}";document.head.appendChild(__uepFinalStyle090);
+ 12402: 
+ 12403: 
+ 12404: 
+ 12405: 
+ 12406: 
+ 12407: 
+ 12408: 
+ 12409: 
+
+PACKAGE_VERSION=0.81.23
