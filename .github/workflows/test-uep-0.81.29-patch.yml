@@ -1,0 +1,47 @@
+name: Test UEP 0.81.29 Patch
+
+'on':
+  push:
+    branches: [main]
+    paths:
+      - test-uep-0.81.29-patch.trigger
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test patch and save result
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force source,app,diag | Out-Null
+          gh release download v0.81.28 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+          $out=@()
+          try {
+            $x=node scripts/patch-uep-0.81.29.js app 2>&1
+            $out += $x
+            node --check app/resources/app/gyomuon.js 2>&1 | ForEach-Object {$out += $_}
+            if($LASTEXITCODE -ne 0){throw 'gyomuon syntax failed'}
+            node --check app/resources/app/electron/google-data.cjs 2>&1 | ForEach-Object {$out += $_}
+            if($LASTEXITCODE -ne 0){throw 'google-data syntax failed'}
+            $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+            $d=Get-Content app/resources/app/electron/google-data.cjs -Raw -Encoding UTF8
+            $out += 'APP29='+$g.Contains('const APP_VERSION = "0.81.29";')
+            $out += 'BLOCKS='+$d.Contains('selectionBlocks: rowsFrom("19_선택과목블록DB")')
+            $out += 'RULES='+$d.Contains('selectionRules: rowsFrom("41_선택과목규칙")')
+            $out += 'MISSING='+$g.Contains('미선택 오류')
+            $out += 'RESULT=PASS'
+          } catch {
+            $out += ('RESULT=FAIL '+$_.Exception.Message)
+          }
+          $out | Set-Content diag/08129-patch-test.txt -Encoding UTF8
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add diag/08129-patch-test.txt
+          git commit -m 'diag: record UEP 0.81.29 patch test' || echo no-change
+          git push
