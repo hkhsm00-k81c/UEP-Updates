@@ -1,0 +1,515 @@
+===== 1-90 =====
+00001 "use strict";
+00002 
+00003 const UEP_SPREADSHEET_ID = "1bphoIQ11E2qsc3ksOqrXuO7xqS4CFyH8Dagbld7A1hg";
+00004 const UEP_SPREADSHEET_NAME = "2026_운호고_UEP_DB_v1.0_Dev";
+00005 const UEP_SPREADSHEET_URL = `https://docs.google.com/spreadsheets/d/${UEP_SPREADSHEET_ID}/edit`;
+00006 const UEP_PROCESSING_SPREADSHEET_ID = "1fNV2T9Nf07y7i8VKngLzV6IWo_Bja4142ejJNS4F5c4";
+00007 const UEP_INPUT_CENTER_SPREADSHEET_ID = "1nJDQ1MzLVVD0mtSPxecoxMYDF4vKvaiqL1bcUSqgopc"; // [UEP] 입력센터 원본
+00008 const UEP_RULES_SPREADSHEET_ID = "1hRNvoUmNISEftmrMvjeo6CfAt9BJx3yjeHWAiT1M77s";
+00009 
+00010 const SHEET_RANGES = Object.freeze({
+00011   "00_UEP설정": "'00_UEP설정'!A1:Z500",
+00012   "01_사용자계정": "'01_사용자계정'!A1:Z1000",
+00013   "00_표준환경": "'00_표준환경'!A1:N500",
+00014   "02_학생마스터": "'02_학생마스터'!A1:Z1000",
+00015   "04_학생연락식별정보": "'04_학생연락식별정보'!A1:Z1000",
+00016   "05_대학적성데이터": "'05_대학적성데이터'!A1:Z1000",
+00017   "06_선택과목이력": "'06_선택과목이력'!A1:AI1000",
+00018   "07_학생활동이력": "'07_학생활동이력'!A1:X3000",
+00019   "08_생활기록부최종기록": "'08_생활기록부최종기록'!A1:X3000",
+00020   "09_공통활동마스터": "'09_공통활동마스터'!A1:AH1000",
+00021   "10_선택활동마스터": "'10_선택활동마스터'!A1:AL1000",
+00022   "11_방과후학교": "'11_방과후학교'!A1:Z1000",
+00023   "12_차시일정": "'12_차시일정'!A1:Z1000",
+00024   "14_봉사활동확정": "'14_봉사활동확정'!A1:X5000",
+00025   "13_출석부": "'13_출석부'!A1:Z5000",
+00026   "16_프로그램출석실적": "'16_프로그램출석실적'!A1:Z10000",
+00027   "17_시간표마스터": "'17_시간표마스터'!A1:N1000",
+00028   "20_학사생마스터": "'20_학사생마스터'!A1:Z1000",
+00029   "30_공식출결기록": "'30_공결기록'!A1:Z3000",
+00030   "31_지각기록": "'31_지각기록'!A1:Z1000",
+00031   "40_공지마감": "'40_공지마감'!A1:Z2000",
+00032   "44_공지확인현황": "'44_공지확인현황'!A1:R3000",
+00033   "45_학생상담기록": "'45_학생상담기록'!A1:R5000",
+00034   "46_학생지도기록": "'46_학생지도기록'!A1:R5000",
+00035   "47_교육비지원": "'47_교육비지원'!A1:R1000",
+00036   "48_요보호학생": "'48_요보호학생'!A1:P1000",
+00037   "49_위기학생관리": "'49_위기학생관리'!A1:T1000",
+00038   "42_급식지도계획": "'42_급식지도계획'!A1:K1000",
+00039   "43_야자감독계획": "'43_야자감독계획'!A1:J1000",
+00040   "50_내신DB": "'50_내신DB'!A1:V7000",
+00041   "51_모의고사DB": "'51_모의고사DB'!A1:AH2000",
+00042   "54_수능최저DB": "'54_수능최저DB'!A1:Z1000",
+00043   "55_대학입결DB": "'55_대학입결DB'!A1:Z1000",
+00044 });
+00045 
+00046 const RULE_SHEET_RANGES = Object.freeze({
+00047   "32_생기부작성우선순위": "'32_생기부작성우선순위'!A1:Z1000",
+00048   "31_생기부작성규칙": "'31_생기부작성규칙'!A1:N1000",
+00049   "33_생기부작성절대규칙": "'33_생기부작성절대규칙'!A1:Z1000",
+00050   "35_금지표현DB": "'35_금지표현DB'!A1:Z1000",
+00051   "34_문장패턴DB": "'34_문장패턴DB'!A1:Z1000",
+00052   "36_교사관찰표현DB": "'36_교사관찰표현DB'!A1:Y1000",
+00053   "40_학사외출규칙": "'40_학사외출규칙'!A1:X1000",
+00054   "53_외부자료입력규칙": "'53_외부자료입력규칙'!A1:P1000",
+00055 });
+00056 
+00057 function normalizeHeaderText(value) {
+00058   return String(value ?? "")
+00059     .replace(/\r?\n/g, " ")
+00060     .replace(/\s+/g, " ")
+00061     .trim();
+00062 }
+00063 
+00064 function detectHeaderRowIndex(rows) {
+00065   const source = Array.isArray(rows) ? rows : [];
+00066   const scanLimit = Math.min(source.length, 12);
+00067   let bestIndex = -1;
+00068   let bestScore = -Infinity;
+00069 
+00070   for (let index = 0; index < scanLimit; index += 1) {
+00071     const cells = (source[index] || []).map(normalizeHeaderText);
+00072     const nonEmpty = cells.filter(Boolean);
+00073     if (nonEmpty.length < 2) continue;
+00074 
+00075     const uniqueCount = new Set(nonEmpty).size;
+00076     const duplicatePenalty = nonEmpty.length - uniqueCount;
+00077     const knownHeaderHits = nonEmpty.filter((value) =>
+00078       /^(학생ID|학번|성명|사용성명|학년|반|번호|일자|운영일|일정ID|프로그램ID|강좌ID|기록ID|상태|구분|설정키|파일구분|스프레드시트ID|탭명|탭용도)$/.test(value),
+00079     ).length;
+00080     const titlePenalty = nonEmpty.length <= 2 && /UEP|표준|시트|DB|관리|기준/.test(nonEmpty.join(" ")) ? 8 : 0;
+00081     const score = nonEmpty.length * 3 + uniqueCount + knownHeaderHits * 8 - duplicatePenalty * 2 - titlePenalty;
+00082 
+00083     if (score > bestScore) {
+00084       bestScore = score;
+00085       bestIndex = index;
+00086     }
+00087   }
+00088 
+00089   return bestIndex;
+00090 }
+===== 990-1080 =====
+00990     ["2학년 1학기","정보·외국어·한문","2-1 정보·제2외국어/한문 선택 택1"],
+00991     ["2학년 1학기","예술","2-1 예술 선택 택1"],
+00992     ["2학년 2학기","탐구·교과","2-2 탐구/교과 선택 택3"],
+00993     ["2학년 2학기","정보·외국어·한문","2-2 정보·제2외국어/한문 선택 택1"],
+00994     ["2학년 2학기","예술","2-2 예술 선택 택1"],
+00995     ["3학년 1학기","전공심화","3-1 전공심화 선택 택5"],
+00996     ["3학년 1학기","정보·외국어·한문","3-1 정보·제2외국어/한문 선택 택1"],
+00997     ["3학년 2학기","전공심화","3-2 전공심화 선택 택7"],
+00998     ["3학년 2학기","정보·외국어·한문","3-2 정보·제2외국어/한문 선택 택1"],
+00999   ];
+01000   // 학생 직접 입력값(희망계열·희망전공)은 최신 선택과목 응답에서, 대학적성데이터는 기본정보 연결시트 05_대학적성데이터 E열에서 가져옵니다.
+01001   const curriculumStudentMatrix = sheetMatrices["__CURRICULUM_STUDENTS"] || [];
+01002   const curriculumStudentHeaders = (curriculumStudentMatrix[3] || []).map(v=>String(v??"").trim());
+01003   const curriculumStudentProfiles = new Map();
+01004   curriculumStudentMatrix.slice(4).forEach(row=>{
+01005     const obj=Object.fromEntries(curriculumStudentHeaders.map((h,i)=>[h,row?.[i]??""]));
+01006     const no=String(obj["학번"]||"").replace(/\.0$/,"" ).trim();
+01007     if(!no)return;
+01008     curriculumStudentProfiles.set(no,{
+01009       aptitude:String(obj["대학계열적성_데이터"]||obj["대학적성데이터"]||"").trim(),
+01010       recommendedField:String(obj["추천분야"]||"").trim(),
+01011       recommendedMajorGroup:String(obj["추천전공군"]||"").trim()
+01012     });
+01013   });
+01014   students.forEach(student=>{
+01015     const no=String(student.studentNo||"").replace(/\.0$/,"" ).trim();
+01016     const raw=latestRawSelection.get(no)||{};
+01017     const apt=curriculumStudentProfiles.get(no)||{};
+01018     const existing=student.careerProfile||{};
+01019     student.careerProfile={
+01020       ...existing,
+01021       hopeTrack:String(raw["희망계열"]||existing.hopeTrack||existing.track||"").trim(),
+01022       hopeMajor:String(raw["희망전공 또는 관심학과"]||existing.hopeMajor||existing.major||"").trim(),
+01023       universityAptitude:String(existing.career||existing.universityAptitude||existing.aptitude||"").trim(),
+01024       recommendedField:apt.recommendedField||"",
+01025       recommendedMajorGroup:apt.recommendedMajorGroup||""
+01026     };
+01027   });
+01028 
+01029   const fallbackSubjectRows=[];
+01030   latestRawSelection.forEach((row,no)=>{
+01031     const master=studentByNo.get(no)||{}; let seq=0;
+01032     selectionBlocks.forEach(([term,group,column])=>{
+01033       String(row[column]||"").split(",").map(x=>x.trim()).filter(Boolean).forEach(subject=>{
+01034         seq+=1; const standardSubject=subject.replace(/\*|\(성\)/g,"").replace(/\s+/g,"");
+01035         fallbackSubjectRows.push({id:`raw-selection-${no}-${seq}`,studentId:String(master.id||""),studentNo:no,name:String(row["이름"]||master.name||""),schoolYear:"2026",semester:term,term,group,subject,standardSubject,type:"선택과목",credit:"",status:"정상",final:"Y",track:String(row["희망계열"]||""),major:String(row["희망전공 또는 관심학과"]||""),submittedAt:String(row["타임스탬프"]||""),source:"06_선택과목응답(안전망)"});
+01036       });
+01037     });
+01038   });
+01039   const selectionStudentRows = rowsFrom("06_선택과목이력");
+01040   const selectionTerms = ["2-1","2-2","3-1","3-2"];
+01041   const legacySelectedSubjectRows = selectionStudentRows.flatMap((row,index)=>{
+01042     const studentId=String(valueByHeader(row,"학생ID","학생 ID")||"").trim(),studentNo=String(valueByHeader(row,"학번")||"").replace(/\.0$/,"").trim(),name=String(valueByHeader(row,"이름","성명","학생명")||"").trim();
+01043     const master=students.find(s=>String(s.id)===studentId||String(s.studentNo)===studentNo)||{};
+01044     let seq=0;const out=[];
+01045     selectionTerms.forEach(term=>Object.keys(row).filter(key=>key.startsWith(term+" ")&&/선택\d+|정보·외국어|예술/.test(key)).forEach(key=>{const subject=String(row[key]||"").trim();if(!subject)return;seq+=1;out.push({id:`subject-${studentNo||index}-${seq}`,studentId:studentId||String(master.id||""),studentNo,name:name||String(master.name||""),schoolYear:"2026",semester:term,term,group:/예술/.test(key)?"예술":/정보·외국어/.test(key)?"정보·외국어":"선택",subject,standardSubject:subject.replace(/\*|\(성\)/g,"").replace(/\s+/g,""),type:"선택과목",credit:"",status:String(row["제출상태"]||"신청"),final:"Y",round:"",note:String(row["비고"]||""),source:"06_선택과목이력"});}));
+01046     return out;
+01047   }).filter(row=>(row.studentId||row.studentNo)&&row.subject);
+01048   const selectedSubjectRows = legacySelectedSubjectRows;
+01049   const selectionSubjectErrors = [];
+01050   const scienceSubjectPattern = /(물리|화학|생명과학|지구과학|역학|에너지|전자기|양자|세포|유전|환경생태|융합과학|과학)/;
+01051   const socialSubjectPattern = /(세계사|동아시아사|한국지리|세계지리|사회와문화|사회문화|정치|법|경제|윤리|사상|인문학|사회문제)/;
+01052   const inferredSelectionErrors = [];
+01053   const subjectsByStudent = new Map();
+01054   selectedSubjectRows.forEach(row=>{const key=String(row.studentId||row.studentNo); if(!subjectsByStudent.has(key)) subjectsByStudent.set(key,[]); subjectsByStudent.get(key).push(row);});
+01055   subjectsByStudent.forEach((rows,key)=>{
+01056     const science=rows.filter(r=>scienceSubjectPattern.test(String(r.standardSubject||r.subject||'')));
+01057     const social=rows.filter(r=>socialSubjectPattern.test(String(r.standardSubject||r.subject||'')));
+01058     if(science.length && social.length){
+01059       const first=rows[0];
+01060       inferredSelectionErrors.push({id:`selection-mixed-${key}`,studentId:first.studentId,studentNo:first.studentNo,name:first.name,type:'문·이과 교차 선택',severity:'확인 필요',subject:'탐구과목',terms:[...new Set(rows.map(r=>r.term).filter(Boolean))].join(', '),detail:`사회계열 ${social.map(r=>r.subject).join(', ')} / 과학계열 ${science.map(r=>r.subject).join(', ')}`,status:'미처리',source:'현재 본신청 자동검증'});
+01061     }
+01062   });
+01063   subjectsByStudent.forEach((rows,key)=>{
+01064     const first=rows[0]||{};
+01065     const bySubject=new Map();
+01066     rows.forEach(r=>{const s=String(r.standardSubject||r.subject||'').trim();if(!s)return;if(!bySubject.has(s))bySubject.set(s,[]);bySubject.get(s).push(r);});
+01067     bySubject.forEach((list,subject)=>{
+01068       const terms=[...new Set(list.map(r=>String(r.term||r.semester||'')).filter(Boolean))];
+01069       if(terms.length>1) inferredSelectionErrors.push({id:`selection-duplicate-${key}-${subject}`,studentId:first.studentId,studentNo:first.studentNo,name:first.name,type:'학기간 중복과목 오류',severity:'확인 필요',subject,terms:terms.join(', '),detail:`${subject}: ${terms.join(' · ')} 중복 선택`,status:'미처리',source:'현재 본신청 자동검증'});
+01070     });
+01071     const prereq={
+01072       '역학과 에너지':['물리학'],'전자기와 양자':['물리학'],
+01073       '물질과 에너지':['화학'],'화학 반응의 세계':['화학'],
+01074       '세포와 물질대사':['생명과학'],'생물의 유전':['생명과학'],
+01075       '지구시스템과학':['지구과학'],'행성우주과학':['지구과학']
+01076     };
+01077     const order=t=>({'2학년 1학기':1,'2학년 2학기':2,'3학년 1학기':3,'3학년 2학기':4}[String(t||'')]||99);
+01078     rows.forEach(r=>{
+01079       const subject=String(r.standardSubject||r.subject||'').trim(), need=prereq[subject];if(!need)return;
+01080       const currentOrder=order(r.term||r.semester);
+===== 1400-1730 =====
+01400         let pairs=[];
+01401         try{
+01402           const parsed=JSON.parse(rawQA);
+01403           if(Array.isArray(parsed))pairs=parsed.map((x,i)=>({label:String(x?.label||`문항 ${i+1}`).trim(),value:String(x?.value||"").trim()})).filter(x=>x.value);
+01404         }catch{}
+01405         const parseBracketText=text=>{
+01406           const out=[];const source=String(text||"").trim();
+01407           const re=/\[([^\]]+)\]\s*\n?([\s\S]*?)(?=\n\s*\[[^\]]+\]|$)/g;let m;
+01408           while((m=re.exec(source))!==null){const label=String(m[1]||"").trim(),value=String(m[2]||"").trim();if(value)out.push({label:label||`문항 ${out.length+1}`,value});}
+01409           return out;
+01410         };
+01411         if(!pairs.length)pairs=parseBracketText(rawQA);
+01412         if(!pairs.length)pairs=parseBracketText(normalizedContent);
+01413         if(!pairs.length&&normalizedContent)pairs=[{label:'보고서 내용',value:normalizedContent}];
+01414         return {questions:pairs.map(x=>x.label),responses:pairs.map(x=>x.value),normalizedContent:normalizedContent||pairs.map(x=>`[${x.label}]\n${x.value}`).join("\n\n"),normalizationVersion:String(row["정규화버전"]||"").trim()||"REPORT_TEXT_V2"};
+01415       })(),
+01416       sourceSheet,
+01417       sourceRow,
+01418       sourceUrl: sourceRow ? `https://docs.google.com/spreadsheets/d/1K-Me8Pm8T2d5fGHoqSPEAu4RXozETUQ-N5pZVxjs8Hw/edit#gid=${/공통/.test(kind)?2130126376:1376749791}&range=A${sourceRow}:M${sourceRow}` : "",
+01419     };
+01420   }).filter(row => row.sourceStatus !== "삭제됨" && !(row.sourceType === "INPUT_CENTER" && row.sourceId && !inputCenterLiveSourceIds.has(row.sourceId)) && (row.studentId || row.studentNo) && (row.programName || row.reportGroup));
+01421   const reportTimestamp = value => {
+01422     const raw = String(value || "").trim();
+01423     const serial = Number(raw);
+01424     if (Number.isFinite(serial) && serial > 20000 && serial < 100000) return Date.UTC(1899,11,30) + serial*86400000;
+01425     const parsed = Date.parse(raw.replace(/오전/g,"AM").replace(/오후/g,"PM"));
+01426     return Number.isFinite(parsed) ? parsed : 0;
+01427   };
+01428   const latestReportMap = new Map();
+01429   const reportSubmissionCounts = new Map();
+01430   normalizedReportRows.forEach(report => {
+01431     const key = `${report.studentId || report.studentNo}::${report.programId || report.reportMatchKey || report.programName}`;
+01432     reportSubmissionCounts.set(key,(reportSubmissionCounts.get(key)||0)+1);
+01433     const current = latestReportMap.get(key);
+01434     if (!current || reportTimestamp(report.submittedAt) >= reportTimestamp(current.submittedAt)) latestReportMap.set(key, report);
+01435   });
+01436   const programReports = [...latestReportMap.entries()].map(([key,report])=>({
+01437     ...report,
+01438     finalSubmittedAt:report.submittedAt,
+01439     submissionCount:reportSubmissionCounts.get(key)||1,
+01440   }));
+01441   const studentActivities = activityHistory.length ? activityHistory : legacyStudentActivities;
+01442   const scoreRows = [...internalScoreRows, ...mockScoreRows];
+01443   const admissionMinimums = rowsFrom("54_수능최저DB").map(row => ({
+01444     year: String(row["입시년도"] || ""), university: String(row["대학명"] || ""), type: String(row["전형유형"] || ""), name: String(row["전형명"] || ""), unit: String(row["모집단위"] || ""), minimum: String(row["수능최저원문"] || ""), areaCount: row["반영영역수"], sumLimit: row["등급합기준"], inquiryCount: row["탐구반영과목수"], inquiryMethod: String(row["탐구적용방식"] || ""), english: String(row["영어별도기준"] || ""), history: String(row["한국사기준"] || ""), conditions: String(row["기타조건"] || ""), discoveryStatus: String(row["발굴사용상태"] || ""), discoveryMemo: String(row["발굴판정메모"] || ""), verifiedStatus: String(row["공식검증상태"] || ""), badgeUse: String(row["배지사용여부"] || ""),
+01445   })).filter(row => row.university && row.name);
+01446   const admissionCuts = rowsFrom("55_대학입결DB").map(row => ({
+01447     university: String(row["대학명"] || ""), unit: String(row["모집단위"] || ""), name: String(row["전형명(대)"] || ""), admitted: row["합격자수"], cut: row["최저내신등급"], track: String(row["입결전형군"] || ""), minimumLink: String(row["2028수능최저연결"] || ""), discoveryUse: String(row["발굴배지사용"] || ""), discoveryReason: String(row["발굴판정근거"] || ""), recheck: String(row["3학년재검증"] || ""),
+01448   })).filter(row => row.university && row.cut !== "");
+01449 
+01450   // 보고서 폼 선택지는 학생 혼동 방지를 위해 "실제 프로그램명 (YYYY.MM.DD.)"처럼
+01451   // 운영일을 함께 표시할 수 있습니다. 기존 응답은 원문 그대로 보존하고, 매칭 단계에서만
+01452   // 끝의 날짜 표기를 제거하여 과거/신규 응답이 동일한 프로그램ID로 귀속되게 합니다.
+01453   const stripProgramDisplayDate = value => String(value || "")
+01454     .normalize("NFKC")
+01455     .replace(/\s*[（(\[]\s*(?:20\d{2}[.\-/년]\s*)?\d{1,2}[.\-/월]\s*\d{1,2}(?:[.\-/일]\s*)?(?:[~～\-–—]\s*(?:20\d{2}[.\-/년]\s*)?\d{1,2}[.\-/월]\s*\d{1,2}(?:[.\-/일]\s*)?)?\s*[）)\]]\s*$/u, "")
+01456     .replace(/\s*[·|]\s*(?:20\d{2})?[.\-/년\s]*\d{1,2}[.\-/월\s]+\d{1,2}(?:\s*일)?\s*$/u, "")
+01457     .trim();
+01458   const normalizeProgramName = value => stripProgramDisplayDate(value)
+01459     .replace(/[\s·ㆍ.,:;()\[\]{}'"`~!@#$%^&*+=_|\\/<>?–—-]+/g,"")
+01460     .trim()
+01461     .toLowerCase();
+01462   const programSemester = program => {
+01463     const explicit=String(program.semester||program.term||"").trim();
+01464     if(/1/.test(explicit))return "1학기";
+01465     if(/2/.test(explicit))return "2학기";
+01466     const month=Number(String(program.date||program.startDate||"").slice(5,7));
+01467     return month&&month<=7?"1학기":month?"2학기":"";
+01468   };
+01469   const programReportGroup = program => {
+01470     // 프로그램 식별에는 생활기록부 정제명(recordTitle)을 사용하지 않습니다.
+01471     // 공군/육군사관학교처럼 서로 다른 실제 프로그램이 같은 생기부표기명으로 일반화될 수 있기 때문입니다.
+01472     const title=String(program.actualTitle||program.title||"").trim();
+01473     if(/챌린지\s*데이/.test(title))return `${programSemester(program)||"학기미정"} 챌린지데이`;
+01474     return title;
+01475   };
+01476   const reportsForProgram = program => programReports.filter(report => {
+01477     const rawPid=String(program.programId||program.id||"").trim();
+01478     const pid=rawPid.replace(/^common-|^selected-|^after-session-/,"").trim();
+01479     const reportPid=String(report.programId||"").trim().replace(/^common-|^selected-|^after-session-/,"");
+01480     const pSemester=programSemester(program);
+01481     const rSemester=String(report.semester||"").trim();
+01482     if(pSemester && rSemester && pSemester!==rSemester)return false;
+01483 
+01484     // 정규화 과정에서 과거 보고서의 프로그램ID가 화면용 prefix 유무 등으로 달라질 수 있으므로
+01485     // 정확히 일치하면 즉시 채택하고, 불일치하면 이름/보고서그룹 보조키까지 검증합니다.
+01486     if(pid && reportPid && pid===reportPid)return true;
+01487 
+01488     const group=normalizeProgramName(programReportGroup(program));
+01489     const reportGroup=normalizeProgramName(report.reportGroup);
+01490     if(group && reportGroup && group===reportGroup)return true;
+01491 
+01492     const reportName=normalizeProgramName(report.programName);
+01493     const names=[program.actualTitle,program.title,program.recordTitle].map(normalizeProgramName).filter(Boolean);
+01494     return names.some(name=>name&&reportName&&(name===reportName||name.includes(reportName)||reportName.includes(name)));
+01495   });
+01496   connectedPrograms.forEach(program => {
+01497     const reports = reportsForProgram(program);
+01498     const latestByStudent = new Map();
+01499     reports.forEach(report=>{
+01500       const no=String(report.studentNo||"").replace(/\D/g,"").slice(-4);
+01501       [report.studentId,report.studentNo,no].filter(Boolean).forEach(key=>latestByStudent.set(String(key),report));
+01502     });
+01503     const uniqueReports=[...new Map(reports.map(report=>[String(report.id),report])).values()];
+01504     program.reportDataConnected = program.kind !== "after";
+01505     program.reportSubmittedCount = uniqueReports.filter(report=>report.submitted).length;
+01506     program.reportReports = uniqueReports;
+01507     (program.students || []).forEach(student => {
+01508       const studentNo=String(student.studentNo||student.number||"").replace(/\D/g,"").slice(-4);
+01509       const report = latestByStudent.get(String(student.studentId||""))
+01510         || latestByStudent.get(String(student.studentNo||""))
+01511         || latestByStudent.get(studentNo)
+01512         || latestByStudent.get(String(student.number||""));
+01513       student.reportSubmitted = Boolean(report?.submitted);
+01514       student.reportSubmittedAt = report?.submittedAt || "";
+01515       student.reportId = report?.id || "";
+01516       student.reportResponses = report?.responses || [];
+01517       student.reportConsent = report?.consent || "";
+01518       student.reportMatchStatus = report?.matchStatus || "";
+01519     });
+01520   });
+01521 
+01522   const countByStudent = (rows) => rows.reduce((map,row)=>(map.set(row.studentId,(map.get(row.studentId)||0)+1),map),new Map());
+01523   const officialCounts=countByStudent(officialRows), lateCounts=countByStudent(lateRows), afterCounts=countByStudent(afterSchoolAttendance);
+01524   const nightAbsentCounts=new Map();
+01525   const outingCounts=countByStudent(dormOutings);
+01526   const averageFor = (id, exam, type) => {
+01527     const values=scoreRows.filter(row=>row.studentId===id && row.exam===exam && (!type || row.scoreType===type)).map(row=>Number(row.level)).filter(Number.isFinite);
+01528     return values.length ? Math.round((values.reduce((a,b)=>a+b,0)/values.length)*100)/100 : null;
+01529   };
+01530   const reportsByStudent = new Map();
+01531   programReports.forEach(report => {
+01532     const key = String(report.studentId || report.studentNo || "");
+01533     if (!key) return;
+01534     if (!reportsByStudent.has(key)) reportsByStudent.set(key, []);
+01535     reportsByStudent.get(key).push(report);
+01536   });
+01537   students.forEach(student=>{
+01538     student.reports = reportsByStudent.get(String(student.id)) || reportsByStudent.get(String(student.studentNo)) || [];
+01539     const internalExam=["학기말고사","2차고사","1차고사"].find(exam=>scoreRows.some(row=>row.studentId===student.id&&row.scoreType==="내신"&&row.exam===exam));
+01540     const march=averageFor(student.id,"3월모의고사","모의고사"), june=averageFor(student.id,"6월모의고사","모의고사");
+01541     const change=march!=null&&june!=null?Math.round((march-june)*100)/100:null;
+01542     Object.assign(student,{officialCount:officialCounts.get(student.id)||0,lateCount:lateCounts.get(student.id)||0,afterSchoolCount:afterCounts.get(student.id)||0,nightAbsentCount:nightAbsentCounts.get(student.id)||0,outingCount:outingCounts.get(student.id)||0,scoreSummary:{internalExam:internalExam||"",internalAverage:internalExam?averageFor(student.id,internalExam,"내신"):null,marchAverage:march,juneAverage:june,mockChange:change,mockChangeLabel:change==null?"-":change>0?`▲ ${change}`:change<0?`▼ ${Math.abs(change)}`:"유지"}});
+01543   });
+01544   const dormStudents = students.filter(student=>currentDorm.has(student.id)).map(student=>{const row=currentDorm.get(student.id);return {studentId:student.id,studentNo:student.studentNo,name:student.name,className:classNumberSafe(row["반"]||student.className),number:String(row["번호"]||student.number||"").replace(/\.0$/, ""),room:String(row["호실"]||"").trim(),status:String(row["학사상태"]||"재사").trim(),year:String(row["학년도"]||"").trim(),semester:String(row["학기"]||"").trim(),startDate:localDate(row["적용시작일"]),endDate:localDate(row["적용종료일"]),outingCount:outingCounts.get(student.id)||0};}).sort((a,b)=>Number(a.className)-Number(b.className)||Number(a.number)-Number(b.number));
+01545   const pastDormStudents = dormRows.filter(row => !(String(row["현재여부"] || "").trim() === "Y" || String(row["학사상태"] || "").trim() === "재사")).map((row,index)=>{
+01546     const id=String(row["학생ID"]||"").trim(); const student=studentById.get(id)||{};
+01547     return {id:String(row["학사기록ID"]||`past-dorm-${index}`),studentId:id,studentNo:String(row["학번"]||student.studentNo||"").replace(/\.0$/, ""),name:String(row["성명"]||student.name||"").trim(),className:classNumberSafe(row["반"]||student.className),number:String(row["번호"]||student.number||"").replace(/\.0$/, ""),room:String(row["호실"]||"").trim(),status:String(row["학사상태"]||"지난 학사").trim(),year:String(row["학년도"]||"").trim(),semester:String(row["학기"]||"").trim(),startDate:localDate(row["적용시작일"]),endDate:localDate(row["적용종료일"]),outingCount:outingCounts.get(id)||0};
+01548   }).filter(row=>row.studentId&&row.name).sort((a,b)=>String(b.year).localeCompare(String(a.year))||String(b.semester).localeCompare(String(a.semester))||Number(a.className)-Number(b.className)||Number(a.number)-Number(b.number));
+01549   const nightCalendarDates = [...new Set(allMappedNightRows.map(row=>row.date).filter(Boolean))].sort();
+01550 
+01551   const settings = Object.fromEntries(
+01552     rowsFrom("00_표준환경").map((row) => [
+01553       String(row["설정키"] || "").trim(),
+01554       row["설정값"],
+01555     ]),
+01556   );
+01557   const calendarTitleFromRow = (row) => String(row["프로그램명"] || "").trim();
+01558   const recordRuleRows = [
+01559     ...rowsFrom("32_생기부작성우선순위").map(row=>({...row,__source:"32_생기부작성우선순위"})),
+01560     ...rowsFrom("31_생기부작성규칙").map(row=>({...row,__source:"31_생기부작성규칙"})),
+01561     ...rowsFrom("33_생기부작성절대규칙").map(row=>({...row,__source:"33_생기부작성절대규칙"})),
+01562     ...rowsFrom("35_금지표현DB").map(row=>({...row,__source:"35_금지표현DB"})),
+01563     ...rowsFrom("34_문장패턴DB").map(row=>({...row,__source:"34_문장패턴DB"})),
+01564     ...rowsFrom("36_교사관찰표현DB").map(row=>({...row,__source:"36_교사관찰표현DB"})),
+01565   ].filter(row=>Object.entries(row).some(([key,value])=>key!=="__source"&&String(value||"").trim()));
+01566   const dormRuleMatrix=sheetMatrices["40_학사외출규칙"]||[];
+01567   const dormRuleHeaderIndex=dormRuleMatrix.findIndex(row=>Array.isArray(row)&&row.some(cell=>String(cell||"").trim()==="규칙ID"));
+01568   const dormRuleObjects=dormRuleHeaderIndex>=0
+01569     ? dormRuleMatrix.slice(dormRuleHeaderIndex+1).filter(row=>Array.isArray(row)&&row.some(v=>String(v??"").trim())).map(row=>{
+01570         const headers=(dormRuleMatrix[dormRuleHeaderIndex]||[]).map(v=>String(v||"").trim());
+01571         return Object.fromEntries(headers.map((key,i)=>[key,row[i]??""]));
+01572       })
+01573     : rowsFrom("40_학사외출규칙");
+01574   const sheetSerialToDateTime=(value)=>{
+01575     if(value===null||value===undefined||value==='')return '';
+01576     const raw=String(value).trim();
+01577     if(/^\d+(?:\.\d+)?$/.test(raw)){
+01578       const serial=Number(raw);
+01579       if(Number.isFinite(serial)&&serial>20000&&serial<100000){
+01580         const d=new Date(Date.UTC(1899,11,30)+Math.round(serial*86400000));
+01581         if(!Number.isNaN(d.getTime())){
+01582           const y=d.getUTCFullYear(),m=String(d.getUTCMonth()+1).padStart(2,'0'),day=String(d.getUTCDate()).padStart(2,'0');
+01583           const hh=String(d.getUTCHours()).padStart(2,'0'),mm=String(d.getUTCMinutes()).padStart(2,'0');
+01584           return `${y}-${m}-${day}T${hh}:${mm}`;
+01585         }
+01586       }
+01587     }
+01588     const m=raw.replace(' ','T').match(/^(\d{4})-(\d{1,2})-(\d{1,2})T(\d{1,2}):(\d{2})/);
+01589     return m?`${m[1]}-${String(m[2]).padStart(2,'0')}-${String(m[3]).padStart(2,'0')}T${String(m[4]).padStart(2,'0')}:${m[5]}`:raw;
+01590   };
+01591   const dormRules=dormRuleObjects.filter(row=>String(row["규칙ID"]||"").trim()).map(row=>({
+01592     id:String(row["규칙ID"]||"").trim(),
+01593     category:String(row["규칙유형"]||"").trim(),
+01594     name:String(row["규칙명"]||"").trim(),
+01595     start:sheetSerialToDateTime(row["시작일시"]),
+01596     end:sheetSerialToDateTime(row["종료일시"]),
+01597     days:String(row["적용요일"]||"전체").trim(),
+01598     effect:String(row["판정효과"]||"").trim(),
+01599     entryTime:String(row["기본입소시간"]||"").trim(),
+01600     exitTime:String(row["기본퇴소시간"]||"").trim(),
+01601     lateEntry:String(row["늦은입소허용"]||"").trim(),
+01602     earlyExit:String(row["이른퇴소허용"]||"").trim(),
+01603     reason:String(row["허용사유"]||"").trim(),
+01604     priority:Number(row["우선순위"]||0),
+01605     active:/^(Y|YES|TRUE|1)$/i.test(String(row["활성여부"]||"Y")),
+01606     note:String(row["비고"]||"").trim(),
+01607     modifiedAt:String(row["수정일시"]||"").trim(),
+01608     writer:String(row["수정자"]||"").trim(),
+01609     source:String(row["생성방식"]||"").trim(),
+01610     operationState:String(row["운영상태"]||"").trim(),
+01611     actualExit:sheetSerialToDateTime(row["실제퇴소일시"]),
+01612     actualReentry:sheetSerialToDateTime(row["실제재입소일시"]),
+01613     priorNightAcademyHome:/^(Y|YES|TRUE|1)$/i.test(String(row["전날학원후귀가허용"]||"")),
+01614     formRequired:/^(Y|YES|TRUE|1)$/i.test(String(row["개인신청필요"]||"")),
+01615     individualOutingAllowed:/^(Y|YES|TRUE|1)$/i.test(String(row["개인외출허용"]||""))
+01616   }));
+01617 
+01618   const lunchDuties = rowsFrom("42_급식지도계획").filter(row=>row["운영일"]&&row["담당교사"]).map((row,index)=>({
+01619     id:String(row["기록ID"]||`lunch-${index}`), year:String(row["학년도"]||""), month:String(row["운영월"]||""), date:localDate(row["운영일"]), day:String(row["요일"]||""), start:localTime(row["시작시간"]), end:localTime(row["종료시간"]), dutyType:String(row["담당구분"]||"급식실"), teacher:String(row["담당교사"]||""), target:String(row["지도대상반"]||"전교생"), note:String(row["일정비고"]||"")
+01620   }));
+01621   const nightSupervisors = rowsFrom("43_야자감독계획").filter(row=>row["운영일"]&&row["감독교사"]).map((row,index)=>({
+01622     id:String(row["기록ID"]||`night-duty-${index}`), year:String(row["학년도"]||""), month:String(row["운영월"]||""), date:localDate(row["운영일"]), day:String(row["요일"]||""), start:localTime(row["시작시간"]), end:localTime(row["종료시간"]), teacher:String(row["감독교사"]||""), target:String(row["대상학년반"]||"1학년 1~9반"), place:String(row["감독장소"]||"면학관 2~3층")
+01623   }));
+01624   const userAccounts=rowsFrom("01_사용자계정").filter(row=>row["사용자ID"]&&row["이메일"]&&row["성명"]).map(row=>({
+01625     id:String(row["사용자ID"]||""),email:String(row["이메일"]||"").trim(),name:String(row["성명"]||"").trim(),role:String(row["역할"]||""),admin:String(row["관리자여부"]||"N"),grade:String(row["담당학년"]||"1").replace(/\.0$/,""),classNo:String(row["담당반"]||"").replace(/\.0$/,""),subject:String(row["담당교과"]||""),viewScope:String(row["조회범위"]||""),editScope:String(row["수정범위"]||""),activeRaw:String(row["사용여부"]||"Y"),active:String(row["사용여부"]||"Y").toUpperCase()!=="N",department:/학년/.test(String(row["담당학년"]||""))?String(row["담당학년"]):`${String(row["담당학년"]||"1").replace(/\.0$/,'')}학년부`
+01626   }));
+01627   const counselRecords=rowsFrom("45_학생상담기록").filter(row=>row["상담ID"]&&row["학생ID"]).map((row,index)=>({
+01628     id:String(row["상담ID"]||`counsel-${index}`), studentId:String(row["학생ID"]||""), studentNo:String(row["학번"]||"").replace(/\.0$/,""), name:String(row["성명"]||""), grade:String(row["학년"]||"").replace(/\.0$/,""), className:String(row["반"]||"").replace(/\.0$/,""),
+01629     createdAt:String(row["상담일시"]||""), area:String(row["상담영역"]||""), type:String(row["상담방식"]||"학생 상담"), memo:String(row["상담내용"]||""), action:String(row["조치후속계획"]||""), nextDate:localDate(row["다음확인일"]), status:String(row["진행상태"]||"진행중"),
+01630     group:String(row["발굴그룹"]||""), stage:String(row["발굴단계"]||""), discoveryReason:String(row["발굴근거"]||""), writer:String(row["상담교사"]||""), modifiedAt:String(row["수정일시"]||"")
+01631   }));
+01632   const studentGuidanceRecords=rowsFrom("46_학생지도기록").filter(row=>row["지도ID"]&&row["학생ID"]).map((row,index)=>({
+01633     id:String(row["지도ID"]||`guide-${index}`), studentId:String(row["학생ID"]||""), studentNo:String(row["학번"]||"").replace(/\.0$/,""), name:String(row["성명"]||""), grade:String(row["학년"]||"").replace(/\.0$/,""), className:String(row["반"]||"").replace(/\.0$/,""), number:String(row["번호"]||"").replace(/\.0$/,""),
+01634     guidanceDate:localDate(row["지도일자"]), memo:String(row["지도내용"]||""), writer:String(row["지도교사"]||""), createdAt:String(row["기록일시"]||""), modifiedAt:String(row["수정일시"]||""), status:String(row["상태"]||"기록"), note:String(row["비고"]||"")
+01635   }));
+01636   const noticeReceipts=rowsFrom("44_공지확인현황").filter(row=>row["공지ID"]&&row["교사명"]).map((row,index)=>({
+01637     id:String(row["기록ID"]||`notice-receipt-${index}`), noticeId:String(row["공지ID"]||""), userId:String(row["사용자ID"]||""), teacher:String(row["교사명"]||""), grade:String(row["담당학년"]||""), classNo:String(row["담당반"]||""), confirmed:String(row["확인상태"]||"N").toUpperCase()==="Y", confirmedAt:String(row["확인일시"]||""), submitted:String(row["제출상태"]||"N").toUpperCase()==="Y", submittedAt:String(row["제출일시"]||""), modifiedAt:String(row["수정일시"]||""), sourceType:String(row["원본유형"]||"직접공지"), read:String(row["읽음상태"]||"N").toUpperCase()==="Y", dismissed:String(row["공지해제"]||"N").toUpperCase()==="Y", detailViewed:String(row["상세열람"]||"N").toUpperCase()==="Y"
+01638   }));
+01639   const notices=rowsFrom("40_공지마감").filter(row=>row["공지ID"]&&String(row["상태"]||"게시").trim()!=="삭제").map((row,index)=>{
+01640     const id=String(row["공지ID"]||`notice-${index}`);
+01641     const receipts=noticeReceipts.filter(item=>item.noticeId===id);
+01642     return {
+01643       id, type:String(row["구분"]||"공지"), title:String(row["제목"]||"학년 공지"), detail:String(row["내용"]||""), targetGrade:String(row["대상학년"]||""), targetClass:String(row["대상반"]||""), postDate:localDate(row["게시일"]), deadline:(()=>{const raw=String(row["마감일시"]||"").trim();if(!raw)return "";const formatted=formatReportDateTime(raw);return formatted&&formatted.length>=16?formatted.slice(0,16).replace(" ","T"):raw;})(), deadlineType:String(row["마감유형"]||""), confirmRequired:String(row["확인필요"]||"Y").toUpperCase()!=="N", submitRequired:String(row["제출필요"]||"N").toUpperCase()==="Y", department:String(row["담당부서"]||""), author:String(row["담당자"]||""), status:String(row["상태"]||"게시"), noticeKind:String(row["공지성격"]||row["구분"]||"일반공지"), homeroomNotice:String(row["종례전달"]||"N").toUpperCase()==="Y", important:String(row["중요"]||"N").toUpperCase()==="Y", topAlert:String(row["상단알림"]||"N").toUpperCase()==="Y", endDate:localDate(row["게시종료일"]), receipts, confirmedCount:receipts.filter(item=>item.confirmed).length, submittedCount:receipts.filter(item=>item.submitted).length
+01644     };
+01645   });
+01646   return {
+01647     sourceType: "Google Sheets 실시간 조회",
+01648     sourcePath: UEP_SPREADSHEET_URL,
+01649     sourceName: UEP_SPREADSHEET_NAME,
+01650     version: String(baseSettings["VERSION"] || settings["VERSION"] || "v1.2.1-direct"),
+01651     // 00_UEP설정의 공통 설정을 renderer에도 전달해 프로그램 팝업이 시트 원본값을 직접 확인할 수 있게 합니다.
+01652     uepSettings: {...baseSettings},
+01653     syncedAt: new Date().toISOString(),
+01654     students,
+01655     userAccounts,
+01656     dormStudents,
+01657     pastDormStudents,
+01658     dormHistory: [...pastDormStudents, ...dormStudents],
+01659     officialAttendance: officialRows,
+01660     attendance,
+01661     nightAttendance: nightAttendance.slice().reverse(),
+01662     nightCalendarDates,
+01663     afterSchoolAttendance: afterSchoolAttendance.slice().reverse(),
+01664     programs: connectedPrograms,
+01665     timetableRows: rowsFrom("17_시간표마스터").filter(row => row["학년도"] && row["학기"] && row["학년"] && row["반"] && row["요일"] && row["교시"]),
+01666     studentActivities,
+01667     programReports,
+01668     selectedSubjects,
+01669     subjectSelections:selectedSubjects,
+01670     selectionStudentRows: rowsFrom("06_선택과목이력"),
+01671     selectionSubjectErrors,
+01672     activityHistory,
+01673     volunteerActivities,
+01674     finalRecordRows,
+01675     recordRuleRows,
+01676     dormRules,
+01677     lateAttendance: lateRows,
+01678     scoreRecords: scoreRows,
+01679     admissionMinimums,
+01680     admissionCuts,
+01681     dormOutings,
+01682     notices,
+01683     noticeReceipts,
+01684     counselRecords,
+01685     studentGuidanceRecords,
+01686     lunchDuties,
+01687     nightSupervisors,
+01688     schoolCalendar: rowsFrom("41_학교캘린더")
+01689       .filter((row) => {
+01690         const startDate = row["시작일"] || row["일자"];
+01691         const title = row["일정명"] || row["프로그램명"];
+01692         return startDate && title && !/제외|삭제|취소/.test(String(row["상태"] || ""));
+01693       })
+01694       .map((row, index) => {
+01695         const startDate = localDate(row["시작일"] || row["일자"]);
+01696         const endDate = localDate(row["종료일"] || row["종료일자"] || row["시작일"] || row["일자"]);
+01697         const title = String(row["일정명"] || row["프로그램명"] || "일정").trim();
+01698         const detail = String(row["상세내용"] || row["상세"] || row["비고"] || "").trim();
+01699         const category = String(row["일정구분"] || row["구분"] || "업무").trim();
+01700         return {
+01701           id: String(row["일정ID"] || `calendar-${index}`),
+01702           date: startDate,
+01703           endDate: endDate || startDate,
+01704           title,
+01705           target: String(row["대상"] || ""),
+01706           time: [localTime(row["시작시각"]), localTime(row["종료시각"])].filter(Boolean).join("~"),
+01707           allDay: /^(Y|YES|TRUE|1)$/i.test(String(row["종일"] || "")),
+01708           place: String(row["장소"] || ""),
+01709           owner: [row["부서"], row["담당자"]].filter(Boolean).join(" · "),
+01710           detail,
+01711           originalDetail: String(row["원본내용"] || row["비고"] || detail),
+01712           source: String(row["출처"] || "데이터처리시트 41_학교캘린더"),
+01713           type: category,
+01714           status: String(row["상태"] || "확정"),
+01715           originalId: String(row["원본일정ID"] || ""),
+01716           modifiedAt: String(row["수정일시"] || ""),
+01717           correctionLocked: /^(true|1|yes|y|o)$/i.test(String(row["보정잠금"] || "")),
+01718           firstGradeTarget: /^(true|1|yes|y|o)$/i.test(String(row["1학년대상"] || "")),
+01719           showTodayProgram: /^(true|1|yes|y|o)$/i.test(String(row["오늘의프로그램표시"] || "")),
+01720           programLinked: /^(true|1|yes|y|o)$/i.test(String(row["프로그램연동"] || "")),
+01721         };
+01722       }),
+01723     summary: {
+01724       masterCount: students.length,
+01725       dormCount: dormRows.length,
+01726       dormRosterCount: currentDorm.size,
+01727       dormOutingCount: dormOutings.length,
+01728       duplicateCount: students.length - new Set(students.map((student) => student.id)).size,
+01729       unmatchedCount: outingRows.length - dormOutings.length,
+01730       rosterStudents: new Set(nightRows.map((row) => String(row["학생ID"] || ""))).size,
