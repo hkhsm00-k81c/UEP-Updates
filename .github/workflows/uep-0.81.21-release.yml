@@ -1,0 +1,123 @@
+name: UEP 0.81.21 School Read Endpoint Fix
+
+on:
+  push:
+    branches: [fix/0.81.21-school-read-endpoint]
+    paths:
+      - .github/workflows/uep-0.81.21-release.yml
+      - tools/apply-school-read-endpoint-fallback-0.81.21.js
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download 0.81.20 release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.81.20 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
+
+      - name: Apply 0.81.21 endpoint fix
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node tools/apply-school-read-endpoint-fallback-0.81.21.js app
+          if($LASTEXITCODE -ne 0){throw '0.81.21 endpoint patch failed'}
+
+      - name: Runtime gates
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $m=Get-Content app/resources/app/electron/main.cjs -Raw -Encoding UTF8
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          $endpoint='https://script.google.com/macros/s/AKfycbyLEEam4L2sX653pii69TC3_84wTyfAed_UL8HRY6PBG467im1LmZJ0CIpSKSOj4r6-0w/exec'
+          $checks=[ordered]@{
+            version=$g.Contains('const APP_VERSION = "0.81.21";')
+            schoolReadPrimary=$m.Contains('__UEP_SCHOOL_READ_API_PRIMARY_08120__')
+            endpointFallback=$m.Contains('__UEP_SCHOOL_READ_ENDPOINT_FALLBACK_08121__') -and $m.Contains($endpoint)
+            policyResolver=$m.Contains("policy?.schoolReadApiUrl||UEP_SCHOOL_READ_API_FALLBACK")
+            deviceId=$m.Contains('uep-device-id.txt')
+            tokenStore=$m.Contains('uep-school-read-session.bin')
+            batchRead=$m.Contains('schoolReadBatchRead(spreadsheetId,ranges)')
+          }
+          $checks.GetEnumerator()|ForEach-Object{Write-Host ("0.81.21 GATE {0} = {1}" -f $_.Key,$_.Value)}
+          if($checks.Values-contains $false){throw '0.81.21 runtime gate failed'}
+          node --check app/resources/app/gyomuon.js
+          node --check app/resources/app/electron/main.cjs
+          node --check app/resources/app/electron/preload.cjs
+          node --check app/resources/app/electron/google-data.cjs
+
+      - name: Probe School Read API
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $url='https://script.google.com/macros/s/AKfycbyLEEam4L2sX653pii69TC3_84wTyfAed_UL8HRY6PBG467im1LmZJ0CIpSKSOj4r6-0w/exec'
+          $payload=@{action='login';name='UEP_RELEASE_PROBE';email='uep-release-probe@example.invalid';deviceId='UEP-08121-PROBE'} | ConvertTo-Json -Compress
+          $resp=Invoke-WebRequest -UseBasicParsing -Uri $url -Method Post -ContentType 'application/json; charset=utf-8' -Body $payload -TimeoutSec 20
+          if($resp.StatusCode -ne 200){throw "School Read API HTTP $($resp.StatusCode)"}
+          $body=[string]$resp.Content
+          if($body -match '<html|accounts\.google\.com|oauth'){throw 'School Read API redirected to browser OAuth'}
+          $json=$body | ConvertFrom-Json
+          if($null -eq $json.ok){throw 'School Read API did not return JSON response'}
+
+      - name: Build package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Compress-Archive -Path app/* -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          Set-Content -LiteralPath UEP-update.sha256 -Value $sha -Encoding ascii
+          "SHA256=$sha" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Publish v0.81.21
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $tag='v0.81.21'
+          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+          if($LASTEXITCODE -ne 0){
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --target 'fix/0.81.21-school-read-endpoint' --title 'UEP 0.81.21 - School Read API Endpoint Fix' --notes '0.81.20의 School Read API endpoint 전달 누락을 수정합니다. 정책 endpoint와 실행파일 fallback을 이중 적용하며 0.81.19 코드 다이어트 및 0.81.20 담임 연결 구조를 그대로 포함합니다.'
+          }
+          gh release upload $tag UEP-update.zip UEP-update.sha256 --repo $env:GITHUB_REPOSITORY --clobber
+
+      - name: Promote production policy to 0.81.21
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          git fetch origin main
+          git checkout main
+          git pull --ff-only origin main
+          $policy=Get-Content uep-policy.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          $policy.latestVersion='0.81.21'
+          $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.21/UEP-update.zip'
+          $policy.sha256=$env:SHA256
+          $policy.message='UEP 0.81.21 School Read API endpoint 연결 수정'
+          if(-not $policy.PSObject.Properties['schoolReadApiUrl']){$policy | Add-Member -NotePropertyName schoolReadApiUrl -NotePropertyValue 'https://script.google.com/macros/s/AKfycbyLEEam4L2sX653pii69TC3_84wTyfAed_UL8HRY6PBG467im1LmZJ0CIpSKSOj4r6-0w/exec'}
+          else{$policy.schoolReadApiUrl='https://script.google.com/macros/s/AKfycbyLEEam4L2sX653pii69TC3_84wTyfAed_UL8HRY6PBG467im1LmZJ0CIpSKSOj4r6-0w/exec'}
+          $policy | ConvertTo-Json -Depth 10 | Set-Content uep-policy.json -Encoding UTF8
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add uep-policy.json
+          git commit -m 'release: promote UEP 0.81.21 auto-update'
+          git push origin main
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UEP-0.81.21
+          path: |
+            UEP-update.zip
+            UEP-update.sha256
