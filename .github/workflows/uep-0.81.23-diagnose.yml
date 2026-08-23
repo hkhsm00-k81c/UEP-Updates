@@ -1,0 +1,56 @@
+name: UEP 0.81.23 Diagnose Dashboard and Dorm Paths
+
+'on':
+  push:
+    branches:
+      - fix/0.81.23-dashboard-dorm-sync
+    paths:
+      - .github/workflows/uep-0.81.23-diagnose.yml
+      - uep-0.81.23-diagnose.trigger
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download 0.81.22 shipped package
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,diagnostics | Out-Null
+          gh release download v0.81.22 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive -LiteralPath 'source/UEP-update.zip' -DestinationPath app -Force
+
+      - name: Inspect exact runtime paths
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $out='diagnostics/0.81.23-dashboard-dorm-paths.txt'
+          $g='app/resources/app/gyomuon.js'
+          $preload='app/resources/app/preload.js'
+          $main='app/resources/app/main.js'
+          'UEP 0.81.23 dashboard/work/dorm diagnostic' | Set-Content $out -Encoding UTF8
+          foreach($file in @($g,$preload,$main)){
+            if(Test-Path $file){
+              Add-Content $out "`n===== $file =====" -Encoding UTF8
+              Select-String -Path $file -Pattern 'personalTimetableData|dashboardPersonalWeekMarkup|directNoticeRows|dashboardDeadlineItems|workBoardData|googleConnectionStatus|refreshReadonlyCacheSilently|schoolReadSessionStatus|readReadonlyCache|학사외출|귀가|입소|늦은|메일|mail|dorm|outing|return|homecoming' -Context 8,25 | Select-Object -First 800 | ForEach-Object { Add-Content $out $_.ToString() -Encoding UTF8 }
+            }
+          }
+          if(-not (Test-Path $out)){throw 'diagnostic output missing'}
+
+      - name: Persist diagnostics
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add diagnostics/0.81.23-dashboard-dorm-paths.txt
+          git commit -m 'diag: capture 0.81.22 dashboard work dorm runtime paths'
+          if($LASTEXITCODE -eq 0){ git push origin HEAD:fix/0.81.23-dashboard-dorm-sync }
