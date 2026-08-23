@@ -7,6 +7,7 @@ on:
       - .github/workflows/uep-0.81.20-homeroom-simulation.yml
       - tools/apply-school-read-api-0.81.20.js
       - tools/normalize-readonly-auth-0.81.20.js
+      - tools/harden-school-read-auth-gate-0.81.20.js
       - scripts/build-update-0.81.20.ps1
       - uep-policy.json
   workflow_dispatch:
@@ -88,7 +89,7 @@ jobs:
             Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
           Write-Host 'Simulation environment contains no local Google credential artifacts.'
 
-      - name: Assert homeroom readonly path cannot require local Google credentials
+      - name: Assert homeroom readonly and login path
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
@@ -105,6 +106,9 @@ jobs:
             batchRead=$main.Contains('schoolReadBatchRead(spreadsheetId,ranges)')
             rendererLogin=$gyo.Contains('window.schoolBoard.schoolReadLogin({name,email})')
             rendererStartup=$gyo.Contains('window.schoolBoard?.schoolReadSessionStatus')
+            rememberedSessionVerified=$gyo.Contains('const status=await window.schoolBoard.schoolReadSessionStatus({verify:true});')
+            noLocalRememberedBypass=(-not $gyo.Contains('if(state?.auth?.rememberUser&&state?.auth?.user){hideUserAuthGate();authSessionReady=true;state.auth.locked=false;}'))
+            authGateNoReadonlyAccountLookup=(-not ($gyo -match 'async function initializeUserSessionGate\(\)[\s\S]{0,2600}findUserAccount\('))
             noReadonlyOAuthFallback=(-not ($main -match 'getReadonlySheetsAuth[\s\S]{0,1800}readGoogleUserOAuth'))
             noReadonlyServiceFallback=(-not ($main -match 'getReadonlySheetsAuth[\s\S]{0,1800}readEncrypted\(credentialPath\(\)\)'))
           }
@@ -118,21 +122,25 @@ jobs:
           node --check app/resources/app/electron/preload.cjs
           node --check app/resources/app/gyomuon.js
 
-      - name: Persist successful simulation result
+      - name: Persist simulation result
+        if: always()
         shell: pwsh
+        env:
+          JOB_STATUS: ${{ job.status }}
         run: |
           $ErrorActionPreference='Stop'
           New-Item -ItemType Directory -Force audit-output | Out-Null
+          $status=String($env:JOB_STATUS).ToUpperInvariant()
           @(
-            'UEP 0.81.20 HOMEROOM NO-GOOGLE SIMULATION: PASS',
+            "UEP 0.81.20 HOMEROOM NO-GOOGLE SIMULATION: $status",
             "commit=$env:GITHUB_SHA",
             "time=$([DateTime]::UtcNow.ToString('o'))",
             'endpoint=School Read API JSON response without browser OAuth',
-            'local_google_credentials=removed before final assertions',
+            'local_google_credentials=removed before final assertions when build reached that step',
             'readonly_path=UEP login -> deviceId -> UEP session -> School Read API -> batch-read'
           ) | Set-Content audit-output/homeroom-no-google-0.81.20.txt -Encoding UTF8
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add audit-output/homeroom-no-google-0.81.20.txt
-          git commit -m 'audit: persist 0.81.20 homeroom no-Google simulation pass' || exit 0
+          git commit -m "audit: persist 0.81.20 homeroom simulation $status" || exit 0
           git push
