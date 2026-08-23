@@ -1,0 +1,10 @@
+const fs=require('fs'),path=require('path');
+const root=process.argv[2]||'app';
+const file=path.join(root,'resources/app/gyomuon.js');
+let text=fs.readFileSync(file,'utf8');
+const before='${groups.map(([kind,label])=>`<section class="uep-quick-group quick-${kind}"><b>${label} 메뉴 (${quick.filter(q=>q[2]===kind).length})</b><div class="uep-quick-actions">${quick.filter(q=>q[2]===kind).map(q=>`<button class="uep-quick-card-v0755" draggable="true" data-reference="${q[0]}" data-quick-kind="${q[2]}"><i class="uep-quick-icon"></i><span><b>${q[1]}</b></span></button>`).join("")}</div></section>`).join("")}';
+const after='${groups.map(([kind,label])=>{const kindQuick=quick.filter(q=>q[2]===kind);return `<section class="uep-quick-group quick-${kind}"><b>${label} 메뉴 (${kindQuick.length})</b><div class="uep-quick-actions">${kindQuick.map(q=>`<button class="uep-quick-card-v0755" draggable="true" data-reference="${q[0]}" data-quick-kind="${q[2]}"><i class="uep-quick-icon"></i><span><b>${q[1]}</b></span></button>`).join("")}</div></section>`;}).join("")}';
+if(!text.includes(before)) throw new Error('dashboardView quick grouping expected shape not found');
+text=text.replace(before,after);
+fs.writeFileSync(file,text);
+console.log('Applied dashboardView quick grouping single-filter optimization');
