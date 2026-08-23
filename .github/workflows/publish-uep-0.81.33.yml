@@ -1,0 +1,125 @@
+name: Publish UEP 0.81.33 Curriculum Security
+
+'on':
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/publish-uep-0.81.33.yml
+      - scripts/patch-uep-0.81.33.js
+      - publish-uep-0.81.33.trigger
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-uep-0.81.33
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download shipped 0.81.32
+        shell: pwsh
+        timeout-minutes: 2
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,out | Out-Null
+          gh release download v0.81.32 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+
+      - name: Apply 0.81.33 curriculum security patch
+        shell: pwsh
+        timeout-minutes: 2
+        run: |
+          $ErrorActionPreference='Stop'
+          node scripts/patch-uep-0.81.33.js app
+          node --check app/resources/app/gyomuon.js
+
+      - name: Verify exact 0.81.33 markers
+        shell: pwsh
+        timeout-minutes: 1
+        run: |
+          $ErrorActionPreference='Stop'
+          @'
+          const fs=require('fs');
+          const g=fs.readFileSync('app/resources/app/gyomuon.js','utf8');
+          const req=['const APP_VERSION = "0.81.33";','UEP_08133_CURRICULUM_SECURITY_START','교육과정 편성표','uep_subject_security_pin_hash','uep-subject-side-panel','cleanupFalseHolidayBadges()'];
+          for(const x of req) if(!g.includes(x)) throw new Error('missing 0.81.33 marker: '+x);
+          console.log('UEP 0.81.33 marker verification PASS');
+          '@ | Set-Content verify-08133.js -Encoding UTF8
+          node verify-08133.js
+
+      - name: Build 0.81.33 package
+        shell: pwsh
+        timeout-minutes: 3
+        run: |
+          $ErrorActionPreference='Stop'
+          $pkg='app/resources/app/package.json'
+          $j=Get-Content $pkg -Raw -Encoding UTF8 | ConvertFrom-Json
+          $j.version='0.81.33'
+          $j | ConvertTo-Json -Depth 50 | Set-Content $pkg -Encoding UTF8
+          Compress-Archive -Path app/* -DestinationPath out/UEP-update.zip -Force
+          $hash=(Get-FileHash out/UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "UEP_SHA256=$hash" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Publish v0.81.33
+        shell: pwsh
+        timeout-minutes: 3
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $tag='v0.81.33'
+          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+          if($LASTEXITCODE -eq 0){ gh release delete $tag --repo $env:GITHUB_REPOSITORY --yes --cleanup-tag }
+          $global:LASTEXITCODE=0
+          gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.33' --notes '교육과정 편성표 탭 신설, 과목별 신청현황 권한·보안 PIN 보호, 신청학생 우측 패널, 8/24~9/4 공휴일 오표시 정리' --draft
+          gh release upload $tag out/UEP-update.zip --repo $env:GITHUB_REPOSITORY --clobber
+          gh release edit $tag --repo $env:GITHUB_REPOSITORY --draft=false
+
+      - name: Promote updater fields to 0.81.33
+        shell: pwsh
+        timeout-minutes: 2
+        run: |
+          $ErrorActionPreference='Stop'
+          $url='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.33/UEP-update.zip'
+          $notes='교육과정 편성표·대외비 과목현황 보호·우측 상세패널·공휴일 오표시 정리'
+          $manifest=@{version='0.81.33';channel='stable';downloadUrl=$url;sha256=$env:UEP_SHA256;notes=$notes} | ConvertTo-Json
+          Set-Content uep-update.json $manifest -Encoding UTF8
+          Set-Content uep-version.json $manifest -Encoding UTF8
+          $policy=Get-Content uep-policy.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          $policy.latestVersion='0.81.33';$policy.downloadUrl=$url;$policy.sha256=$env:UEP_SHA256;$policy.message=$notes
+          if($policy.homeroomStableVersion){$policy.homeroomStableVersion='0.81.33'}
+          if($policy.sharedBoardStableVersion){$policy.sharedBoardStableVersion='0.81.33'}
+          $policy | ConvertTo-Json -Depth 50 | Set-Content uep-policy.json -Encoding UTF8
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add uep-update.json uep-version.json uep-policy.json
+          git diff --cached --quiet
+          if($LASTEXITCODE -ne 0){git commit -m 'release: promote UEP 0.81.33 updater fields';git push}
+
+      - name: Final release consistency check
+        shell: pwsh
+        timeout-minutes: 2
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force verify | Out-Null
+          gh release download v0.81.33 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir verify
+          $actual=(Get-FileHash verify/UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          if($actual -ne $env:UEP_SHA256){throw 'published ZIP SHA mismatch'}
+          Expand-Archive verify/UEP-update.zip verify/app -Force
+          $g=Get-Content verify/app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          $pkg=Get-Content verify/app/resources/app/package.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          if(-not $g.Contains('const APP_VERSION = "0.81.33";')){throw 'published runtime is not 0.81.33'}
+          if($pkg.version -ne '0.81.33'){throw 'published package is not 0.81.33'}
+          if(-not $g.Contains('UEP_08133_CURRICULUM_SECURITY_START')){throw 'published runtime missing 0.81.33 patch'}
+          Write-Host 'UEP 0.81.33 package and updater manifests are consistent.'
