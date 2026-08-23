@@ -1,0 +1,10 @@
+const fs=require('fs'),path=require('path');
+const root=process.argv[2]||'app';
+const file=path.join(root,'resources/app/gyomuon.js');
+let text=fs.readFileSync(file,'utf8');
+const before=`  const quickOrder=JSON.parse(localStorage.getItem('uepQuickOrder')||'{}');\n  quick.sort((a,b)=>{const aa=(quickOrder[a[2]]||[]).indexOf(a[0]),bb=(quickOrder[b[2]]||[]).indexOf(b[0]);return (aa<0?999:aa)-(bb<0?999:bb);});`;
+const after=`  const quickOrder=JSON.parse(localStorage.getItem('uepQuickOrder')||'{}');\n  const quickOrderRank=Object.fromEntries(Object.entries(quickOrder).map(([kind,ids])=>[kind,Object.fromEntries((Array.isArray(ids)?ids:[]).map((id,index)=>[id,index]))]));\n  quick.sort((a,b)=>{const aa=quickOrderRank[a[2]]?.[a[0]],bb=quickOrderRank[b[2]]?.[b[0]];return (Number.isInteger(aa)?aa:999)-(Number.isInteger(bb)?bb:999);});`;
+if(!text.includes(before)) throw new Error('dashboardView quick sort expected shape not found');
+text=text.replace(before,after);
+fs.writeFileSync(file,text);
+console.log('Applied dashboardView precomputed quick sort ranks');
