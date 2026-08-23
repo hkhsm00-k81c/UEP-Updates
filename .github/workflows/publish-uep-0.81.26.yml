@@ -1,0 +1,146 @@
+name: Publish UEP 0.81.26
+
+'on':
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/publish-uep-0.81.26.yml
+      - publish-uep-0.81.26.trigger
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download shipped 0.81.25
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,out | Out-Null
+          gh release download v0.81.25 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+
+      - name: Apply 0.81.26 runtime fixes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $patch=@'
+          const fs=require('fs');
+          const jsFile='app/resources/app/gyomuon.js';
+          let s=fs.readFileSync(jsFile,'utf8');
+          if(!s.includes('const APP_VERSION = "0.81.25";')) throw new Error('0.81.25 runtime anchor missing');
+          s=s.replace('const APP_VERSION = "0.81.25";','const APP_VERSION = "0.81.26";');
+
+          // Selection validation: 2-1/2-2 continuity for Japanese, Chinese, Music, Art.
+          const inject=`\n// __UEP_08126_SELECTION_CONTINUITY__\nconst __uepSelectionErrors08105_08126=uepSelectionErrors08105;\nuepSelectionErrors08105=function(row){\n  const errors=__uepSelectionErrors08105_08126(row);\n  const s21=uepSelectionTermSubjects(row,'2-1'),s22=uepSelectionTermSubjects(row,'2-2');\n  const groups=[['일본어',/일본어/],['중국어',/중국어/],['음악',/음악/],['미술',/미술/]];\n  groups.forEach(([label,rx])=>{\n    const a=s21.some(x=>rx.test(String(x))),b=s22.some(x=>rx.test(String(x)));\n    if(a!==b)errors.push({type:label+' 연계오류',term:'2-1 · 2-2',detail:'2학년 1·2학기 '+label+' 선택은 동일 계열로 이어져야 합니다.'});\n  });\n  const seen=new Set();\n  return errors.filter(e=>{const k=[e.type,e.term,e.detail].join('|');if(seen.has(k))return false;seen.add(k);return true;});\n};\n`;
+          const eventAnchor='// __UEP_08113_RESTORED_CURRICULUM_SDGS_BODY__';
+          if(!s.includes(eventAnchor)) throw new Error('selection injection anchor missing');
+          s=s.replace(eventAnchor,inject+'\n'+eventAnchor);
+
+          // Dorm supervisor report: Sunday = entry/late-entry; weekday = outing/checkout.
+          const reportRx=/const supervisorReportText=\(\)=>\{[\s\S]*?\};\s*const smsCards=/;
+          if(!reportRx.test(s)) throw new Error('supervisorReportText anchor missing');
+          const report=`const supervisorReportText=()=>{\n    const sunday=outingViewDate.getDay()===0;\n    const reportItems=sunday?items.filter(item=>/늦은\\s*입소|재입소|입소|복귀/.test(String(item.category||item.type||item.outingType||''))):items.filter(item=>/외출|퇴소|귀가/.test(String(item.category||item.type||item.outingType||'')));\n    const groups=new Map();\n    reportItems.forEach(item=>{const time=String((sunday?(item.returnTime||item.outTime):(item.outTime||item.returnTime))||'시간 미정');if(!groups.has(time))groups.set(time,[]);groups.get(time).push(item);});\n    const body=[...groups.entries()].sort((a,b)=>a[0].localeCompare(b[0])).map(([time,list])=>{const label=sunday?'입소':'이동';return '■ '+time+' '+label+'\\n'+list.sort((a,b)=>String(outingStudentNo(a)).localeCompare(String(outingStudentNo(b)))).map(item=>outingStudentNo(item)+' '+item.name).join('\\n');}).join('\\n\\n');\n    const title=sunday?'[오늘의 1학년 학사 입소 및 늦은 입소 현황]':'[오늘의 1학년 학사 외출 및 퇴소 현황]';\n    const empty=sunday?'금일 늦은 입소 학생 없음':'금일 학사 외출·퇴소 학생 없음';\n    return title+'\\n'+displayDate+'\\n\\n'+(body||empty)+'\\n\\n이상입니다.';\n  };  const smsCards=`;
+          s=s.replace(reportRx,report);
+
+          const oldEmail='const text=supervisorReportText(),subject=encodeURIComponent(`[운호고등학교] ${displayDate} 1학년 학사 귀가 학생`),body=encodeURIComponent(text);';
+          const newEmail='const text=supervisorReportText(),sunday=outingViewDate.getDay()===0,subject=encodeURIComponent(`[운호고등학교] ${displayDate} 1학년 ${sunday?"학사 입소 및 늦은 입소 현황":"학사 외출 및 퇴소 현황"}`),body=encodeURIComponent(text);';
+          if(!s.includes(oldEmail)) throw new Error('supervisor email subject anchor missing');
+          s=s.replace(oldEmail,newEmail);
+
+          fs.writeFileSync(jsFile,s,'utf8');
+          '@
+          Set-Content patch-08126.cjs $patch -Encoding UTF8
+          node patch-08126.cjs
+
+          $css='app/resources/app/gyomuon.css'
+          if(-not(Test-Path $css)){ $css='app/resources/app/style.css' }
+          if(-not(Test-Path $css)){ throw 'UEP CSS file not found' }
+          @'
+
+/* __UEP_08126_SELECTION_LAYOUT__ */
+.curriculum-filter-bar{display:flex!important;flex-wrap:nowrap!important;align-items:center!important;gap:8px!important;overflow-x:auto!important;white-space:nowrap!important}
+.curriculum-filter-bar .record-query-switch,.curriculum-filter-bar>label,.curriculum-filter-bar>.btn,.curriculum-filter-bar .uep-student-picker{flex:0 0 auto!important}
+.curriculum-filter-bar .record-class-cards{display:flex!important;flex-wrap:nowrap!important;gap:4px!important;flex:0 0 auto!important}
+.curriculum-filter-bar .record-class-cards button{min-width:58px!important}
+.curriculum-term-grid-four{display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:12px!important}
+.selection-roster.roster-six-columns .selection-roster-head,.selection-roster.roster-six-columns article{display:grid!important;grid-template-columns:minmax(210px,2fr) 90px 90px 140px 110px 110px!important;align-items:center!important}
+.selection-roster.roster-six-columns .expected-grade-cell{grid-column:6!important;white-space:nowrap!important}
+'@ | Add-Content $css -Encoding UTF8
+
+          node --check app/resources/app/gyomuon.js
+
+      - name: Verify 0.81.26 invariants
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          foreach($c in @(
+            'const APP_VERSION = "0.81.26";',
+            '__UEP_08126_SELECTION_CONTINUITY__',
+            "['일본어',/일본어/]",
+            "['중국어',/중국어/]",
+            "['음악',/음악/]",
+            "['미술',/미술/]",
+            '[오늘의 1학년 학사 입소 및 늦은 입소 현황]',
+            '학사 외출 및 퇴소 현황',
+            'sunday=outingViewDate.getDay()===0'
+          )){if(-not $g.Contains($c)){throw "missing invariant: $c"}}
+          if($g.Contains('const APP_VERSION = "0.81.25";')){throw 'stale APP_VERSION remains'}
+          $cssPath=if(Test-Path 'app/resources/app/gyomuon.css'){'app/resources/app/gyomuon.css'}else{'app/resources/app/style.css'}
+          $css=Get-Content $cssPath -Raw -Encoding UTF8
+          foreach($c in @('__UEP_08126_SELECTION_LAYOUT__','grid-template-columns:repeat(4,minmax(0,1fr))','grid-template-columns:minmax(210px,2fr) 90px 90px 140px 110px 110px')){if(-not $css.Contains($c)){throw "missing css invariant: $c"}}
+
+      - name: Build 0.81.26 package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $pkg='app/resources/app/package.json'
+          $j=Get-Content $pkg -Raw -Encoding UTF8 | ConvertFrom-Json
+          $j.version='0.81.26'
+          $j | ConvertTo-Json -Depth 50 | Set-Content $pkg -Encoding UTF8
+          Compress-Archive -Path app/* -DestinationPath out/UEP-update.zip -Force
+          $hash=(Get-FileHash out/UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "UEP_SHA256=$hash" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "SHA256=$hash"
+
+      - name: Publish release safely
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $tag='v0.81.26'
+          gh release delete $tag --repo $env:GITHUB_REPOSITORY --yes --cleanup-tag 2>$null
+          $global:LASTEXITCODE=0
+          gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.26' --notes 'Selection UI/error rules and dorm Sunday report formatting.' --draft
+          gh release upload $tag out/UEP-update.zip --repo $env:GITHUB_REPOSITORY --clobber
+          $assets=gh release view $tag --repo $env:GITHUB_REPOSITORY --json assets --jq '.assets[].name'
+          if($assets -notcontains 'UEP-update.zip'){throw 'release asset missing'}
+          gh release edit $tag --repo $env:GITHUB_REPOSITORY --draft=false
+
+      - name: Promote update manifests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $p=Get-Content uep-policy.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          $p.latestVersion='0.81.26'
+          $p.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.26/UEP-update.zip'
+          $p.sha256=$env:UEP_SHA256
+          $p.message='UEP 0.81.26 선택과목 화면·오류규칙 및 학사 일요일 입소보고 개선'
+          $p | ConvertTo-Json -Depth 50 | Set-Content uep-policy.json -Encoding UTF8
+          $m=Get-Content uep-update.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          $m.version='0.81.26';$m.channel='stable';$m.downloadUrl=$p.downloadUrl;$m.sha256=$env:UEP_SHA256;$m.notes='선택과목 화면·오류규칙 및 학사 일요일 입소보고 개선'
+          $m | ConvertTo-Json -Depth 50 | Set-Content uep-update.json -Encoding UTF8
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add uep-policy.json uep-update.json
+          git commit -m 'release: promote UEP 0.81.26 auto-update'
+          git push origin HEAD:main
