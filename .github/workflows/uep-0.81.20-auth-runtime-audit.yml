@@ -6,7 +6,7 @@ on:
       - .github/workflows/uep-0.81.20-auth-runtime-audit.yml
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
 jobs:
   audit:
     runs-on: windows-latest
@@ -45,7 +45,8 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          New-Item -ItemType Directory -Force auth-audit | Out-Null
+          $out='audit-output/auth-0.81.20'
+          New-Item -ItemType Directory -Force $out | Out-Null
           $files=@(
             'app/resources/app/gyomuon.js',
             'app/resources/app/electron/preload.cjs',
@@ -54,13 +55,23 @@ jobs:
           )
           $patterns='google:|googleCredential|selectGoogle|previewReadonly|readReadonly|service.account|serviceAccount|google-service-account|oauth|refresh.token|access.token|school.read|School Read|deviceId|userAccount|login|token|resolveSchool'
           foreach($f in $files){
-            "===== $f =====" | Add-Content auth-audit/AUTH-RUNTIME.txt
-            Select-String -Path $f -Pattern $patterns -CaseSensitive:$false -Context 8,20 | Out-String -Width 500 | Add-Content auth-audit/AUTH-RUNTIME.txt
+            "===== $f =====" | Add-Content "$out/AUTH-RUNTIME.txt"
+            Select-String -Path $f -Pattern $patterns -CaseSensitive:$false -Context 8,20 | Out-String -Width 500 | Add-Content "$out/AUTH-RUNTIME.txt"
           }
-          Get-Content app/resources/app/electron/main.cjs -Raw | Set-Content auth-audit/main.cjs.txt
-          Get-Content app/resources/app/electron/google-data.cjs -Raw | Set-Content auth-audit/google-data.cjs.txt
-          Get-Content app/resources/app/electron/preload.cjs -Raw | Set-Content auth-audit/preload.cjs.txt
+          Get-Content app/resources/app/electron/main.cjs -Raw | Set-Content "$out/main.cjs.txt"
+          Get-Content app/resources/app/electron/google-data.cjs -Raw | Set-Content "$out/google-data.cjs.txt"
+          Get-Content app/resources/app/electron/preload.cjs -Raw | Set-Content "$out/preload.cjs.txt"
+      - name: Persist auth audit snapshots
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add audit-output/auth-0.81.20
+          git diff --cached --quiet; if($LASTEXITCODE -eq 0){ Write-Host 'No auth snapshot changes'; exit 0 }
+          git commit -m 'audit: persist 0.81.20 auth runtime snapshots'
+          git push
       - uses: actions/upload-artifact@v4
         with:
           name: UEP-0.81.20-auth-runtime-audit
-          path: auth-audit
+          path: audit-output/auth-0.81.20
