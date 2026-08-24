@@ -1,0 +1,146 @@
+=== uepComparableDate ===
+2479: function uepComparableDate(value,basis=attendanceViewDate||dateKey(today)){
+2480:   if(value==null||value==='')return '';
+2481:   if(typeof value==='object')value=value.formattedValue||value.value||value.date||value.serial||'';
+2482:   const text=String(value).trim();
+2483:   if(/^\d{5}(?:\.\d+)?$/.test(text)){
+2484:     const serial=Number(text),utc=new Date(Math.round((serial-25569)*86400000));
+2485:     if(!Number.isNaN(utc.getTime()))return `${utc.getUTCFullYear()}-${String(utc.getUTCMonth()+1).padStart(2,'0')}-${String(utc.getUTCDate()).padStart(2,'0')}`;
+2486:   }
+2487:   const full=text.match(/(20\d{2})[^0-9]+(\d{1,2})[^0-9]+(\d{1,2})/);
+2488:   if(full)return `${full[1]}-${full[2].padStart(2,'0')}-${full[3].padStart(2,'0')}`;
+2489:   const compact=text.replace(/\D/g,'');
+2490:   if(/^20\d{6}$/.test(compact))return compact.slice(0,4)+'-'+compact.slice(4,6)+'-'+compact.slice(6,8);
+2491:   const monthDay=text.match(/(?:^|\D)(\d{1,2})\s*(?:월|[.\-/])\s*(\d{1,2})(?:\s*일)?(?:\D|$)/);
+2492:   if(monthDay){const year=String(basis||dateKey(today)).slice(0,4)||'2026';return year+'-'+monthDay[1].padStart(2,'0')+'-'+monthDay[2].padStart(2,'0');}
+2493:   const parsed=new Date(text);
+2494:   if(!Number.isNaN(parsed.getTime()))return `${parsed.getFullYear()}-${String(parsed.getMonth()+1).padStart(2,'0')}-${String(parsed.getDate()).padStart(2,'0')}`;
+2495:   return text.slice(0,10);
+2496: }
+2497: function attendanceView() {
+2498:   const officialRows = readonlyCache?.officialAttendance || [];
+2499:   const lateRows = readonlyCache?.lateAttendance || [];
+2500:   const nightRows = readonlyCache?.nightAttendance || readonlyCache?.attendance || [];
+2501:   if(attendanceMode==="night"&&!isNightOperatingDay(attendanceViewDate)){
+2502:     attendanceViewDate=nearestNightOperatingDay(attendanceViewDate);
+2503:     nightViewMonth=attendanceViewDate.slice(0,7);
+2504:   }
+2505:   const tabs = `<div class="attendance-tabs attendance-tabs-four"><button data-attendance-mode="official" class="${attendanceMode === "official" ? "active" : ""}">공결</button><button data-attendance-mode="late" class="${attendanceMode === "late" ? "active" : ""}">지각</button><button data-attendance-mode="night" class="${attendanceMode === "night" ? "active" : ""}">야자출결</button><button data-attendance-mode="statistics" class="${attendanceMode === "statistics" ? "active" : ""}">통계</button></div>`;
+2506:   if(attendanceMode === "statistics") return `<div class="module-page">${tabs}${attendancePersonalStatisticsView(officialRows,lateRows,nightRows)}</div>`;
+2507:   const genericRows = (rows, mode) => {
+2508:     if (!rows.length) return `<div class="empty-state data-card"><b>선택일에 ${mode} 기록이 없습니다.</b><span>${escapeHtml(attendanceViewDate)} 기준</span></div>`;
+2509:     return `<div class="data-card" id="attendanceRows"><div class="data-head attendance-detail-grid"><span>일자</span><span>학번</span><span>학생</span><span>구분</span><span>시간·교시</span><span>사유·상태</span><span>확인</span></div>${rows.slice().sort((a,b)=>String(b.date).localeCompare(String(a.date))).map(row => `<div class="data-row attendance-detail-grid attendance-row" data-search="${escapeHtml([row.date,row.studentNo,row.name,row.className,row.type,row.detail,row.reason,row.result].join(" ").toLowerCase())}"><time>${escapeHtml(row.date || "-")}</time><b>${escapeHtml(row.studentNo || "-")}</b><span>${escapeHtml(row.name || "-")} · ${escapeHtml(row.className || "-")}반</span><span>${escapeHtml(row.type || mode)}</span><span>${escapeHtml(row.time || row.period || "-")}</span><span title="${escapeHtml(row.sourceTab?`출처: ${row.sourceTab}`:"")}">${escapeHtml(row.reason || row.detail || row.result || "-")}${row.sourceTab?`<small class="attendance-source-tab">${escapeHtml(row.sourceTab)}</small>`:""}</span><span class="state ${String(row.result || row.guidance).includes("필요") || /결석|미입실|미제출/.test(String(row.result)) ? "warn" : ""}">${escapeHtml(row.result || row.guidance || "확인")}</span></div>`).join("")}</div>`;
+2510:   };
+2511:   if (attendanceMode === "official") {
+2512:     const selectedDay = officialRows.filter(row => uepComparableDate(row.date||row.day||row.rawDate||row['일자']||row['출결일자'],attendanceViewDate) === attendanceViewDate);
+2513:     const classes = Array.from({length:9},(_,i)=>String(i+1));
+2514:     const classSummary = classes.map(classNo=>{
+2515:       const rows=selectedDay.filter(row=>String(row.className||row.classNo||"")===classNo);
+2516:       return {classNo,records:rows.length,students:new Set(rows.map(attendanceStudentKey)).size};
+2517:     });
+2518:     const classFiltered = officialClassFilter === "all" ? selectedDay : selectedDay.filter(row=>String(row.className||row.classNo||"")===String(officialClassFilter));
+2519:     const rosterStudents=(readonlyCache?.students||[]).filter(student=>officialClassFilter==="all"||String(classNumberOf(student))===String(officialClassFilter)).sort((a,b)=>String(a.studentNo||"").localeCompare(String(b.studentNo||"")));
+2520:     const studentOptions=rosterStudents;
+2521:     if(officialStudentFilter!=="all"&&!studentOptions.some(row=>attendanceStudentKey(row)===officialStudentFilter))officialStudentFilter="all";
+2522:     const selected = officialStudentFilter === "all" ? classFiltered : classFiltered.filter(row=>attendanceStudentKey(row)===officialStudentFilter);
+2523:     const cumulativeRows=officialStudentFilter==="all"?[]:officialRows.filter(row=>attendanceStudentKey(row)===officialStudentFilter).sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+=== selection hit 6215 ===
+6208:     const careerValues=[career.hopeTrack,career.hopeMajor,career.aptitude].filter(v=>v&&v!=="-");
+6209:     const careerCard=`<section class="record-history-group record-career-profile compact"><header><h3>진로희망</h3><span>${careerValues.length?"등록":"0건"}</span></header>${careerValues.length?`<div class="career-support-strip compact record-career-strip"><span><small>진로희망계열</small><b>${escapeHtml(career.hopeTrack)}</b></span><span><small>진로희망전공</small><b>${escapeHtml(career.hopeMajor)}</b></span><span><small>대학적성데이터</small><b>${escapeHtml(career.aptitude)}</b></span></div>`:'<div class="empty-inline">연결 자료 없음</div>'}</section>`;
+6210:     return `<div class="record-history-grid record-history-three-columns record-history-layout-v700"><div class="record-history-small-stack">${officeCard}${careerCard}</div><div class="record-history-small-stack">${clubCard}${scholarshipCard}</div><div class="record-history-volunteer-stack">${outsideCard}</div><div class="record-history-inside-full">${insideCard}</div></div>`
+6211:   }
+6212:   if(recordMode==='sdgs') return sdgsDashboard(student,bundle);
+6213:   if(recordMode==='curriculum'){
+6214:     const byTerm=new Map();bundle.selected.forEach(x=>{const key=x.term||x.semester||'학기 미분류';if(!byTerm.has(key))byTerm.set(key,[]);byTerm.get(key).push(x);});
+6215:     const errors=selectionErrorsForStudent(student);const errorPanel=errors.length?`<section class="selection-error-panel"><header><div><small>ERROR REVIEW</small><h3>선택과목 오류검토</h3></div><span>${errors.length}건 확인 필요</span></header>${errors.map(x=>`<article><b>${escapeHtml(x.type)}</b><em>${escapeHtml(x.severity)}</em><p>${escapeHtml(x.detail||[x.subject,x.terms].filter(Boolean).join(' · '))}</p><small>${escapeHtml([x.subject,x.terms,x.status].filter(Boolean).join(' · '))}</small></article>`).join('')}</section>`:`<section class="selection-safe-panel"><b>✓ 선택과목 검증 정상</b><span>현재 선택과목 기준 문·이과 교차지원·과학과목 위계·학기간 중복과목 오류가 없습니다.</span></section>`;
+6216:     const profilePanel=`<section class="curriculum-career-profile subtle"><header><div><small>CAREER REFERENCE</small><h3>선택과목 상담 참고정보</h3></div><span>05_대학적성데이터</span></header>${careerSupportMarkup(student,bundle,true)}</section>`;
+6217:     const submit=selectionSubmissionInfo(bundle);
+6218:     return `<div class="curriculum-summary"><b>${escapeHtml(student?.name||'학생')} 선택과목</b><span>${bundle.selected.length}과목</span><small>최종 신청 ${escapeHtml(submit.date)} · ${submit.count}차 신청 · 8/3 안내 후 ${submit.modifiedAfterNotice?'수정함':'추가 수정 없음'}</small></div>${profilePanel}${errorPanel}<div class="curriculum-term-grid">${['2학년 1학기','2학년 2학기','3학년 1학기','3학년 2학기'].map(term=>{const rows=byTerm.get(term)||[];return `<section><header><h3>${escapeHtml(term)}</h3><span>${rows.length}과목</span></header>${rows.map(x=>`<article><b>${escapeHtml(x.subject)}</b><small>${escapeHtml([x.group,x.track,x.major].filter(Boolean).join(' · '))}</small><em>${escapeHtml(x.status||'상담용 신청')}</em></article>`).join('')||'<div class="empty-inline">신청 없음</div>'}</section>`;}).join('')}</div>${curriculumMessagePanel(student,bundle)}`;
+6219:   }
+6220:   return recordWriterWorkspace(student,bundle);
+6221: }
+6222: function recordsView() {
+6223:   const allStudents=readonlyCache?.students||[];
+6224:   const classStudents=allStudents.filter(s=>recordStudentClass(s)===String(recordClassNo)).sort((a,b)=>Number(a.number||0)-Number(b.number||0));
+6225:   if(!recordStudentId||!allStudents.some(s=>s.id===recordStudentId))recordStudentId=(classStudents[0]||allStudents[0])?.id||"";
+6226:   let student=allStudents.find(s=>s.id===recordStudentId)||classStudents[0]||allStudents[0];
+=== selection hit 12809 ===
+12802: }
+12803: // __UEP_08113_RESTORED_CURRICULUM_SDGS_BODY__
+12804: // __UEP_CURRICULUM_CANONICAL_08127__
+12805: let curriculumWorkspaceMode="students",curriculumErrorOnly=false,curriculumErrorType="all",curriculumTermFilter="2-1",curriculumSubjectKey="",curriculumRosterSort="grade";
+12806: function uepMainRecordTabs(){const tabs=[["activities","활동내역"],["sdgs","SDGs 연계 성장 프로파일"],["curriculum","교육과정"],["final","기록"]];return '<div class="record-main-tabs">'+tabs.map(([id,label])=>'<button data-record-mode="'+id+'" class="'+(recordMode===id?'active':'')+'"><b>'+label+'</b><small>'+(id==='activities'?'학생 활동 사실 확인':id==='sdgs'?'진로·전공·탐구주제·사회적 가치 연계':id==='curriculum'?'학기별 선택과목':'학생 성장 자료')+'</small></button>').join('')+'</div>';}
+12807: function uepCurriculumNav(){return '<div class="selection-analysis-tabs curriculum-final-tabs"><button data-curriculum-workspace="students" class="'+(curriculumWorkspaceMode==='students'?'active':'')+'">학생신청</button><button data-curriculum-workspace="subjects" class="'+(curriculumWorkspaceMode==='subjects'?'active':'')+'">과목별 신청현황</button></div>';}
+12808: function uepSelectionErrorLabel(errors){return errors.length?'<span class="selection-error-count">'+errors.length+'건 확인</span>':'<span class="selection-ok">정상</span>';}
+12809: function uepStudentApplicationDetail(row,errors){const student=row.__student,bundle=studentRecordBundle(student),sms=uepSelectionSms(student,errors),className=String(student.className||recordStudentClass(student)||'').replace(/반+$/,'');const career=careerSupportMarkup(student,bundle,false);const alert=errors.length?'<section class="selection-error-panel selection-error-first"><header><h3>먼저 확인할 신청 오류</h3><span>'+errors.length+'건</span></header>'+errors.map(x=>'<article><b>'+escapeHtml(x.type)+'</b><em>'+escapeHtml(x.term)+'</em><p>'+escapeHtml(x.detail)+'</p></article>').join('')+'</section>':'<section class="selection-safe-panel selection-safe-first"><b>✓ 선택과목 검증 정상</b><span>현재 신청자료에서 확인할 오류가 없습니다.</span></section>';const termCards=['2-1','2-2','3-1','3-2'].map(term=>'<section><header><h3>'+term.replace('-','학년 ')+'학기</h3><span>'+uepSelectionTermSubjects(row,term).length+'과목</span></header><div class="selection-group-stack">'+uepSelectionTermGroups08128(row,term).map(g=>'<div class="selection-choice-group"><div class="selection-choice-head"><b>'+escapeHtml(g.label)+'</b><span>'+(g.pick?'택'+g.pick:'선택')+'</span></div>'+((g.subjects||[]).map(x=>{const state=uepSelectionSubjectState(x,term,errors);return '<article class="'+state.cls+'"><b>'+escapeHtml(x)+'</b><em>'+escapeHtml(state.label)+'</em></article>';}).join('')||'<div class="selection-missing">미신청</div>')+'</div>').join('')+'</div></section>').join('');return '<section class="curriculum-student-detail"><header><div><small>'+escapeHtml(student.studentNo)+' · '+escapeHtml(className)+'반</small><h3>'+escapeHtml(student.name)+' 학생신청</h3><em class="selection-rule-source">검증기준 · '+escapeHtml(uepSelectionRuleSource08129())+'</em></div>'+uepSelectionErrorLabel(errors)+'</header>'+career+alert+'<div class="curriculum-term-grid curriculum-term-grid-four">'+termCards+'</div>'+(errors.length?'<section class="curriculum-message-panel"><header><div><small>STUDENT MESSAGE</small><h3>현재 오류 보완 문자</h3></div><button class="btn primary" data-copy-current-selection-sms>문자 복사</button></header><textarea id="currentSelectionSms" readonly>'+escapeHtml(sms)+'</textarea></section>':'')+'</section>';}
+12810: function uepStudentApplicationView(){
+12811:   const data=uepSelectionDataset(),allRows=data.rows.filter(uepSelectionActiveRow08129),types=[...new Set(data.errors.map(x=>x.type))];
+12812:   const errorsFor=r=>data.errors.filter(e=>e.student.id===r.__student.id);
+12813:   const matchesError=r=>{const es=errorsFor(r);return(!curriculumErrorOnly||es.length)&&(curriculumErrorType==='all'||es.some(e=>e.type===curriculumErrorType));};
+12814:   const rowsForClass=no=>no==='all'?allRows:allRows.filter(r=>recordStudentClass(r.__student)===String(no));
+12815:   const classButton=(no,label)=>{const rows=rowsForClass(no),errorRows=rows.filter(r=>errorsFor(r).length);const count=curriculumErrorOnly?errorRows.length:rows.length;const sub=curriculumErrorOnly?'오류 '+count+'명':count+'명';return '<button data-record-class="'+no+'" class="'+(String(recordClassNo)===String(no)?'active':'')+'"><b>'+label+'</b><span>'+sub+'</span></button>';};
+12816:   if(!recordClassNo)recordClassNo='all';
+12817:   const scope=rowsForClass(String(recordClassNo)),visible=scope.filter(matchesError);
+12818:   if(recordStudentId&&!scope.some(r=>r.__student.id===recordStudentId))recordStudentId='';
+12819:   const chosen=recordStudentId?scope.find(r=>r.__student.id===recordStudentId):null,errs=chosen?errorsFor(chosen):[];
+12820:   const controls='<div class="curriculum-mode-block curriculum-unified-mode"><div class="curriculum-filter-bar class-mode"><div class="record-class-cards">'+classButton('all','전체')+Array.from({length:9},(_,i)=>classButton(String(i+1),(i+1)+'반')).join('')+'</div><button class="btn '+(curriculumErrorOnly?'primary':'secondary')+'" data-curriculum-error-only>'+(curriculumErrorOnly?'오류학생만 보는 중':'오류학생만 보기')+'</button><label>오류유형<select data-curriculum-error-type><option value="all">전체 오류</option>'+types.map(x=>'<option value="'+escapeHtml(x)+'" '+(curriculumErrorType===x?'selected':'')+'>'+escapeHtml(x)+'</option>').join('')+'</select></label></div></div>';
+=== selection hit 12948 ===
+12941:     [/(세포와 물질대사|생물의 유전)/,/생명과학/ ,"생명과학"],
+12942:     [/지구시스템과학/,/지구과학/ ,"지구과학"]
+12943:   ];
+12944:   hierarchy.forEach(([advanced,basic,label])=>{if(second.some(x=>advanced.test(x))&&!first.some(x=>basic.test(x)))errors.push({type:"과학과목 위계오류",term:"2-1 → 2-2",detail:`${label} 선이수 과목 확인 필요`});});
+12945:   const lang1=String(row["2-1 정보·외국어"]||""),lang2=String(row["2-2 정보·외국어"]||"");
+12946:   const l1=/중국/.test(lang1)?"중국어":/일본/.test(lang1)?"일본어":"";
+12947:   const l2=/중국/.test(lang2)?"중국어":/일본/.test(lang2)?"일본어":"";
+12948:   if((l1||l2)&&l1!==l2)errors.push({type:"제2외국어 연계오류",term:"2-1 → 2-2",detail:`${lang1||"미신청"} → ${lang2||"미신청"}`});
+12949:   const art1=String(row["2-1 예술"]||""),art2=String(row["2-2 예술"]||"");
+12950:   const a1=/음악/.test(art1)?"음악":/미술/.test(art1)?"미술":"";
+12951:   const a2=/음악/.test(art2)?"음악":/미술/.test(art2)?"미술":"";
+12952:   if((a1||a2)&&a1!==a2)errors.push({type:"예술과목 연계오류",term:"2-1 → 2-2",detail:`${art1||"미신청"} → ${art2||"미신청"}`});
+12953:   if(!first.length||!second.length)errors.push({type:"신청 누락",term:!first.length?"2-1":"2-2",detail:"해당 학기 선택과목이 비어 있습니다."});
+12954:   return errors;
+12955: }
+12956: 
+12957: // __UEP_08115_SDGS_SUPPLEMENT__
+12958: function uepSdgsSupplementPanel(){
+12959:   const student=(readonlyCache?.students||[]).find(s=>String(s.id)===String(recordStudentId));
+=== selection hit 12952 ===
+12945:   const lang1=String(row["2-1 정보·외국어"]||""),lang2=String(row["2-2 정보·외국어"]||"");
+12946:   const l1=/중국/.test(lang1)?"중국어":/일본/.test(lang1)?"일본어":"";
+12947:   const l2=/중국/.test(lang2)?"중국어":/일본/.test(lang2)?"일본어":"";
+12948:   if((l1||l2)&&l1!==l2)errors.push({type:"제2외국어 연계오류",term:"2-1 → 2-2",detail:`${lang1||"미신청"} → ${lang2||"미신청"}`});
+12949:   const art1=String(row["2-1 예술"]||""),art2=String(row["2-2 예술"]||"");
+12950:   const a1=/음악/.test(art1)?"음악":/미술/.test(art1)?"미술":"";
+12951:   const a2=/음악/.test(art2)?"음악":/미술/.test(art2)?"미술":"";
+12952:   if((a1||a2)&&a1!==a2)errors.push({type:"예술과목 연계오류",term:"2-1 → 2-2",detail:`${art1||"미신청"} → ${art2||"미신청"}`});
+12953:   if(!first.length||!second.length)errors.push({type:"신청 누락",term:!first.length?"2-1":"2-2",detail:"해당 학기 선택과목이 비어 있습니다."});
+12954:   return errors;
+12955: }
+12956: 
+12957: // __UEP_08115_SDGS_SUPPLEMENT__
+12958: function uepSdgsSupplementPanel(){
+12959:   const student=(readonlyCache?.students||[]).find(s=>String(s.id)===String(recordStudentId));
+12960:   if(!student)return "";
+12961:   const bundle=studentRecordBundle(student),reports=bundle.reports||[],activities=bundle.activities||[],programs=bundle.programs||[];
+12962:   const questions=[];
+12963:   if(!reports.length)questions.push("참여 활동에서 새롭게 알게 된 사실과 생각이 달라진 지점을 구체적으로 적어 주세요.");
+=== selection hit 13111 ===
+13104:  }
+13105:  async function digest(v){const b=new TextEncoder().encode(v);const h=await crypto.subtle.digest('SHA-256',b);return [...new Uint8Array(h)].map(x=>x.toString(16).padStart(2,'0')).join('');}
+13106:  function block(title,pick,items){return '<section class="uep134-block"><div class="uep134-block-head"><b>'+title+'</b>'+(pick?'<span>'+pick+'</span>':'')+'</div><div class="uep134-chips">'+items.map(x=>'<span>'+x+'</span>').join('')+'</div></section>';}
+13107:  const plan={
+13108:   '1-1':[block('공통·학교지정','', ['공통국어1','공통수학1','공통영어1','한국사1','통합사회1','통합과학1','과학탐구실험1','체육1','음악','정보*'])],
+13109:   '1-2':[block('공통·학교지정','', ['공통국어2','공통수학2','공통영어2','한국사2','통합사회2','통합과학2','과학탐구실험2','체육2','미술','한문'])],
+13110:   '2-1':[block('공통·학교지정','',['문학','대수*','영어Ⅰ','운동과 건강','음악','정보*']),block('탐구·교과 선택','택3',['독서 토론과 글쓰기','세계 문화와 영어','인공지능 수학*','세계사','현대사회와 윤리','도시의 미래 탐구','경제','물리학*','화학','생명과학','지구과학']),block('제2외국어·정보','택1',['중국어','일본어','인공지능 기초*']),block('예술','택1',['음악 연주와 창작','미술 창작'])],
+13111:   '2-2':[block('공통·학교지정','',['화법과 언어','미적분Ⅰ*','영어Ⅱ','스포츠 문화','미술','한문']),block('탐구·교과 선택','택3',['문학과 영상','미디어 영어*','기하*','세계시민과 지리','사회와 문화','동아시아 역사 기행','인문학과 윤리','역학과 에너지','물질과 에너지','세포와 물질대사','지구시스템과학']),block('제2외국어·정보','택1',['중국어 회화','일본어 회화','정보과학*']),block('예술','택1',['음악과 미디어','미술과 매체'])],
+13112:   '3-1':[block('공통·학교지정','',['독서와 작문','확률과 통계*','영어 독해와 작문','스포츠 과학']),block('전공심화 선택','택5',['언어생활 탐구','미적분Ⅱ*','영미 문학 읽기','한국지리 탐구','정치','법과 사회','윤리와 사상','역사로 탐구하는 현대세계','역학과 에너지','전자기와 양자','물질과 에너지','화학 반응의 세계','세포와 물질대사','생물의 유전','지구시스템과학','행성우주과학']),block('제2외국어·정보','택1',['데이터 과학*','심화 중국어','심화 일본어','한문 고전 읽기'])],
+13113:   '3-2':[block('공통·학교지정','',['스포츠 생활1']),block('전공심화 선택','택7',['주제 탐구 독서','매체 의사소통','전문수학*','수학과 문화','심화영어','심화영어 독해와 작문','여행지리','사회문제탐구','금융과 경제생활','윤리문제탐구','과학의 역사와 문화','기후변화와 환경생태','융합과학 탐구*']),block('제2외국어·정보','택1',['소프트웨어와 생활*','중국 문화','일본 문화','언어생활과 한자'])]
+13114:  };
+13115:  function planHtml(){return '<div class="uep134-plan"><div class="uep134-title"><b>2026학년도 입학생 3개년 교육과정 편성표</b><span>학교교육과정DB 기준</span></div>'+Object.entries(plan).map(([sem,blocks])=>'<section class="uep134-sem"><h3>'+sem.replace('-','학년 ')+'학기</h3><div class="uep134-blocks">'+blocks.join('')+'</div></section>').join('')+'</div>';}
+13116:  function setActive(btns,active){btns.forEach(b=>{b.style.background=b===active?'#0b8a78':'';b.style.color=b===active?'#fff':'';});}
+13117:  function ensureTabs(){
+13118:    const bs=[...document.querySelectorAll('button,[role="button"]')];
+13119:    const student=bs.find(x=>exact(x,'학생신청')); const subject=bs.find(x=>exact(x,'과목별 신청현황')); if(!student||!subject)return;
+13120:    const row=student.parentElement;if(!row||row!==subject.parentElement)return;
+13121:    row.style.display='grid';row.style.gridTemplateColumns='repeat(3,minmax(0,1fr))';row.style.gap='10px';
+13122:    let planBtn=row.querySelector('[data-uep134-plan]');if(!planBtn){planBtn=student.cloneNode(true);planBtn.dataset.uep134Plan='1';planBtn.textContent='교육과정 편성표';row.insertBefore(planBtn,student);}
