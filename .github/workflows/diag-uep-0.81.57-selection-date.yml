@@ -1,0 +1,55 @@
+name: Diagnose UEP 0.81.57 Selection Date
+
+'on':
+  push:
+    branches: [main]
+    paths: [diag-08157-selection-date.trigger]
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download 0.81.57
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'; New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.81.57 --repo $env:GITHUB_REPOSITORY --pattern '*.zip' --dir source
+          $zip=Get-ChildItem source -File -Filter '*.zip'|Select-Object -First 1; if(!$zip){throw 'release zip missing'}; Expand-Archive $zip.FullName app -Force
+      - name: Inspect relevant code
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $files=@('app/resources/app/gyomuon.js','app/resources/app/electron/main.cjs','app/resources/app/electron/google-data.cjs')
+          $patterns=@('공결·지각 학생','공결지각','선택과목 검증 정상','예술 선택','음악 연주와 창작','미술과 매체','toISOString','new Date(','substring(0,10)','slice(0,10)')
+          $out=@()
+          foreach($f in $files){
+            if(!(Test-Path $f)){continue}
+            $lines=Get-Content $f -Encoding UTF8
+            $out += "===== $f ====="
+            for($i=0;$i -lt $lines.Count;$i++){
+              foreach($p in $patterns){
+                if($lines[$i].Contains($p)){
+                  $s=[Math]::Max(0,$i-5); $e=[Math]::Min($lines.Count-1,$i+8)
+                  $out += "--- match [$p] line $($i+1) ---"
+                  for($j=$s;$j -le $e;$j++){ $out += ('{0,6}: {1}' -f ($j+1),$lines[$j]) }
+                  break
+                }
+              }
+            }
+          }
+          $out | Set-Content diag-08157-selection-date.txt -Encoding UTF8
+      - name: Commit report
+        shell: pwsh
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add diag-08157-selection-date.txt
+          git commit -m 'diag: inspect 0.81.57 selection and date logic'
+          git push
