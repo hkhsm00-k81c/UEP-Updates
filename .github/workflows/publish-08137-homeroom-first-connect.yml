@@ -1,0 +1,114 @@
+name: Publish UEP 0.81.37 Homeroom First-Connect Hotfix
+
+'on':
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [publish-08137-homeroom-first-connect.trigger]
+
+permissions:
+  contents: write
+
+jobs:
+  build-publish:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build clean hotfix from shipped 0.81.35
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          Remove-Item source,app,verify -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force source,app,verify | Out-Null
+          gh release download v0.81.35 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+          if(!(Test-Path 'app/UEP.exe')){ throw 'base 0.81.35 package has no root UEP.exe' }
+          $gy=(Get-ChildItem app -Recurse -File -Filter gyomuon.js | Select-Object -First 1).FullName
+          if(!$gy){ throw 'gyomuon.js not found' }
+          $text=Get-Content $gy -Raw -Encoding UTF8
+
+          $old1=".then((status) => { if (status) googleConnectionStatus = {ok:Boolean(status.authenticated),encryption:true,mode:'school_read_api',endpointReady:status.endpointReady!==false}; })"
+          $new1=".then((status) => { if(status?.authenticated){ googleConnectionStatus={ok:true,encryption:true,mode:'school_read_api',endpointReady:status.endpointReady!==false}; } else if(!googleConnectionStatus?.ok && status){ googleConnectionStatus={ok:false,encryption:true,mode:'school_read_api',endpointReady:status.endpointReady!==false}; } })"
+          if(!$text.Contains($old1)){ throw 'startup session status target not found' }
+          $text=$text.Replace($old1,$new1)
+
+          $old2=@"
+async function previewReadonlySync() {
+  if (!googleConnectionStatus.ok || !window.schoolBoard?.previewReadonlySync)
+    return toast("먼저 Google 연결 인증을 등록하세요.");
+"@
+          $new2=@"
+async function previewReadonlySync() {
+  if (!window.schoolBoard?.previewReadonlySync)
+    return toast("학교 공용 데이터 연결 기능을 찾지 못했습니다.");
+  if (!googleConnectionStatus?.ok && window.schoolBoard?.schoolReadSessionStatus) {
+    try {
+      const status = await window.schoolBoard.schoolReadSessionStatus({verify:true});
+      if (status?.authenticated) googleConnectionStatus = {ok:true,encryption:true,mode:'school_read_api',endpointReady:status.endpointReady!==false};
+    } catch (_) {}
+  }
+  if (!googleConnectionStatus?.ok)
+    return toast("학교 공용 읽기 연결을 확인하지 못했습니다. 다시 로그인해 주세요.");
+"@
+          if(!$text.Contains($old2)){ throw 'manual readonly sync target not found' }
+          $text=$text.Replace($old2,$new2)
+
+          $old3="  if(!googleConnectionStatus?.ok || !window.schoolBoard?.previewReadonlySync || !window.schoolBoard?.readReadonlyCache) return false;"
+          $new3=@"
+  if(!window.schoolBoard?.previewReadonlySync || !window.schoolBoard?.readReadonlyCache) return false;
+  if(!googleConnectionStatus?.ok && window.schoolBoard?.schoolReadSessionStatus){
+    try{
+      const status=await window.schoolBoard.schoolReadSessionStatus({verify:true});
+      if(status?.authenticated) googleConnectionStatus={ok:true,encryption:true,mode:'school_read_api',endpointReady:status.endpointReady!==false};
+    }catch(_){}
+  }
+  if(!googleConnectionStatus?.ok) return false;
+"@
+          if(!$text.Contains($old3)){ throw 'silent readonly sync target not found' }
+          $text=$text.Replace($old3,$new3.TrimEnd())
+          Set-Content $gy $text -Encoding UTF8 -NoNewline
+
+          $pkg=(Get-ChildItem app -Recurse -File -Filter package.json | Where-Object { $_.FullName -like '*resources*app*package.json' } | Select-Object -First 1).FullName
+          if($pkg){
+            $p=Get-Content $pkg -Raw -Encoding UTF8
+            $p=$p -replace '"version"\s*:\s*"0\.81\.35"','"version": "0.81.37"'
+            Set-Content $pkg $p -Encoding UTF8 -NoNewline
+          }
+
+          $check=Get-Content $gy -Raw -Encoding UTF8
+          foreach($needle in @("status?.authenticated){ googleConnectionStatus={ok:true","학교 공용 읽기 연결을 확인하지 못했습니다","if(!googleConnectionStatus?.ok && window.schoolBoard?.schoolReadSessionStatus)")){
+            if(!$check.Contains($needle)){ throw "verification missing: $needle" }
+          }
+          if(($check.Split("학교 공용 읽기 연결을 확인하지 못했습니다").Count-1) -ne 1){ throw 'manual recovery patch duplicated' }
+
+          Remove-Item UEP-update.zip -Force -ErrorAction SilentlyContinue
+          Compress-Archive -Path 'app/*' -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          Expand-Archive UEP-update.zip verify -Force
+          if(!(Test-Path 'verify/UEP.exe')){ throw 'built package missing root UEP.exe' }
+          if(!(Get-ChildItem verify -Recurse -File -Filter gyomuon.js | Select-Object -First 1)){ throw 'built package missing gyomuon.js' }
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "SHA256=$sha" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Publish release and atomically promote stable channel
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          gh release delete v0.81.37 --repo $env:GITHUB_REPOSITORY --cleanup-tag -y 2>$null; $global:LASTEXITCODE=0
+          gh release create v0.81.37 UEP-update.zip --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.37 Homeroom First-Connect Hotfix' --notes 'Clean rebuild from 0.81.35. Fixes first Google school-read connection for newly distributed homeroom PCs only.'
+          $url='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.37/UEP-update.zip'
+          $policy=Get-Content uep-policy.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          $policy.latestVersion='0.81.37'; $policy.downloadUrl=$url; $policy.sha256=$env:SHA256; $policy.message='담임 신규 PC 학교 공용 Google 읽기 최초 연결 복구'; $policy.forceUpdate=$false
+          $policy | ConvertTo-Json -Depth 10 | Set-Content uep-policy.json -Encoding UTF8
+          $update=Get-Content uep-update.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          $update.version='0.81.37'; $update.downloadUrl=$url; $update.sha256=$env:SHA256; $update.notes='담임 신규 PC 학교 공용 Google 읽기 최초 연결 복구'
+          $update | ConvertTo-Json -Depth 10 | Set-Content uep-update.json -Encoding UTF8
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add uep-policy.json uep-update.json
+          git commit -m 'release: promote 0.81.37 homeroom first-connect hotfix'
+          git push
