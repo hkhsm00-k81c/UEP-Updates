@@ -1,0 +1,74 @@
+name: Diagnose UEP 0.81.36 Google Auth and Subject Lock
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/diagnose-uep-0.81.36-google-auth.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download shipped 0.81.36
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $release=Invoke-RestMethod -Headers @{ 'User-Agent'='UEP-Diag' } -Uri 'https://api.github.com/repos/${{ github.repository }}/releases/tags/v0.81.36'
+          $asset=$release.assets | Where-Object { $_.name -like '*.zip' } | Select-Object -First 1
+          if(-not $asset){throw '0.81.36 zip asset not found'}
+          Invoke-WebRequest -Headers @{ 'User-Agent'='UEP-Diag'; 'Accept'='application/octet-stream' } -Uri $asset.browser_download_url -OutFile shipped.zip
+          Expand-Archive shipped.zip -DestinationPath app -Force
+
+      - name: Map Google auth and subject confidential paths
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $target=(Get-ChildItem app -Recurse -File -Filter gyomuon.js | Select-Object -First 1).FullName
+          if(-not $target){throw 'gyomuon.js not found'}
+          $lines=Get-Content $target -Encoding UTF8
+          $patterns=@(
+            'Google 연결 인증','먼저 Google','구글 새로고침','연결 설정','Google 연결','UEP 구글시트',
+            'oauth','credential','credentials','token','accessToken','refreshToken','google','sheets','spreadsheet',
+            'subjectConfidential','선택과목 대외비','과목별 신청현황','unlockSubjectConfidential','settingsView'
+          )
+          $out=@()
+          $out += '# UEP 0.81.36 Google Auth / Subject Lock Structural Map'
+          $out += ''
+          $out += ('Runtime: `' + $target + '`')
+          $out += ''
+          foreach($p in $patterns){
+            $hits=Select-String -Path $target -Pattern $p -SimpleMatch
+            if($hits){
+              $out += ('## ' + $p)
+              foreach($h in ($hits | Select-Object -First 20)){
+                $start=[Math]::Max(0,$h.LineNumber-8)
+                $end=[Math]::Min($lines.Count-1,$h.LineNumber+7)
+                $out += ('### line ' + $h.LineNumber)
+                $out += '```js'
+                for($i=$start;$i -le $end;$i++){$out += ('{0,6}: {1}' -f ($i+1),$lines[$i])}
+                $out += '```'
+              }
+              $out += ''
+            }
+          }
+          New-Item -ItemType Directory -Force diagnostics | Out-Null
+          Set-Content diagnostics/uep-0.81.36-google-auth-map.md -Value $out -Encoding UTF8
+
+      - name: Commit structural map
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add diagnostics/uep-0.81.36-google-auth-map.md
+          if((git diff --cached --name-only).Count -gt 0){
+            git commit -m 'diag: record 0.81.36 google auth and subject lock map'
+            git push
+          }
