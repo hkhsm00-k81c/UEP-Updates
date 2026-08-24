@@ -1,0 +1,81 @@
+name: Publish UEP 0.81.43 Counsel Class Repair
+
+'on':
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - publish-uep-0.81.43.trigger
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-uep-0.81.43
+  cancel-in-progress: true
+
+jobs:
+  build-publish:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download 0.81.42
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,verify | Out-Null
+          gh release download v0.81.42 --repo $env:GITHUB_REPOSITORY --pattern '*.zip' --dir source
+          $zip=Get-ChildItem source -File -Filter '*.zip' | Select-Object -First 1
+          if(!$zip){throw '0.81.42 release zip not found'}
+          Expand-Archive $zip.FullName app -Force
+          if(!(Test-Path 'app/UEP.exe')){throw '0.81.42 base has no root UEP.exe'}
+      - name: Apply and verify counsel class repair
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node scripts/patch-uep-0.81.43.js app
+          node --check app/resources/app/gyomuon.js
+          $pkg='app/resources/app/package.json'
+          $p=Get-Content $pkg -Raw -Encoding UTF8 | ConvertFrom-Json
+          $p.version='0.81.43'
+          $p | ConvertTo-Json -Depth 50 | Set-Content $pkg -Encoding UTF8
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          foreach($x in @('const APP_VERSION = "0.81.43";','0.81.43: "1-5"에서 학년 숫자까지 합치지 않고 마지막 반 번호(5)만 사용합니다.',"split('-').pop().replace(/\D/g,'')")){if(!$g.Contains($x)){throw "missing renderer marker: $x"}}
+          if($p.version -ne '0.81.43'){throw 'package version mismatch'}
+      - name: Build package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Compress-Archive -Path 'app/*' -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          Expand-Archive UEP-update.zip verify -Force
+          $g=Get-Content verify/resources/app/gyomuon.js -Raw -Encoding UTF8
+          if(!(Test-Path 'verify/UEP.exe')){throw 'root UEP.exe missing'}
+          if(!$g.Contains('const APP_VERSION = "0.81.43";')){throw 'packaged version mismatch'}
+          if(!$g.Contains("split('-').pop().replace(/\D/g,'')")){throw 'packaged counsel class repair missing'}
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "UEP_SHA256=$sha" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Publish and promote 0.81.43
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          gh release view v0.81.43 --repo $env:GITHUB_REPOSITORY *> $null
+          if($LASTEXITCODE -eq 0){gh release delete v0.81.43 --repo $env:GITHUB_REPOSITORY --cleanup-tag --yes}
+          $global:LASTEXITCODE=0
+          gh release create v0.81.43 UEP-update.zip --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.43 Counsel Class Repair' --notes '상담 화면이 모든 담임의 학년-반 값을 잘못 합쳐 표시하던 공통 오류를 수정합니다.'
+          $url='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.43/UEP-update.zip'
+          $policy=Get-Content uep-policy.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          $policy.latestVersion='0.81.43';$policy.downloadUrl=$url;$policy.sha256=$env:UEP_SHA256;$policy.message='상담 화면 담임반 공통 인식 오류 수정';$policy.forceUpdate=$false
+          $policy | ConvertTo-Json -Depth 50 | Set-Content uep-policy.json -Encoding UTF8
+          $manifest=@{version='0.81.43';channel='stable';downloadUrl=$url;sha256=$env:UEP_SHA256;notes='상담 화면 담임반 공통 인식 오류 수정'} | ConvertTo-Json
+          Set-Content uep-update.json $manifest -Encoding UTF8
+          Set-Content uep-version.json $manifest -Encoding UTF8
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add uep-policy.json uep-update.json uep-version.json
+          git commit -m 'release: promote UEP 0.81.43 counsel class repair'
+          git push
