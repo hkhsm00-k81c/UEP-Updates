@@ -27,6 +27,7 @@ jobs:
           if(-not $asset){throw '0.81.35 zip asset not found'}
           Invoke-WebRequest -Headers @{ 'User-Agent'='UEP-Updater'; 'Accept'='application/octet-stream' } -Uri $asset.browser_download_url -OutFile shipped.zip
           Expand-Archive shipped.zip -DestinationPath app -Force
+          if(-not (Test-Path 'app/UEP.exe')){throw 'shipped 0.81.35 package is missing UEP.exe'}
 
       - name: Apply source-level 0.81.36 repair
         shell: pwsh
@@ -79,12 +80,15 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          $root=(Get-ChildItem app -Directory | Select-Object -First 1).FullName
-          if(-not $root){$root=(Resolve-Path app).Path}
           $out='UEP-Windows-x64-v0.81.36-source-repair.zip'
           if(Test-Path $out){Remove-Item $out -Force}
-          Compress-Archive -Path "$root\*" -DestinationPath $out -Force
-          Write-Host "built $out"
+          if(-not (Test-Path 'app/UEP.exe')){throw 'UEP.exe missing before packaging'}
+          Compress-Archive -Path 'app/*' -DestinationPath $out -Force
+          New-Item -ItemType Directory -Force verify-package | Out-Null
+          Expand-Archive -LiteralPath $out -DestinationPath verify-package -Force
+          if(-not (Test-Path 'verify-package/UEP.exe')){throw 'built update zip does not contain root UEP.exe'}
+          if(-not (Test-Path 'verify-package/resources/app/gyomuon.js')){throw 'built update zip does not contain runtime resources'}
+          Write-Host "built $out with root UEP.exe"
 
       - name: Publish v0.81.36
         uses: softprops/action-gh-release@v2
@@ -97,6 +101,7 @@ jobs:
             - separate subject confidential password controls
             - detailed official attendance labels
             - removed legacy runtime DOM repair coupling
+            - fixed Launcher V2 update package layout (root UEP.exe included)
           files: UEP-Windows-x64-v0.81.36-source-repair.zip
           make_latest: false
 
@@ -104,17 +109,29 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          $files=@('latest.yml','update.yml') | Where-Object { Test-Path $_ }
-          foreach($file in $files){
-            $text=Get-Content $file -Raw -Encoding UTF8
-            $text=$text -replace '0\.81\.35','0.81.36'
-            Set-Content -Path $file -Value $text -Encoding UTF8 -NoNewline
-            git add $file
-          }
+          $asset=(Get-Item 'UEP-Windows-x64-v0.81.36-source-repair.zip')
+          $hash=(Get-FileHash $asset.FullName -Algorithm SHA256).Hash.ToLower()
+          $download='https://github.com/${{ github.repository }}/releases/download/v0.81.36/UEP-Windows-x64-v0.81.36-source-repair.zip'
+
+          $policy=Get-Content 'uep-policy.json' -Raw -Encoding UTF8 | ConvertFrom-Json
+          $policy.latestVersion='0.81.36'
+          $policy.downloadUrl=$download
+          $policy.sha256=$hash
+          $policy.message='UEP 0.81.36 소스 정합성·공휴일·선택과목 보안·공결상세 및 업데이트 패키지 구조 수정'
+          $policy | ConvertTo-Json -Depth 50 | Set-Content 'uep-policy.json' -Encoding UTF8
+
+          $manifest=Get-Content 'uep-update.json' -Raw -Encoding UTF8 | ConvertFrom-Json
+          $manifest.version='0.81.36'
+          $manifest.downloadUrl=$download
+          $manifest.sha256=$hash
+          $manifest.notes='UEP 0.81.36 소스 정합성 및 Launcher V2 패키지 구조 수정'
+          $manifest | ConvertTo-Json -Depth 50 | Set-Content 'uep-update.json' -Encoding UTF8
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add uep-policy.json uep-update.json
           if((git diff --cached --name-only).Count -gt 0){
-            git config user.name 'github-actions[bot]'
-            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git commit -m 'release: promote updater metadata to 0.81.36'
+            git commit -m 'release: promote updater metadata to repaired 0.81.36'
             git push
           }
 
@@ -125,4 +142,7 @@ jobs:
           $release=Invoke-RestMethod -Headers @{ 'User-Agent'='UEP-Updater' } -Uri 'https://api.github.com/repos/${{ github.repository }}/releases/tags/v0.81.36'
           $asset=$release.assets | Where-Object { $_.name -eq 'UEP-Windows-x64-v0.81.36-source-repair.zip' } | Select-Object -First 1
           if(-not $asset){throw 'published 0.81.36 asset missing'}
+          $policy=Get-Content 'uep-policy.json' -Raw -Encoding UTF8 | ConvertFrom-Json
+          if([string]$policy.latestVersion -ne '0.81.36'){throw 'policy version did not promote to 0.81.36'}
+          if([string]$policy.downloadUrl -notmatch 'v0\.81\.36/UEP-Windows-x64-v0\.81\.36-source-repair\.zip$'){throw 'policy download URL does not point to repaired 0.81.36 asset'}
           Write-Host "published asset: $($asset.name) size=$($asset.size)"
