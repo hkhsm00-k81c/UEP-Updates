@@ -1,0 +1,54 @@
+name: Promote UEP 0.81.36 Stable Manifests
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/promote-uep-0.81.36-manifests.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download published 0.81.36 and compute hash
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force pkg | Out-Null
+          gh release download v0.81.36 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-Windows-x64-v0.81.36-source-repair.zip' --dir pkg
+          $file='pkg/UEP-Windows-x64-v0.81.36-source-repair.zip'
+          if(-not(Test-Path $file)){throw '0.81.36 release asset missing'}
+          $hash=(Get-FileHash $file -Algorithm SHA256).Hash.ToLower()
+          "UEP_SHA256=$hash" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "SHA256=$hash"
+
+      - name: Promote policy and update manifest
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $url='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.36/UEP-Windows-x64-v0.81.36-source-repair.zip'
+          $p=Get-Content uep-policy.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          $p.latestVersion='0.81.36'
+          $p.downloadUrl=$url
+          $p.sha256=$env:UEP_SHA256
+          $p.message='UEP 0.81.36 원본함수 기반 공휴일·선택과목 대외비·공결지각 상세 수정'
+          $p | ConvertTo-Json -Depth 50 | Set-Content uep-policy.json -Encoding UTF8
+          $m=Get-Content uep-update.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          $m.version='0.81.36'
+          $m.channel='stable'
+          $m.downloadUrl=$url
+          $m.sha256=$env:UEP_SHA256
+          $m.notes='원본함수 기반 공휴일·선택과목 대외비·공결지각 상세 수정'
+          $m | ConvertTo-Json -Depth 50 | Set-Content uep-update.json -Encoding UTF8
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add uep-policy.json uep-update.json
+          git commit -m 'release: promote UEP 0.81.36 stable manifests'
+          git push origin HEAD:main
