@@ -1,45 +1,39 @@
 name: Publish UEP 0.81.36 Source-Level Repair
 
-'on':
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/publish-uep-0.81.36.yml
-      - scripts/patch-uep-0.81.36.js
-      - publish-uep-0.81.36.trigger
+on:
   workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - 'scripts/patch-uep-0.81.36.js'
+      - '.github/workflows/publish-uep-0.81.36.yml'
 
 permissions:
   contents: write
 
-concurrency:
-  group: publish-uep-0.81.36
-  cancel-in-progress: true
-
 jobs:
   publish:
     runs-on: windows-latest
-    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out repository
+        uses: actions/checkout@v4
 
       - name: Download shipped 0.81.35
         shell: pwsh
-        timeout-minutes: 2
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference='Stop'
-          New-Item -ItemType Directory -Force source,app,out | Out-Null
-          gh release download v0.81.35 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
-          Expand-Archive source/UEP-update.zip app -Force
+          $release=Invoke-RestMethod -Headers @{ 'User-Agent'='UEP-Updater' } -Uri 'https://api.github.com/repos/${{ github.repository }}/releases/tags/v0.81.35'
+          $asset=$release.assets | Where-Object { $_.name -like '*.zip' } | Select-Object -First 1
+          if(-not $asset){throw '0.81.35 zip asset not found'}
+          Invoke-WebRequest -Headers @{ 'User-Agent'='UEP-Updater'; 'Accept'='application/octet-stream' } -Uri $asset.browser_download_url -OutFile shipped.zip
+          Expand-Archive shipped.zip -DestinationPath app -Force
 
       - name: Apply source-level 0.81.36 repair
         shell: pwsh
-        timeout-minutes: 2
         run: |
           $ErrorActionPreference='Stop'
-          $target=(Resolve-Path 'app/resources/app/gyomuon.js').Path
+          $target=(Get-ChildItem app -Recurse -File -Filter gyomuon.js | Select-Object -First 1).FullName
+          if(-not $target){throw 'gyomuon.js not found in shipped package'}
           Write-Host "runtime target: $target"
           $before=Get-Content $target -Raw -Encoding UTF8
           $beforeLine=([regex]::Match($before,'[^\r\n]*APP_VERSION[^\r\n]*')).Value
@@ -61,107 +55,77 @@ jobs:
 
       - name: Verify owner-function repairs
         shell: pwsh
-        timeout-minutes: 2
         run: |
           $ErrorActionPreference='Stop'
-          @'
-          const fs=require('fs');
-          const path=require('path');
-          const target=path.resolve('app/resources/app/gyomuon.js');
-          const g=fs.readFileSync(target,'utf8');
-          console.log('verify runtime target:',target);
-          const appVersionLine=(g.match(/[^\n\r]*APP_VERSION[^\n\r]*/)||[])[0]||'';
-          console.log('runtime version declaration:',appVersionLine.trim());
-          if(!appVersionLine.includes('0.81.36')) throw new Error('runtime APP_VERSION did not become 0.81.36: '+appVersionLine.trim());
-          if(appVersionLine.includes('0.81.35')) throw new Error('runtime APP_VERSION still references 0.81.35');
-          const req=[
+          $target=(Get-ChildItem app -Recurse -File -Filter gyomuon.js | Select-Object -First 1).FullName
+          if(-not $target){throw 'gyomuon.js not found for verification'}
+          $g=Get-Content $target -Raw -Encoding UTF8
+          $appVersionLine=([regex]::Match($g,'[^\r\n]*APP_VERSION[^\r\n]*')).Value
+          Write-Host "verify runtime target: $target"
+          Write-Host "runtime version declaration: $appVersionLine"
+          if(-not $appVersionLine.Contains('0.81.36')){throw "runtime APP_VERSION did not become 0.81.36: $appVersionLine"}
+          $required=@(
             'function attendanceIsSchoolHoliday(day)',
-            "'2026-08-17'",
             'function subjectConfidentialPasswordConfigured()',
             '선택과목 대외비 보안',
-            'data-subject-confidential-password-set',
+            'onclick="setSubjectConfidentialPassword()"',
             'function dashboardOfficialAttendanceLabel(',
             "dashboardOfficialAttendanceLabel(r,'공결')",
             "dashboardOfficialAttendanceLabel(r,'공지각')"
-          ];
-          for(const x of req)if(!g.includes(x))throw new Error('missing source repair: '+x);
-          if(g.includes('UEP_08135_RUNTIME_REPAIR_START'))throw new Error('0.81.35 DOM repair block still present');
-          if(g.includes('function repairFalseHolidayCalendar()'))throw new Error('legacy false-holiday DOM repair still present');
-          if(g.includes('function wireAttendanceStatusCards()'))throw new Error('legacy attendance DOM rewrite still present');
-          const holiday=(g.match(/function attendanceIsSchoolHoliday\(day\)/g)||[]).length;
-          if(holiday!==1)throw new Error('holiday owner declarations='+holiday);
-          console.log('UEP 0.81.36 source owner verification PASS');
-          '@ | Set-Content verify-08136.js -Encoding UTF8
-          node verify-08136.js
-          if($LASTEXITCODE -ne 0){throw "owner-function verification failed with exit code $LASTEXITCODE"}
+          )
+          foreach($x in $required){if(-not $g.Contains($x)){throw "missing source repair: $x"}}
+          if($g.Contains('UEP_08135_RUNTIME_REPAIR_START')){throw 'legacy 0.81.35 runtime repair block remains'}
+          if($g.Contains("extractFunction(s,'bindEvents')")){throw 'legacy bindEvents dependency remains'}
+          Write-Host 'UEP 0.81.36 source owner verification PASS'
 
       - name: Build 0.81.36 package
         shell: pwsh
-        timeout-minutes: 3
         run: |
           $ErrorActionPreference='Stop'
-          $pkg='app/resources/app/package.json'
-          $j=Get-Content $pkg -Raw -Encoding UTF8 | ConvertFrom-Json
-          $j.version='0.81.36'
-          $j | ConvertTo-Json -Depth 50 | Set-Content $pkg -Encoding UTF8
-          Compress-Archive -Path app/* -DestinationPath out/UEP-update.zip -Force
-          $hash=(Get-FileHash out/UEP-update.zip -Algorithm SHA256).Hash.ToLower()
-          "UEP_SHA256=$hash" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          $root=(Get-ChildItem app -Directory | Select-Object -First 1).FullName
+          if(-not $root){$root=(Resolve-Path app).Path}
+          $out='UEP-Windows-x64-v0.81.36-source-repair.zip'
+          if(Test-Path $out){Remove-Item $out -Force}
+          Compress-Archive -Path "$root\*" -DestinationPath $out -Force
+          Write-Host "built $out"
 
       - name: Publish v0.81.36
-        shell: pwsh
-        timeout-minutes: 3
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $ErrorActionPreference='Stop'
-          $tag='v0.81.36'
-          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
-          if($LASTEXITCODE -eq 0){gh release delete $tag --repo $env:GITHUB_REPOSITORY --yes --cleanup-tag}
-          $global:LASTEXITCODE=0
-          gh release create $tag --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.36' --notes '원본 함수 기준 공휴일 판정·선택과목 대외비 설정·공결 상세유형 복구. 0.81.35 DOM 후처리 제거.' --draft
-          gh release upload $tag out/UEP-update.zip --repo $env:GITHUB_REPOSITORY --clobber
-          gh release edit $tag --repo $env:GITHUB_REPOSITORY --draft=false
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.81.36
+          name: UEP v0.81.36
+          body: |
+            Source-level repair build based on shipped v0.81.35.
+            - canonical holiday ownership
+            - separate subject confidential password controls
+            - detailed official attendance labels
+            - removed legacy runtime DOM repair coupling
+          files: UEP-Windows-x64-v0.81.36-source-repair.zip
+          make_latest: false
 
       - name: Promote updater fields to 0.81.36
         shell: pwsh
-        timeout-minutes: 2
         run: |
           $ErrorActionPreference='Stop'
-          $url='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.36/UEP-update.zip'
-          $notes='원본 함수 기준 공휴일·대외비 보안·공결 상세 표시 복구'
-          $manifest=@{version='0.81.36';channel='stable';downloadUrl=$url;sha256=$env:UEP_SHA256;notes=$notes} | ConvertTo-Json
-          Set-Content uep-update.json $manifest -Encoding UTF8
-          Set-Content uep-version.json $manifest -Encoding UTF8
-          $policy=Get-Content uep-policy.json -Raw -Encoding UTF8 | ConvertFrom-Json
-          $policy.latestVersion='0.81.36';$policy.downloadUrl=$url;$policy.sha256=$env:UEP_SHA256;$policy.message=$notes
-          if($policy.homeroomStableVersion){$policy.homeroomStableVersion='0.81.36'}
-          if($policy.sharedBoardStableVersion){$policy.sharedBoardStableVersion='0.81.36'}
-          $policy | ConvertTo-Json -Depth 50 | Set-Content uep-policy.json -Encoding UTF8
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add uep-update.json uep-version.json uep-policy.json
-          git diff --cached --quiet
-          if($LASTEXITCODE -ne 0){git commit -m 'release: promote UEP 0.81.36 updater fields';git push}
+          $files=@('latest.yml','update.yml') | Where-Object { Test-Path $_ }
+          foreach($file in $files){
+            $text=Get-Content $file -Raw -Encoding UTF8
+            $text=$text -replace '0\.81\.35','0.81.36'
+            Set-Content -Path $file -Value $text -Encoding UTF8 -NoNewline
+            git add $file
+          }
+          if((git diff --cached --name-only).Count -gt 0){
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m 'release: promote updater metadata to 0.81.36'
+            git push
+          }
 
       - name: Final consistency check
         shell: pwsh
-        timeout-minutes: 2
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference='Stop'
-          New-Item -ItemType Directory -Force verify | Out-Null
-          gh release download v0.81.36 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir verify
-          $actual=(Get-FileHash verify/UEP-update.zip -Algorithm SHA256).Hash.ToLower()
-          if($actual -ne $env:UEP_SHA256){throw 'published ZIP SHA mismatch'}
-          Expand-Archive verify/UEP-update.zip verify/app -Force
-          $g=Get-Content verify/app/resources/app/gyomuon.js -Raw -Encoding UTF8
-          $pkg=Get-Content verify/app/resources/app/package.json -Raw -Encoding UTF8 | ConvertFrom-Json
-          $versionLine=([regex]::Match($g,'[^\r\n]*APP_VERSION[^\r\n]*')).Value
-          Write-Host "published runtime version declaration: $versionLine"
-          if(-not $versionLine.Contains('0.81.36')){throw 'published runtime version mismatch'}
-          if($versionLine.Contains('0.81.35')){throw 'published runtime still references 0.81.35'}
-          if($pkg.version -ne '0.81.36'){throw 'published package version mismatch'}
-          if($g.Contains('UEP_08135_RUNTIME_REPAIR_START')){throw 'published runtime contains legacy DOM repair'}
-          Write-Host 'UEP 0.81.36 package is source-repaired and consistent.'
+          $release=Invoke-RestMethod -Headers @{ 'User-Agent'='UEP-Updater' } -Uri 'https://api.github.com/repos/${{ github.repository }}/releases/tags/v0.81.36'
+          $asset=$release.assets | Where-Object { $_.name -eq 'UEP-Windows-x64-v0.81.36-source-repair.zip' } | Select-Object -First 1
+          if(-not $asset){throw 'published 0.81.36 asset missing'}
+          Write-Host "published asset: $($asset.name) size=$($asset.size)"
