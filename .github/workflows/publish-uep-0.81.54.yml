@@ -1,0 +1,71 @@
+name: Publish UEP 0.81.54 Bundled Verification Repair
+
+'on':
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [publish-uep-0.81.54.trigger]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-uep-0.81.54
+  cancel-in-progress: true
+
+jobs:
+  build-publish:
+    runs-on: windows-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download 0.81.53
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,verify | Out-Null
+          gh release download v0.81.53 --repo $env:GITHUB_REPOSITORY --pattern '*.zip' --dir source
+          $zip=Get-ChildItem source -File -Filter '*.zip' | Select-Object -First 1
+          if(!$zip){throw '0.81.53 release zip not found'}
+          Expand-Archive $zip.FullName app -Force
+      - name: Apply and verify bundled repairs
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node scripts/patch-uep-0.81.54.js app
+          node --check app/resources/app/gyomuon.js
+          node --check app/resources/app/electron/google-data.cjs
+          node --check app/resources/app/electron/main.cjs
+          $pkg='app/resources/app/package.json';$p=Get-Content $pkg -Raw -Encoding UTF8|ConvertFrom-Json;$p.version='0.81.54';$p|ConvertTo-Json -Depth 50|Set-Content $pkg -Encoding UTF8
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          $d=Get-Content app/resources/app/electron/google-data.cjs -Raw -Encoding UTF8
+          foreach($x in @('const APP_VERSION = "0.81.54";','function mockAllExamComparisonMarkup(','function mockTrendOverviewMarkup(','전체 시험 비교','return controls+list;','preferredPool=semesterPool.length?semesterPool:studentPool','function upsertNoticeCache(','최근 학기말 평균')){if(!$g.Contains($x)){throw "renderer regression marker missing: $x"}}
+          foreach($x in @("monthDay=text.match",'function localDate(value)')){if(!$d.Contains($x)){throw "data regression marker missing: $x"}}
+          if($g.Contains("return controls+list+detail;")){throw 'legacy curriculum bottom detail remains'}
+      - name: Build package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Compress-Archive -Path 'app/*' -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          Expand-Archive UEP-update.zip verify -Force
+          if(!(Test-Path 'verify/UEP.exe')){throw 'root UEP.exe missing'}
+          node --check verify/resources/app/gyomuon.js
+          node --check verify/resources/app/electron/google-data.cjs
+          $g=Get-Content verify/resources/app/gyomuon.js -Raw -Encoding UTF8
+          foreach($x in @('const APP_VERSION = "0.81.54";','function mockAllExamComparisonMarkup(','return controls+list;')){if(!$g.Contains($x)){throw "packaged marker missing: $x"}}
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower();"UEP_SHA256=$sha"|Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Publish and promote 0.81.54
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          gh release view v0.81.54 --repo $env:GITHUB_REPOSITORY *> $null
+          if($LASTEXITCODE -eq 0){gh release delete v0.81.54 --repo $env:GITHUB_REPOSITORY --cleanup-tag --yes};$global:LASTEXITCODE=0
+          gh release create v0.81.54 UEP-update.zip --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.54 Bundled Verification Repair' --notes '공결 날짜키 전면 보강, 선택과목 하단 중복 제거, 보고서 판정 통일, 모의고사 전체 시험 비교와 통합·과목별 추이를 추가합니다. 공지 최적화와 최근 학기말 평균은 유지합니다.'
+          $url='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.54/UEP-update.zip'
+          $policy=Get-Content uep-policy.json -Raw -Encoding UTF8|ConvertFrom-Json;$policy.latestVersion='0.81.54';$policy.downloadUrl=$url;$policy.sha256=$env:UEP_SHA256;$policy.message='공결·보고서·선택과목·모의고사 통계 묶음 보완';$policy.forceUpdate=$false;$policy|ConvertTo-Json -Depth 50|Set-Content uep-policy.json -Encoding UTF8
+          $manifest=@{version='0.81.54';channel='stable';downloadUrl=$url;sha256=$env:UEP_SHA256;notes='공결·보고서·선택과목·모의고사 통계 묶음 보완'}|ConvertTo-Json;Set-Content uep-update.json $manifest -Encoding UTF8;Set-Content uep-version.json $manifest -Encoding UTF8
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add uep-policy.json uep-update.json uep-version.json;git commit -m 'release: promote UEP 0.81.54 bundled verification repair';git push
