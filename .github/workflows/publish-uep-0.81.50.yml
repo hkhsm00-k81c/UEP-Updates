@@ -1,0 +1,82 @@
+name: Publish UEP 0.81.50 Subject Button and Bar Trend
+
+'on':
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [publish-uep-0.81.50.trigger]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-uep-0.81.50
+  cancel-in-progress: true
+
+jobs:
+  build-publish:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download 0.81.49
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,verify | Out-Null
+          gh release download v0.81.49 --repo $env:GITHUB_REPOSITORY --pattern '*.zip' --dir source
+          $zip=Get-ChildItem source -File -Filter '*.zip' | Select-Object -First 1
+          if(!$zip){throw '0.81.49 release zip not found'}
+          Expand-Archive $zip.FullName app -Force
+          if(!(Test-Path 'app/UEP.exe')){throw '0.81.49 base has no root UEP.exe'}
+      - name: Apply and verify repairs
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node scripts/patch-uep-0.81.50.js app
+          node --check app/resources/app/gyomuon.js
+          node --check app/resources/app/electron/google-data.cjs
+          $pkg='app/resources/app/package.json'
+          $p=Get-Content $pkg -Raw -Encoding UTF8 | ConvertFrom-Json
+          $p.version='0.81.50'
+          $p | ConvertTo-Json -Depth 50 | Set-Content $pkg -Encoding UTF8
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          $d=Get-Content app/resources/app/electron/google-data.cjs -Raw -Encoding UTF8
+          foreach($x in @('const APP_VERSION = "0.81.50";',"const result=await sensitivePasswordModal({mode:'unlock',configured:true});",'시험별 등급 분포 비교','data-score-stat-type="mocktrend"',"if(next==='subjects'&&!(await unlockSubjectConfidential()))return;",'<b>게시 중 직접공지</b>','function teacherTimetableMasterRows(teacher="")','setInterval(check,10*60*1000)')){if(!$g.Contains($x)){throw "regression marker missing: $x"}}
+          if($g.Contains("const p=prompt('선택과목 대외비 비밀번호를 입력하세요.')")){throw 'obsolete subject prompt remains'}
+          foreach($x in @('"17A_교사시간표마스터":','teacherTimetableRows: rowsFrom("17A_교사시간표마스터")')){if(!$d.Contains($x)){throw "data regression marker missing: $x"}}
+      - name: Build package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Compress-Archive -Path 'app/*' -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          Expand-Archive UEP-update.zip verify -Force
+          $g=Get-Content verify/resources/app/gyomuon.js -Raw -Encoding UTF8
+          if(!(Test-Path 'verify/UEP.exe')){throw 'root UEP.exe missing'}
+          foreach($x in @('const APP_VERSION = "0.81.50";',"const result=await sensitivePasswordModal({mode:'unlock',configured:true});",'시험별 등급 분포 비교')){if(!$g.Contains($x)){throw "packaged marker missing: $x"}}
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "UEP_SHA256=$sha" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Publish and promote 0.81.50
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          gh release view v0.81.50 --repo $env:GITHUB_REPOSITORY *> $null
+          if($LASTEXITCODE -eq 0){gh release delete v0.81.50 --repo $env:GITHUB_REPOSITORY --cleanup-tag --yes}
+          $global:LASTEXITCODE=0
+          gh release create v0.81.50 UEP-update.zip --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.50 Subject Button and Bar Trend' --notes '과목별 신청현황 열기 인증을 Electron 보안 모달로 통일하고 시험별 추이를 묶음 막대그래프로 개선합니다.'
+          $url='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.50/UEP-update.zip'
+          $policy=Get-Content uep-policy.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          $policy.latestVersion='0.81.50';$policy.downloadUrl=$url;$policy.sha256=$env:UEP_SHA256;$policy.message='과목별 신청현황 버튼·시험별 막대그래프 수정';$policy.forceUpdate=$false
+          $policy | ConvertTo-Json -Depth 50 | Set-Content uep-policy.json -Encoding UTF8
+          $manifest=@{version='0.81.50';channel='stable';downloadUrl=$url;sha256=$env:UEP_SHA256;notes='과목별 신청현황 버튼·시험별 막대그래프 수정'} | ConvertTo-Json
+          Set-Content uep-update.json $manifest -Encoding UTF8
+          Set-Content uep-version.json $manifest -Encoding UTF8
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add uep-policy.json uep-update.json uep-version.json
+          git commit -m 'release: promote UEP 0.81.50 subject button and bar trend'
+          git push
