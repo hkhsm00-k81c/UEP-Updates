@@ -1,0 +1,117 @@
+name: Publish UEP 0.81.38 Homeroom School Read Repair
+
+'on':
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - publish-uep-0.81.38.trigger
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-uep-0.81.38
+  cancel-in-progress: true
+
+jobs:
+  build-publish:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download feature-complete 0.81.36
+        shell: pwsh
+        timeout-minutes: 3
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          Remove-Item source,app,verify -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force source,app,verify | Out-Null
+          gh release download v0.81.36 --repo $env:GITHUB_REPOSITORY --pattern '*.zip' --dir source
+          $zip=Get-ChildItem source -File -Filter '*.zip' | Select-Object -First 1
+          if(!$zip){throw '0.81.36 release zip not found'}
+          Expand-Archive $zip.FullName app -Force
+          if(!(Test-Path 'app/UEP.exe')){throw '0.81.36 base has no root UEP.exe'}
+
+      - name: Apply first-connect repair
+        shell: pwsh
+        timeout-minutes: 3
+        run: |
+          $ErrorActionPreference='Stop'
+          node scripts/patch-uep-0.81.38.js app
+          if($LASTEXITCODE -ne 0){throw '0.81.38 patch failed'}
+          node --check app/resources/app/gyomuon.js
+          if($LASTEXITCODE -ne 0){throw 'gyomuon syntax failed'}
+          $pkg='app/resources/app/package.json'
+          $p=Get-Content $pkg -Raw -Encoding UTF8 | ConvertFrom-Json
+          $p.version='0.81.38'
+          $p | ConvertTo-Json -Depth 50 | Set-Content $pkg -Encoding UTF8
+
+      - name: Verify inherited features and connection invariants
+        shell: pwsh
+        timeout-minutes: 2
+        run: |
+          $ErrorActionPreference='Stop'
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          $p=Get-Content app/resources/app/package.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          $required=@(
+            'const APP_VERSION = "0.81.38";',
+            'async function ensureSchoolReadSessionForCurrentUser',
+            'window.schoolBoard.schoolReadLogin({name,email})',
+            'function attendanceIsSchoolHoliday(day)',
+            'function subjectConfidentialPasswordConfigured()',
+            'function dashboardOfficialAttendanceLabel(',
+            '학교 공용 읽기 연결에 실패했습니다'
+          )
+          foreach($x in $required){if(!$g.Contains($x)){throw "missing required marker: $x"}}
+          if($g.Contains('return toast("먼저 Google 연결 인증을 등록하세요.");')){throw 'legacy homeroom Google credential gate remains'}
+          if($p.version -ne '0.81.38'){throw 'package version mismatch'}
+          Write-Host 'UEP 0.81.38 source invariants PASS'
+
+      - name: Build and verify package
+        shell: pwsh
+        timeout-minutes: 4
+        run: |
+          $ErrorActionPreference='Stop'
+          Remove-Item UEP-update.zip -Force -ErrorAction SilentlyContinue
+          Compress-Archive -Path 'app/*' -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          Expand-Archive UEP-update.zip verify -Force
+          if(!(Test-Path 'verify/UEP.exe')){throw 'built package missing root UEP.exe'}
+          $g=Get-Content verify/resources/app/gyomuon.js -Raw -Encoding UTF8
+          $p=Get-Content verify/resources/app/package.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          if(!$g.Contains('const APP_VERSION = "0.81.38";')){throw 'packaged runtime version mismatch'}
+          if($p.version -ne '0.81.38'){throw 'packaged package version mismatch'}
+          if(!$g.Contains('async function ensureSchoolReadSessionForCurrentUser')){throw 'packaged first-connect repair missing'}
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "UEP_SHA256=$sha" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Publish and promote 0.81.38
+        shell: pwsh
+        timeout-minutes: 4
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          gh release view v0.81.38 --repo $env:GITHUB_REPOSITORY *> $null
+          if($LASTEXITCODE -eq 0){gh release delete v0.81.38 --repo $env:GITHUB_REPOSITORY --cleanup-tag --yes}
+          $global:LASTEXITCODE=0
+          gh release create v0.81.38 UEP-update.zip --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.38 Homeroom School Read Repair' --notes '0.81.36 기능을 계승하고 신규·기존 자동로그인 담임 PC의 학교 공용 읽기 세션 자동 생성을 복구합니다.'
+          $url='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.38/UEP-update.zip'
+          $policy=Get-Content uep-policy.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          $policy.latestVersion='0.81.38'
+          $policy.downloadUrl=$url
+          $policy.sha256=$env:UEP_SHA256
+          $policy.message='담임 학교 공용 읽기 세션 자동 복구 · 0.81.36 기능 계승'
+          $policy.forceUpdate=$false
+          $policy | ConvertTo-Json -Depth 50 | Set-Content uep-policy.json -Encoding UTF8
+          $manifest=@{version='0.81.38';channel='stable';downloadUrl=$url;sha256=$env:UEP_SHA256;notes='담임 학교 공용 읽기 세션 자동 복구 · 0.81.36 기능 계승'} | ConvertTo-Json
+          Set-Content uep-update.json $manifest -Encoding UTF8
+          Set-Content uep-version.json $manifest -Encoding UTF8
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add uep-policy.json uep-update.json uep-version.json
+          git commit -m 'release: promote UEP 0.81.38 homeroom school-read repair'
+          git push
