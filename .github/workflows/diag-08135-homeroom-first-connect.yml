@@ -20,17 +20,20 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference='Stop'
+          Remove-Item source,app -Recurse -Force -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Force source,app,diagnostics | Out-Null
           gh release download v0.81.35 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
           Expand-Archive source/UEP-update.zip app -Force
+          $gy = Get-ChildItem app -Recurse -File -Filter gyomuon.js | Select-Object -First 1
+          if(!$gy){ throw 'gyomuon.js not found in shipped 0.81.35 ZIP' }
+          $appRoot = Split-Path $gy.DirectoryName -Parent
           $out='diagnostics/08135-homeroom-first-connect.txt'
-          "UEP 0.81.35 HOMEROOM FIRST GOOGLE CONNECTION TRACE`n" | Set-Content $out -Encoding UTF8
-          $files=@('app/resources/app/main.js','app/resources/app/preload.js','app/resources/app/gyomuon.js','app/resources/app/package.json')
+          "UEP 0.81.35 HOMEROOM FIRST GOOGLE CONNECTION TRACE`nAPP_ROOT=$appRoot`nGYOMUON=$($gy.FullName)`n" | Set-Content $out -Encoding UTF8
+          $files = Get-ChildItem $appRoot -Recurse -File | Where-Object { $_.Name -in @('main.js','preload.js','gyomuon.js','package.json') }
           $terms=@('schoolReadSessionStatus','previewReadonlySync','readReadonlyCache','Google 연결 인증','Google 연결','google-service-account','service-account','credential','authenticated','schoolRead','readonly','session','safeStorage','userData','homeroom','담임','ipcMain','ipcRenderer','contextBridge')
-          foreach($f in $files){
-            if(!(Test-Path $f)){continue}
-            "`n===== $f =====" | Add-Content $out -Encoding UTF8
-            $lines=Get-Content $f -Encoding UTF8
+          foreach($fi in $files){
+            "`n===== $($fi.FullName) =====" | Add-Content $out -Encoding UTF8
+            $lines=Get-Content $fi.FullName -Encoding UTF8
             for($i=0;$i -lt $lines.Count;$i++){
               $hit=$false
               foreach($t in $terms){if($lines[$i] -like "*$t*"){$hit=$true;break}}
@@ -41,10 +44,9 @@ jobs:
               }
             }
           }
-          Write-Host '===== FIRST-CONNECT TRACE ====='
-          Get-Content $out -Encoding UTF8
+          if((Get-Item $out).Length -lt 500){ throw "trace unexpectedly small: $((Get-Item $out).Length) bytes" }
+          Write-Host "TRACE_BYTES=$((Get-Item $out).Length)"
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -f $out
-          git diff --cached --stat
           if(-not (git diff --cached --quiet)){ git commit -m 'diag: capture 0.81.35 homeroom first-connect path'; git push }
