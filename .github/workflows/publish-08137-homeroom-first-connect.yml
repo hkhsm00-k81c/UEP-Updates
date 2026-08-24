@@ -28,47 +28,22 @@ jobs:
           if(!(Test-Path 'app/UEP.exe')){ throw 'base 0.81.35 package has no root UEP.exe' }
           $gy=(Get-ChildItem app -Recurse -File -Filter gyomuon.js | Select-Object -First 1).FullName
           if(!$gy){ throw 'gyomuon.js not found' }
-          $text=Get-Content $gy -Raw -Encoding UTF8
+          $text=(Get-Content $gy -Raw -Encoding UTF8) -replace "`r`n","`n"
 
           $old1=".then((status) => { if (status) googleConnectionStatus = {ok:Boolean(status.authenticated),encryption:true,mode:'school_read_api',endpointReady:status.endpointReady!==false}; })"
           $new1=".then((status) => { if(status?.authenticated){ googleConnectionStatus={ok:true,encryption:true,mode:'school_read_api',endpointReady:status.endpointReady!==false}; } else if(!googleConnectionStatus?.ok && status){ googleConnectionStatus={ok:false,encryption:true,mode:'school_read_api',endpointReady:status.endpointReady!==false}; } })"
           if(!$text.Contains($old1)){ throw 'startup session status target not found' }
           $text=$text.Replace($old1,$new1)
 
-          $old2=@"
-async function previewReadonlySync() {
-  if (!googleConnectionStatus.ok || !window.schoolBoard?.previewReadonlySync)
-    return toast("먼저 Google 연결 인증을 등록하세요.");
-"@
-          $new2=@"
-async function previewReadonlySync() {
-  if (!window.schoolBoard?.previewReadonlySync)
-    return toast("학교 공용 데이터 연결 기능을 찾지 못했습니다.");
-  if (!googleConnectionStatus?.ok && window.schoolBoard?.schoolReadSessionStatus) {
-    try {
-      const status = await window.schoolBoard.schoolReadSessionStatus({verify:true});
-      if (status?.authenticated) googleConnectionStatus = {ok:true,encryption:true,mode:'school_read_api',endpointReady:status.endpointReady!==false};
-    } catch (_) {}
-  }
-  if (!googleConnectionStatus?.ok)
-    return toast("학교 공용 읽기 연결을 확인하지 못했습니다. 다시 로그인해 주세요.");
-"@
+          $old2="async function previewReadonlySync() {`n  if (!googleConnectionStatus.ok || !window.schoolBoard?.previewReadonlySync)`n    return toast(`"먼저 Google 연결 인증을 등록하세요.`");`n"
+          $new2="async function previewReadonlySync() {`n  if (!window.schoolBoard?.previewReadonlySync)`n    return toast(`"학교 공용 데이터 연결 기능을 찾지 못했습니다.`");`n  if (!googleConnectionStatus?.ok && window.schoolBoard?.schoolReadSessionStatus) {`n    try {`n      const status = await window.schoolBoard.schoolReadSessionStatus({verify:true});`n      if (status?.authenticated) googleConnectionStatus = {ok:true,encryption:true,mode:'school_read_api',endpointReady:status.endpointReady!==false};`n    } catch (_) {}`n  }`n  if (!googleConnectionStatus?.ok)`n    return toast(`"학교 공용 읽기 연결을 확인하지 못했습니다. 다시 로그인해 주세요.`");`n"
           if(!$text.Contains($old2)){ throw 'manual readonly sync target not found' }
           $text=$text.Replace($old2,$new2)
 
           $old3="  if(!googleConnectionStatus?.ok || !window.schoolBoard?.previewReadonlySync || !window.schoolBoard?.readReadonlyCache) return false;"
-          $new3=@"
-  if(!window.schoolBoard?.previewReadonlySync || !window.schoolBoard?.readReadonlyCache) return false;
-  if(!googleConnectionStatus?.ok && window.schoolBoard?.schoolReadSessionStatus){
-    try{
-      const status=await window.schoolBoard.schoolReadSessionStatus({verify:true});
-      if(status?.authenticated) googleConnectionStatus={ok:true,encryption:true,mode:'school_read_api',endpointReady:status.endpointReady!==false};
-    }catch(_){}
-  }
-  if(!googleConnectionStatus?.ok) return false;
-"@
+          $new3="  if(!window.schoolBoard?.previewReadonlySync || !window.schoolBoard?.readReadonlyCache) return false;`n  if(!googleConnectionStatus?.ok && window.schoolBoard?.schoolReadSessionStatus){`n    try{`n      const status=await window.schoolBoard.schoolReadSessionStatus({verify:true});`n      if(status?.authenticated) googleConnectionStatus={ok:true,encryption:true,mode:'school_read_api',endpointReady:status.endpointReady!==false};`n    }catch(_){}`n  }`n  if(!googleConnectionStatus?.ok) return false;"
           if(!$text.Contains($old3)){ throw 'silent readonly sync target not found' }
-          $text=$text.Replace($old3,$new3.TrimEnd())
+          $text=$text.Replace($old3,$new3)
           Set-Content $gy $text -Encoding UTF8 -NoNewline
 
           $pkg=(Get-ChildItem app -Recurse -File -Filter package.json | Where-Object { $_.FullName -like '*resources*app*package.json' } | Select-Object -First 1).FullName
