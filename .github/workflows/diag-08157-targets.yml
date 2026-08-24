@@ -1,0 +1,27 @@
+name: Diagnose UEP 0.81.57 Targets
+'on':
+  push:
+    branches: [main]
+    paths: [diag-08157-targets.trigger]
+permissions:
+  contents: write
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          gh release download v0.81.57 --repo $env:GITHUB_REPOSITORY --pattern '*.zip' --dir source
+          $z=Get-ChildItem source -Filter '*.zip'|Select-Object -First 1; Expand-Archive $z.FullName app -Force
+          $f='app/resources/app/gyomuon.js';$l=Get-Content $f -Encoding UTF8;$o=@()
+          $idx=($l|Select-String 'function uepComparableDate').LineNumber[0]-1
+          $o+='=== uepComparableDate ===';for($i=$idx;$i -lt [Math]::Min($l.Count,$idx+45);$i++){$o+=('{0}: {1}' -f ($i+1),$l[$i])}
+          $hits=$l|Select-String '예술계열|예술 선택|선택과목 검증|selectionValidation|validateSelection|연계오류|음악과 미디어|미술과 매체'
+          foreach($h in $hits){$s=[Math]::Max(0,$h.LineNumber-8);$e=[Math]::Min($l.Count-1,$h.LineNumber+10);$o+="=== selection hit $($h.LineNumber) ===";for($i=$s;$i -le $e;$i++){$o+=('{0}: {1}' -f ($i+1),$l[$i])}}
+          $o|Set-Content diag-08157-targets.txt -Encoding UTF8
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add diag-08157-targets.txt;git commit -m 'diag: capture exact 0.81.57 patch targets';git push
