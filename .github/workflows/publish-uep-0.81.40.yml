@@ -1,0 +1,128 @@
+name: Publish UEP 0.81.40 School Read Data Repair
+
+'on':
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - publish-uep-0.81.40.trigger
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-uep-0.81.40
+  cancel-in-progress: true
+
+jobs:
+  build-publish:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download diagnosed 0.81.39 pilot
+        shell: pwsh
+        timeout-minutes: 3
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          Remove-Item source,app,verify -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force source,app,verify | Out-Null
+          gh release download v0.81.39 --repo $env:GITHUB_REPOSITORY --pattern '*.zip' --dir source
+          $zip=Get-ChildItem source -File -Filter '*.zip' | Select-Object -First 1
+          if(!$zip){throw '0.81.39 release zip not found'}
+          Expand-Archive $zip.FullName app -Force
+          if(!(Test-Path 'app/UEP.exe')){throw '0.81.39 base has no root UEP.exe'}
+
+      - name: Apply School Read data pipeline repair
+        shell: pwsh
+        timeout-minutes: 3
+        run: |
+          $ErrorActionPreference='Stop'
+          node scripts/patch-uep-0.81.40.js app
+          if($LASTEXITCODE -ne 0){throw '0.81.40 patch failed'}
+          node --check app/resources/app/electron/main.cjs
+          if($LASTEXITCODE -ne 0){throw 'main syntax failed'}
+          node --check app/resources/app/gyomuon.js
+          if($LASTEXITCODE -ne 0){throw 'renderer syntax failed'}
+          $pkg='app/resources/app/package.json'
+          $p=Get-Content $pkg -Raw -Encoding UTF8 | ConvertFrom-Json
+          $p.version='0.81.40'
+          $p | ConvertTo-Json -Depth 50 | Set-Content $pkg -Encoding UTF8
+
+      - name: Verify read routing and inherited features
+        shell: pwsh
+        timeout-minutes: 2
+        run: |
+          $ErrorActionPreference='Stop'
+          $m=Get-Content app/resources/app/electron/main.cjs -Raw -Encoding UTF8
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          $p=Get-Content app/resources/app/package.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          $requiredMain=@(
+            'const auth = await getReadonlySheetsAuth(credentials);',
+            'const token = auth.token;',
+            "if(auth.mode!=='school_read_api') await ensureSelectedReportNormalization(token);",
+            "if(String(token||'').startsWith('UEP_SCHOOL_READ:')) return schoolReadBatchRead(spreadsheetId,ranges);",
+            "const result=await schoolReadPost('batch-read'"
+          )
+          foreach($x in $requiredMain){if(!$m.Contains($x)){throw "missing main marker: $x"}}
+          $requiredRenderer=@(
+            'const APP_VERSION = "0.81.40";',
+            'async function ensureSchoolReadSessionForCurrentUser',
+            'function attendanceIsSchoolHoliday(day)',
+            'function subjectConfidentialPasswordConfigured()',
+            'function dashboardOfficialAttendanceLabel(',
+            'downloadSchoolReadDiagnostics'
+          )
+          foreach($x in $requiredRenderer){if(!$g.Contains($x)){throw "missing renderer marker: $x"}}
+          if($m.Contains('const account = credentials || await resolveSchoolServiceAccount();')){throw 'legacy local-only readonly path remains'}
+          if($p.version -ne '0.81.40'){throw 'package version mismatch'}
+          Write-Host 'UEP 0.81.40 School Read routing invariants PASS'
+
+      - name: Build and verify package
+        shell: pwsh
+        timeout-minutes: 4
+        run: |
+          $ErrorActionPreference='Stop'
+          Remove-Item UEP-update.zip -Force -ErrorAction SilentlyContinue
+          Compress-Archive -Path 'app/*' -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          Expand-Archive UEP-update.zip verify -Force
+          if(!(Test-Path 'verify/UEP.exe')){throw 'built package missing root UEP.exe'}
+          $m=Get-Content verify/resources/app/electron/main.cjs -Raw -Encoding UTF8
+          $g=Get-Content verify/resources/app/gyomuon.js -Raw -Encoding UTF8
+          $p=Get-Content verify/resources/app/package.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          if(!$g.Contains('const APP_VERSION = "0.81.40";')){throw 'packaged runtime version mismatch'}
+          if(!$m.Contains('const auth = await getReadonlySheetsAuth(credentials);')){throw 'packaged School Read routing missing'}
+          if($p.version -ne '0.81.40'){throw 'packaged package version mismatch'}
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "UEP_SHA256=$sha" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Publish and promote 0.81.40 repair pilot
+        shell: pwsh
+        timeout-minutes: 4
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          gh release view v0.81.40 --repo $env:GITHUB_REPOSITORY *> $null
+          if($LASTEXITCODE -eq 0){gh release delete v0.81.40 --repo $env:GITHUB_REPOSITORY --cleanup-tag --yes}
+          $global:LASTEXITCODE=0
+          gh release create v0.81.40 UEP-update.zip --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.40 Homeroom School Read Data Repair' --notes '담임 인증 후 구글 새로고침과 자동 동기화가 로컬 서비스계정 대신 School Read API 읽기 경로를 사용하도록 수정합니다. 읽기 전용 담임 세션에서는 자동복구 쓰기를 실행하지 않습니다.'
+          $url='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.40/UEP-update.zip'
+          $policy=Get-Content uep-policy.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          $policy.latestVersion='0.81.40'
+          $policy.downloadUrl=$url
+          $policy.sha256=$env:UEP_SHA256
+          $policy.message='담임 구글 자료조회 School Read API 연결 수정 · 0.81.39 진단결과 반영'
+          $policy.forceUpdate=$false
+          $policy | ConvertTo-Json -Depth 50 | Set-Content uep-policy.json -Encoding UTF8
+          $manifest=@{version='0.81.40';channel='stable';downloadUrl=$url;sha256=$env:UEP_SHA256;notes='담임 구글 자료조회 School Read API 연결 수정'} | ConvertTo-Json
+          Set-Content uep-update.json $manifest -Encoding UTF8
+          Set-Content uep-version.json $manifest -Encoding UTF8
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add uep-policy.json uep-update.json uep-version.json
+          git commit -m 'release: promote UEP 0.81.40 School Read data repair'
+          git push
