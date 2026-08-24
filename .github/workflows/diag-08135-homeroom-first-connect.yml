@@ -1,0 +1,48 @@
+name: Diagnose 0.81.35 Homeroom First Google Connection
+
+'on':
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [diag-08135-homeroom-first-connect.trigger]
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trace shipped 0.81.35 first-connect path
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.81.35 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+          $out='diagnostics/08135-homeroom-first-connect.txt'
+          "UEP 0.81.35 HOMEROOM FIRST GOOGLE CONNECTION TRACE`n" | Set-Content $out -Encoding UTF8
+          $files=@('app/resources/app/main.js','app/resources/app/preload.js','app/resources/app/gyomuon.js','app/resources/app/package.json')
+          $terms=@('schoolReadSessionStatus','previewReadonlySync','readReadonlyCache','Google 연결 인증','Google 연결','google-service-account','service-account','credential','authenticated','schoolRead','readonly','session','safeStorage','userData','homeroom','담임')
+          foreach($f in $files){
+            if(!(Test-Path $f)){continue}
+            "`n===== $f =====" | Add-Content $out -Encoding UTF8
+            $lines=Get-Content $f -Encoding UTF8
+            for($i=0;$i -lt $lines.Count;$i++){
+              $hit=$false
+              foreach($t in $terms){if($lines[$i] -like "*$t*"){$hit=$true;break}}
+              if($hit){
+                $a=[Math]::Max(0,$i-6);$b=[Math]::Min($lines.Count-1,$i+12)
+                for($j=$a;$j -le $b;$j++){('{0,6}: {1}' -f ($j+1),$lines[$j]) | Add-Content $out -Encoding UTF8}
+                '------' | Add-Content $out -Encoding UTF8
+              }
+            }
+          }
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add $out
+          git commit -m 'diag: capture 0.81.35 homeroom first-connect path' || echo 'no diagnostic change'
+          git push
