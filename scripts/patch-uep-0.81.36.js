@@ -49,7 +49,7 @@ replaceFunction('attendanceIsSchoolHoliday',[
 "}"
 ].join('\n'));
 
-// Subject confidential helpers: insert as plain source, no patch-time template interpolation.
+// Subject confidential helpers
 const securityHelpers=[
 "const UEP_SUBJECT_CONFIDENTIAL_PIN_KEY='uep_subject_confidential_pin_hash_v3';",
 "const UEP_SUBJECT_CONFIDENTIAL_SESSION_KEY='uep_subject_confidential_unlocked_v3';",
@@ -65,12 +65,12 @@ let settingsFn=extractFunction(s,'settingsView');
 assert(settingsFn,'settingsView missing');
 s=s.slice(0,settingsFn.start)+securityHelpers+'\n'+s.slice(settingsFn.start);
 
-// Add card directly inside settingsView. Use placeholders then restore ${...} for runtime template interpolation.
+// Add confidential card directly inside settingsView.
 settingsFn=extractFunction(s,'settingsView');
 let settingsText=settingsFn.text;
 const sensitiveClose='</div></article>\n    <article class="setting-card role-settings-card">';
 assert(settingsText.includes(sensitiveClose),'settings sensitive-card anchor missing');
-let subjectCard=`</div></article>\n    <article class="setting-card subject-confidential-security-settings"><div><small>CONFIDENTIAL · CURRICULUM</small><h3>🔐 선택과목 대외비 보안</h3><p>과목별 신청현황 전용 비밀번호를 민감정보 비밀번호와 별도로 관리합니다.</p><p class="settings-help">관리자·학년부장만 설정 및 열람할 수 있으며 담임은 비활성화됩니다.</p></div><div class="sensitive-security-status"><b>__DOLLAR__{subjectConfidentialPasswordConfigured()?'비밀번호 설정됨':'비밀번호 설정 필요'}</b><button type="button" class="btn primary" data-subject-confidential-password-set __DOLLAR__{subjectConfidentialAllowed()?'':'disabled'}>__DOLLAR__{subjectConfidentialPasswordConfigured()?'비밀번호 변경':'비밀번호 설정'}</button><button type="button" class="btn secondary" data-subject-confidential-lock __DOLLAR__{subjectConfidentialAllowed()?'':'disabled'}>즉시 잠금</button></div></article>\n    <article class="setting-card role-settings-card">`;
+let subjectCard=`</div></article>\n    <article class="setting-card subject-confidential-security-settings"><div><small>CONFIDENTIAL · CURRICULUM</small><h3>🔐 선택과목 대외비 보안</h3><p>과목별 신청현황 전용 비밀번호를 민감정보 비밀번호와 별도로 관리합니다.</p><p class="settings-help">관리자·학년부장만 설정 및 열람할 수 있으며 담임은 비활성화됩니다.</p></div><div class="sensitive-security-status"><b>__DOLLAR__{subjectConfidentialPasswordConfigured()?'비밀번호 설정됨':'비밀번호 설정 필요'}</b><button type="button" class="btn primary" onclick="setSubjectConfidentialPassword()" __DOLLAR__{subjectConfidentialAllowed()?'':'disabled'}>__DOLLAR__{subjectConfidentialPasswordConfigured()?'비밀번호 변경':'비밀번호 설정'}</button><button type="button" class="btn secondary" onclick="lockSubjectConfidential();render('settings');toast('과목별 신청현황을 잠갔습니다.')" __DOLLAR__{subjectConfidentialAllowed()?'':'disabled'}>즉시 잠금</button></div></article>\n    <article class="setting-card role-settings-card">`;
 subjectCard=subjectCard.replaceAll('__DOLLAR__','$');
 settingsText=settingsText.replace(sensitiveClose,subjectCard);
 s=s.slice(0,settingsFn.start)+settingsText+s.slice(settingsFn.end);
@@ -96,12 +96,6 @@ openText=openText.replace(".map(r=>({...r,dashboardStatusType:'지각'}))",".map
 assert(openText!==beforeOfficial,'attendance source-label replacement failed');
 s=s.slice(0,od.start)+openText+s.slice(od.end);
 
-// Settings event bindings
-let be=extractFunction(s,'bindEvents');assert(be,'bindEvents missing');let bt=be.text;const openBrace=bt.indexOf('{');
-const bindInsert="\n  $$('[data-subject-confidential-password-set]').forEach(button=>button.onclick=()=>setSubjectConfidentialPassword());\n  $$('[data-subject-confidential-lock]').forEach(button=>button.onclick=()=>{lockSubjectConfidential();render('settings');toast('과목별 신청현황을 잠갔습니다.');});\n";
-bt=bt.slice(0,openBrace+1)+bindInsert+bt.slice(openBrace+1);
-s=s.slice(0,be.start)+bt+s.slice(be.end);
-
 // Unify previous keys
 s=s.replace(/uep_subject_confidential_pin_hash_v2/g,'uep_subject_confidential_pin_hash_v3');
 s=s.replace(/uep_subject_confidential_unlocked_v2/g,'uep_subject_confidential_unlocked_v3');
@@ -112,12 +106,13 @@ const must=[
  'function attendanceIsSchoolHoliday(day)',
  'function subjectConfidentialPasswordConfigured()',
  '선택과목 대외비 보안',
- 'data-subject-confidential-password-set',
+ 'onclick="setSubjectConfidentialPassword()"',
  'function dashboardOfficialAttendanceLabel(',
  "dashboardOfficialAttendanceLabel(r,'공결')",
  "dashboardOfficialAttendanceLabel(r,'공지각')"
 ];
 for(const x of must)assert(s.includes(x),'patch missing marker: '+x);
 assert(!s.includes('UEP_08135_RUNTIME_REPAIR_START'),'legacy 0.81.35 block remains');
+assert(!s.includes("extractFunction(s,'bindEvents')"),'legacy bindEvents dependency remains');
 fs.writeFileSync(jsFile,s,'utf8');
 console.log('UEP 0.81.36 source-level repair applied to',jsFile);
