@@ -1,0 +1,46 @@
+name: Diagnose UEP 0.81.70 core functions
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/diag-uep-0.81.70-core-functions.yml]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download current stable 0.81.70
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download v0.81.70 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip
+          Expand-Archive UEP-update.zip app -Force
+      - name: Extract actual runtime call paths
+        shell: pwsh
+        run: |
+          $p='app/resources/app/gyomuon.js'
+          $s=Get-Content $p -Raw -Encoding UTF8
+          function Dump([string]$needle,[int]$before=1000,[int]$after=3000){
+            $i=$s.IndexOf($needle)
+            Write-Host "`n===== $needle @ $i ====="
+            if($i -lt 0){return}
+            $st=[Math]::Max(0,$i-$before);$len=[Math]::Min($s.Length-$st,$before+$needle.Length+$after)
+            Write-Host $s.Substring($st,$len)
+          }
+          Dump 'function unlockSubjectConfidential' 1500 5000
+          Dump 'unlockSubjectConfidential=' 1500 5000
+          Dump '민감정보 열람 인증' 2200 4500
+          Dump '선택과목 대외비 인증' 2200 4500
+          Dump 'subjectConfidentialPasswordHash' 1500 4000
+          Dump 'const makeRecords=sheets=>' 2500 15000
+          Dump 'const findHeader=' 1500 5000
+          Dump 'findHeader(rows)' 1500 4000
+          Dump 'studentMaster' 1500 5000
+          Dump '학생마스터' 1500 5000
+          Dump 'data-neis-rule' 1200 3500
+          Write-Host "`n===== COUNTS ====="
+          foreach($n in @('민감정보 열람 인증','선택과목 대외비 인증','unlockSubjectConfidential','subjectConfidentialPasswordHash','const makeRecords=sheets=>','학생마스터')){
+            $count=([regex]::Matches($s,[regex]::Escape($n))).Count;Write-Host "$n = $count"
+          }
