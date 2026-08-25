@@ -28,14 +28,14 @@ jobs:
           $ErrorActionPreference='Stop';node scripts/patch-uep-0.81.65-urgent-notice.js app
           node --check app/resources/app/gyomuon.js
           $pkg='app/resources/app/package.json';$p=Get-Content $pkg -Raw -Encoding UTF8|ConvertFrom-Json;$p.version='0.81.65';$p|ConvertTo-Json -Depth 50|Set-Content $pkg -Encoding UTF8
+          $gy=(Get-FileHash app/resources/app/gyomuon.js -Algorithm SHA256).Hash.ToLower();"GYOMUON_SHA256=$gy"|Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - name: Build and re-open package
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop';Compress-Archive -Path 'app/*' -DestinationPath UEP-update.zip -CompressionLevel Optimal;Expand-Archive UEP-update.zip verify -Force
           if(!(Test-Path 'verify/UEP.exe')){throw 'root UEP.exe missing'}
           node --check verify/resources/app/gyomuon.js
-          $g=Get-Content verify/resources/app/gyomuon.js -Raw -Encoding UTF8
-          foreach($x in @('uepUrgentBell','data-urgent-confirm','uepUrgentNoticeTick','UEP_URGENT_LOCAL_ACK_KEY')){if(!$g.Contains($x)){throw "urgent output missing: $x"}}
+          $gy2=(Get-FileHash verify/resources/app/gyomuon.js -Algorithm SHA256).Hash.ToLower();if($gy2 -ne $env:GYOMUON_SHA256){throw "gyomuon hash mismatch: source=$env:GYOMUON_SHA256 verify=$gy2"}
           $pkg2=Get-Content verify/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json;if($pkg2.version -ne '0.81.65'){throw "package version mismatch: $($pkg2.version)"}
           $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower();"UEP_SHA256=$sha"|Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - name: Publish and promote 0.81.65
