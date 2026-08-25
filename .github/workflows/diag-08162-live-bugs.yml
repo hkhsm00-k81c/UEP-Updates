@@ -1,0 +1,34 @@
+name: Diagnose UEP 0.81.62 Live Bugs
+'on':
+  push:
+    branches: [main]
+    paths: [diag-08162-live-bugs.trigger]
+permissions:
+  contents: write
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          gh release download v0.81.61 --repo $env:GITHUB_REPOSITORY --pattern '*.zip' --dir source
+          $z=Get-ChildItem source -Filter '*.zip'|Select-Object -First 1; if(!$z){throw '0.81.61 release missing'}; Expand-Archive $z.FullName app -Force
+          $files=@('app/resources/app/gyomuon.js','app/resources/app/electron/google-data.cjs','app/resources/app/electron/main.cjs')
+          $patterns=@('data-curriculum-workspace','function ensureTabs','uep134Wired','unlockSubjectConfidential','function openDashboardStudentStatus','officialAttendance','function directNoticeRows','noticeReceipts','confirmedCount','미확인','확인','data-notice','saveNotice','notice-receipt','공지확인현황')
+          $o=@()
+          foreach($f in $files){
+            $l=Get-Content $f -Encoding UTF8
+            foreach($p in $patterns){
+              $hits=$l|Select-String -SimpleMatch $p
+              foreach($h in $hits){$s=[Math]::Max(0,$h.LineNumber-25);$e=[Math]::Min($l.Count-1,$h.LineNumber+55);$o+="=== $f :: $p @ $($h.LineNumber) ===";for($i=$s;$i -le $e;$i++){$o+=('{0}: {1}' -f ($i+1),$l[$i])}}
+            }
+          }
+          $o|Set-Content diag-08162-live-bugs.txt -Encoding UTF8
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add diag-08162-live-bugs.txt;git commit -m 'diag: capture 0.81.61 curriculum notice attendance handlers';git push
