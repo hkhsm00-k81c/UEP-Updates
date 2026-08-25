@@ -1,0 +1,97 @@
+name: Build UEP 0.81.72 Clean Structural Candidate R3
+'on':
+  push:
+    branches: [main]
+    paths:
+      - build-uep-0.81.72-performance-candidate-r3.trigger
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download stable 0.81.71
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,out | Out-Null
+          gh release download v0.81.71 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+      - name: Apply canonical structure integration
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node scripts/patch-uep-08172-structure.js
+          if($LASTEXITCODE -ne 0){throw 'structure patch failed'}
+      - name: Apply function-scoped operational write refactor
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node scripts/patch-uep-08172-operational-writes.js
+          if($LASTEXITCODE -ne 0){throw 'operational write patch failed'}
+      - name: Syntax checks must fail hard
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($file in @('app/resources/app/gyomuon.js','app/resources/app/electron/main.cjs','app/resources/app/electron/preload.cjs')){
+            node --check $file
+            if($LASTEXITCODE -ne 0){throw "syntax check failed: $file"}
+          }
+      - name: Structural regression checks
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          $m=Get-Content app/resources/app/electron/main.cjs -Raw -Encoding UTF8
+          $p=Get-Content app/resources/app/electron/preload.cjs -Raw -Encoding UTF8
+          foreach($bad in @('UEP_08134_CURRICULUM_SECURITY_START','data-uep134-pin-setting','setInterval(tick,2000)')){if($g.Contains($bad)){throw "legacy marker remains: $bad"}}
+          foreach($good in @('UEP_CURRICULUM_PLAN_08172','data-curriculum-workspace="plan"','refreshOperationalCacheSilently','uepLoadSharedSecurity08168(false)')){if(-not $g.Contains($good)){throw "renderer marker missing: $good"}}
+          foreach($good in @('fetchOperationalData','google:previewOperationalSync','UEP_OPERATIONAL_RANGE_NAMES')){if(-not $m.Contains($good)){throw "main marker missing: $good"}}
+          if(-not $p.Contains('previewOperationalSync')){throw 'preload operational bridge missing'}
+          foreach($fn in @('saveOfficialAttendance','deleteOfficialAttendance','saveLateAttendance','deleteLateAttendance','saveDormOuting','saveNightSupervisor','saveLunchDuty')){
+            $start=$m.IndexOf("async function $fn");if($start -lt 0){throw "function missing: $fn"}
+            $next=$m.IndexOf('async function ',$start+20);if($next -lt 0){$next=$m.Length}
+            $block=$m.Substring($start,$next-$start)
+            if($block -match 'fetchLiveData\(\{\s*force\s*:\s*true'){throw "full refresh remains: $fn"}
+          }
+      - name: Partial operational parser regression
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          @'
+          const {parseGoogleSheetData}=require('./app/resources/app/electron/google-data.cjs');
+          const matrices={
+            '30_공식출결기록':[['기록ID','학생ID','학번','성명','일자','구분'],['O1','S1','1101','테스트','2026-08-26','공결']],
+            '31_지각기록':[['지각ID','학생ID','학번','성명','일자','시간'],['L1','S1','1101','테스트','2026-08-26','08:40']],
+            '40_공지마감':[['공지ID','제목','내용','상태'],['N1','테스트공지','내용','게시']],
+            '44_공지확인현황':[['공지ID','사용자ID','확인일시'],['N1','T1','2026-08-26 08:00']],
+            '42_급식지도계획':[['기록ID','운영일','담당교사'],['D1','2026-08-26','교사A']],
+            '43_야자감독계획':[['기록ID','운영일','감독교사'],['Y1','2026-08-26','교사B']]
+          };
+          const p=parseGoogleSheetData(matrices);
+          const keys=['officialAttendance','lateAttendance','notices','noticeReceipts','lunchDuties','nightSupervisors'];
+          for(const key of keys){if(!Array.isArray(p[key]))throw new Error(key+' is not array');}
+          if(!p.lunchDuties.length||!p.nightSupervisors.length)throw new Error('duty partial normalization failed');
+          console.log('operational parser PASS',Object.fromEntries(keys.map(k=>[k,p[k].length])));
+          '@ | Set-Content test-operational-r3.js -Encoding UTF8
+          node test-operational-r3.js
+          if($LASTEXITCODE -ne 0){throw 'operational parser regression failed'}
+      - name: Package and revalidate archive
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Compress-Archive -Path app/* -DestinationPath out/UEP-update-0.81.72-candidate-r3.zip -CompressionLevel Optimal
+          New-Item -ItemType Directory -Force verify | Out-Null
+          Expand-Archive out/UEP-update-0.81.72-candidate-r3.zip verify -Force
+          foreach($file in @('verify/resources/app/gyomuon.js','verify/resources/app/electron/main.cjs','verify/resources/app/electron/preload.cjs')){node --check $file;if($LASTEXITCODE -ne 0){throw "archive syntax failed: $file"}}
+          $sha=(Get-FileHash out/UEP-update-0.81.72-candidate-r3.zip -Algorithm SHA256).Hash.ToLower()
+          @("candidate=0.81.72-r3","base=0.81.71-stable","sha256=$sha","legacy08134=removed","auto-refresh=operational","write-refresh=patch","security-poll=cache-aware","release=no") | Set-Content out/UEP-0.81.72-candidate-r3-report.txt -Encoding UTF8
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UEP-0.81.72-performance-candidate-r3
+          path: out/*
+          retention-days: 7
