@@ -1,0 +1,37 @@
+name: Diagnose UEP 0.81.61 Curriculum Attendance
+'on':
+  push:
+    branches: [main]
+    paths: [diag-08161-curriculum-attendance.trigger]
+permissions:
+  contents: write
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          gh release download v0.81.60 --repo $env:GITHUB_REPOSITORY --pattern '*.zip' --dir source
+          $z=Get-ChildItem source -Filter '*.zip'|Select-Object -First 1; Expand-Archive $z.FullName app -Force
+          $f='app/resources/app/gyomuon.js';$l=Get-Content $f -Encoding UTF8;$o=@()
+          $patterns=@(
+            'function uepComparableDate','공결·지각 학생','officialAttendance','attendanceViewDate',
+            '과목별 신청현황','교육과정 편성표','학생신청','중국어·일본어·정보','국·영·수',
+            '한문 고전 읽기','인공지능 기초','function subjectConfidentialAllowed','setSubjectConfidentialPassword',
+            'renderCurriculum','curriculum','selectionSubject','studentSelection'
+          )
+          foreach($p in $patterns){
+            $hits=$l|Select-String -SimpleMatch $p
+            foreach($h in $hits){$s=[Math]::Max(0,$h.LineNumber-35);$e=[Math]::Min($l.Count-1,$h.LineNumber+80);$o+="=== $p @ $($h.LineNumber) ===";for($i=$s;$i -le $e;$i++){$o+=('{0}: {1}' -f ($i+1),$l[$i])}}
+          }
+          $o|Set-Content diag-08161-curriculum-attendance.txt -Encoding UTF8
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add diag-08161-curriculum-attendance.txt
+          git commit -m 'diag: capture 0.81.60 curriculum and attendance targets'
+          git push
