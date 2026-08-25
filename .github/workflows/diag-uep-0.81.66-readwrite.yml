@@ -1,0 +1,28 @@
+name: Diagnose UEP 0.81.66 read write paths
+'on':
+  push:
+    branches: [main]
+    paths: [diag-uep-0.81.66-readwrite.trigger]
+permissions:
+  contents: write
+jobs:
+  diag:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download 0.81.66
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force app,src|Out-Null
+          gh release download v0.81.66 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir src
+          Expand-Archive src/UEP-update.zip app -Force
+      - name: Capture paths
+        shell: pwsh
+        run: |
+          $m=Get-Content app/resources/app/electron/main.cjs;$g=Get-Content app/resources/app/gyomuon.js;$out='diag-0.81.66-readwrite.txt';''|Set-Content $out -Encoding utf8
+          function R($title,$arr,$start,$end){Add-Content $out "===== $title $start-$end =====";for($i=$start;$i -le $end;$i++){if($i -le $arr.Count){Add-Content $out ("{0}: {1}" -f $i,$arr[$i-1])}}}
+          foreach($pat in @('function schoolReadApiRequest','async function schoolReadApiRequest','resolveGoogleReadAuth','school_read_api','readReadonlyCache','00_UEP설정','settings:','notice:receiptSave')){Add-Content $out "===== MAIN $pat =====";Select-String -Path app/resources/app/electron/main.cjs -Pattern $pat -Context 8,30 | Select-Object -First 12 | ForEach-Object {Add-Content $out $_.ToString()}}
+          foreach($pat in @('readonlyCache.settings','readonlyCache=','readReadonlyCache','saveNoticeReceipt','담임이 확인','확인하였습니다')){Add-Content $out "===== GYOMUON $pat =====";Select-String -Path app/resources/app/gyomuon.js -Pattern $pat -Context 8,24 | Select-Object -First 12 | ForEach-Object {Add-Content $out $_.ToString()}}
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add $out;git commit -m 'diag: capture 0.81.66 read write paths';git push
