@@ -1,0 +1,92 @@
+name: Build UEP 0.81.72 Performance Candidate R4
+'on':
+  push:
+    branches: [main]
+    paths:
+      - build-uep-0.81.72-performance-candidate-r4.trigger
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download stable 0.81.71
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,out | Out-Null
+          gh release download v0.81.71 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+      - name: Apply structural scripts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($script in @('scripts/patch-uep-08172-structure.js','scripts/patch-uep-08172-operational-writes.js','scripts/patch-uep-08172-refresh-policy.js')){
+            node $script
+            if($LASTEXITCODE -ne 0){throw "patch failed: $script"}
+          }
+      - name: Hard syntax checks
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($file in @('app/resources/app/gyomuon.js','app/resources/app/electron/main.cjs','app/resources/app/electron/preload.cjs')){
+            node --check $file
+            if($LASTEXITCODE -ne 0){throw "syntax failed: $file"}
+          }
+      - name: Refresh policy structural regression
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          $m=Get-Content app/resources/app/electron/main.cjs -Raw -Encoding UTF8
+          foreach($bad in @('UEP_08134_CURRICULUM_SECURITY_START','setInterval(tick,2000)','setInterval(syncSchoolReadAuthBadge,5000)','},900);')){if($g.Contains($bad)){throw "legacy/hot path remains: $bad"}}
+          foreach($good in @('READONLY_FULL_REFRESH_MAX_AGE_MS','refreshOperationalCacheSilently','operationalSyncedAt','Math.random()*10000','Math.random()*45000','syncSchoolReadAuthBadgeFromState','queueMicrotask(()=>syncSchoolReadAuthBadgeFromState())')){if(-not $g.Contains($good)){throw "refresh marker missing: $good"}}
+          if(-not $m.Contains('operationalSyncedAt')){throw 'main operational timestamp missing'}
+          if($g -match 'readonlyCache=\{\.\.\.\(readonlyCache\|\|\{\}\),\.\.\.result\.patch,syncedAt:'){throw 'operational refresh still overwrites full syncedAt'}
+          if($g -match 'rememberedUserContinue[\s\S]{0,2000}?refreshReadonlyCacheSilently\(\{force:true'){throw 'remembered login still forces full refresh'}
+      - name: Operational write and partial parser regression
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $m=Get-Content app/resources/app/electron/main.cjs -Raw -Encoding UTF8
+          foreach($fn in @('saveOfficialAttendance','deleteOfficialAttendance','saveLateAttendance','deleteLateAttendance','saveDormOuting','saveNightSupervisor','saveLunchDuty')){
+            $start=$m.IndexOf("async function $fn");if($start -lt 0){throw "function missing: $fn"}
+            $next=$m.IndexOf('async function ',$start+20);if($next -lt 0){$next=$m.Length}
+            $block=$m.Substring($start,$next-$start)
+            if($block -match 'fetchLiveData\(\{\s*force\s*:\s*true'){throw "full refresh remains: $fn"}
+          }
+          @'
+          const {parseGoogleSheetData}=require('./app/resources/app/electron/google-data.cjs');
+          const matrices={
+            '30_공식출결기록':[['기록ID','학생ID','학번','성명','일자','구분'],['O1','S1','1101','테스트','2026-08-26','공결']],
+            '31_지각기록':[['지각ID','학생ID','학번','성명','일자','시간'],['L1','S1','1101','테스트','2026-08-26','08:40']],
+            '40_공지마감':[['공지ID','제목','내용','상태'],['N1','테스트공지','내용','게시']],
+            '44_공지확인현황':[['공지ID','사용자ID','확인일시'],['N1','T1','2026-08-26 08:00']],
+            '42_급식지도계획':[['기록ID','운영일','담당교사'],['D1','2026-08-26','교사A']],
+            '43_야자감독계획':[['기록ID','운영일','감독교사'],['Y1','2026-08-26','교사B']]
+          };
+          const p=parseGoogleSheetData(matrices);
+          for(const key of ['officialAttendance','lateAttendance','notices','noticeReceipts','lunchDuties','nightSupervisors'])if(!Array.isArray(p[key]))throw new Error(key+' missing');
+          console.log('R4 partial parser PASS');
+          '@ | Set-Content test-r4.js -Encoding UTF8
+          node test-r4.js
+          if($LASTEXITCODE -ne 0){throw 'partial parser failed'}
+      - name: Package and archive revalidation
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Compress-Archive -Path app/* -DestinationPath out/UEP-update-0.81.72-candidate-r4.zip -CompressionLevel Optimal
+          New-Item -ItemType Directory -Force verify | Out-Null
+          Expand-Archive out/UEP-update-0.81.72-candidate-r4.zip verify -Force
+          foreach($file in @('verify/resources/app/gyomuon.js','verify/resources/app/electron/main.cjs','verify/resources/app/electron/preload.cjs')){node --check $file;if($LASTEXITCODE -ne 0){throw "archive syntax failed: $file"}}
+          $sha=(Get-FileHash out/UEP-update-0.81.72-candidate-r4.zip -Algorithm SHA256).Hash.ToLower()
+          @("candidate=0.81.72-r4","base=0.81.71-stable","sha256=$sha","startup=fresh-operational_stale-full-jitter","auto=10m-operational_60m-full-jitter","badge=render-state-no-5s-poll","release=no") | Set-Content out/UEP-0.81.72-candidate-r4-report.txt -Encoding UTF8
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UEP-0.81.72-performance-candidate-r4
+          path: out/*
+          retention-days: 7
