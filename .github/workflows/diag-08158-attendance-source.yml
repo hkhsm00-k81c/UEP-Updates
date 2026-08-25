@@ -1,0 +1,51 @@
+name: Diagnose UEP 0.81.58 Attendance Source
+
+'on':
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [diag-08158-attendance-source.trigger]
+
+permissions:
+  contents: write
+
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download 0.81.58
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          gh release download v0.81.58 --repo $env:GITHUB_REPOSITORY --pattern '*.zip' --dir source
+          $zip=Get-ChildItem source -File -Filter '*.zip'|Select-Object -First 1
+          Expand-Archive $zip.FullName app -Force
+      - name: Inspect attendance ingestion
+        shell: pwsh
+        run: |
+          $files=@('app/resources/app/gyomuon.js','app/resources/app/electron/main.cjs','app/resources/app/electron/google-data.cjs')
+          $patterns=@('officialAttendance','30_공결기록','공결기록','출결일자','rawDate','formattedValue','toISOString','DateTimeRenderOption','SERIAL_NUMBER','FORMATTED_VALUE')
+          $out=@()
+          foreach($f in $files){
+            $lines=Get-Content $f -Encoding UTF8
+            $out += "===== $f ====="
+            for($i=0;$i -lt $lines.Count;$i++){
+              foreach($p in $patterns){
+                if($lines[$i] -match [regex]::Escape($p)){
+                  $s=[Math]::Max(0,$i-5);$e=[Math]::Min($lines.Count-1,$i+8)
+                  $out += "--- $p @ $($i+1) ---"
+                  for($j=$s;$j -le $e;$j++){ $out += ('{0,6}: {1}' -f ($j+1),$lines[$j]) }
+                  break
+                }
+              }
+            }
+          }
+          Set-Content diag-08158-attendance-source.txt $out -Encoding UTF8
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add diag-08158-attendance-source.txt
+          git commit -m 'diag: inspect 0.81.58 attendance ingestion' || echo nochange
+          git push
