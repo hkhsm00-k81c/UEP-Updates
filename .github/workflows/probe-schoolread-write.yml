@@ -1,0 +1,34 @@
+name: Probe School Read Write Actions
+'on':
+  push:
+    branches: [main]
+    paths: [probe-schoolread-write.trigger]
+permissions:
+  contents: write
+jobs:
+  probe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        run: |
+          $url='https://script.google.com/macros/s/AKfycbyLEEam4L2sX653pii69TC3_84wTyfAed_UL8HRY6PBG467im1LmZJ0CIpSKSOj4r6-0w/exec'
+          $actions=@('notice-receipt-save','save-notice-receipt','noticeReceiptSave','receipt-save','write-notice-receipt')
+          $out=@()
+          foreach($a in $actions){
+            try{
+              $body=@{action=$a;token='INVALID_PROBE_TOKEN';deviceId='UEP-PROBE-INVALID';noticeId='PROBE-NO-WRITE';teacher='PROBE'}|ConvertTo-Json -Compress
+              $r=Invoke-WebRequest -Uri $url -Method POST -ContentType 'application/json;charset=UTF-8' -Body $body -UseBasicParsing
+              $out += "ACTION=$a STATUS=$($r.StatusCode) BODY=$($r.Content)"
+            }catch{
+              $status=$_.Exception.Response.StatusCode.value__
+              $content='';try{$content=$_.ErrorDetails.Message}catch{}
+              $out += "ACTION=$a STATUS=$status ERROR=$content MESSAGE=$($_.Exception.Message)"
+            }
+          }
+          $out|Set-Content probe-schoolread-write.txt -Encoding UTF8
+          Get-Content probe-schoolread-write.txt
+      - shell: pwsh
+        run: |
+          git config user.name 'UEP Diagnostics';git config user.email 'actions@github.com'
+          git add probe-schoolread-write.txt;git commit -m 'diag: capture School Read write action probe' || exit 0;git push
