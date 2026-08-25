@@ -1,0 +1,31 @@
+name: Diagnose UEP 0.81.62 Live
+'on':
+  push:
+    branches: [main]
+    paths: [diag-uep-0.81.62-live.trigger]
+permissions:
+  contents: write
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download 0.81.62
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop';New-Item -ItemType Directory -Force source,app|Out-Null
+          gh release download v0.81.62 --repo $env:GITHUB_REPOSITORY --pattern '*.zip' --dir source
+          $z=Get-ChildItem source -File -Filter '*.zip'|Select-Object -First 1;if(!$z){throw '0.81.62 zip missing'};Expand-Archive $z.FullName app -Force
+      - name: Inspect
+        shell: pwsh
+        run: node scripts/diag-uep-0.81.62-live.js app
+      - name: Commit diagnostic
+        shell: pwsh
+        run: |
+          git config user.name 'UEP Diagnostics'; git config user.email 'actions@github.com'
+          git add diag-08162-live.txt
+          git commit -m 'diag: capture 0.81.62 live paths' || exit 0
+          git push
