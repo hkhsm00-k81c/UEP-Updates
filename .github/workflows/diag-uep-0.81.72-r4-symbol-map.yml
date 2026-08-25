@@ -1,0 +1,44 @@
+name: Diagnose UEP 0.81.72 R4 Symbol Map
+'on':
+  push:
+    branches: [main]
+    paths:
+      - diag-uep-0.81.72-r4-symbol-map.trigger
+permissions:
+  contents: write
+  actions: read
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download R4 artifact
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force stage,app | Out-Null
+          gh run download 32910080088 --repo $env:GITHUB_REPOSITORY -n UEP-0.81.72-performance-candidate-r4 -D stage
+          Expand-Archive stage/UEP-update-0.81.72-candidate-r4.zip app -Force
+      - name: Map input center and write symbols
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $out=@('# UEP 0.81.72 R4 symbol map','')
+          $patterns=@('saveInputRecords','classifyInputBatch','normalizeInputBatch','input:save','input:classify','input:normalize','saveStudentContact','saveProgramOperation','saveInputRecords:','classifyInputBatch:','normalizeInputBatch:')
+          $files=Get-ChildItem app/resources/app -Recurse -File | Where-Object {$_.Extension -in '.js','.cjs','.mjs'}
+          foreach($pat in $patterns){
+            $out+="## $pat"
+            foreach($f in $files){
+              $hits=Select-String -Path $f.FullName -SimpleMatch $pat
+              foreach($h in $hits){$rel=$f.FullName.Substring((Resolve-Path 'app').Path.Length+1);$out+=("{0}:{1}: {2}" -f $rel,$h.LineNumber,$h.Line.Trim())}
+            }
+          }
+          $out|Set-Content diag-uep-0.81.72-r4-symbol-map.txt -Encoding UTF8
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git pull --rebase origin main
+          git add diag-uep-0.81.72-r4-symbol-map.txt
+          git commit -m 'diag: capture UEP 0.81.72 R4 symbol map'
+          git push
