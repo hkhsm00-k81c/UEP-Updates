@@ -1,0 +1,32 @@
+name: Diagnose UEP 0.81.61 Official Source
+'on':
+  push:
+    branches: [main]
+    paths: [diag-08161-official-source.trigger]
+permissions:
+  contents: write
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          gh release download v0.81.60 --repo $env:GITHUB_REPOSITORY --pattern '*.zip' --dir source
+          $z=Get-ChildItem source -Filter '*.zip'|Select-Object -First 1; Expand-Archive $z.FullName app -Force
+          $o=@()
+          foreach($f in @('app/resources/app/electron/google-data.cjs','app/resources/app/electron/main.cjs','app/resources/app/gyomuon.js')){
+            $l=Get-Content $f -Encoding UTF8
+            foreach($p in @('officialAttendance','30_공결기록','30_공식출결기록','localDate','formattedValue')){
+              $hits=$l|Select-String -SimpleMatch $p
+              foreach($h in $hits){$s=[Math]::Max(0,$h.LineNumber-28);$e=[Math]::Min($l.Count-1,$h.LineNumber+55);$o+="=== $f :: $p @ $($h.LineNumber) ===";for($i=$s;$i -le $e;$i++){$o+=('{0}: {1}' -f ($i+1),$l[$i])}}
+            }
+          }
+          $o|Set-Content diag-08161-official-source.txt -Encoding UTF8
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add diag-08161-official-source.txt;git commit -m 'diag: capture official attendance source path';git push
