@@ -22,6 +22,7 @@ const students=[
 ];
 const forbidden=[['기업·브랜드·플랫폼',/(다음카카오|구글)/gi,true]];
 const records=makeNeisRecordbookRecords08171({sheets:[{name:'sheet1',rows}],students,defaultGrade:'1',forbidden});
+console.log('RECORDS BEFORE ASSERT',JSON.stringify(records.map(r=>({studentNo:r.studentNo,studentId:r.studentId,name:r.name,subject:r.subject,semester:r.semester,row:r.row,lastRow:r.lastRow,text:r.text,masterMatched:r.masterMatched})),null,2));
 assert.equal(records.length,3,'page-boundary continuation must merge instead of creating a fourth record');
 assert.deepEqual([...new Set(records.map(r=>r.subject))],['공통국어1','공통수학1'],'subject transition must be detected from repeated-page first rows');
 const merged=records.find(r=>r.studentNo==='1102'&&r.subject==='공통국어1');
