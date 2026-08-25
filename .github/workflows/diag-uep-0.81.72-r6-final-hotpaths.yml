@@ -1,0 +1,43 @@
+name: Diagnose UEP 0.81.72 R6 Final Hot Paths
+'on':
+  push:
+    branches: [main]
+    paths:
+      - diag-uep-0.81.72-r6-final-hotpaths.trigger
+permissions:
+  contents: write
+  actions: read
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download R6 artifact
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop';New-Item -ItemType Directory -Force stage,app|Out-Null
+          gh run download 32910802716 --repo $env:GITHUB_REPOSITORY -n UEP-0.81.72-performance-candidate-r6 -D stage
+          Expand-Archive stage/UEP-update-0.81.72-candidate-r6.zip app -Force
+      - name: Audit remaining network and renderer hot paths
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $m='app/resources/app/electron/main.cjs';$g='app/resources/app/gyomuon.js';$ml=Get-Content $m -Encoding UTF8;$gl=Get-Content $g -Encoding UTF8
+          $out=@('# UEP 0.81.72 R6 final hot-path audit','')
+          $out+='## MAIN remaining full fetches'
+          for($i=0;$i -lt $ml.Count;$i++){if($ml[$i] -match 'fetchLiveData\(\{\s*force\s*:\s*true'){$s=[Math]::Max(0,$i-14);$e=[Math]::Min($ml.Count-1,$i+12);for($j=$s;$j -le $e;$j++){$out+=('{0}: {1}' -f ($j+1),$ml[$j])};$out+='---'}}
+          $out+='## RENDERER remaining forced full refreshes'
+          for($i=0;$i -lt $gl.Count;$i++){if($gl[$i] -match 'refreshReadonlyCacheSilently\(\{\s*force\s*:\s*true'){$s=[Math]::Max(0,$i-12);$e=[Math]::Min($gl.Count-1,$i+12);for($j=$s;$j -le $e;$j++){$out+=('{0}: {1}' -f ($j+1),$gl[$j])};$out+='---'}}
+          $out+='## WHOLE CACHE replacements'
+          for($i=0;$i -lt $gl.Count;$i++){if($gl[$i] -match 'readonlyCache\s*=\s*result(?:\?\.)?\.data|readonlyCache\s*=\s*result\.data'){$s=[Math]::Max(0,$i-10);$e=[Math]::Min($gl.Count-1,$i+10);for($j=$s;$j -le $e;$j++){$out+=('{0}: {1}' -f ($j+1),$gl[$j])};$out+='---'}}
+          $out+='## MUTATION OBSERVERS'
+          for($i=0;$i -lt $gl.Count;$i++){if($gl[$i] -match 'MutationObserver'){$s=[Math]::Max(0,$i-8);$e=[Math]::Min($gl.Count-1,$i+14);for($j=$s;$j -le $e;$j++){$out+=('{0}: {1}' -f ($j+1),$gl[$j])};$out+='---'}}
+          $out+='## SETINTERVAL inventory'
+          for($i=0;$i -lt $gl.Count;$i++){if($gl[$i] -match 'setInterval\('){$s=[Math]::Max(0,$i-5);$e=[Math]::Min($gl.Count-1,$i+10);for($j=$s;$j -le $e;$j++){$out+=('{0}: {1}' -f ($j+1),$gl[$j])};$out+='---'}}
+          $out+='## RENDER calls near operational refresh'
+          for($i=0;$i -lt $gl.Count;$i++){if($gl[$i] -match 'refreshOperationalCacheSilently|operationalRefreshInFlight'){$s=[Math]::Max(0,$i-8);$e=[Math]::Min($gl.Count-1,$i+18);for($j=$s;$j -le $e;$j++){$out+=('{0}: {1}' -f ($j+1),$gl[$j])};$out+='---'}}
+          $out|Set-Content diag-uep-0.81.72-r6-final-hotpaths.txt -Encoding UTF8
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git pull --rebase origin main;git add diag-uep-0.81.72-r6-final-hotpaths.txt;git commit -m 'diag: capture UEP 0.81.72 R6 final hot paths';git push
