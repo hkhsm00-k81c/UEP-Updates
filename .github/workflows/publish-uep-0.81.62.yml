@@ -1,0 +1,50 @@
+name: Publish UEP 0.81.62 Live Fix Bundle
+'on':
+  push:
+    branches: [main]
+    paths: [publish-uep-0.81.62.trigger]
+permissions:
+  contents: write
+concurrency:
+  group: publish-uep-0.81.62
+  cancel-in-progress: true
+jobs:
+  build-publish:
+    runs-on: windows-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download 0.81.61
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop';New-Item -ItemType Directory -Force source,app,verify|Out-Null
+          gh release download v0.81.61 --repo $env:GITHUB_REPOSITORY --pattern '*.zip' --dir source
+          $zip=Get-ChildItem source -File -Filter '*.zip'|Select-Object -First 1;if(!$zip){throw '0.81.61 release zip not found'};Expand-Archive $zip.FullName app -Force
+      - name: Apply 0.81.62 patch and verify
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop';node scripts/patch-uep-0.81.62.js app
+          node --check app/resources/app/gyomuon.js;node --check app/resources/app/electron/main.cjs;node --check app/resources/app/electron/google-data.cjs
+          $pkg='app/resources/app/package.json';$p=Get-Content $pkg -Raw -Encoding UTF8|ConvertFrom-Json;$p.version='0.81.62';$p|ConvertTo-Json -Depth 50|Set-Content $pkg -Encoding UTF8
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          foreach($x in @('const APP_VERSION = "0.81.62";','__UEP_08162_CURRICULUM_BINDINGS__','__UEP_08162_OFFICIAL_SINGLE_DATE_SOURCE__','__UEP_08162_DIRECT_NOTICE_CONFIRM_REQUIRED__','__UEP_08162_EXISTING_NOTICE_CONFIRM_GATE__','__UEP_08162_NOTICE_RECEIPT_REFRESH__')){if(!$g.Contains($x)){throw "marker missing: $x"}}
+          $canonical=[regex]::Matches($g,'officialAttendanceRowsForDate08162\(').Count;if($canonical -lt 5){throw "official date helper not shared enough: $canonical"}
+      - name: Build package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop';Compress-Archive -Path 'app/*' -DestinationPath UEP-update.zip -CompressionLevel Optimal;Expand-Archive UEP-update.zip verify -Force
+          if(!(Test-Path 'verify/UEP.exe')){throw 'root UEP.exe missing'};node --check verify/resources/app/gyomuon.js
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower();"UEP_SHA256=$sha"|Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Publish and promote 0.81.62
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop';gh release view v0.81.62 --repo $env:GITHUB_REPOSITORY *> $null
+          if($LASTEXITCODE -eq 0){gh release delete v0.81.62 --repo $env:GITHUB_REPOSITORY --cleanup-tag --yes};$global:LASTEXITCODE=0
+          gh release create v0.81.62 UEP-update.zip --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.62 Curriculum Click + Attendance + Notice Confirmation' --notes '생활기록부 교육과정의 문이과 교차오류/과목별 신청현황 클릭 바인딩 오류를 수정합니다. 공결은 대시보드 카드·상세 팝업·출결 메뉴가 동일한 officialAttendance YYYY-MM-DD 기준 함수를 사용하도록 단일화합니다. 직접 학교업무 일반공지도 담임 확인 대상이 되며 확인했습니다 버튼과 44_공지확인현황 저장/공용 캐시 갱신을 연결합니다.'
+          $url='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.62/UEP-update.zip';$policy=Get-Content uep-policy.json -Raw -Encoding UTF8|ConvertFrom-Json;$policy.latestVersion='0.81.62';$policy.downloadUrl=$url;$policy.sha256=$env:UEP_SHA256;$policy.message='선택과목 클릭 복구 · 공결 날짜 조회 단일화 · 직접공지 확인 집계 수정';$policy.forceUpdate=$false;$policy|ConvertTo-Json -Depth 50|Set-Content uep-policy.json -Encoding UTF8
+          $manifest=@{version='0.81.62';channel='stable';downloadUrl=$url;sha256=$env:UEP_SHA256;notes='선택과목 클릭 + 공결 단일 날짜소스 + 직접공지 확인 집계'}|ConvertTo-Json;Set-Content uep-update.json $manifest -Encoding UTF8;Set-Content uep-version.json $manifest -Encoding UTF8
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add uep-policy.json uep-update.json uep-version.json;git commit -m 'release: promote UEP 0.81.62 live fixes';git push
