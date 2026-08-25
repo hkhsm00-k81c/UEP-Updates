@@ -1,0 +1,49 @@
+name: Diagnose UEP 0.81.60 Dashboard Notice
+
+'on':
+  push:
+    branches: [main]
+    paths: [diag-08160-dashboard-notice.trigger]
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download 0.81.59
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          gh release download v0.81.59 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+      - name: Capture dashboard/date/notice targets
+        shell: pwsh
+        run: |
+          $out=@()
+          $files=@('app/resources/app/gyomuon.js','app/resources/app/electron/google-data.cjs')
+          $patterns=@('공결·지각 학생','공결','officialAttendance','lateAttendance','조회 날짜','setDate','86400000','toISOString','schoolWork','학교업무 공지','직접 공지','새로운 업데이트 공지','manual notice','AUTO DEADLINE','직접공지','notices','noticeReceipts','deadline')
+          foreach($file in $files){
+            if(!(Test-Path $file)){continue}
+            $lines=Get-Content $file -Encoding UTF8
+            $out += "===== $file ====="
+            foreach($p in $patterns){
+              $hits=$lines|Select-String -SimpleMatch $p
+              foreach($h in $hits){
+                $s=[Math]::Max(0,$h.LineNumber-1-18);$e=[Math]::Min($lines.Count-1,$h.LineNumber-1+24)
+                $out += "--- $p @ $($h.LineNumber) ---"
+                for($i=$s;$i -le $e;$i++){$out += ('{0}: {1}' -f ($i+1),$lines[$i])}
+              }
+            }
+          }
+          $out|Set-Content diag-08160-dashboard-notice.txt -Encoding UTF8
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add diag-08160-dashboard-notice.txt
+          git commit -m 'diag: capture 0.81.60 dashboard and notice targets'
+          git push
