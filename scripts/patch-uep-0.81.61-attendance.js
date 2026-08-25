@@ -1,0 +1,12 @@
+const fs=require('fs');
+const path=require('path');
+const appRoot=process.argv[2]||'app';
+const f=path.resolve(appRoot,'resources','app','gyomuon.js');
+let s=fs.readFileSync(f,'utf8');
+const oldText="const official=(readonlyCache?.officialAttendance||[]).filter(r=>{/* __UEP_08161_DASHBOARD_OFFICIAL_DATE_SCOPE__ */return uepComparableDate(r.date||r.day||r.rawDate||r['일자']||r['출결일자'],basisDate)===basisDate;}).map(r=>({...r,dashboardStatusType:dashboardOfficialAttendanceLabel(r,'공결')}));";
+const newText="const official=(readonlyCache?.officialAttendance||[]).filter(r=>{/* __UEP_08161_DASHBOARD_OFFICIAL_CANONICAL_DATE__ officialAttendance.date is already canonical YYYY-MM-DD from google-data localDate(); do not reparse or offset it */return String(r.date||'').slice(0,10)===basisDate;}).map(r=>({...r,dashboardStatusType:dashboardOfficialAttendanceLabel(r,'공결')}));";
+if(!s.includes(oldText))throw new Error('0.81.61 dashboard official anchor missing');
+s=s.replace(oldText,newText);
+if(!s.includes('__UEP_08161_DASHBOARD_OFFICIAL_CANONICAL_DATE__'))throw new Error('canonical marker missing');
+fs.writeFileSync(f,s,'utf8');
+console.log('UEP 0.81.61 dashboard official attendance now compares canonical source date directly; no +/- day correction used');
