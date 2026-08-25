@@ -1,0 +1,907 @@
+# UEP 0.81.72 R6 final hot-path audit
+
+## MAIN remaining full fetches
+573:     try{info=await googleUserInfo(tokenPayload.access_token);}catch{}
+574:     let idTokenInfo={};
+575:     try{
+576:       const parts=String(tokenPayload.id_token||'').split('.');
+577:       if(parts.length>=2) idTokenInfo=JSON.parse(Buffer.from(parts[1].replace(/-/g,'+').replace(/_/g,'/'),'base64').toString('utf8'))||{};
+578:     }catch{}
+579:     const fallbackEmail=String(loginHint||'').trim();
+580:     const saved={...tokenPayload,client_id:clientId,email:String(info?.email||idTokenInfo?.email||fallbackEmail||''),sub:String(info?.sub||idTokenInfo?.sub||''),expires_at:Date.now()+Math.max(60,Number(tokenPayload.expires_in||3600))*1000,created_at:new Date().toISOString(),updated_at:new Date().toISOString()};
+581:     const persistResult=await saveGoogleUserOAuth(saved);
+582:     const verifySaved=await readGoogleUserOAuth();
+583:     if(!verifySaved?.access_token) throw googleOAuthError('Google 승인 토큰 저장 확인에 실패했습니다.','UEP_GOOGLE_OAUTH_PERSIST_FAILED');
+584:     liveDataCache=null;liveDataFetchedAt=0;
+585:     let syncOk=false, syncError='', syncCode='', data=null;
+586:     try {
+587:       data=await fetchLiveData({force:true});
+588:       syncOk=true;
+589:     } catch(error) {
+590:       syncError=String(error?.message||error||'Google 시트 조회 실패');
+591:       syncCode=String(error?.code||'');
+592:     }
+593:     return {ok:true,authorized:true,mode:'user_oauth',account:saved.email,sourceName:data?.sourceName||UEP_SPREADSHEET_NAME,preview:data?.summary||null,syncedAt:data?.syncedAt||'',syncOk,syncError,syncCode};
+594:   }finally{
+595:     if(timer)clearTimeout(timer);
+596:     try{server.close();}catch{}
+597:   }
+598: }
+599: async function disconnectGoogleUser(){
+---
+2055: });ipcMain.handle("google:disconnectUser", async () => {
+2056:   try{return await disconnectGoogleUser();}catch(error){return {ok:false,reason:error?.message||String(error)};}
+2057: });
+2058:   ipcMain.handle("google:selectCredential", async (event) => {
+2059:     const win = BrowserWindow.fromWebContents(event.sender);
+2060:     const selected = await dialog.showOpenDialog(win, {
+2061:       title: "Google 서비스 계정 JSON 선택",
+2062:       properties: ["openFile"],
+2063:       filters: [{ name: "Google 서비스 계정", extensions: ["json"] }],
+2064:     });
+2065:     if (selected.canceled || !selected.filePaths[0]) return { ok: false, canceled: true };
+2066:     try {
+2067:       const credentials = JSON.parse(await fs.readFile(selected.filePaths[0], "utf8"));
+2068:       if (!validateServiceAccount(credentials)) return { ok: false, reason: "Google 서비스 계정 JSON 형식이 아닙니다." };
+2069:       const data = await fetchLiveData({ force: true, credentials });
+2070:       await saveEncrypted(credentialPath(), credentials);
+2071:       return {
+2072:         ok: true,
+2073:         account: credentials.client_email,
+2074:         sourceName: UEP_SPREADSHEET_NAME,
+2075:         preview: data.summary,
+2076:       };
+2077:     } catch (error) {
+2078:       liveDataCache = null;
+2079:       liveDataFetchedAt = 0;
+2080:       return { ok: false, reason: `${error.message || "구글시트 연결 실패"} 서비스 계정 이메일에 UEP 구글시트 보기 권한이 있는지 확인하세요.` };
+2081:     }
+---
+2072:         ok: true,
+2073:         account: credentials.client_email,
+2074:         sourceName: UEP_SPREADSHEET_NAME,
+2075:         preview: data.summary,
+2076:       };
+2077:     } catch (error) {
+2078:       liveDataCache = null;
+2079:       liveDataFetchedAt = 0;
+2080:       return { ok: false, reason: `${error.message || "구글시트 연결 실패"} 서비스 계정 이메일에 UEP 구글시트 보기 권한이 있는지 확인하세요.` };
+2081:     }
+2082:   });
+2083:   ipcMain.handle("google:previewOperationalSync", async () => {try{return await fetchOperationalData();}catch(error){return {ok:false,reason:error?.message||'UEP 운영자료 갱신 실패'};}});
+2084:   ipcMain.handle("google:previewReadonlySync", async () => {
+2085:     try {
+2086:       const data = await fetchLiveData({ force: true });
+2087:       return { ok: true, syncedAt: data.syncedAt, preview: data.summary, nightPreview: data.summary, sourceName: data.sourceName };
+2088:     } catch (error) {
+2089:       liveDataCache = null;
+2090:       liveDataFetchedAt = 0;
+2091:       return { ok: false, reason: error.message || "UEP 구글시트 새로고침 실패" };
+2092:     }
+2093:   });
+2094:   ipcMain.handle("google:readReadonlyCache", async () => {
+2095:     try { return { ok: true, data: await fetchLiveData() }; }
+2096:     catch (error) { return { ok: false, reason: error.message || "UEP 구글시트를 읽지 못했습니다." }; }
+2097:   });
+2098:   
+---
+## RENDERER remaining forced full refreshes
+534:         })
+535:     : Promise.resolve();
+536:   await Promise.all([credentialTask, cacheTask]);
+537:   // 화면은 로컬/메모리 캐시로 먼저 표시한 뒤, 실행당 한 번만 백그라운드 원격 동기화한다.
+538:   // 사용자는 기다리지 않고 UEP를 사용하며, 최신 Google Sheet가 도착하면 현재 화면만 갱신한다.
+539:   if(googleConnectionStatus?.ok){
+540:     const fullSyncedAt=readonlyCache?.syncedAt?new Date(readonlyCache.syncedAt).getTime():0;
+541:     const fullAge=fullSyncedAt?Date.now()-fullSyncedAt:Number.POSITIVE_INFINITY;
+542:     const needsFull=!readonlyCache||!fullSyncedAt||fullAge>=READONLY_FULL_REFRESH_MAX_AGE_MS;
+543:     const jitter=needsFull?(2000+Math.floor(Math.random()*10000)):(500+Math.floor(Math.random()*2500));
+544:     setTimeout(async()=>{
+545:       const ok=needsFull
+546:         ? await refreshReadonlyCacheSilently({force:true,rerender:true})
+547:         : await refreshOperationalCacheSilently({rerender:true});
+548:       if(ok){
+549:         updateTopSyncStatus();
+550:         if(currentRoleId()==='admin') migrateAdminProgramOverridesToSheetOnce().catch(()=>{});
+551:       }
+552:     },jitter);
+553:   }
+554:   if(googleConnectionStatus?.ok && readonlyCache) await migrateAdminProgramOverridesToSheetOnce();
+555:   updateDormOutingCount();
+556:   updateTopSyncStatus();
+557:   startReadonlyAutoRefresh();
+558:   // 여기서는 백그라운드에서 최신 계정 유효성을 재검증한다.
+---
+639:     return true;
+640:   } catch(error) {
+641:     googleConnectionError=error?.message||'UEP 학교 데이터 자동 갱신 실패';
+642:     updateTopSyncStatus();
+643:     return false;
+644:   }
+645:   })();
+646:   try{return await readonlyRefreshInFlight;}finally{readonlyRefreshInFlight=null;}
+647: }
+648: let operationalRefreshInFlight=null;
+649: async function refreshOperationalCacheSilently({rerender=true}={}){
+650:   if(operationalRefreshInFlight)return operationalRefreshInFlight;
+651:   if(!window.schoolBoard?.previewOperationalSync)return refreshReadonlyCacheSilently({force:true,rerender});
+652:   operationalRefreshInFlight=(async()=>{
+653:     if(!googleConnectionStatus?.ok)return false;
+654:     try{
+655:       const result=await window.schoolBoard.previewOperationalSync();
+656:       if(result?.requiresFullSync)return refreshReadonlyCacheSilently({force:true,rerender});
+657:       if(!result?.ok)throw new Error(result?.reason||'UEP 운영자료 갱신 실패');
+658:       if(result.patch&&typeof result.patch==='object')readonlyCache={...(readonlyCache||{}),...result.patch,operationalSyncedAt:result.operationalSyncedAt||result.syncedAt||new Date().toISOString()};
+659:       googleConnectionError='';updateTopSyncStatus();updateDormOutingCount();
+660:       if(rerender&&state.activePage)render(state.activePage);
+661:       return true;
+662:     }catch(error){googleConnectionError=error?.message||String(error);updateTopSyncStatus();return false;}
+663:   })();
+---
+644:   }
+645:   })();
+646:   try{return await readonlyRefreshInFlight;}finally{readonlyRefreshInFlight=null;}
+647: }
+648: let operationalRefreshInFlight=null;
+649: async function refreshOperationalCacheSilently({rerender=true}={}){
+650:   if(operationalRefreshInFlight)return operationalRefreshInFlight;
+651:   if(!window.schoolBoard?.previewOperationalSync)return refreshReadonlyCacheSilently({force:true,rerender});
+652:   operationalRefreshInFlight=(async()=>{
+653:     if(!googleConnectionStatus?.ok)return false;
+654:     try{
+655:       const result=await window.schoolBoard.previewOperationalSync();
+656:       if(result?.requiresFullSync)return refreshReadonlyCacheSilently({force:true,rerender});
+657:       if(!result?.ok)throw new Error(result?.reason||'UEP 운영자료 갱신 실패');
+658:       if(result.patch&&typeof result.patch==='object')readonlyCache={...(readonlyCache||{}),...result.patch,operationalSyncedAt:result.operationalSyncedAt||result.syncedAt||new Date().toISOString()};
+659:       googleConnectionError='';updateTopSyncStatus();updateDormOutingCount();
+660:       if(rerender&&state.activePage)render(state.activePage);
+661:       return true;
+662:     }catch(error){googleConnectionError=error?.message||String(error);updateTopSyncStatus();return false;}
+663:   })();
+664:   try{return await operationalRefreshInFlight;}finally{operationalRefreshInFlight=null;}
+665: }
+666: function startReadonlyAutoRefresh(){
+667:   if(readonlyAutoRefreshTimer) clearInterval(readonlyAutoRefreshTimer);
+668:   if(!googleConnectionStatus?.ok) return;
+---
+665: }
+666: function startReadonlyAutoRefresh(){
+667:   if(readonlyAutoRefreshTimer) clearInterval(readonlyAutoRefreshTimer);
+668:   if(!googleConnectionStatus?.ok) return;
+669:   readonlyAutoRefreshTimer=setInterval(()=>{
+670:     if(document.hidden) return;
+671:     readonlyAutoRefreshCycle+=1;
+672:     const fullSyncedAt=readonlyCache?.syncedAt?new Date(readonlyCache.syncedAt).getTime():0;
+673:     const fullAge=fullSyncedAt?Date.now()-fullSyncedAt:Number.POSITIVE_INFINITY;
+674:     const needsFull=!fullSyncedAt||fullAge>=READONLY_FULL_REFRESH_MAX_AGE_MS||readonlyAutoRefreshCycle%6===0;
+675:     if(needsFull){
+676:       const jitter=Math.floor(Math.random()*45000);
+677:       setTimeout(()=>{if(!document.hidden)refreshReadonlyCacheSilently({force:true,rerender:true});},jitter);
+678:       return;
+679:     }
+680:     refreshOperationalCacheSilently({rerender:true});
+681:   },READONLY_AUTO_REFRESH_MS);
+682: }
+683: 
+684: function updateTopSyncStatus() {
+685:   const button = $("#syncButton");
+686:   if (!button) return;
+687:   button.classList.remove("good", "warn", "bad");
+688:   const label = button.querySelector("span");
+689:   if (googleConnectionError) {
+---
+3146:   if(/수행평가|평가지/.test(joined)) return {type:'교과 수행평가',label:'학생정보 > 교과활동 참고자료',description:'수행평가 원문·검수본을 학생별 교과활동 참고자료로 연결합니다.'};
+3147:   return {type:'외부 학생자료',label:'학생정보 > 외부자료',description:'자료유형이 명확하지 않아 학생별 외부자료로 보관합니다. 이후 용도를 다시 지정할 수 있습니다.'};
+3148: }
+3149: async function inputCenterApply(mode='uep'){
+3150:   const rows=inputCenterReviewRowsCache||[];if(!rows.length)return toast('적용할 검수 자료가 없습니다.');
+3151:   const unmatched=rows.filter(r=>!r.studentNo&&!r.studentId).length;if(unmatched)return toast(`학생 매칭이 끝나지 않은 자료 ${unmatched}건이 있습니다.`);
+3152:   const first=rows[0]||{};const program=(readonlyCache?.programs||[]).find(v=>String(v.id||v.programId||'')===String(first.programId||''))||{};
+3153:   const nature=String(first.type||'').includes('보고서')?'보고서':String(first.type||'').includes('신청')?'신청':String(first.type||'').includes('만족도')||String(first.type||'').includes('설문')?'만족도조사':first.type||'기타';
+3154:   if(nature==='보고서'&&!first.programId)return toast('보고서는 연결프로그램을 먼저 확정해 주세요.');
+3155:   const payload={batchId:first.batchId||'',nature,programId:first.programId||'',programKind:first.programKind||program.kind||'',programName:program.actualTitle||program.title||'',programSemester:program.semester||program.term||'',records:rows.map(r=>({id:r.id,batchId:r.batchId,studentId:r.studentId,studentNo:r.studentNo,name:r.name,schoolYear:r.schoolYear,semester:r.semester,programId:r.programId,programKind:r.programKind,rawText:r.rawText,normalizedText:r.normalizedText,reviewText:r.reviewText||'',createdAt:r.createdAt}))};
+3156:   let result=await window.schoolBoard?.normalizeInputBatch?.(payload);if(!result?.ok)return toast(result?.reason||'UEP 정규화 사전검사에 실패했습니다.');
+3157:   if(result.requiresConfirmation){const summary=`정규화 대상: ${result.targetSheet||''}\n${result.programName||payload.programName||''}\n\n신규 ${result.newCount||0}건 · 중복 ${result.duplicateCount||0}건 · 갱신 ${result.updateCount||0}건\n\n계속 UEP에 적용할까요?`;if(!confirm(summary))return toast('UEP 적용을 취소했습니다.');result=await window.schoolBoard?.normalizeInputBatch?.({...payload,confirmed:true});if(!result?.ok)return toast(result?.reason||'UEP 정규화 적용에 실패했습니다.');}
+3158:   await refreshReadonlyCacheSilently({force:true,rerender:false});inputCenterConfig.historyMode='active';inputCenterConfig.batchFilter='latest';toast(`${result.targetSheet||'UEP'} 적용 완료 · 신규 ${result.newCount||0} · 갱신 ${result.updateCount||0} · 중복 ${result.duplicateCount||0} · 작업목록에서 완료 배치를 내렸습니다.`);render('inputs');
+3159: }
+3160: 
+3161: function inputCenterExportCsv(){
+3162:   const rows=inputCenterReviewRowsCache||[]; if(!rows.length)return toast('내보낼 검수 자료가 없습니다.');
+3163:   const q=v=>'"'+String(v??'').replace(/"/g,'""')+'"';
+3164:   const csv='\ufeff'+[['학번','이름','학년','반','자료유형','자료제목','검수텍스트','원본파일'].map(q).join(','),...rows.map(r=>[r.studentNo,r.name,r.grade,r.className,r.type,r.title||r.fileName,r.reviewText||r.normalizedText||r.rawText||r.text,r.fileName].map(q).join(','))].join('\r\n');
+3165:   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));a.download=`UEP_검수자료_${new Date().toISOString().slice(0,10)}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);toast(`${rows.length}건을 CSV로 내보냈습니다.`);
+3166: }
+3167: function bindInputCenter(){
+3168:   $$('[data-input-tab]').forEach(b=>b.onclick=()=>{inputCenterConfig.tab=b.dataset.inputTab;render('inputs');});
+3169:   $$('[data-input-history-mode]').forEach(b=>b.onclick=()=>{inputCenterConfig.historyMode=b.dataset.inputHistoryMode||'active';inputCenterConfig.batchFilter='latest';render('inputs');});
+3170:   $('[data-input-batch-filter]')?.addEventListener('change',e=>{inputCenterConfig.batchFilter=e.target.value;render('inputs');});
+---
+12630:       const profile=(typeof currentUserProfile==='function'?currentUserProfile():{})||{};
+12631:       const result=await window.schoolBoard?.authorizeGoogleUser?.({loginHint:String(profile.email||'')});
+12632:       if(!result?.ok){googleConnectionError=result?.reason||'학교 공용 연결 확인에 실패했습니다.'; if(typeof toast==='function')toast(googleConnectionError); try{render(state.activePage||'dashboard');}catch{} return;}
+12633:       const status=await window.schoolBoard?.googleCredentialStatus?.();if(status)googleConnectionStatus=status;
+12634:       if(result.syncOk===false){
+12635:         googleConnectionError=result.syncError||'Google 계정 승인은 완료되었지만 학교 시트 조회에 실패했습니다.';
+12636:         if(typeof toast==='function')toast(`학교 공용 연결 확인 완료 · 시트 조회 확인 필요: ${googleConnectionError}`);
+12637:       } else {
+12638:         googleConnectionError='';
+12639:         if(typeof toast==='function')toast('학교 공용 읽기 연결 및 학교 시트 동기화가 완료되었습니다.');
+12640:       }
+12641:       if(window.schoolBoard?.readReadonlyCache){const cached=await window.schoolBoard.readReadonlyCache();if(cached?.ok)readonlyCache=uep08123NormalizeReadonlyCache(cached.data);}
+12642:       if(typeof refreshReadonlyCacheSilently==='function')await refreshReadonlyCacheSilently({force:true,rerender:true});
+12643:       if(typeof updateTopSyncStatus==='function')updateTopSyncStatus();
+12644:       if(typeof startReadonlyAutoRefresh==='function')startReadonlyAutoRefresh();
+12645:       if(typeof toast==='function')toast(`Google 읽기 연결 완료${result.account?' · '+result.account:''}`);
+12646:       document.querySelector('[data-uep-google-oauth]')?.remove();
+12647:     }catch(error){if(typeof toast==='function')toast(error?.message||'학교 공용 연결 확인에 실패했습니다.');}
+12648:     finally{busy=false;const b=document.querySelector('[data-uep-google-oauth]');if(b){b.disabled=false;b.textContent='학교 공용 연결 확인';}}
+12649:   }
+12650:   function enhance(){
+12651:     const drawer=document.querySelector('#drawerBody');if(!drawer)return;
+12652:     const text=String(drawer.textContent||'');
+12653:     if(!googleConnectionStatus?.setupRequired && !text.includes('Google 시트 연결 승인') && !text.includes('학교 공용 연결 확인'))return;
+12654:     if(drawer.querySelector('[data-uep-google-oauth]'))return;
+---
+## WHOLE CACHE replacements
+4149:   const layer=document.createElement("div");layer.id="accessControlLayer";layer.className="issue-layer";
+4150:   layer.innerHTML=`<div class="issue-dialog issue-manager access-control-dialog"><header><div><small>UEP RELEASE SECURITY</small><h3>사용자·권한 승인</h3></div><button type="button" data-access-close>×</button></header>
+4151:   <div class="issue-summary"><b>${isAdmin?'관리자 권한 제어판':'내 권한 상태'}</b><span>${escapeHtml(p.name||'미설정')} · ${escapeHtml(currentRoleDisplay())}</span></div>
+4152:   <div class="security-control-grid release-security-grid"><article><small>등록 사용자</small><b>${accounts.length}명</b><p>01_사용자계정 기준</p></article><article><small>사용 승인</small><b>${activeCount}명</b><p>로그인 가능</p></article><article><small>사용 중지</small><b>${blockedCount}명</b><p>로그인 차단</p></article><article><small>권한 원본</small><b>구글시트</b><p>역할·학년·담임반</p></article></div>
+4153:   <div class="security-gate-warning release-ready"><b>배포 승인 방식</b><p>UEP는 <b>01_사용자계정</b>에 등록되고 사용여부가 Y인 교사를 이메일 기준으로 확인합니다. 최고관리자는 신규 PC·계정표 일시 오류에서도 부트스트랩 진입이 가능하며, 일반 사용자의 역할과 담당 학년·반은 계정표 기준을 유지합니다.</p></div>
+4154:   <div class="access-user-table-wrap"><table class="access-user-table"><thead><tr><th>사용자</th><th>역할</th><th>학년</th><th>담임반</th><th>상태</th><th>관리</th></tr></thead><tbody>${rows}</tbody></table></div>
+4155:   <div class="readonly-rule"><b>배포 전 확인</b><span>관리자 계정 최소 1명 유지 · 퇴직/전보/미사용 교사는 사용 중지 · 담임은 담당반 확인 · 관리자 권한은 필요한 사용자에게만 부여</span></div>
+4156:   <div class="modal-actions"><button class="btn secondary" data-access-refresh>계정표 새로고침</button><button class="btn secondary" data-access-close>닫기</button></div></div>`;
+4157:   document.body.appendChild(layer);
+4158:   const close=()=>layer.remove(); layer.querySelectorAll('[data-access-close]').forEach(b=>b.onclick=close); layer.onclick=e=>{if(e.target===layer)close();};
+4159:   layer.querySelector('[data-access-refresh]')?.addEventListener('click',async()=>{const result=await window.schoolBoard?.readReadonlyCache?.();if(result?.ok){readonlyCache=result.data;layer.remove();openAccessControlPanel();}else toast(result?.reason||'사용자 계정표를 새로고침하지 못했습니다.');});
+4160:   if(isAdmin){
+4161:     layer.querySelectorAll('[data-access-user]').forEach(row=>{
+4162:       const id=row.dataset.accessUser, account=accounts.find(a=>String(a.id)===String(id)); if(!account)return;
+4163:       row.querySelector('[data-access-toggle]')?.addEventListener('click',async()=>{
+4164:         if(account.active!==false && String(account.id)===String(p.id)) return toast('현재 로그인한 관리자 계정은 자기 자신을 중지할 수 없습니다.');
+4165:         const active=account.active===false; const result=await window.schoolBoard?.updateUserAccount?.({id,active});
+4166:         if(!result?.ok)return toast(result?.reason||'사용자 승인 상태를 저장하지 못했습니다.');
+4167:         const refreshed=await window.schoolBoard?.readReadonlyCache?.(); if(refreshed?.ok)readonlyCache=refreshed.data; layer.remove();openAccessControlPanel();toast(active?'사용 승인을 완료했습니다.':'사용을 중지했습니다.');
+4168:       });
+4169:       row.querySelector('[data-access-save]')?.addEventListener('click',async()=>{
+---
+10924:     } else if (state.settings.neis.useApiKey && !state.settings.neis.apiKeyConfigured) {
+10925:       return toast("NEIS 인증키를 입력하세요.");
+10926:     }
+10927:     await save();
+10928:     loadNeisDashboard(true);
+10929:   };
+10930:   const updateForm=$("#updateSettingsForm");
+10931:   if(updateForm) updateForm.onsubmit=async event=>{event.preventDefault();state.settings.updateManifestUrl=$("#updateManifestUrl").value.trim();await save();toast("업데이트 정보 주소를 저장했습니다.");};
+10932:   $$('[data-open-issue-report]').forEach(button=>button.onclick=openIssueReportDialog);
+10933:   $$('[data-open-issue-manager]').forEach(button=>button.onclick=()=>{if(currentRoleId()!=='admin')return toast('관리자만 신고 관리 화면을 열 수 있습니다.');openIssueManager();});
+10934:   $$('[data-run-health-check]').forEach(button=>button.onclick=async()=>{button.disabled=true;button.textContent='진단 중…';const result=await window.schoolBoard?.previewReadonlySync?.().catch(()=>null);if(result?.ok){readonlyCache=result.data;googleConnectionError='';}else if(result?.reason){googleConnectionError=result.reason;}button.disabled=false;render('settings');toast(googleConnectionError?'연결 진단에서 확인할 항목이 있습니다.':'필수 연결이 정상입니다.');});
+10935:   $$('[data-access-control]').forEach(button=>button.onclick=()=>openAccessControlPanel());
+10936:   $$('[data-inline-access-refresh]').forEach(button=>button.onclick=async()=>{const result=await window.schoolBoard?.readReadonlyCache?.();if(result?.ok){readonlyCache=result.data;render('settings');toast('사용자 계정표를 새로고침했습니다.');}else toast(result?.reason||'사용자 계정표를 새로고침하지 못했습니다.');});
+10937:   $$('[data-inline-access-user]').forEach(row=>{const id=row.dataset.inlineAccessUser,account=(readonlyCache?.userAccounts||[]).find(a=>String(a.id)===String(id));if(!account)return;row.querySelector('[data-inline-access-toggle]')?.addEventListener('click',async()=>{const p=currentUserProfile();if(account.active!==false&&String(account.id)===String(p.id))return toast('현재 로그인한 관리자 계정은 자기 자신을 중지할 수 없습니다.');const active=account.active===false;const result=await window.schoolBoard?.updateUserAccount?.({id,active});if(!result?.ok)return toast(result?.reason||'사용자 승인 상태를 저장하지 못했습니다.');const refreshed=await window.schoolBoard?.readReadonlyCache?.();if(refreshed?.ok)readonlyCache=refreshed.data;render('settings');toast(active?'사용 승인을 완료했습니다.':'사용을 중지했습니다.');});row.querySelector('[data-inline-access-save]')?.addEventListener('click',async()=>{const role=row.querySelector('[data-inline-access-role]')?.value||'',grade=row.querySelector('[data-inline-access-grade]')?.value||'1',classNo=row.querySelector('[data-inline-access-class]')?.value||'';const admin=role==='관리자';const result=await window.schoolBoard?.updateUserAccount?.({id,role:admin?'관리자':role,admin,grade,classNo,active:account.active!==false});if(!result?.ok)return toast(result?.reason||'권한을 저장하지 못했습니다.');const refreshed=await window.schoolBoard?.readReadonlyCache?.();if(refreshed?.ok)readonlyCache=refreshed.data;render('settings');toast('사용자 권한을 저장했습니다.');});});
+10938:   $$('[data-check-update]').forEach(button=>button.onclick=async()=>{const url=$("#updateManifestUrl")?.value.trim()||state.settings.updateManifestUrl||"";if(!url)return toast("업데이트 정보 JSON 주소를 먼저 입력하세요.");button.disabled=true;button.textContent="확인 중…";const result=await window.schoolBoard?.checkUpdate?.(url,APP_VERSION);button.disabled=false;button.textContent="업데이트 확인";const box=$("#updateCheckResult");if(!result?.ok){if(box)box.innerHTML=`<b>확인 실패</b><small>${escapeHtml(result?.reason||'업데이트 정보를 읽지 못했습니다.')}</small>`;return;}if(box)box.innerHTML=result.updateAvailable?`<b>새 버전 ${escapeHtml(result.version)} 사용 가능</b><small>${escapeHtml(result.notes||'새 버전이 있습니다.')} · 확인경로 ${escapeHtml(result.source||'자동')}</small><button class="btn primary" data-apply-update>업데이트 적용</button>`:`<b>최신 버전입니다</b><small>현재 ${APP_VERSION} · 확인경로 ${escapeHtml(result.source||'자동')}</small>`;const apply=$("[data-apply-update]");if(apply)apply.onclick=async()=>{if(!result.sha256)return toast("업데이트 정보에 SHA-256이 없어 자동 적용할 수 없습니다.");if(!confirm(`UEP ${result.version} 업데이트를 적용할까요?\n\n현재 설정·인증·연결 정보는 그대로 유지됩니다. 적용 후 UEP가 자동으로 다시 실행됩니다.`))return;apply.disabled=true;apply.textContent="다운로드·검증 중…";const applied=await window.schoolBoard?.applyUpdate?.({version:result.version,downloadUrl:result.downloadUrl,sha256:result.sha256});if(!applied?.ok){apply.disabled=false;apply.textContent="업데이트 적용";return toast(applied?.reason||"업데이트 적용에 실패했습니다.");}toast("업데이트 검증 완료 · UEP를 재시작하여 적용합니다.");};});
+10939:   const timetableForm = $("#timetableNeisForm");
+10940:   if (timetableForm) timetableForm.onsubmit = async (event) => {
+10941:     event.preventDefault();
+10942:     state.settings.neis.grade = $("#timetableGrade").value;
+10943:     state.settings.neis.classNo = $("#timetableClass").value;
+10944:     await save();
+---
+10926:     }
+10927:     await save();
+10928:     loadNeisDashboard(true);
+10929:   };
+10930:   const updateForm=$("#updateSettingsForm");
+10931:   if(updateForm) updateForm.onsubmit=async event=>{event.preventDefault();state.settings.updateManifestUrl=$("#updateManifestUrl").value.trim();await save();toast("업데이트 정보 주소를 저장했습니다.");};
+10932:   $$('[data-open-issue-report]').forEach(button=>button.onclick=openIssueReportDialog);
+10933:   $$('[data-open-issue-manager]').forEach(button=>button.onclick=()=>{if(currentRoleId()!=='admin')return toast('관리자만 신고 관리 화면을 열 수 있습니다.');openIssueManager();});
+10934:   $$('[data-run-health-check]').forEach(button=>button.onclick=async()=>{button.disabled=true;button.textContent='진단 중…';const result=await window.schoolBoard?.previewReadonlySync?.().catch(()=>null);if(result?.ok){readonlyCache=result.data;googleConnectionError='';}else if(result?.reason){googleConnectionError=result.reason;}button.disabled=false;render('settings');toast(googleConnectionError?'연결 진단에서 확인할 항목이 있습니다.':'필수 연결이 정상입니다.');});
+10935:   $$('[data-access-control]').forEach(button=>button.onclick=()=>openAccessControlPanel());
+10936:   $$('[data-inline-access-refresh]').forEach(button=>button.onclick=async()=>{const result=await window.schoolBoard?.readReadonlyCache?.();if(result?.ok){readonlyCache=result.data;render('settings');toast('사용자 계정표를 새로고침했습니다.');}else toast(result?.reason||'사용자 계정표를 새로고침하지 못했습니다.');});
+10937:   $$('[data-inline-access-user]').forEach(row=>{const id=row.dataset.inlineAccessUser,account=(readonlyCache?.userAccounts||[]).find(a=>String(a.id)===String(id));if(!account)return;row.querySelector('[data-inline-access-toggle]')?.addEventListener('click',async()=>{const p=currentUserProfile();if(account.active!==false&&String(account.id)===String(p.id))return toast('현재 로그인한 관리자 계정은 자기 자신을 중지할 수 없습니다.');const active=account.active===false;const result=await window.schoolBoard?.updateUserAccount?.({id,active});if(!result?.ok)return toast(result?.reason||'사용자 승인 상태를 저장하지 못했습니다.');const refreshed=await window.schoolBoard?.readReadonlyCache?.();if(refreshed?.ok)readonlyCache=refreshed.data;render('settings');toast(active?'사용 승인을 완료했습니다.':'사용을 중지했습니다.');});row.querySelector('[data-inline-access-save]')?.addEventListener('click',async()=>{const role=row.querySelector('[data-inline-access-role]')?.value||'',grade=row.querySelector('[data-inline-access-grade]')?.value||'1',classNo=row.querySelector('[data-inline-access-class]')?.value||'';const admin=role==='관리자';const result=await window.schoolBoard?.updateUserAccount?.({id,role:admin?'관리자':role,admin,grade,classNo,active:account.active!==false});if(!result?.ok)return toast(result?.reason||'권한을 저장하지 못했습니다.');const refreshed=await window.schoolBoard?.readReadonlyCache?.();if(refreshed?.ok)readonlyCache=refreshed.data;render('settings');toast('사용자 권한을 저장했습니다.');});});
+10938:   $$('[data-check-update]').forEach(button=>button.onclick=async()=>{const url=$("#updateManifestUrl")?.value.trim()||state.settings.updateManifestUrl||"";if(!url)return toast("업데이트 정보 JSON 주소를 먼저 입력하세요.");button.disabled=true;button.textContent="확인 중…";const result=await window.schoolBoard?.checkUpdate?.(url,APP_VERSION);button.disabled=false;button.textContent="업데이트 확인";const box=$("#updateCheckResult");if(!result?.ok){if(box)box.innerHTML=`<b>확인 실패</b><small>${escapeHtml(result?.reason||'업데이트 정보를 읽지 못했습니다.')}</small>`;return;}if(box)box.innerHTML=result.updateAvailable?`<b>새 버전 ${escapeHtml(result.version)} 사용 가능</b><small>${escapeHtml(result.notes||'새 버전이 있습니다.')} · 확인경로 ${escapeHtml(result.source||'자동')}</small><button class="btn primary" data-apply-update>업데이트 적용</button>`:`<b>최신 버전입니다</b><small>현재 ${APP_VERSION} · 확인경로 ${escapeHtml(result.source||'자동')}</small>`;const apply=$("[data-apply-update]");if(apply)apply.onclick=async()=>{if(!result.sha256)return toast("업데이트 정보에 SHA-256이 없어 자동 적용할 수 없습니다.");if(!confirm(`UEP ${result.version} 업데이트를 적용할까요?\n\n현재 설정·인증·연결 정보는 그대로 유지됩니다. 적용 후 UEP가 자동으로 다시 실행됩니다.`))return;apply.disabled=true;apply.textContent="다운로드·검증 중…";const applied=await window.schoolBoard?.applyUpdate?.({version:result.version,downloadUrl:result.downloadUrl,sha256:result.sha256});if(!applied?.ok){apply.disabled=false;apply.textContent="업데이트 적용";return toast(applied?.reason||"업데이트 적용에 실패했습니다.");}toast("업데이트 검증 완료 · UEP를 재시작하여 적용합니다.");};});
+10939:   const timetableForm = $("#timetableNeisForm");
+10940:   if (timetableForm) timetableForm.onsubmit = async (event) => {
+10941:     event.preventDefault();
+10942:     state.settings.neis.grade = $("#timetableGrade").value;
+10943:     state.settings.neis.classNo = $("#timetableClass").value;
+10944:     await save();
+10945:     loadNeisDashboard(true);
+10946:   };
+---
+## MUTATION OBSERVERS
+12287:         grid.innerHTML=''; confirmed.forEach(x=>grid.appendChild(x)); possible.forEach(x=>grid.appendChild(x));
+12288:         if(empty.length){
+12289:           const details=document.createElement('details');details.className='growth-sdg-empty-089';details.innerHTML=`<summary>현재 근거가 없는 목표 ${empty.length}개 보기</summary><div class="growth-sdg-empty-grid"></div>`;
+12290:           const holder=details.querySelector('.growth-sdg-empty-grid');empty.forEach(x=>holder.appendChild(x));grid.insertAdjacentElement('afterend',details);
+12291:         }
+12292:       }
+12293:     }
+12294:   }
+12295:   const obs=new MutationObserver(()=>requestAnimationFrame(refineGrowthProfile));
+12296:   obs.observe(document.documentElement,{childList:true,subtree:true});
+12297:   setTimeout(refineGrowthProfile,0);
+12298: })();
+12299: 
+12300: // __UEP_SELECTION_SDGS_STYLE_08089__
+12301: try {
+12302:   const s=document.createElement('style');s.id='uep-selection-sdgs-08089';s.textContent="/* __UEP_SELECTION_SDGS_UI_08089__ */\r\n.selection-compare-panel.compact-089,.selection-error-history.compact-089{display:inline-block;vertical-align:top;width:calc(50% - 6px);min-height:0!important;padding:12px 14px!important;margin:8px 6px 8px 0!important;border-radius:14px!important}\r\n.selection-error-history.compact-089{margin-right:0!important}\r\n.selection-compare-panel.compact-089 header,.selection-error-history.compact-089 header{margin:0!important;align-items:center!important}\r\n.selection-compare-panel.compact-089 h3,.selection-error-history.compact-089 h3{font-size:15px!important;margin:2px 0!important}\r\n.selection-compare-panel.compact-089 p,.selection-error-history.compact-089 p{margin:6px 0!important}\r\n.selection-compare-panel.compact-089 details,.selection-error-history.compact-089 details{margin-top:7px!important}\r\n.selection-compare-panel.compact-089 summary,.selection-error-history.compact-089 summary{cursor:pointer;font-weight:800;color:#337b72}\r\n.selection-compare-card.waiting,.selection-error-history-grid article.waiting{background:#fff9e8!important;border-color:#ead7a3!important}\r\n.growth-profile-v082{display:flex;flex-direction:column;gap:10px}\r\n.growth-profile-v082 .growth-profile-intro{padding:16px 20px!important;min-height:0!important}\r\n.growth-profile-v082 .growth-profile-intro>div>p{margin:6px 0!important;line-height:1.5!important}\r\n.growth-guide-inline-089{margin-top:10px;border-top:1px solid #d9e8e4;padding-top:8px}\r\n.growth-guide-inline-089 summary{cursor:pointer;font-weight:800;color:#176f63}\r\n.growth-guide-inline-089 p{margin:8px 0 4px!important;font-size:13px}.growth-guide-inline-089 em{display:block;padding:8px 10px;border-radius:10px;background:#fff5d9;color:#88621d;font-style:normal;font-size:12px}\r\n.growth-profile-v082 .growth-story-card{padding:14px 18px!important}.growth-profile-v082 .growth-story-card>p{font-size:15px!important;line-height:1.55!important;margin:10px 0!important}\r\n.growth-profile-v082 .growth-axis-grid{display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:7px!important;margin:0!important}\r\n.growth-profile-v082 .growth-axis-grid>section{padding:10px 12px!important;min-height:0!important}.growth-profile-v082 .growth-axis-grid h3{font-size:13px!important;margin:3px 0!important}.growth-profile-v082 .growth-axis-grid b{font-size:13px!important}.growth-profile-v082 .growth-axis-grid p{font-size:11px!important;margin:4px 0 0!important}\r\n.growth-profile-v082 .growth-sdg-lens{padding:14px 16px!important}.growth-profile-v082 .growth-sdg-lens header{margin-bottom:8px!important}\r\n.growth-profile-v082 .growth-sdg-grid{display:grid!important;grid-template-columns:repeat(6,minmax(0,1fr))!important;gap:7px!important}\r\n.growth-profile-v082 .growth-sdg-chip{min-height:62px!important;padding:9px 10px!important}.growth-profile-v082 .growth-sdg-chip.confirmed{order:0;box-shadow:0 0 0 2px rgba(43,154,132,.24) inset!important}.growth-profile-v082 .growth-sdg-chip.possible{order:1;opacity:.72}.growth-sdg-empty-089{margin-top:8px}.growth-sdg-empty-089 summary{cursor:pointer;color:#76868b;font-size:12px}.growth-sdg-empty-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:7px;margin-top:7px}.growth-sdg-empty-grid .growth-sdg-chip{opacity:.42!important}\r\n.growth-profile-v082 .growth-sdg-detail{margin-top:10px!important;padding:12px 14px!important}.growth-profile-v082 .growth-sdg-detail article{padding:10px 12px!important;margin:6px 0!important}\r\n@media(max-width:1100px){.selection-compare-panel.compact-089,.selection-error-history.compact-089{display:block;width:100%;margin-right:0!important}.growth-profile-v082 .growth-axis-grid{grid-template-columns:repeat(2,1fr)!important}.growth-profile-v082 .growth-sdg-grid,.growth-sdg-empty-grid{grid-template-columns:repeat(4,1fr)!important}}";document.head.appendChild(s);
+12303: } catch(e) { console.warn('[UEP] 0.80.89 style injection skipped',e); }
+12304: 
+12305: // __UEP_FINAL_REFINEMENT_08090__
+12306: (function(){
+12307:   const esc=s=>typeof escapeHtml==='function'?escapeHtml(String(s??'')):String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+12308: 
+12309:   // Selection curriculum: show results, not explanatory process cards.
+---
+12370:     document.querySelectorAll('table').forEach(table=>{
+12371:       const heads=[...table.querySelectorAll('thead th')];if(!heads.length)return;
+12372:       const statTable=heads.some(h=>/순위|총점|평균등급|표준점수|백분위|성취도|등급산출/.test(h.textContent||''));if(!statTable)return;
+12373:       const idCols=new Set();heads.forEach((h,i)=>{if(/^(학생|이름|성명|학번|번호)$/.test((h.textContent||'').trim()))idCols.add(i);});
+12374:       table.querySelectorAll('tbody tr').forEach(tr=>[...tr.children].forEach((td,i)=>{if(!idCols.has(i)){td.classList.remove('privacy-mask','masked','demo-mask','blurred');td.style.filter='none';td.style.color='';}}));
+12375:     });
+12376:   }
+12377:   const run=()=>{refineGrowth090();refineStatsPrivacy090();};
+12378:   const obs=new MutationObserver(()=>requestAnimationFrame(run));obs.observe(document.documentElement,{childList:true,subtree:true});setTimeout(run,0);
+12379: })();
+12380: load();
+12381: const scheduleWeatherLoad = () => loadWeather();
+12382: if ('requestIdleCallback' in window) requestIdleCallback(scheduleWeatherLoad, { timeout: 1800 });
+12383: else setTimeout(scheduleWeatherLoad, 900);
+12384: 
+12385: // UEP 0.80.66 - 빠른열기 결재라인 팝업 안전 범위 UI 보정
+12386: (function(){
+12387:   if(window.__UEP_APPROVAL_POPUP_FIX_08066__) return;
+12388:   window.__UEP_APPROVAL_POPUP_FIX_08066__ = true;
+12389: 
+12390:   function exactTitleNode(){
+12391:     return [...document.querySelectorAll('h1,h2,h3,h4,div,span')].find(el =>
+12392:       (el.textContent||'').trim()==='주요 업무 결재라인' && el.children.length<=3
+---
+12451:       const rr=el.getBoundingClientRect();
+12452:       if(rr.width<250 || rr.height<180) return;
+12453:       if(el.scrollHeight <= el.clientHeight + 24){
+12454:         el.style.setProperty('overflow-y','visible','important');
+12455:       }
+12456:     });
+12457:   }
+12458: 
+12459:   const obs=new MutationObserver(()=>requestAnimationFrame(applyFix));
+12460:   obs.observe(document.documentElement,{childList:true,subtree:true});
+12461:   window.addEventListener('resize',applyFix);
+12462:   setTimeout(applyFix,250);
+12463: })();
+12464: // UEP 0.80.67 - 빠른열기 결재라인 카드 높이/줄바꿈 보정
+12465: (function(){
+12466:   if(window.__UEP_APPROVAL_POPUP_FIX_08067__) return;
+12467:   window.__UEP_APPROVAL_POPUP_FIX_08067__ = true;
+12468: 
+12469:   function findPopupRoot(){
+12470:     const title=[...document.querySelectorAll('h1,h2,h3,h4,div,span')].find(el=>
+12471:       (el.textContent||'').trim()==='주요 업무 결재라인' && el.children.length<=3
+12472:     );
+12473:     if(!title) return null;
+---
+12534:       if(list.scrollHeight <= maxAvailable + 8){
+12535:         list.style.setProperty('overflow-y','visible','important');
+12536:       }else{
+12537:         list.style.setProperty('overflow-y','auto','important');
+12538:       }
+12539:     }
+12540:   }
+12541: 
+12542:   const obs=new MutationObserver(()=>requestAnimationFrame(applyFix));
+12543:   obs.observe(document.documentElement,{childList:true,subtree:true});
+12544:   window.addEventListener('resize',applyFix);
+12545:   setTimeout(applyFix,250);
+12546: })();
+12547: // UEP 0.80.68 - 빠른열기 결재라인 왼쪽 카드 직접 보정
+12548: (function(){
+12549:   if(window.__UEP_APPROVAL_POPUP_FIX_08068__) return;
+12550:   window.__UEP_APPROVAL_POPUP_FIX_08068__=true;
+12551: 
+12552:   function root(){
+12553:     const title=[...document.querySelectorAll('h1,h2,h3,h4,div,span')].find(el=>(el.textContent||'').trim()==='주요 업무 결재라인' && el.children.length<=3);
+12554:     if(!title) return null;
+12555:     let n=title;
+12556:     for(let i=0;i<10&&n;i++,n=n.parentElement){
+---
+12595:         }
+12596:       });
+12597:     });
+12598:     list.style.setProperty('overflow-x','hidden','important');
+12599:     // 14개 카드가 현재 팝업 높이에 들어오면 스크롤을 제거하고, 실제 초과할 때만 유지합니다.
+12600:     if(list.scrollHeight<=list.clientHeight+18) list.style.setProperty('overflow-y','hidden','important');
+12601:     else list.style.setProperty('overflow-y','auto','important');
+12602:   }
+12603:   const obs=new MutationObserver(()=>requestAnimationFrame(apply));
+12604:   obs.observe(document.documentElement,{childList:true,subtree:true});
+12605:   window.addEventListener('resize',apply);
+12606:   setTimeout(apply,200);
+12607: })();
+12608: // __UEP_GOOGLE_STATUS_UI_08069__
+12609: (function(){
+12610:   function normalizeGoogleConnectionError(){
+12611:     document.querySelectorAll('body *').forEach(el=>{
+12612:       if(el.children.length) return;
+12613:       const t=String(el.textContent||'');
+12614:       if(t.includes('google-service-account.bin') || (t.includes('ENOENT') && t.includes('Google'))){
+12615:         el.textContent='담임용 학교 데이터 동기화 연결이 필요합니다. 연결 전에도 마지막 저장 자료와 NEIS 기능으로 UEP를 계속 사용할 수 있습니다.';
+12616:       }
+12617:     });
+---
+12611:     document.querySelectorAll('body *').forEach(el=>{
+12612:       if(el.children.length) return;
+12613:       const t=String(el.textContent||'');
+12614:       if(t.includes('google-service-account.bin') || (t.includes('ENOENT') && t.includes('Google'))){
+12615:         el.textContent='담임용 학교 데이터 동기화 연결이 필요합니다. 연결 전에도 마지막 저장 자료와 NEIS 기능으로 UEP를 계속 사용할 수 있습니다.';
+12616:       }
+12617:     });
+12618:   }
+12619:   const obs=new MutationObserver(()=>requestAnimationFrame(normalizeGoogleConnectionError));
+12620:   obs.observe(document.documentElement,{childList:true,subtree:true,characterData:true});
+12621:   setTimeout(normalizeGoogleConnectionError,250);
+12622: })();
+12623: // __UEP_GOOGLE_OAUTH_UI_08070__
+12624: (function(){
+12625:   let busy=false;
+12626:   async function connectGoogleUser(){
+12627:     if(busy)return;busy=true;
+12628:     const btn=document.querySelector('[data-uep-google-oauth]');if(btn){btn.disabled=true;btn.textContent='Google 승인 진행 중…';}
+12629:     try{
+12630:       const profile=(typeof currentUserProfile==='function'?currentUserProfile():{})||{};
+12631:       const result=await window.schoolBoard?.authorizeGoogleUser?.({loginHint:String(profile.email||'')});
+12632:       if(!result?.ok){googleConnectionError=result?.reason||'학교 공용 연결 확인에 실패했습니다.'; if(typeof toast==='function')toast(googleConnectionError); try{render(state.activePage||'dashboard');}catch{} return;}
+12633:       const status=await window.schoolBoard?.googleCredentialStatus?.();if(status)googleConnectionStatus=status;
+---
+12651:     const drawer=document.querySelector('#drawerBody');if(!drawer)return;
+12652:     const text=String(drawer.textContent||'');
+12653:     if(!googleConnectionStatus?.setupRequired && !text.includes('Google 시트 연결 승인') && !text.includes('학교 공용 연결 확인'))return;
+12654:     if(drawer.querySelector('[data-uep-google-oauth]'))return;
+12655:     const button=document.createElement('button');button.type='button';button.className='btn primary';button.dataset.uepGoogleOauth='1';button.textContent='학교 공용 연결 확인';button.addEventListener('click',connectGoogleUser);
+12656:     const actions=[...drawer.querySelectorAll('div')].find(el=>{const t=String(el.textContent||'');return t.includes('연결 설정')&&t.includes('새로고침')&&el.querySelector('button');});
+12657:     if(actions)actions.appendChild(button);else{const wrap=document.createElement('div');wrap.className='connection-actions';wrap.style.marginTop='12px';wrap.appendChild(button);drawer.appendChild(wrap);}
+12658:   }
+12659:   const obs=new MutationObserver(()=>requestAnimationFrame(enhance));obs.observe(document.documentElement,{childList:true,subtree:true});
+12660:   setTimeout(enhance,300);
+12661: })();
+12662: // UEP 0.80.79 selection-course identity/comparison helpers.
+12663: function uepSelectionStableStudentKey(row={}){
+12664:   const sid=String(row.studentId??row.studentID??row['학생ID']??'').trim();
+12665:   if(sid) return `ID:${sid}`;
+12666:   const sno=String(row.studentNo??row.studentNumber??row['학번']??'').trim();
+12667:   return sno?`NO:${sno}`:'';
+12668: }
+12669: function uepSelectionNormalizeCourse(row={}){
+12670:   return String(row.course??row.subject??row['과목']??row['선택과목']??row['과목명']??'').trim();
+12671: }
+12672: function uepSelectionSemester(row={}){
+12673:   return String(row.semester??row['학기']??row['신청학기']??'').trim();
+---
+12713:     if(drawer.querySelector('[data-uep-google-nonblocking-note]')) return;
+12714:     const note=document.createElement('div');
+12715:     note.dataset.uepGoogleNonblockingNote='1';
+12716:     note.className='setup-warning';
+12717:     note.style.marginTop='10px';
+12718:     note.innerHTML='<b>UEP는 계속 사용할 수 있습니다.</b><br>Google 연결은 최신 학교자료를 동기화하기 위한 연결입니다. 연결이 끊겨도 마지막 정상 동기화 자료로 화면을 사용할 수 있으며, 연결이 복구되면 최신 자료로 자동 갱신됩니다.';
+12719:     drawer.appendChild(note);
+12720:   }
+12721:   const obs=new MutationObserver(()=>requestAnimationFrame(annotateGoogleConnection));
+12722:   obs.observe(document.documentElement,{childList:true,subtree:true});
+12723:   setTimeout(annotateGoogleConnection,350);
+12724: })();
+12725: // __UEP_EVIDENCE_GROWTH_08082__
+12726: function sdgsDashboard(student,bundle){
+12727:   const career=studentCareerSupport(student,bundle);
+12728:   const programs=(bundle.programs||[]).filter(p=>p.kind!=="after");
+12729:   const activities=bundle.activities||[];
+12730:   const volunteers=[...(bundle.volunteer||[]),...(bundle.volunteers||[]),...(bundle.service||[]),...(bundle.services||[])];
+12731:   const reportRows=[...recordEvidenceRows(student,bundle,"autonomy"),...recordEvidenceRows(student,bundle,"career")].filter(r=>r.report);
+12732:   const uniqueReports=[];const seen=new Set();reportRows.forEach(r=>{const k=String(r.report?.id||[r.report?.submittedAt,r.title,(r.report?.responses||[]).join('|')].join('::'));if(!seen.has(k)){seen.add(k);uniqueReports.push(r);}});
+12733:   const map=new Map(SDG_CATALOG.map(([no,name])=>[Number(no),{no:Number(no),name,evidence:[]} ]));
+12734:   const add=(no,type,title,detail,strength='confirmed')=>{const row=map.get(Number(no));if(!row)return;const key=[type,title,detail].join('|');if(row.evidence.some(e=>e.key===key))return;row.evidence.push({key,type,title:String(title||'활동'),detail:String(detail||''),strength});};
+12735:   programs.forEach(p=>String(p.sdgs||'').split(/[,;/\s]+/).map(Number).filter(n=>n>=1&&n<=17).forEach(n=>add(n,'프로그램',p.recordTitle||p.title,p.description||p.note,'confirmed')));
+---
+12767:   const detail=null;
+12768:   const sdgsEvidenceCardsRendered=true;return `<div class="growth-profile-v082"><section class="growth-profile-intro"><div><small>STUDENT GROWTH STORY · UNESCO SCHOOL</small><h2>${escapeHtml(student.name)} 생활기록부 핵심 성장 프로파일</h2><p><b>활동의 요약이 아니라 학생의 스토리를 읽습니다.</b> 운호고의 유네스코 교육기관으로서의 지속가능발전교육 방향과, 주요 대학 인재상에서 반복적으로 강조되는 학업·탐구·자기주도·문제해결·공동체 역량을 학생의 진로·전공, 자율·진로·동아리·봉사, 선택활동, 프로그램과 보고서의 실제 근거와 함께 살펴봅니다.</p></div><span></span></section><section class="growth-story-card"><header><div><small>CORE STORY</small><h3>이 학생을 설명하는 현재의 성장 스토리</h3></div><span>근거 기반</span></header><p>${escapeHtml(story)}</p><div class="growth-story-source">확인 근거 ${confirmed.reduce((n,x)=>n+x.evidence.filter(e=>e.strength==='confirmed').length,0)}건 · 연결 가능 근거 ${possible.reduce((n,x)=>n+x.evidence.length,0)+confirmed.reduce((n,x)=>n+x.evidence.filter(e=>e.strength==='possible').length,0)}건</div></section><div class="growth-axis-grid"><section><small>01 CAREER · MAJOR</small><h3>진로·전공 관심</h3><b>${escapeHtml(hope.join(' · ')||'진로 관심 형성 중')}</b><p>선택과목과 진로희망을 함께 봅니다.</p></section><section><small>02 EXPLORATION</small><h3>핵심 탐구주제</h3><b>${escapeHtml(topics.join(' · ')||'탐구주제 형성 중')}</b><p>보고서에서 반복·심화되는 주제를 확인합니다.</p></section><section><small>03 VALUE · SDGs</small><h3>사회적 가치·SDGs</h3><b>${confirmed.length?`${confirmed.length}개 목표 근거 확인`:'확정 근거 형성 중'}</b><p>명시된 활동 근거와 내용 기반 연결 가능성을 구분합니다.</p></section><section><small>04 EVIDENCE FLOW</small><h3>학교교육과정 속 근거</h3><b>${activities.length+volunteers.length+programs.length+uniqueReports.length}건 자료 연결</b><p>자율·진로·동아리·봉사·선택활동·프로그램·보고서를 함께 읽습니다.</p></section></div><section class="growth-teacher-guide"><header><div><small>WHY THIS LENS?</small><h3>왜 대학 인재상과 SDGs를 함께 보나요?</h3></div></header><p>대학이 요구하는 하나의 정답형 인재를 만드는 것이 아니라, 학생이 자신의 전공 관심을 깊이 탐구하면서 사회·공동체·환경·미래의 문제를 발견하고 자신의 관점으로 해석해 온 흔적을 찾기 위해서입니다. 유네스코 지속가능발전교육의 주제는 이러한 경험을 생활기록부 전반에서 연결해 읽는 가치의 렌즈로 활용합니다.</p><em>담임 지도: 무엇을 했는가 → 왜 관심을 가졌는가 → 어떤 문제를 발견했는가 → 생각이 어떻게 달라졌는가 → 다음 탐구로 어떻게 이어지는가</em></section><section class="growth-sdg-lens"><header><div><small>EVIDENCE-BASED SDGs</small><h3>SDGs 근거 지도</h3><p>카드가 활성화되려면 보고서·봉사·학교교육과정·선택활동·프로그램 등의 실제 근거가 있어야 합니다.</p></div><span>${confirmed.length}개 확인 · ${possible.length}개 가능</span></header><div class="growth-sdg-grid">${chips}</div>${detail?`<div class="growth-sdg-detail"><h4>SDG ${detail.no} ${escapeHtml(detail.name)}</h4>${detail.evidence.length?detail.evidence.map(e=>`<article><b>${escapeHtml(e.type)} · ${e.strength==='confirmed'?'근거 확인':'연결 가능'}</b><span>${escapeHtml(e.title)}</span><p>${escapeHtml((e.detail||'').slice(0,180)||'연결된 활동 근거')}</p></article>`).join(''):'<p>현재 연결 근거가 없습니다.</p>'}</div>`:''}</section></div>`;
+12769: }
+12770: 
+12771: function uepSchoolGrowthGapSummary(){
+12772:   const acts=readonlyCache?.activities||[],progs=readonlyCache?.programs||[],reports=readonlyCache?.reports||[];return {evidenceCount:acts.length+progs.length+reports.length,message:'프로그램 추천은 SDG 개수를 채우기보다 학생 활동에서 부족한 탐구·공동체·사회문제 경험을 보완하는 방향으로 해석합니다.'};
+12773: }
+12774: (function(){
+12775:   const enhance=()=>{document.querySelectorAll('h1,h2,h3').forEach(h=>{if(/프로그램추천|프로그램 추천/.test(h.textContent||'')){const root=h.closest('section,main,div');if(root&&!root.querySelector('[data-growth-program-guide]')){const n=document.createElement('div');n.dataset.growthProgramGuide='1';n.className='growth-program-guide';n.innerHTML='<b>학생 성장 근거 기반 프로그램 추천</b><span>단순히 SDG 빈칸을 채우는 추천이 아닙니다. 학생들의 진로·탐구·공동체·사회문제 경험과 유네스코 지속가능발전교육의 관점을 함께 분석하여 학교교육과정에서 보완할 경험을 제안합니다.</span>';root.insertBefore(n,h.nextSibling);}}});};new MutationObserver(()=>requestAnimationFrame(enhance)).observe(document.documentElement,{subtree:true,childList:true});setTimeout(enhance,500);
+12776: })();
+12777: // __UEP_AUTOLOGIN_WATCHDOG_08083__
+12778: (function(){
+12779:   const started=Date.now();
+12780:   const timer=setInterval(()=>{
+12781:     try{
+12782:       const gate=document.getElementById('userAuthGate');
+12783:       const text=String(gate?.textContent||'');
+12784:       if(!gate||gate.classList.contains('hidden')){clearInterval(timer);return;}
+12785:       if(Date.now()-started<2800)return;
+12786:       if(/자동 로그인/.test(text)&&state?.auth?.rememberUser&&state?.auth?.user){
+12787:         hideUserAuthGate();authSessionReady=true;state.auth.locked=false;
+12788:         try{navigate(state.activePage||'dashboard');}catch{}
+12789:         clearInterval(timer);
+---
+## SETINTERVAL inventory
+664:   try{return await operationalRefreshInFlight;}finally{operationalRefreshInFlight=null;}
+665: }
+666: function startReadonlyAutoRefresh(){
+667:   if(readonlyAutoRefreshTimer) clearInterval(readonlyAutoRefreshTimer);
+668:   if(!googleConnectionStatus?.ok) return;
+669:   readonlyAutoRefreshTimer=setInterval(()=>{
+670:     if(document.hidden) return;
+671:     readonlyAutoRefreshCycle+=1;
+672:     const fullSyncedAt=readonlyCache?.syncedAt?new Date(readonlyCache.syncedAt).getTime():0;
+673:     const fullAge=fullSyncedAt?Date.now()-fullSyncedAt:Number.POSITIVE_INFINITY;
+674:     const needsFull=!fullSyncedAt||fullAge>=READONLY_FULL_REFRESH_MAX_AGE_MS||readonlyAutoRefreshCycle%6===0;
+675:     if(needsFull){
+676:       const jitter=Math.floor(Math.random()*45000);
+677:       setTimeout(()=>{if(!document.hidden)refreshReadonlyCacheSilently({force:true,rerender:true});},jitter);
+678:       return;
+679:     }
+---
+9517:   $("#drawer").classList.add("timetable-expanded");
+9518:   $("#drawer").classList.remove("hidden");
+9519:   $("#drawerBackdrop").classList.remove("hidden");
+9520:   clearInterval(studentPopupClockTimer);
+9521:   updateStudentPopupClock();
+9522:   studentPopupClockTimer=setInterval(updateStudentPopupClock,1000);
+9523: }
+9524: function studentActivityOverview(student) {
+9525:   const matches=(item)=>String(item?.studentId||"")===String(student.id||"") || (student.studentNo && String(item?.studentNo||item?.number||"")===String(student.studentNo));
+9526:   const connected=(readonlyCache?.programs||[]).map(programWithOverride).filter(program=>studentRecordWithinEnrollment(program,student)&&(program.students||[]).some(matches));
+9527:   const local=(state.programs||[]).filter(program=>studentRecordWithinEnrollment(program,student)&&(program.students||[]).some(matches));
+9528:   const programs=[...connected,...local].filter((program,index,array)=>array.findIndex(item=>`${item.id}|${item.date}|${item.title}`===`${program.id}|${program.date}|${program.title}`)===index).sort((a,b)=>String(b.date||"").localeCompare(String(a.date||"")));
+9529:   const activities=(readonlyCache?.studentActivities||[]).filter(item=>matches(item)&&studentRecordWithinEnrollment(item,student));
+9530:   const text=activities.map(item=>`${item.area} ${item.title} ${item.type} ${item.keywords}`).join(" ");
+9531:   const officer=/임원|회장|부회장|실장|부실장|반장|부반장/.test(text);
+9532:   const volunteer=/봉사/.test(text);
+---
+12153:   if (meta) meta.textContent = `체감 ${weatherState.feels}℃ · 강수확률 ${weatherState.rain}%`;
+12154: }
+12155: 
+12156: const profileBox=document.querySelector('.profile');
+12157: if(profileBox){profileBox.addEventListener('click',openAccountPopover);profileBox.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();openAccountPopover();}});}
+12158: setInterval(updateHeroClock, 1000);
+12159: setInterval(checkPeriodAlerts, 30000);
+12160: setInterval(() => { const minutes = Number(state.settings.neis?.autoRefreshMinutes || 30); if (minutes > 0 && neisData?.fetchedAt && Date.now() - new Date(neisData.fetchedAt).getTime() >= minutes * 60000) loadNeisDashboard(true); }, 60000);
+12161: 
+12162: // __UEP_GLOBAL_RENDER_BRIDGE_08087__
+12163: try {
+12164:   window.__uepNavigate = navigate;
+12165:   window.__uepRender = render;
+12166:   window.__uepBootLoad = load;
+12167: } catch (bridgeError) {
+12168:   console.error('[UEP] global renderer bridge failed', bridgeError);
+---
+12154: }
+12155: 
+12156: const profileBox=document.querySelector('.profile');
+12157: if(profileBox){profileBox.addEventListener('click',openAccountPopover);profileBox.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();openAccountPopover();}});}
+12158: setInterval(updateHeroClock, 1000);
+12159: setInterval(checkPeriodAlerts, 30000);
+12160: setInterval(() => { const minutes = Number(state.settings.neis?.autoRefreshMinutes || 30); if (minutes > 0 && neisData?.fetchedAt && Date.now() - new Date(neisData.fetchedAt).getTime() >= minutes * 60000) loadNeisDashboard(true); }, 60000);
+12161: 
+12162: // __UEP_GLOBAL_RENDER_BRIDGE_08087__
+12163: try {
+12164:   window.__uepNavigate = navigate;
+12165:   window.__uepRender = render;
+12166:   window.__uepBootLoad = load;
+12167: } catch (bridgeError) {
+12168:   console.error('[UEP] global renderer bridge failed', bridgeError);
+12169: }
+---
+12155: 
+12156: const profileBox=document.querySelector('.profile');
+12157: if(profileBox){profileBox.addEventListener('click',openAccountPopover);profileBox.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();openAccountPopover();}});}
+12158: setInterval(updateHeroClock, 1000);
+12159: setInterval(checkPeriodAlerts, 30000);
+12160: setInterval(() => { const minutes = Number(state.settings.neis?.autoRefreshMinutes || 30); if (minutes > 0 && neisData?.fetchedAt && Date.now() - new Date(neisData.fetchedAt).getTime() >= minutes * 60000) loadNeisDashboard(true); }, 60000);
+12161: 
+12162: // __UEP_GLOBAL_RENDER_BRIDGE_08087__
+12163: try {
+12164:   window.__uepNavigate = navigate;
+12165:   window.__uepRender = render;
+12166:   window.__uepBootLoad = load;
+12167: } catch (bridgeError) {
+12168:   console.error('[UEP] global renderer bridge failed', bridgeError);
+12169: }
+12170: 
+---
+12775:   const enhance=()=>{document.querySelectorAll('h1,h2,h3').forEach(h=>{if(/프로그램추천|프로그램 추천/.test(h.textContent||'')){const root=h.closest('section,main,div');if(root&&!root.querySelector('[data-growth-program-guide]')){const n=document.createElement('div');n.dataset.growthProgramGuide='1';n.className='growth-program-guide';n.innerHTML='<b>학생 성장 근거 기반 프로그램 추천</b><span>단순히 SDG 빈칸을 채우는 추천이 아닙니다. 학생들의 진로·탐구·공동체·사회문제 경험과 유네스코 지속가능발전교육의 관점을 함께 분석하여 학교교육과정에서 보완할 경험을 제안합니다.</span>';root.insertBefore(n,h.nextSibling);}}});};new MutationObserver(()=>requestAnimationFrame(enhance)).observe(document.documentElement,{subtree:true,childList:true});setTimeout(enhance,500);
+12776: })();
+12777: // __UEP_AUTOLOGIN_WATCHDOG_08083__
+12778: (function(){
+12779:   const started=Date.now();
+12780:   const timer=setInterval(()=>{
+12781:     try{
+12782:       const gate=document.getElementById('userAuthGate');
+12783:       const text=String(gate?.textContent||'');
+12784:       if(!gate||gate.classList.contains('hidden')){clearInterval(timer);return;}
+12785:       if(Date.now()-started<2800)return;
+12786:       if(/자동 로그인/.test(text)&&state?.auth?.rememberUser&&state?.auth?.user){
+12787:         hideUserAuthGate();authSessionReady=true;state.auth.locked=false;
+12788:         try{navigate(state.activePage||'dashboard');}catch{}
+12789:         clearInterval(timer);
+12790:       }
+---
+13357:       el.style.background='#fff3cd'; el.style.color='#8a5200';
+13358:     });
+13359:   };
+13360:   const check=async()=>{try{const r=await fetch(UPDATE_MANIFEST,{cache:'no-store'});if(!r.ok)return;const m=await r.json();decorate(m.version||m.latestVersion);}catch(_){}};
+13361:   addEventListener('DOMContentLoaded',()=>setTimeout(check,1200),{once:true});
+13362:   setInterval(check,10*60*1000);
+13363: })();
+13364: 
+13365: 
+13366: // __UEP_08166_CORE_RUNTIME__
+13367: function uepSharedSettingValue08166(key){
+13368:   const rows=Array.isArray(readonlyCache?.settings)?readonlyCache.settings:[];
+13369:   const hit=rows.find(r=>String(r?.key||r?.settingKey||r?.['설정키']||'').trim()===String(key));
+13370:   return String(hit?.value||hit?.settingValue||hit?.['설정값']||'').trim();
+13371: }
+13372: function uepUpsertLocalSharedSetting08166(key,value,description=''){
+---
+13540:   const layer=document.createElement('div');layer.id='uepUrgentLayer08166';layer.innerHTML=`<div class="uep-urgent-dialog08166"><header><small>URGENT · SCHOOL NOTICE</small><h3>🚨 ${escapeHtml(item.title||'긴급공지')}</h3></header><div class="uep-urgent-body08166"><p>${escapeHtml(item.content||item.detail||item.memo||item.description||'등록된 상세 내용이 없습니다.')}</p><div class="uep-urgent-meta08166"><span>${escapeHtml(item.department||'1학년부')}</span><span>${escapeHtml(item.author||'')}</span><span>${escapeHtml(item.postDate||item.date||'')}</span></div></div><div class="uep-urgent-actions08166"><button type="button" class="btn primary" data-urgent-confirm08166>확인했습니다</button></div></div>`;
+13541:   document.body.appendChild(layer);layer.querySelector('[data-urgent-confirm08166]')?.addEventListener('click',()=>uepConfirmUrgent08166(item));
+13542: }
+13543: function uepUrgentTick08166(){try{uepEnsureBell08166();if(typeof currentUserCanManageNotices==='function'&&currentUserCanManageNotices())return;const first=uepUrgentPending08166()[0];if(first)uepOpenUrgent08166(first);}catch(error){console.warn('[UEP urgent]',error);}}
+13544: if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(uepUrgentTick08166,1800));else setTimeout(uepUrgentTick08166,1800);
+13545: setInterval(uepUrgentTick08166,12000);
+13546: 
+13547: 
+13548: 
+13549: // __UEP_08168_SHARED_SECURITY_READ_RUNTIME__
+13550: let __uepSharedSecurityLoading08168=null;
+13551: async function uepLoadSharedSecurity08168(force=false){
+13552:   if(!window.schoolBoard?.readSharedSecurityConfig)return false;
+13553:   if(!force&&uepSharedSettingValue08166?.('SENSITIVE_PIN_HASH')&&uepSharedSettingValue08166?.('SUBJECT_CONFIDENTIAL_PIN_HASH'))return true;
+13554:   if(__uepSharedSecurityLoading08168)return __uepSharedSecurityLoading08168;
+13555:   __uepSharedSecurityLoading08168=(async()=>{
+---
+13576:   return __uepSensitiveSecurityConfig08168.apply(this,arguments);
+13577: };
+13578: 
+13579: // 로그인 직후/동기화 직후 중앙값 로드.
+13580: setTimeout(()=>uepLoadSharedSecurity08168(true),1200);
+13581: setInterval(()=>uepLoadSharedSecurity08168(false),10*60*1000);
+13582: 
+13583: 
+13584: // __UEP_08167_PASSWORD_RESET_RUNTIME__
+13585: async function uepResetSharedPassword08167(kind){
+13586:   const isSensitive=kind==='sensitive';
+13587:   const key=isSensitive?'SENSITIVE_PIN_HASH':'SUBJECT_CONFIDENTIAL_PIN_HASH';
+13588:   const label=isSensitive?'민감정보':'선택과목';
+13589:   if(!(typeof canConfigureSensitivePassword==='function'&&canConfigureSensitivePassword())){
+13590:     toast('관리자·학년부장만 비밀번호를 초기화할 수 있습니다.');return false;
+13591:   }
+---
+## RENDER calls near operational refresh
+539:   if(googleConnectionStatus?.ok){
+540:     const fullSyncedAt=readonlyCache?.syncedAt?new Date(readonlyCache.syncedAt).getTime():0;
+541:     const fullAge=fullSyncedAt?Date.now()-fullSyncedAt:Number.POSITIVE_INFINITY;
+542:     const needsFull=!readonlyCache||!fullSyncedAt||fullAge>=READONLY_FULL_REFRESH_MAX_AGE_MS;
+543:     const jitter=needsFull?(2000+Math.floor(Math.random()*10000)):(500+Math.floor(Math.random()*2500));
+544:     setTimeout(async()=>{
+545:       const ok=needsFull
+546:         ? await refreshReadonlyCacheSilently({force:true,rerender:true})
+547:         : await refreshOperationalCacheSilently({rerender:true});
+548:       if(ok){
+549:         updateTopSyncStatus();
+550:         if(currentRoleId()==='admin') migrateAdminProgramOverridesToSheetOnce().catch(()=>{});
+551:       }
+552:     },jitter);
+553:   }
+554:   if(googleConnectionStatus?.ok && readonlyCache) await migrateAdminProgramOverridesToSheetOnce();
+555:   updateDormOutingCount();
+556:   updateTopSyncStatus();
+557:   startReadonlyAutoRefresh();
+558:   // 여기서는 백그라운드에서 최신 계정 유효성을 재검증한다.
+559:   // 자동로그인 세션은 이미 화면을 열었으므로 네트워크 지연이 시작 화면을 막지 않는다.
+560:   await Promise.race([
+561:     initializeUserSessionGate(),
+562:     new Promise(resolve=>setTimeout(()=>{
+563:       try{
+564:         /* 0.81.20: local remembered state never bypasses School Read session verification */
+565:       }catch{}
+---
+640:   } catch(error) {
+641:     googleConnectionError=error?.message||'UEP 학교 데이터 자동 갱신 실패';
+642:     updateTopSyncStatus();
+643:     return false;
+644:   }
+645:   })();
+646:   try{return await readonlyRefreshInFlight;}finally{readonlyRefreshInFlight=null;}
+647: }
+648: let operationalRefreshInFlight=null;
+649: async function refreshOperationalCacheSilently({rerender=true}={}){
+650:   if(operationalRefreshInFlight)return operationalRefreshInFlight;
+651:   if(!window.schoolBoard?.previewOperationalSync)return refreshReadonlyCacheSilently({force:true,rerender});
+652:   operationalRefreshInFlight=(async()=>{
+653:     if(!googleConnectionStatus?.ok)return false;
+654:     try{
+655:       const result=await window.schoolBoard.previewOperationalSync();
+656:       if(result?.requiresFullSync)return refreshReadonlyCacheSilently({force:true,rerender});
+657:       if(!result?.ok)throw new Error(result?.reason||'UEP 운영자료 갱신 실패');
+658:       if(result.patch&&typeof result.patch==='object')readonlyCache={...(readonlyCache||{}),...result.patch,operationalSyncedAt:result.operationalSyncedAt||result.syncedAt||new Date().toISOString()};
+659:       googleConnectionError='';updateTopSyncStatus();updateDormOutingCount();
+660:       if(rerender&&state.activePage)render(state.activePage);
+661:       return true;
+662:     }catch(error){googleConnectionError=error?.message||String(error);updateTopSyncStatus();return false;}
+663:   })();
+664:   try{return await operationalRefreshInFlight;}finally{operationalRefreshInFlight=null;}
+665: }
+666: function startReadonlyAutoRefresh(){
+---
+641:     googleConnectionError=error?.message||'UEP 학교 데이터 자동 갱신 실패';
+642:     updateTopSyncStatus();
+643:     return false;
+644:   }
+645:   })();
+646:   try{return await readonlyRefreshInFlight;}finally{readonlyRefreshInFlight=null;}
+647: }
+648: let operationalRefreshInFlight=null;
+649: async function refreshOperationalCacheSilently({rerender=true}={}){
+650:   if(operationalRefreshInFlight)return operationalRefreshInFlight;
+651:   if(!window.schoolBoard?.previewOperationalSync)return refreshReadonlyCacheSilently({force:true,rerender});
+652:   operationalRefreshInFlight=(async()=>{
+653:     if(!googleConnectionStatus?.ok)return false;
+654:     try{
+655:       const result=await window.schoolBoard.previewOperationalSync();
+656:       if(result?.requiresFullSync)return refreshReadonlyCacheSilently({force:true,rerender});
+657:       if(!result?.ok)throw new Error(result?.reason||'UEP 운영자료 갱신 실패');
+658:       if(result.patch&&typeof result.patch==='object')readonlyCache={...(readonlyCache||{}),...result.patch,operationalSyncedAt:result.operationalSyncedAt||result.syncedAt||new Date().toISOString()};
+659:       googleConnectionError='';updateTopSyncStatus();updateDormOutingCount();
+660:       if(rerender&&state.activePage)render(state.activePage);
+661:       return true;
+662:     }catch(error){googleConnectionError=error?.message||String(error);updateTopSyncStatus();return false;}
+663:   })();
+664:   try{return await operationalRefreshInFlight;}finally{operationalRefreshInFlight=null;}
+665: }
+666: function startReadonlyAutoRefresh(){
+667:   if(readonlyAutoRefreshTimer) clearInterval(readonlyAutoRefreshTimer);
+---
+642:     updateTopSyncStatus();
+643:     return false;
+644:   }
+645:   })();
+646:   try{return await readonlyRefreshInFlight;}finally{readonlyRefreshInFlight=null;}
+647: }
+648: let operationalRefreshInFlight=null;
+649: async function refreshOperationalCacheSilently({rerender=true}={}){
+650:   if(operationalRefreshInFlight)return operationalRefreshInFlight;
+651:   if(!window.schoolBoard?.previewOperationalSync)return refreshReadonlyCacheSilently({force:true,rerender});
+652:   operationalRefreshInFlight=(async()=>{
+653:     if(!googleConnectionStatus?.ok)return false;
+654:     try{
+655:       const result=await window.schoolBoard.previewOperationalSync();
+656:       if(result?.requiresFullSync)return refreshReadonlyCacheSilently({force:true,rerender});
+657:       if(!result?.ok)throw new Error(result?.reason||'UEP 운영자료 갱신 실패');
+658:       if(result.patch&&typeof result.patch==='object')readonlyCache={...(readonlyCache||{}),...result.patch,operationalSyncedAt:result.operationalSyncedAt||result.syncedAt||new Date().toISOString()};
+659:       googleConnectionError='';updateTopSyncStatus();updateDormOutingCount();
+660:       if(rerender&&state.activePage)render(state.activePage);
+661:       return true;
+662:     }catch(error){googleConnectionError=error?.message||String(error);updateTopSyncStatus();return false;}
+663:   })();
+664:   try{return await operationalRefreshInFlight;}finally{operationalRefreshInFlight=null;}
+665: }
+666: function startReadonlyAutoRefresh(){
+667:   if(readonlyAutoRefreshTimer) clearInterval(readonlyAutoRefreshTimer);
+668:   if(!googleConnectionStatus?.ok) return;
+---
+644:   }
+645:   })();
+646:   try{return await readonlyRefreshInFlight;}finally{readonlyRefreshInFlight=null;}
+647: }
+648: let operationalRefreshInFlight=null;
+649: async function refreshOperationalCacheSilently({rerender=true}={}){
+650:   if(operationalRefreshInFlight)return operationalRefreshInFlight;
+651:   if(!window.schoolBoard?.previewOperationalSync)return refreshReadonlyCacheSilently({force:true,rerender});
+652:   operationalRefreshInFlight=(async()=>{
+653:     if(!googleConnectionStatus?.ok)return false;
+654:     try{
+655:       const result=await window.schoolBoard.previewOperationalSync();
+656:       if(result?.requiresFullSync)return refreshReadonlyCacheSilently({force:true,rerender});
+657:       if(!result?.ok)throw new Error(result?.reason||'UEP 운영자료 갱신 실패');
+658:       if(result.patch&&typeof result.patch==='object')readonlyCache={...(readonlyCache||{}),...result.patch,operationalSyncedAt:result.operationalSyncedAt||result.syncedAt||new Date().toISOString()};
+659:       googleConnectionError='';updateTopSyncStatus();updateDormOutingCount();
+660:       if(rerender&&state.activePage)render(state.activePage);
+661:       return true;
+662:     }catch(error){googleConnectionError=error?.message||String(error);updateTopSyncStatus();return false;}
+663:   })();
+664:   try{return await operationalRefreshInFlight;}finally{operationalRefreshInFlight=null;}
+665: }
+666: function startReadonlyAutoRefresh(){
+667:   if(readonlyAutoRefreshTimer) clearInterval(readonlyAutoRefreshTimer);
+668:   if(!googleConnectionStatus?.ok) return;
+669:   readonlyAutoRefreshTimer=setInterval(()=>{
+670:     if(document.hidden) return;
+---
+656:       if(result?.requiresFullSync)return refreshReadonlyCacheSilently({force:true,rerender});
+657:       if(!result?.ok)throw new Error(result?.reason||'UEP 운영자료 갱신 실패');
+658:       if(result.patch&&typeof result.patch==='object')readonlyCache={...(readonlyCache||{}),...result.patch,operationalSyncedAt:result.operationalSyncedAt||result.syncedAt||new Date().toISOString()};
+659:       googleConnectionError='';updateTopSyncStatus();updateDormOutingCount();
+660:       if(rerender&&state.activePage)render(state.activePage);
+661:       return true;
+662:     }catch(error){googleConnectionError=error?.message||String(error);updateTopSyncStatus();return false;}
+663:   })();
+664:   try{return await operationalRefreshInFlight;}finally{operationalRefreshInFlight=null;}
+665: }
+666: function startReadonlyAutoRefresh(){
+667:   if(readonlyAutoRefreshTimer) clearInterval(readonlyAutoRefreshTimer);
+668:   if(!googleConnectionStatus?.ok) return;
+669:   readonlyAutoRefreshTimer=setInterval(()=>{
+670:     if(document.hidden) return;
+671:     readonlyAutoRefreshCycle+=1;
+672:     const fullSyncedAt=readonlyCache?.syncedAt?new Date(readonlyCache.syncedAt).getTime():0;
+673:     const fullAge=fullSyncedAt?Date.now()-fullSyncedAt:Number.POSITIVE_INFINITY;
+674:     const needsFull=!fullSyncedAt||fullAge>=READONLY_FULL_REFRESH_MAX_AGE_MS||readonlyAutoRefreshCycle%6===0;
+675:     if(needsFull){
+676:       const jitter=Math.floor(Math.random()*45000);
+677:       setTimeout(()=>{if(!document.hidden)refreshReadonlyCacheSilently({force:true,rerender:true});},jitter);
+678:       return;
+679:     }
+680:     refreshOperationalCacheSilently({rerender:true});
+681:   },READONLY_AUTO_REFRESH_MS);
+682: }
+---
+672:     const fullSyncedAt=readonlyCache?.syncedAt?new Date(readonlyCache.syncedAt).getTime():0;
+673:     const fullAge=fullSyncedAt?Date.now()-fullSyncedAt:Number.POSITIVE_INFINITY;
+674:     const needsFull=!fullSyncedAt||fullAge>=READONLY_FULL_REFRESH_MAX_AGE_MS||readonlyAutoRefreshCycle%6===0;
+675:     if(needsFull){
+676:       const jitter=Math.floor(Math.random()*45000);
+677:       setTimeout(()=>{if(!document.hidden)refreshReadonlyCacheSilently({force:true,rerender:true});},jitter);
+678:       return;
+679:     }
+680:     refreshOperationalCacheSilently({rerender:true});
+681:   },READONLY_AUTO_REFRESH_MS);
+682: }
+683: 
+684: function updateTopSyncStatus() {
+685:   const button = $("#syncButton");
+686:   if (!button) return;
+687:   button.classList.remove("good", "warn", "bad");
+688:   const label = button.querySelector("span");
+689:   if (googleConnectionError) {
+690:     button.classList.add("bad");
+691:     if (label) label.textContent = "구글시트 오류";
+692:     button.title = googleConnectionError;
+693:     return;
+694:   }
+695:   if (readonlyCache?.students?.length && neisData?.ok && !neisData.offline) {
+696:     button.classList.add("good");
+697:     if (label) label.textContent = "동기화 정상";
+698:     button.title = "UEP 구글시트와 NEIS 자료가 정상 연결되었습니다.";
+---
+3764: function hideUserAuthGate(){document.getElementById('userAuthGate')?.classList.add('hidden');document.body.classList.remove('uep-auth-locked');authSessionReady=true;state.auth.locked=false;refreshHeaderRoleBadge();}
+3765: function authGateMessage(text){const node=document.getElementById('userAuthMessage');if(node)node.textContent=text||'';}
+3766: function renderUserAuthGate({locked=false,switchUser=false}={}){
+3767:   const gate=document.getElementById('userAuthGate');if(!gate)return;document.body.classList.add('uep-auth-locked');gate.classList.remove('hidden');authSessionReady=false;
+3768:   const remembered=state?.auth?.rememberedUser||state?.auth?.user;const canContinue=remembered&&uep08125ValidTeacherName(remembered.name)&&remembered.email&&!switchUser;
+3769:   gate.innerHTML=`<section class="user-auth-card"><div class="user-auth-brand"><span>U</span><div><small>UNHO EDUCATION PLATFORM</small><h2>${locked?'UEP 화면 잠금':'사용자 확인'}</h2><p>${locked?'학생정보 보호를 위해 현재 화면을 잠갔습니다.':'학교에 등록된 이메일을 기준으로 사용자를 확인합니다. 최고관리자는 신규 PC에서도 안전하게 진입할 수 있습니다.'}</p></div></div>${canContinue?`<button class="user-auth-remembered" id="rememberedUserContinue"><b>${escapeHtml(remembered.name)}</b><span>${escapeHtml(maskEmail(remembered.email))}</span><small>${locked?'계속 사용':'자동 로그인 사용자'}</small></button><button class="user-auth-text" id="useDifferentUser">다른 사용자로 로그인</button>`:`<form id="userAuthForm"><label>교사 이름<input id="userAuthName" autocomplete="name" required placeholder="예: 홍석민"></label><label>교사 이메일<input id="userAuthEmail" type="email" autocomplete="email" required placeholder="학교에 등록된 이메일"></label><label class="user-auth-check"><input id="userAuthRemember" type="checkbox"> 이 PC에서 자동 로그인</label><p id="userAuthMessage" class="user-auth-message"></p><button class="btn primary" type="submit">UEP 시작</button></form>`}<div class="user-auth-exit-row"><button type="button" class="user-auth-text danger" id="userAuthExit">UEP 종료</button></div><footer>PC 인증과 사용자 확인은 별도입니다. 상담 메모와 개인 권한은 현재 로그인 교사를 기준으로 표시됩니다.</footer></section>`;
+3770:   document.getElementById('useDifferentUser')?.addEventListener('click',()=>renderUserAuthGate({locked:false,switchUser:true}));
+3771:   document.getElementById('userAuthExit')?.addEventListener('click',async()=>{if(confirm('UEP를 종료할까요?'))await window.schoolBoard?.close?.();});
+3772:   document.getElementById('rememberedUserContinue')?.addEventListener('click',async()=>{const status=await window.schoolBoard?.schoolReadSessionStatus?.({verify:true});if(!status?.authenticated)return renderUserAuthGate({switchUser:true});const a=status.user||{},account={id:String(a.userId||remembered.id||''),email:String(a.email||remembered.email||'').trim(),name:uep08125PickTeacherName(a.name,remembered.name),role:String(a.role||''),admin:a.isAdmin?'Y':'N',grade:String(a.grade||'1'),classNo:String(a.homeroom||''),department:String(a.department||((a.grade||1)+'학년부')),active:true,activeRaw:'Y'};state.auth.user=accountToSession(account);googleConnectionStatus={ok:true,encryption:true,mode:'school_read_api'};await save();hideUserAuthGate();refreshOperationalCacheSilently({rerender:false}).catch(()=>{});navigate(state.activePage||'dashboard');});
+3773:   document.getElementById('userAuthForm')?.addEventListener('submit',async event=>{event.preventDefault();const name=document.getElementById('userAuthName')?.value,email=document.getElementById('userAuthEmail')?.value;const submit=event.submitter||document.querySelector('#userAuthForm button[type="submit"]');if(submit){submit.disabled=true;submit.textContent='확인 중…';}try{if(!window.schoolBoard?.schoolReadLogin)throw new Error('이 UEP 빌드에는 School Read API 로그인이 없습니다.');const result=await window.schoolBoard.schoolReadLogin({name,email});if(!result?.ok){authGateMessage(result?.message||'UEP 로그인에 실패했습니다.');return;}const a=result.user||{};const account={id:String(a.userId||''),email:String(a.email||email||'').trim(),name:uep08125PickTeacherName(a.name,name),role:String(a.role||''),admin:a.isAdmin?'Y':'N',grade:String(a.grade||'1'),classNo:String(a.homeroom||''),department:String(a.department||((a.grade||1)+'학년부')),active:true,activeRaw:'Y'};const user=accountToSession(account),remember=Boolean(document.getElementById('userAuthRemember')?.checked);state.auth.user=user;state.auth.rememberUser=remember;state.auth.rememberedUser=remember?{id:user.id,name:user.name,email:user.email}:null;state.settings.userProfile={...state.settings.userProfile,...user};state.settings.loginUserName=user.name;state.settings.teacherName=user.name;googleConnectionStatus={ok:true,encryption:true,mode:'school_read_api'};await save();hideUserAuthGate();const synced=await window.schoolBoard?.previewReadonlySync?.();if(synced?.ok){const cached=await window.schoolBoard?.readReadonlyCache?.();if(cached?.ok){readonlyCache=uep08123NormalizeReadonlyCache(cached.data);googleConnectionError='';}}else if(synced){googleConnectionError=synced.reason||'학교 데이터 동기화에 실패했습니다.';}startReadonlyAutoRefresh();navigate(state.activePage||'dashboard');}catch(error){authGateMessage(error?.message||'UEP 로그인에 실패했습니다.');}finally{if(submit){submit.disabled=false;submit.textContent='UEP 시작';}}});
+3774: }
+3775: async function restoreRememberedSessionImmediately(){
+3776:   const remembered=state?.auth?.rememberUser?state?.auth?.rememberedUser:null;
+3777:   const savedUser=state?.auth?.user;
+3778:   if(!uep08125ValidTeacherName(remembered?.name)||!remembered?.email||!uep08125ValidTeacherName(savedUser?.name)||!savedUser?.email)return false;
+3779:   const sameName=String(savedUser.name).trim()===String(remembered.name).trim();
+3780:   const sameEmail=String(savedUser.email).trim().toLowerCase()===String(remembered.email).trim().toLowerCase();
+3781:   if(!sameName||!sameEmail)return false;
+3782:   if(!window.schoolBoard?.schoolReadSessionStatus)return false;
+3783:   const status=await window.schoolBoard.schoolReadSessionStatus({verify:true});
+3784:   if(!status?.authenticated)return false;
+3785:   const a=status.user||{};const account={id:String(a.userId||remembered?.id||savedUser?.id||''),email:String(a.email||remembered?.email||savedUser?.email||'').trim(),name:uep08125PickTeacherName(a.name,remembered?.name,savedUser?.name),role:String(a.role||''),admin:a.isAdmin?'Y':'N',grade:String(a.grade||'1'),classNo:String(a.homeroom||''),department:String(a.department||((a.grade||1)+'학년부')),active:true,activeRaw:'Y'};state.auth.user=accountToSession(account);state.settings.userProfile={...state.settings.userProfile,...state.auth.user};state.settings.loginUserName=state.auth.user.name;state.settings.teacherName=state.auth.user.name;googleConnectionStatus={ok:true,encryption:true,mode:'school_read_api'};
+3786:   const gate=document.getElementById('userAuthGate');
+3787:   if(gate){
+3788:     document.body.classList.add('uep-auth-locked');gate.classList.remove('hidden');
+3789:     gate.innerHTML=`<section class="user-auth-card auto-login-transition"><div class="user-auth-brand"><span>U</span><div><small>UNHO EDUCATION PLATFORM</small><h2>자동 로그인 중…</h2><p>${escapeHtml(state.auth.user.name)} · ${escapeHtml(maskEmail(state.auth.user.email))}</p></div></div><div class="auto-login-progress"><i></i></div><footer>승인된 UEP 세션을 확인했습니다.</footer></section>`;
+3790:     await new Promise(resolve=>setTimeout(resolve,220));
+---
