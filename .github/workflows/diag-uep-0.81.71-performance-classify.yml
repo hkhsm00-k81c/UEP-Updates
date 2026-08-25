@@ -1,0 +1,63 @@
+name: Diagnose UEP 0.81.71 Performance Classifier
+'on':
+  push:
+    branches: [main]
+    paths: [diag-uep-0.81.71-performance-classify.trigger]
+permissions:
+  contents: write
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download stable 0.81.71
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          gh release download v0.81.71 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+      - name: Classify hot paths
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $g='app/resources/app/gyomuon.js';$m='app/resources/app/electron/main.cjs'
+          $gl=Get-Content $g -Encoding UTF8;$ml=Get-Content $m -Encoding UTF8
+          $out=@('# UEP 0.81.71 concise performance classification','')
+          $out+='## Renderer refresh callers'
+          for($i=0;$i -lt $gl.Count;$i++){
+            if($gl[$i] -match 'refreshReadonlyCacheSilently\(' -and $gl[$i] -notmatch '^\s*async function refreshReadonlyCacheSilently'){
+              $context=($gl[[Math]::Max(0,$i-4)..[Math]::Min($gl.Count-1,$i+4)] -join ' ')
+              $kind=if($context -match 'setInterval|READONLY_AUTO_REFRESH_MS'){'AUTO_TIMER'}elseif($context -match 'setTimeout' -and $context -match '900'){'STARTUP_BACKGROUND'}elseif($context -match 'rememberedUserContinue'){'REMEMBERED_LOGIN'}elseif($context -match 'inputCenter|InputBatch|input-'){'INPUT_CENTER_WRITE'}elseif($context -match 'syncButton|동기화'){'MANUAL_SYNC'}else{'OTHER'}
+              $out+=('line={0} kind={1} code={2}' -f ($i+1),$kind,$gl[$i].Trim())
+            }
+          }
+          $out+='';$out+='## Renderer timers'
+          for($i=0;$i -lt $gl.Count;$i++){
+            if($gl[$i] -match 'setInterval\('){
+              $ctx=($gl[[Math]::Max(0,$i-5)..[Math]::Min($gl.Count-1,$i+8)] -join ' ')
+              $network=($ctx -match 'refreshReadonlyCacheSilently|previewReadonlySync|schoolRead|fetch\(|loadNeis|weather|comcigan')
+              $out+=('line={0} network={1} code={2}' -f ($i+1),$network,$gl[$i].Trim())
+            }
+          }
+          $out+='';$out+='## Main force fetch callers'
+          for($i=0;$i -lt $ml.Count;$i++){
+            if($ml[$i] -match 'fetchLiveData\(\{\s*force\s*:\s*true'){
+              $name='';for($j=$i;$j -ge [Math]::Max(0,$i-40);$j--){if($ml[$j] -match '(async\s+function\s+|function\s+|ipcMain\.handle\()'){ $name=$ml[$j].Trim();break}}
+              $out+=('line={0} owner={1} code={2}' -f ($i+1),$name,$ml[$i].Trim())
+            }
+          }
+          $out+='';$out+='## Main full-read core'
+          for($i=0;$i -lt $ml.Count;$i++){if($ml[$i] -match '^async function fetchLiveData'){for($j=$i;$j -le [Math]::Min($ml.Count-1,$i+190);$j++){if($ml[$j] -match 'chunkSize|mapWithConcurrency|schoolReadBatchRead|readSheetBatch|RULE_SHEET_RANGES|PROCESSING|INPUT_CENTER|syncedAt|liveDataCache'){ $out+=('{0}: {1}' -f ($j+1),$ml[$j].Trim())}};break}}
+          $out+='';$out+='## Session verification callers renderer'
+          for($i=0;$i -lt $gl.Count;$i++){if($gl[$i] -match 'schoolReadSessionStatus\?\.\(\{verify:true\}\)|ensureSchoolReadSessionForCurrentUser\(\{verify:true\}'){ $out+=('{0}: {1}' -f ($i+1),$gl[$i].Trim())}}
+          $out|Set-Content diag-uep-0.81.71-performance-classify.txt -Encoding UTF8
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git pull --rebase origin main
+          git add diag-uep-0.81.71-performance-classify.txt
+          git commit -m 'diag: classify UEP 0.81.71 performance hot paths'
+          git push
