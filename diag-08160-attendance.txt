@@ -1,0 +1,114 @@
+=== __UEP_08160_ISO_CALENDAR_DATE__ @ 2491 ===
+2479:   const scopedStudents=attendanceStatClassFilter==='all'?students:students.filter(s=>String(classNumberOf(s))===String(attendanceStatClassFilter));
+2480:   const classOptions=`<option value="all">전체 반</option>${classes.map(c=>`<option value="${escapeHtml(c)}" ${String(attendanceStatClassFilter)===String(c)?'selected':''}>${escapeHtml(c)}반</option>`).join('')}`;
+2481:   const studentOptions=scopedStudents.map(s=>`<option value="${escapeHtml(attendanceStudentKey(s))}" ${attendanceStatStudentFilter===attendanceStudentKey(s)?"selected":""}>${escapeHtml(s.studentNo||"")} ${escapeHtml(s.name||"")}</option>`).join("");
+2482:   const metricCard=(label,rows,detail)=>`<article class="attendance-personal-metric"><small>${label}</small><b>${rows.length}<em>건</em></b><span>${detail(rows)}</span></article>`;
+2483:   const history=(label,rows,value)=>`<section class="attendance-personal-history"><header><h3>${label}</h3><span>${rows.length}건 · ${dates(rows).length}일</span></header>${rows.length?rows.slice(0,60).map(row=>`<article><time>${escapeHtml(row.date||"-")}</time><b>${escapeHtml(value(row))}</b><p>${escapeHtml(row.reason||row.detail||row.result||row.programTitle||"")}</p></article>`).join(""):'<div class="empty-inline">기록이 없습니다.</div>'}</section>`;
+2484:   return `<div class="attendance-stat-page"><section class="attendance-stat-selector"><div><small>ATTENDANCE · PERSONAL INSIGHT</small><h3>${selectedStudent?`${escapeHtml(selectedStudent.studentNo)} ${escapeHtml(selectedStudent.name)}`:"학생 개인 출결 현황판"}</h3><p>반별 비교 없이 학생 한 명의 공결·지각·야자출결 누적 기록과 날짜를 확인합니다.</p></div><div class="attendance-stat-pickers"><label>반 선택<select id="attendanceStatClassFilter">${classOptions}</select></label><label>학생 선택<select id="attendanceStatStudentFilter"><option value="all">학생을 선택하세요</option>${studentOptions}</select></label></div></section>${selectedStudent?`<div class="attendance-personal-metrics">${metricCard("공결",official,r=>`${dates(r).length}일 · 최근 ${dates(r)[0]||"-"}`)}${metricCard("지각",late,r=>`${dates(r).length}일 · 최근 ${dates(r)[0]||"-"}`)}${metricCard("야자출결",night,r=>`${dates(r).length}일 · 학사 제외 · 실제 출석·프로그램만`)}</div><div class="attendance-personal-history-grid">${history("공결 기록",official,row=>`${row.type||"공결"} · ${row.period||"하루 전체"}`)}${history("지각 기록",late,row=>`${row.time||row.period||"지각"}`)}${history("야자출결 기록",night,row=>`${row.result||row.type||row.detail||"출결"}`)}</div>`:'<div class="query-empty attendance-stat-empty"><b>학생을 선택하면 개인 출결 통계가 표시됩니다.</b><small>공결 횟수와 날짜, 지각 횟수와 날짜, 야자출결 누적 현황을 한 화면에서 확인합니다.</small></div>'}</div>`;
+2485: }
+2486: 
+2487: function uepComparableDate(value,basis=attendanceViewDate||dateKey(today)){
+2488:   if(value==null||value==='')return '';
+2489:   if(typeof value==='object')value=value.formattedValue||value.value||value.date||value.serial||'';
+2490:   const text=String(value).trim();
+2491:   // __UEP_08160_ISO_CALENDAR_DATE__
+2492:   if(/^20\d{2}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:?\d{2})$/i.test(text)){
+2493:     const instant=new Date(text);
+2494:     if(!Number.isNaN(instant.getTime())){
+2495:       const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(instant);
+2496:       const p=Object.fromEntries(parts.map(part=>[part.type,part.value]));
+2497:       if(p.year&&p.month&&p.day)return p.year+'-'+p.month+'-'+p.day;
+2498:     }
+2499:   }
+2500:   if(/^\d{5}(?:\.\d+)?$/.test(text)){
+2501:     const serial=Number(text),utc=new Date(Math.round((serial-25569)*86400000));
+2502:     if(!Number.isNaN(utc.getTime()))return `${utc.getUTCFullYear()}-${String(utc.getUTCMonth()+1).padStart(2,'0')}-${String(utc.getUTCDate()).padStart(2,'0')}`;
+2503:   }
+2504:   const full=text.match(/(20\d{2})[^0-9]+(\d{1,2})[^0-9]+(\d{1,2})/);
+2505:   if(full)return `${full[1]}-${full[2].padStart(2,'0')}-${full[3].padStart(2,'0')}`;
+2506:   const compact=text.replace(/\D/g,'');
+2507:   if(/^20\d{6}$/.test(compact))return compact.slice(0,4)+'-'+compact.slice(4,6)+'-'+compact.slice(6,8);
+2508:   const monthDay=text.match(/(?:^|\D)(\d{1,2})\s*(?:월|[.\-/])\s*(\d{1,2})(?:\s*일)?(?:\D|$)/);
+2509:   if(monthDay){const year=String(basis||dateKey(today)).slice(0,4)||'2026';return year+'-'+monthDay[1].padStart(2,'0')+'-'+monthDay[2].padStart(2,'0');}
+2510:   const parsed=new Date(text);
+2511:   if(!Number.isNaN(parsed.getTime()))return `${parsed.getFullYear()}-${String(parsed.getMonth()+1).padStart(2,'0')}-${String(parsed.getDate()).padStart(2,'0')}`;
+2512:   return text.slice(0,10);
+2513: }
+2514: function attendanceView() {
+2515:   const officialRows = readonlyCache?.officialAttendance || [];
+=== function uepComparableDate @ 2487 ===
+2475:   }).slice().sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+2476:   const dates=rows=>[...new Set(rows.map(x=>x.date).filter(Boolean))].sort().reverse();
+2477:   const classes=[...new Set(students.map(s=>String(classNumberOf(s)||'')).filter(Boolean))].sort((a,b)=>Number(a)-Number(b));
+2478:   if(selectedStudent) attendanceStatClassFilter=String(classNumberOf(selectedStudent)||attendanceStatClassFilter||'all');
+2479:   const scopedStudents=attendanceStatClassFilter==='all'?students:students.filter(s=>String(classNumberOf(s))===String(attendanceStatClassFilter));
+2480:   const classOptions=`<option value="all">전체 반</option>${classes.map(c=>`<option value="${escapeHtml(c)}" ${String(attendanceStatClassFilter)===String(c)?'selected':''}>${escapeHtml(c)}반</option>`).join('')}`;
+2481:   const studentOptions=scopedStudents.map(s=>`<option value="${escapeHtml(attendanceStudentKey(s))}" ${attendanceStatStudentFilter===attendanceStudentKey(s)?"selected":""}>${escapeHtml(s.studentNo||"")} ${escapeHtml(s.name||"")}</option>`).join("");
+2482:   const metricCard=(label,rows,detail)=>`<article class="attendance-personal-metric"><small>${label}</small><b>${rows.length}<em>건</em></b><span>${detail(rows)}</span></article>`;
+2483:   const history=(label,rows,value)=>`<section class="attendance-personal-history"><header><h3>${label}</h3><span>${rows.length}건 · ${dates(rows).length}일</span></header>${rows.length?rows.slice(0,60).map(row=>`<article><time>${escapeHtml(row.date||"-")}</time><b>${escapeHtml(value(row))}</b><p>${escapeHtml(row.reason||row.detail||row.result||row.programTitle||"")}</p></article>`).join(""):'<div class="empty-inline">기록이 없습니다.</div>'}</section>`;
+2484:   return `<div class="attendance-stat-page"><section class="attendance-stat-selector"><div><small>ATTENDANCE · PERSONAL INSIGHT</small><h3>${selectedStudent?`${escapeHtml(selectedStudent.studentNo)} ${escapeHtml(selectedStudent.name)}`:"학생 개인 출결 현황판"}</h3><p>반별 비교 없이 학생 한 명의 공결·지각·야자출결 누적 기록과 날짜를 확인합니다.</p></div><div class="attendance-stat-pickers"><label>반 선택<select id="attendanceStatClassFilter">${classOptions}</select></label><label>학생 선택<select id="attendanceStatStudentFilter"><option value="all">학생을 선택하세요</option>${studentOptions}</select></label></div></section>${selectedStudent?`<div class="attendance-personal-metrics">${metricCard("공결",official,r=>`${dates(r).length}일 · 최근 ${dates(r)[0]||"-"}`)}${metricCard("지각",late,r=>`${dates(r).length}일 · 최근 ${dates(r)[0]||"-"}`)}${metricCard("야자출결",night,r=>`${dates(r).length}일 · 학사 제외 · 실제 출석·프로그램만`)}</div><div class="attendance-personal-history-grid">${history("공결 기록",official,row=>`${row.type||"공결"} · ${row.period||"하루 전체"}`)}${history("지각 기록",late,row=>`${row.time||row.period||"지각"}`)}${history("야자출결 기록",night,row=>`${row.result||row.type||row.detail||"출결"}`)}</div>`:'<div class="query-empty attendance-stat-empty"><b>학생을 선택하면 개인 출결 통계가 표시됩니다.</b><small>공결 횟수와 날짜, 지각 횟수와 날짜, 야자출결 누적 현황을 한 화면에서 확인합니다.</small></div>'}</div>`;
+2485: }
+2486: 
+2487: function uepComparableDate(value,basis=attendanceViewDate||dateKey(today)){
+2488:   if(value==null||value==='')return '';
+2489:   if(typeof value==='object')value=value.formattedValue||value.value||value.date||value.serial||'';
+2490:   const text=String(value).trim();
+2491:   // __UEP_08160_ISO_CALENDAR_DATE__
+2492:   if(/^20\d{2}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:?\d{2})$/i.test(text)){
+2493:     const instant=new Date(text);
+2494:     if(!Number.isNaN(instant.getTime())){
+2495:       const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(instant);
+2496:       const p=Object.fromEntries(parts.map(part=>[part.type,part.value]));
+2497:       if(p.year&&p.month&&p.day)return p.year+'-'+p.month+'-'+p.day;
+2498:     }
+2499:   }
+2500:   if(/^\d{5}(?:\.\d+)?$/.test(text)){
+2501:     const serial=Number(text),utc=new Date(Math.round((serial-25569)*86400000));
+2502:     if(!Number.isNaN(utc.getTime()))return `${utc.getUTCFullYear()}-${String(utc.getUTCMonth()+1).padStart(2,'0')}-${String(utc.getUTCDate()).padStart(2,'0')}`;
+2503:   }
+2504:   const full=text.match(/(20\d{2})[^0-9]+(\d{1,2})[^0-9]+(\d{1,2})/);
+2505:   if(full)return `${full[1]}-${full[2].padStart(2,'0')}-${full[3].padStart(2,'0')}`;
+2506:   const compact=text.replace(/\D/g,'');
+2507:   if(/^20\d{6}$/.test(compact))return compact.slice(0,4)+'-'+compact.slice(4,6)+'-'+compact.slice(6,8);
+2508:   const monthDay=text.match(/(?:^|\D)(\d{1,2})\s*(?:월|[.\-/])\s*(\d{1,2})(?:\s*일)?(?:\D|$)/);
+2509:   if(monthDay){const year=String(basis||dateKey(today)).slice(0,4)||'2026';return year+'-'+monthDay[1].padStart(2,'0')+'-'+monthDay[2].padStart(2,'0');}
+2510:   const parsed=new Date(text);
+2511:   if(!Number.isNaN(parsed.getTime()))return `${parsed.getFullYear()}-${String(parsed.getMonth()+1).padStart(2,'0')}-${String(parsed.getDate()).padStart(2,'0')}`;
+=== function openDashboardStudentStatus @ 8088 ===
+8076: }
+8077: 
+8078: function dashboardOfficialAttendanceLabel(row,fallback='공결'){
+8079:   const text=[row?.detailType,row?.attendanceType,row?.type,row?.statusType,row?.status,row?.result,row?.reason,row?.detail].filter(Boolean).join(' '); let type=fallback;
+8080:   if(/출석인정[^\n]*조퇴|공조퇴/.test(text))type='공조퇴'; else if(/출석인정[^\n]*지각|공지각/.test(text))type='공지각'; else if(/출석인정[^\n]*외출|공외출/.test(text))type='공외출'; else if(/출석인정[^\n]*(결석|결과)|공결/.test(text))type='공결'; else if(/조퇴/.test(text))type='조퇴'; else if(/지각/.test(text))type='지각'; else if(/외출/.test(text))type='외출';
+8081:   const direct=String(row?.periodLabel||row?.period||row?.periods||row?.classPeriod||row?.lessonPeriod||'').trim(); let period='';
+8082:   const dm=direct.match(/(\d{1,2})\s*(?:~|-|–)\s*(\d{1,2})/)||direct.match(/(\d{1,2})/);
+8083:   if(dm)period=dm[2]?(dm[1]+'~'+dm[2]+'교시'):(dm[1]+'교시');
+8084:   if(!period){const a=Number(row?.startPeriod||row?.fromPeriod||row?.periodStart||0),b=Number(row?.endPeriod||row?.toPeriod||row?.periodEnd||0);if(a&&b)period=a===b?(a+'교시'):(a+'~'+b+'교시');else if(a)period=a+'교시';}
+8085:   if(!period){const m=text.match(/(\d{1,2})\s*(?:~|-|–)\s*(\d{1,2})\s*교시/)||text.match(/(\d{1,2})\s*교시/);if(m)period=m[2]?(m[1]+'~'+m[2]+'교시'):(m[1]+'교시');}
+8086:   return [type,period].filter(Boolean).join(' ');
+8087: }
+8088: function openDashboardStudentStatus(kind, selectedDate=""){
+8089:   const defaultDate=kind==='night'?(()=>{const d=new Date(today);d.setDate(today.getDate()-1);return dateKey(d);})():dateKey(today);
+8090:   const basisDate=selectedDate||defaultDate;
+8091:   const official=(readonlyCache?.officialAttendance||[]).filter(r=>uepComparableDate(r.date||r.day)===basisDate).map(r=>({...r,dashboardStatusType:dashboardOfficialAttendanceLabel(r,'공결')}));
+8092:   const late=(readonlyCache?.lateAttendance||[]).filter(r=>uepComparableDate(r.date||r.day)===basisDate).map(r=>({...r,dashboardStatusType:dashboardOfficialAttendanceLabel(r,'공지각')}));
+8093:   const gradeReportRows=filterRowsForDashboardStatus(dashboardReportStatusRows());
+8094:   const allReportGroups=dashboardReportGroups(gradeReportRows);
+8095:   const reportGroupWithRows=(group,rows)=>({...group,rows,programs:[...new Set(rows.map(row=>String(row.programTitle||row.programName||row.title||row.activityName||'프로그램명 확인 필요').trim()).filter(Boolean))]});
+8096:   const submittedGroups=allReportGroups.filter(group=>dashboardReportGroupState(group).state==="complete").map(group=>reportGroupWithRows(group,group.rows));
+8097:   const progressGroups=allReportGroups.filter(group=>dashboardReportGroupState(group).state==="progress").map(group=>reportGroupWithRows(group,group.rows));
+8098:   const missingGroups=allReportGroups.filter(group=>dashboardReportGroupState(group).state==="missing").map(group=>reportGroupWithRows(group,group.rows));
+8099:   const configs={
+8100:     late:{title:'공결·지각 학생',page:'attendance',rows:[...official,...late],attendance:true,dateSelectable:true},
+8101:     night:{title:'야자 참여 학생',page:'attendance',rows:(readonlyCache?.nightAttendance||readonlyCache?.attendance||[]).filter(r=>uepComparableDate(r.date||r.day)===basisDate&&nightRecordIsAttendance(r)),dateSelectable:true},
+8102:     submitted:{title:'선택활동 보고서 제출완료 학생',page:'programs',rows:submittedGroups,report:true,reportGrouped:true},
+8103:     progress:{title:'선택활동 보고서 제출중 학생',page:'programs',rows:progressGroups,report:true,reportGrouped:true},
+8104:     report:{title:'선택활동 보고서 미제출 학생',page:'programs',rows:missingGroups,report:true,reportGrouped:true},
+8105:     outing:{title:'오늘 학사 외출 학생',page:'attendance',rows:(readonlyCache?.dormOutings||readonlyCache?.outings||[]).filter(r=>uepComparableDate(r.date||r.day)===basisDate)},
+8106:     absent:{title:'오늘 프로그램 불참 학생',page:'programs',rows:(readonlyCache?.programAttendance||[]).filter(r=>uepComparableDate(r.date||r.day)===basisDate&&/불참|결석|미참여/.test(String(r.status||r.result||'')))}
+8107:   };
+8108:   const cfg=configs[kind]||configs.late;
+8109:   const scoped=cfg.reportGrouped?(cfg.rows||[]):filterRowsForDashboardStatus(cfg.rows||[]);
+8110:   const rows=cfg.reportGrouped?scoped:(cfg.report?dashboardReportGroups(scoped):scoped.map(normalizeDashboardStudentRow));
+8111:   const boardRows=cfg.report?rows:scoped;
+8112:   const studentGroups=dashboardStatusStudentGroups(boardRows,{report:Boolean(cfg.report),attendance:Boolean(cfg.attendance)});
