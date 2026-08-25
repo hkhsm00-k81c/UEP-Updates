@@ -1,4 +1,4 @@
-UEP v0.81.71 core-fix build trigger R2
+UEP v0.81.71 core-fix build trigger R3
 base: v0.81.70 stable
-scope: diagnose parser merge regression before release
+scope: first-page class context + page-boundary merge + subject auth core
 requested: 2026-08-26
