@@ -1,4 +1,4 @@
-UEP v0.81.71 core-fix build trigger R3
+UEP v0.81.71 core-fix build trigger R4
 base: v0.81.70 stable
-scope: first-page class context + page-boundary merge + subject auth core
+scope: structural subject auth + tested NEIS parser core
 requested: 2026-08-26
