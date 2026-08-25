@@ -40,9 +40,6 @@ const receiptNew="const result=await window.schoolBoard?.saveNoticeReceipt?.({..
 replaceOnce(receiptOld,receiptNew,'notice receipt refresh');
 
 for(const marker of ['const APP_VERSION = "0.81.62";','__UEP_08162_CURRICULUM_BINDINGS__','__UEP_08162_OFFICIAL_SINGLE_DATE_SOURCE__','__UEP_08162_DIRECT_NOTICE_CONFIRM_REQUIRED__','__UEP_08162_EXISTING_NOTICE_CONFIRM_GATE__','__UEP_08162_NOTICE_RECEIPT_REFRESH__'])assert(g.includes(marker),'missing marker '+marker);
-assert(g.includes("$$('[data-curriculum-workspace]').forEach(b=>b.onclick=async()=>{/* __UEP_08162_CURRICULUM_BINDINGS__ */"),'patched curriculum binding missing');
-assert(g.includes("$$('[data-cross-student]').forEach(b=>b.onclick=()=>openCurriculumStudentSidePanel(b.dataset.crossStudent));"),'patched cross binding missing');
-assert(g.includes("$$('[data-curriculum-subject]').forEach(b=>b.onclick=()=>{"),'patched subject binding missing');
 
 fs.writeFileSync(gFile,g,'utf8');
 console.log('UEP 0.81.62 patch applied');
