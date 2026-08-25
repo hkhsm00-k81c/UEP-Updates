@@ -1,0 +1,91 @@
+name: Publish UEP 0.81.71 Core Fixes
+on:
+  push:
+    branches: [main]
+    paths: [publish-uep-0.81.71-core-fixes.trigger]
+permissions:
+  contents: write
+concurrency:
+  group: publish-uep-0.81.71-core-fixes
+  cancel-in-progress: true
+jobs:
+  build-publish:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run parser regression before packaging
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop';$PSNativeCommandUseErrorActionPreference=$true
+          node --check scripts/uep-0.81.71-recordbook-core.js
+          node --check scripts/test-uep-0.81.71-recordbook-core.js
+          node scripts/test-uep-0.81.71-recordbook-core.js
+      - name: Download known-good 0.81.70
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop';$PSNativeCommandUseErrorActionPreference=$true
+          New-Item -ItemType Directory -Force source,app,verify|Out-Null
+          gh release download v0.81.70 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+      - name: Apply core refactor
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop';$PSNativeCommandUseErrorActionPreference=$true
+          node --check scripts/patch-uep-0.81.71-core-fixes.js
+          node scripts/patch-uep-0.81.71-core-fixes.js app $pwd
+          node --check app/resources/app/gyomuon.js
+          node --check app/resources/app/electron/main.cjs
+          node --check app/resources/app/electron/preload.cjs
+          $pkg='app/resources/app/package.json';$p=Get-Content $pkg -Raw -Encoding UTF8|ConvertFrom-Json;$p.version='0.81.71';$p|ConvertTo-Json -Depth 50|Set-Content $pkg -Encoding UTF8
+      - name: Verify actual runtime implementation
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop';$PSNativeCommandUseErrorActionPreference=$true
+          $gy=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          $required=@(
+            'const APP_VERSION = "0.81.71"',
+            'function makeNeisRecordbookRecords08171',
+            "kind='subject'",
+            "event.key==='Enter'",
+            '선택과목 대외비 비밀번호를 입력하세요.',
+            "uepSharedSettingValue08166('SUBJECT_CONFIDENTIAL_PIN_HASH')",
+            'masterMatched',
+            'recordsByKey',
+            'lastRow'
+          )
+          foreach($x in $required){if(!$gy.Contains($x)){throw "runtime implementation missing: $x"}}
+          foreach($x in @('__UEP_08169_SUBJECT_SHARED_HASH__','const __uepUnlockSubjectConfidential08168=unlockSubjectConfidential')){if($gy.Contains($x)){throw "legacy wrapper remains: $x"}}
+          if(([regex]::Matches($gy,[regex]::Escape('선택과목 대외비 비밀번호를 입력하세요.'))).Count -ne 1){throw 'subject modal wording count mismatch'}
+          if(([regex]::Matches($gy,[regex]::Escape("kind:'subject'"))).Count -lt 2){throw 'subject modal is not used by both set/unlock paths'}
+          if($gy.Contains("const result=await sensitivePasswordModal({mode:'unlock',configured:true});`n  if(!result)return false;`n  if(await subjectConfidentialDigest")){throw 'subject unlock still uses generic modal'}
+          Write-Host 'Runtime core verification PASS'
+      - name: Reopen and verify package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop';$PSNativeCommandUseErrorActionPreference=$true
+          $g=(Get-FileHash app/resources/app/gyomuon.js -Algorithm SHA256).Hash.ToLower();"GYOMUON_SHA256=$g"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          Compress-Archive -Path 'app/*' -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          Expand-Archive UEP-update.zip verify -Force
+          if(!(Test-Path verify/UEP.exe)){throw 'root UEP.exe missing'}
+          node --check verify/resources/app/gyomuon.js
+          $g2=(Get-FileHash verify/resources/app/gyomuon.js -Algorithm SHA256).Hash.ToLower();if($g2 -ne $env:GYOMUON_SHA256){throw 'gyomuon hash mismatch'}
+          $pkg=Get-Content verify/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json;if($pkg.version -ne '0.81.71'){throw "package version mismatch: $($pkg.version)"}
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower();"UEP_SHA256=$sha"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host '0.81.71 package verification PASS'
+      - name: Publish only after all verification passes
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop';$PSNativeCommandUseErrorActionPreference=$true
+          $exists=$false;try{gh release view v0.81.71 --repo $env:GITHUB_REPOSITORY *> $null;$exists=$true}catch{$exists=$false};if($exists){gh release delete v0.81.71 --repo $env:GITHUB_REPOSITORY --cleanup-tag --yes}
+          gh release create v0.81.71 UEP-update.zip --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.71 0.81.70 Core Fix Completion' --notes '0.81.70에서 실제 본체에 반영되지 않았던 수정사항을 기능 본체 기준으로 마무리합니다. 선택과목 인증은 민감정보 모달을 단순 재사용하지 않고 공통 보안 모달의 subject 컨텍스트로 정식 분기하여 선택과목 전용 제목·설명을 표시하고, 민감정보와 선택과목 모두 Enter 인증을 지원합니다. 선택과목 중앙 비밀번호 조회는 본체 함수에 통합하고 0.81.68/0.81.69 후행 래퍼를 제거합니다. 나이스 세특 XLSX 파서는 실제 출력 구조에 맞춰 반복헤더·학교 메타정보를 제외하고 페이지 첫 행의 과목 전환을 추적하며, 같은 학생·같은 과목이 페이지 경계에서 나뉜 경우 본문을 하나로 연결합니다. 학생마스터를 학년·반·번호·성명으로 매칭하고 검증규칙은 연결된 최종 본문에 적용합니다.'
+          $url='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.71/UEP-update.zip'
+          git pull --rebase origin main
+          $policy=Get-Content uep-policy.json -Raw -Encoding UTF8|ConvertFrom-Json;$policy.latestVersion='0.81.71';$policy.downloadUrl=$url;$policy.sha256=$env:UEP_SHA256;$policy.message='0.81.70 미반영 수정 완결: 선택과목 인증 본체·나이스 세특 XLSX 파서';$policy.forceUpdate=$false;$policy|ConvertTo-Json -Depth 50|Set-Content uep-policy.json -Encoding UTF8
+          $manifest=@{version='0.81.71';channel='stable';downloadUrl=$url;sha256=$env:UEP_SHA256;notes='선택과목 전용 인증·Enter 인증·나이스 세특 페이지경계/학생마스터 파서 완결'}|ConvertTo-Json;Set-Content uep-update.json $manifest -Encoding UTF8;Set-Content uep-version.json $manifest -Encoding UTF8
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add uep-policy.json uep-update.json uep-version.json;git commit -m 'release: promote UEP 0.81.71 core fixes';git push
