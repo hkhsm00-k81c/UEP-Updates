@@ -1,0 +1,898 @@
+=== resources/app/gyomuon.js :: const UEP_SUBJECT_CONFIDENTIAL @ 395139 ===
+[])].sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'ko'));
+  const activeCount=accounts.filter(a=>a.active!==false).length, blockedCount=accounts.length-activeCount;
+  const roleOptions=["관리자","학년부장","학년총무","담임교사","교과담당","교감","교장"];
+  const rows=accounts.length?accounts.map(a=>`<tr data-inline-access-user="${escapeHtml(a.id)}"><td><b>${escapeHtml(a.name)}</b><small>${escapeHtml(maskEmail(a.email))}</small></td><td>${isAdmin?`<select data-inline-access-role>${roleOptions.map(r=>`<option ${accessAccountRole(a)===r?'selected':''}>${r}</option>`).join('')}</select>`:escapeHtml(a.admin==='Y'?'관리자':a.role||'교과담당')}</td><td>${isAdmin?`<select data-inline-access-grade>${[1,2,3].map(g=>`<option ${String(a.grade)==String(g)?'selected':''}>${g}</option>`).join('')}</select>`:escapeHtml(a.grade||'-')}</td><td>${isAdmin?`<select data-inline-access-class><option value="">-</option>${Array.from({length:14},(_,i)=>i+1).map(c=>`<option value="${c}" ${String(a.classNo)==String(c)?'selected':''}>${c}</option>`).join('')}</select>`:escapeHtml(a.classNo||'-')}</td><td><span class="state ${a.active!==false?'connected':'error'}">${a.active!==false?'승인':'차단'}</span></td><td>${isAdmin?`<button class="btn secondary" data-inline-access-toggle>${a.active!==false?'사용 중지':'사용 승인'}</button><button class="btn primary" data-inline-access-save>권한 저장</button>`:'-'}</td></tr>`).join(''):'<tr><td colspan="6">01_사용자계정에 등록된 사용자가 없습니다.</td></tr>';
+  return `<article class="setting-card access-control-inline"><div class="connection-title"><div><small>UEP RELEASE SECURITY</small><h3>사용자·권한 승인</h3><p>01_사용자계정의 사용여부·역할·담당학년·담임반을 이 화면에서 바로 관리합니다.</p></div><span class="state connected">계정표 승인</span></div><div class="security-control-grid release-security-grid"><article><small>등록 사용자</small><b>${accounts.length}명</b><p>01_사용자계정 기준</p></article><article><small>사용 승인</small><b>${activeCount}명</b><p>로그인 가능</p></article><article><small>사용 중지</small><b>${blockedCount}명</b><p>로그인 차단</p></article><article><small>현재 관리자</small><b>${escapeHtml(p.name||'-')}</b><p>${escapeHtml(currentRoleDisplay())}</p></article></div><div class="access-user-table-wrap"><table class="access-user-table"><thead><tr><th>사용자</th><th>역할</th><th>학년</th><th>담임반</th><th>상태</th><th>관리</th></tr></thead><tbody>${rows}</tbody></table></div><div class="connection-actions"><button class="btn secondary" data-inline-access-refresh>계정표 새로고침</button></div><p class="safe-note">현재 로그인한 관리자 자기 계정은 사용 중지할 수 없습니다.</p></article>`;
+}
+
+const UEP_SUBJECT_CONFIDENTIAL_PIN_KEY='uep_subject_confidential_pin_hash_v3';
+const UEP_SUBJECT_CONFIDENTIAL_SESSION_KEY='uep_subject_confidential_unlocked_v3';
+function subjectConfidentialAllowed(){
+  const role=String(currentRoleId?.()||'');
+  return ['admin','grade_head'].includes(role)||['관리자','학년부장'].includes(String(currentRoleDisplay?.()||''));
+}
+function subjectConfidentialPasswordHash(){return String(localStorage.getItem(UEP_SUBJECT_CONFIDENTIAL_PIN_KEY)||'');}
+function subjectConfidentialPasswordConfigured(){return !!subjectConfidentialPasswordHash();}
+async function subjectConfidentialDigest(value){const bytes=new TextEncoder().encode(String(value||''));const hash=await crypto.subtle.digest('SHA-256',bytes);return [...new Uint8Array(hash)].map(x=>x.toString(16).padStart(2,'0')).join('');}
+async function setSubjectConfidentialPassword(){
+  // 0.81.46: Electron에서 차단될 수 있는 prompt 대신 검증된 보안 전용 모달을 사용합니다.
+  if(!subjectConfidentialAllowed()){toast('관리자·학년부장 권한에서 설정할 수 있습니다.');return false;}
+  const configured=subjectConfidentialPasswordConfigured();
+  const result=await sensitivePasswordModal({mode:'set',configured});
+  if(!result)return false;
+  if(configured&&await subjectConfidentialDigest(result.current)!==subjectConfidentialPasswordHash()){
+    toast('현재 선택과목 비밀번호가 일치하지 않습니다.');return false;
+  }
+  localStorage.setItem(UEP_SUBJECT_CONFIDENTIAL_PIN_KEY,await subjectConfidentialDigest(result.first));
+  lockSubjectConfidential();
+  toast('선택과목 신청현황 비밀번호를 저장했습니다.');
+  if(state.activePage==='settings')render('settings');
+  return true;
+}
+function lockSubjectConfidential(){sessionStorage.removeItem(UEP_SUBJECT_CONFIDENTIAL_SESSION_KEY);}
+async function unlockSubjectConfidential(){
+  // __UEP_08159_HOMEROOM_SUBJECT_GATE__
+  const scope=typeof currentTeacherAccessScope==='function'?currentTeacherAccessScope():null;
+  const role=String(currentRoleId?.()||'');
+  const homeroomAllowed=role==='homeroom'||Boolean(scope?.teacher&&scope?.classNo);
+  if(!subjectConfidentialAllowed()&&!homeroomAllowed){toast('담임·학년부장·관리자는 비밀번호 인증 후 과목별 신청현황을 열람할 수 있습니다.');return false;}
+  if(sessionStorage.getItem(UEP_SUBJECT_CONFIDENTIAL_SESSION_KEY)==='1')return true;
+  if(!subjectConfidentialPasswordConfigured()){toast('설정 → 사용자·보안에서 선택과목 대외비 비밀번호를 먼저 설정해 주세요.');return false;}
+  const result=await sensitivePasswordModal({mode:'unlock',configured:true});
+  if(!result)return false;
+  if(await subjectConfidentialDigest(result.first)!==subjectConfidentialPasswordHash()){toast('선택과목 대외비 비밀번호가 일치하지 않습니다.');return false;}
+  sessionStorage.setItem(UEP_SUBJECT_CONFIDENTIAL_SESSION_KEY,'1');
+  return true;
+}
+function settingsView() {
+  const connected = Boolean(readonlyCache?.students?.length && !googleConnectionError);
+  const credentialReady = Boolean(googleConnectionStatus?.ok);
+  const googleStatus = connected ? ["구글시트 연결됨", ""] : googleConnectionError ? ["권한·연결 오류", "error"] : credentialReady ? ["권한 확인 필요", "warn"] : ["인증 필요", "warn"];
+  const connectionRows = [
+    ["학생정보", readonlyCache?.students?.length], ["학사생", readonlyCache?.dormStudents?.length], ["학사외출", readonlyCache?.dormOutings?.length],
+    ["성적", readonlyCache?.scoreRecords?.length], ["수능최저", readonlyCache?.admissionMinimums?.length], ["대학입결", readonlyCache?.admissionCuts?.length],
+  ];
+  const neisStatus = neisData?.ok ? (neisData.offline ? ["저장자료 표시", "warn"] : ["실시간 연결됨", ""]) : neisLoading ? ["불러오는 중", "warn"] : ["연결 확인", "error"];
+  const profile=currentUserProfile(), access=currentTeacherAccessScope();
+
+  const header=(title,desc,badge)=>`${settingsTabsMarkup()}<section class="settings-section-head"><div><small>UEP SETTINGS</small><h2>${title}</h2><p>${desc}</p></div><span>${badge}</span></section>`;
+
+  if(settingsPanel==="security") return `<div class="module-page settings-v064 settings-final">
+    ${header("사용자·보안","계정 승인과 역할, 민감정보 보호를 관리합니다.","관리자·학년부장")}
+    <article class="setting-card sensitive-security-settings"><div><small>PRIVACY · SECURITY</small><h3>🔒 민감정보 보안</h3><p>교육비지원 · 요보호학생 · 위기학생 상세정보의 열람 비밀번호를 관리합니다.</p><p class="settings-help">상세정보는 1차 블라인드 후 비밀번호 인증을 거쳐 확인하며 인증은 10분 동안 유지됩니다.</p></div><div class="sensitive-security-status"><b>${sensitivePasswordConfigured()?'비밀번호 설정됨':'비밀번호 설정 필요'}</b><button type="button" class="btn primary" data-sensitive-password-set>${sensitivePasswordConfigured()?'비밀번호 변경':'비밀번호 설정'}</button><button type="button" class="btn secondary" data-sensitive-lock>즉시 잠금</button></div></article>
+    <article class="setting-card subject-confidential-security-settings"><div><small>CONFIDENTIAL · CURRICULUM</small><h3>🔐 선택과목 대외비 보안</h3><p>과목별 신청현황 전용 비밀번호를 민감정보 비밀번호와 별도로 관리합니다.</p><p class="settings-help">관리자·학년부장만 설정 및 열람할 수 있으며 담임은 비활성화됩니다.</p></div><div class="sensitive-security-status"><b>${subjectConfidentialPasswordConfigured()?'비밀번호 설정됨':'비밀번호 설정 필요'}</b><button type="button" class="btn primary" data-subject-confidential-password-set ${subjectConfidentialAllowed()?'':'disabled'}>${subjectConfidentialPasswordConfigured()?'비밀번호 변경':'비밀번호 설정'}</button><button type="button" class="btn secondary" data-subject-confidential-lock ${subjectConfidentialAllowed()?'':'disabled'}>즉시 잠금</button></div></article>
+    <article class="setting-card role-settings-card"><div class="connection-title"><div><h3>사용자·권한 프로필</h3><p>현재 로그인 사용자의 역할과 담당 범위를 확인합니다.</p></div><span class="state">${escapeHtml(currentRoleDisplay())}</span></div><div class="user-profile-summary"><div><small>사용자</small><b>${escapeHtml(profile.name||"미설정")}</b></div><div><small>부서</small><b>${escapeHtml(profile.department||"미설정")}</b></div><div><small>조회 범위</small><b>${escapeHtml(access.label)}</b></div></div><p class="safe-note">담임은 학년 자료를 조회할 수 있고 타반 연락정보는 기본 마스킹합니다. 성적·응답·정규화 원천자료는 UEP에서 직접 수정하지 않습니다.</p></article>
+    <article class="setting-card access-control-card"><div class="connection-title"><div><h3>사용자·권한 승인</h3><p>01_사용자계정의 사용여부·역할·담당학년·담임반을 기준으로 로그인과 조회범위를 제어합니다.</p></div><span class="state connected">계정표 승인</span></div><div class="connection-actions"><button class="btn primary" type="button" data-access-control>권한 승인 제어판</button></div><p class="safe-note">신규 사용자 등록은 표준 구글시트에서 관리하고 UEP에서는 승인상태와 역할을 조정합니다.</p></article>
+  </div>`;
+
+  if(settingsPanel==="operations") return `<div class="module-page settings-v064 settings-final">
+    ${header("알림·운영","실제 운영 중 필요한 알림과 오류 신고만 관리합니다.","운영 설정")}
+    <article class="setting-card mail-alert-settings"><h3>메일 알림</h3><p>필요한 운영 알림만 선택합니다. 발송 기준 시각은 일과운영시간과 연동합니다.</p><div class="mail-alert-grid">${[["dormOuting","학사외출"],["afternoonStudy","오후자습 현황"],["night1","야자1 현황"],["night2","야자2 현황"],["nightException","야간 이상상황"],["nightSummary","야간 종료 종합"]].map(([key,label])=>`<label><input type="checkbox" data-mail-alert="${key}" ${state.settings.mailAlerts?.[key]?"checked":""}> ${label}</label>`).join("")}</div><small>※ 실제 자동메일 발송은 연결된 UEP 데이터처리 메일 트리거가 이 설정값을 읽도록 연동됩니다.</small></article>
+    <article class="setting-card issue-admin-card"><div class="connection-title"><div><h3>오류 신고 관리</h3><p>사용자가 저장한 오류 신고를 확인하고 처리 상태와 수정 버전을 기록합니다.</p></div><span class="state">${(state.issueReports||[]).filter(r=>r.status!=='fixed').length}건 처리 중</span></div><div class="connection-actions"><button class="btn secondary" data-open-issue-report>새 신고 작성</button><button class="btn primary" data-open-issue-manager>신고 관리</button></div><p class="safe-note">현재는 PC 로컬 저장 방식이며 중앙 수집은 관리자 서버 또는 관리 시트 연결 단계에서 확장합니다.</p></article>
+  </div>`;
+
+  if(settingsPanel==="system") return `<div class="module-page settings-v064 settings-final">
+    ${header("시스템 관리","연결상태·배포 준비·업데이트처럼 평소에는 건드리지 않는 관리 도구입니다.","관리자 점검")}
+    <article class="setting-card health-check-card"><div class="connection-title"><div><h3>연결 진단</h3><p>필수 탭과 주요 데이터가 정상적으로 읽히는지 한 번에 확인합니다.</p></div><span class="state ${googleConnectionError?'error':'connected'}">${googleConnectionError?'확인 필요':'정상'}</span></div><div class="health-list">${connectionHealthRows().map(row=>`<div><span>${row.ok?'✓':'!'}</span><b>${row.name}</b><small>${row.ok?'인식':'확인 필요'}</small></div>`).join('')}</div>${googleConnectionError?`<div class="connection-error-detail"><b>최근 오류</b><span>${escapeHtml(googleConnectionError)}</span></div>`:''}<div class="connection-actions"><button class="btn primary" data-run-health-check>다시 진단</button></div></article>
+    <article class="setting-card"><h3>조회 연결 상태</h3><p>UEP 기준 구글시트에 실제 자료가 있는 항목을 확인합니다.</p>${connectionRows.map(([label,count]) => `<div class="setting-row"><span><b>${label}</b><small>${Number(count || 0).toLocaleString()}건 
+
+---
+
+=== resources/app/gyomuon.js :: function subjectConfidential @ 395301 ===
+s.length-activeCount;
+  const roleOptions=["관리자","학년부장","학년총무","담임교사","교과담당","교감","교장"];
+  const rows=accounts.length?accounts.map(a=>`<tr data-inline-access-user="${escapeHtml(a.id)}"><td><b>${escapeHtml(a.name)}</b><small>${escapeHtml(maskEmail(a.email))}</small></td><td>${isAdmin?`<select data-inline-access-role>${roleOptions.map(r=>`<option ${accessAccountRole(a)===r?'selected':''}>${r}</option>`).join('')}</select>`:escapeHtml(a.admin==='Y'?'관리자':a.role||'교과담당')}</td><td>${isAdmin?`<select data-inline-access-grade>${[1,2,3].map(g=>`<option ${String(a.grade)==String(g)?'selected':''}>${g}</option>`).join('')}</select>`:escapeHtml(a.grade||'-')}</td><td>${isAdmin?`<select data-inline-access-class><option value="">-</option>${Array.from({length:14},(_,i)=>i+1).map(c=>`<option value="${c}" ${String(a.classNo)==String(c)?'selected':''}>${c}</option>`).join('')}</select>`:escapeHtml(a.classNo||'-')}</td><td><span class="state ${a.active!==false?'connected':'error'}">${a.active!==false?'승인':'차단'}</span></td><td>${isAdmin?`<button class="btn secondary" data-inline-access-toggle>${a.active!==false?'사용 중지':'사용 승인'}</button><button class="btn primary" data-inline-access-save>권한 저장</button>`:'-'}</td></tr>`).join(''):'<tr><td colspan="6">01_사용자계정에 등록된 사용자가 없습니다.</td></tr>';
+  return `<article class="setting-card access-control-inline"><div class="connection-title"><div><small>UEP RELEASE SECURITY</small><h3>사용자·권한 승인</h3><p>01_사용자계정의 사용여부·역할·담당학년·담임반을 이 화면에서 바로 관리합니다.</p></div><span class="state connected">계정표 승인</span></div><div class="security-control-grid release-security-grid"><article><small>등록 사용자</small><b>${accounts.length}명</b><p>01_사용자계정 기준</p></article><article><small>사용 승인</small><b>${activeCount}명</b><p>로그인 가능</p></article><article><small>사용 중지</small><b>${blockedCount}명</b><p>로그인 차단</p></article><article><small>현재 관리자</small><b>${escapeHtml(p.name||'-')}</b><p>${escapeHtml(currentRoleDisplay())}</p></article></div><div class="access-user-table-wrap"><table class="access-user-table"><thead><tr><th>사용자</th><th>역할</th><th>학년</th><th>담임반</th><th>상태</th><th>관리</th></tr></thead><tbody>${rows}</tbody></table></div><div class="connection-actions"><button class="btn secondary" data-inline-access-refresh>계정표 새로고침</button></div><p class="safe-note">현재 로그인한 관리자 자기 계정은 사용 중지할 수 없습니다.</p></article>`;
+}
+
+const UEP_SUBJECT_CONFIDENTIAL_PIN_KEY='uep_subject_confidential_pin_hash_v3';
+const UEP_SUBJECT_CONFIDENTIAL_SESSION_KEY='uep_subject_confidential_unlocked_v3';
+function subjectConfidentialAllowed(){
+  const role=String(currentRoleId?.()||'');
+  return ['admin','grade_head'].includes(role)||['관리자','학년부장'].includes(String(currentRoleDisplay?.()||''));
+}
+function subjectConfidentialPasswordHash(){return String(localStorage.getItem(UEP_SUBJECT_CONFIDENTIAL_PIN_KEY)||'');}
+function subjectConfidentialPasswordConfigured(){return !!subjectConfidentialPasswordHash();}
+async function subjectConfidentialDigest(value){const bytes=new TextEncoder().encode(String(value||''));const hash=await crypto.subtle.digest('SHA-256',bytes);return [...new Uint8Array(hash)].map(x=>x.toString(16).padStart(2,'0')).join('');}
+async function setSubjectConfidentialPassword(){
+  // 0.81.46: Electron에서 차단될 수 있는 prompt 대신 검증된 보안 전용 모달을 사용합니다.
+  if(!subjectConfidentialAllowed()){toast('관리자·학년부장 권한에서 설정할 수 있습니다.');return false;}
+  const configured=subjectConfidentialPasswordConfigured();
+  const result=await sensitivePasswordModal({mode:'set',configured});
+  if(!result)return false;
+  if(configured&&await subjectConfidentialDigest(result.current)!==subjectConfidentialPasswordHash()){
+    toast('현재 선택과목 비밀번호가 일치하지 않습니다.');return false;
+  }
+  localStorage.setItem(UEP_SUBJECT_CONFIDENTIAL_PIN_KEY,await subjectConfidentialDigest(result.first));
+  lockSubjectConfidential();
+  toast('선택과목 신청현황 비밀번호를 저장했습니다.');
+  if(state.activePage==='settings')render('settings');
+  return true;
+}
+function lockSubjectConfidential(){sessionStorage.removeItem(UEP_SUBJECT_CONFIDENTIAL_SESSION_KEY);}
+async function unlockSubjectConfidential(){
+  // __UEP_08159_HOMEROOM_SUBJECT_GATE__
+  const scope=typeof currentTeacherAccessScope==='function'?currentTeacherAccessScope():null;
+  const role=String(currentRoleId?.()||'');
+  const homeroomAllowed=role==='homeroom'||Boolean(scope?.teacher&&scope?.classNo);
+  if(!subjectConfidentialAllowed()&&!homeroomAllowed){toast('담임·학년부장·관리자는 비밀번호 인증 후 과목별 신청현황을 열람할 수 있습니다.');return false;}
+  if(sessionStorage.getItem(UEP_SUBJECT_CONFIDENTIAL_SESSION_KEY)==='1')return true;
+  if(!subjectConfidentialPasswordConfigured()){toast('설정 → 사용자·보안에서 선택과목 대외비 비밀번호를 먼저 설정해 주세요.');return false;}
+  const result=await sensitivePasswordModal({mode:'unlock',configured:true});
+  if(!result)return false;
+  if(await subjectConfidentialDigest(result.first)!==subjectConfidentialPasswordHash()){toast('선택과목 대외비 비밀번호가 일치하지 않습니다.');return false;}
+  sessionStorage.setItem(UEP_SUBJECT_CONFIDENTIAL_SESSION_KEY,'1');
+  return true;
+}
+function settingsView() {
+  const connected = Boolean(readonlyCache?.students?.length && !googleConnectionError);
+  const credentialReady = Boolean(googleConnectionStatus?.ok);
+  const googleStatus = connected ? ["구글시트 연결됨", ""] : googleConnectionError ? ["권한·연결 오류", "error"] : credentialReady ? ["권한 확인 필요", "warn"] : ["인증 필요", "warn"];
+  const connectionRows = [
+    ["학생정보", readonlyCache?.students?.length], ["학사생", readonlyCache?.dormStudents?.length], ["학사외출", readonlyCache?.dormOutings?.length],
+    ["성적", readonlyCache?.scoreRecords?.length], ["수능최저", readonlyCache?.admissionMinimums?.length], ["대학입결", readonlyCache?.admissionCuts?.length],
+  ];
+  const neisStatus = neisData?.ok ? (neisData.offline ? ["저장자료 표시", "warn"] : ["실시간 연결됨", ""]) : neisLoading ? ["불러오는 중", "warn"] : ["연결 확인", "error"];
+  const profile=currentUserProfile(), access=currentTeacherAccessScope();
+
+  const header=(title,desc,badge)=>`${settingsTabsMarkup()}<section class="settings-section-head"><div><small>UEP SETTINGS</small><h2>${title}</h2><p>${desc}</p></div><span>${badge}</span></section>`;
+
+  if(settingsPanel==="security") return `<div class="module-page settings-v064 settings-final">
+    ${header("사용자·보안","계정 승인과 역할, 민감정보 보호를 관리합니다.","관리자·학년부장")}
+    <article class="setting-card sensitive-security-settings"><div><small>PRIVACY · SECURITY</small><h3>🔒 민감정보 보안</h3><p>교육비지원 · 요보호학생 · 위기학생 상세정보의 열람 비밀번호를 관리합니다.</p><p class="settings-help">상세정보는 1차 블라인드 후 비밀번호 인증을 거쳐 확인하며 인증은 10분 동안 유지됩니다.</p></div><div class="sensitive-security-status"><b>${sensitivePasswordConfigured()?'비밀번호 설정됨':'비밀번호 설정 필요'}</b><button type="button" class="btn primary" data-sensitive-password-set>${sensitivePasswordConfigured()?'비밀번호 변경':'비밀번호 설정'}</button><button type="button" class="btn secondary" data-sensitive-lock>즉시 잠금</button></div></article>
+    <article class="setting-card subject-confidential-security-settings"><div><small>CONFIDENTIAL · CURRICULUM</small><h3>🔐 선택과목 대외비 보안</h3><p>과목별 신청현황 전용 비밀번호를 민감정보 비밀번호와 별도로 관리합니다.</p><p class="settings-help">관리자·학년부장만 설정 및 열람할 수 있으며 담임은 비활성화됩니다.</p></div><div class="sensitive-security-status"><b>${subjectConfidentialPasswordConfigured()?'비밀번호 설정됨':'비밀번호 설정 필요'}</b><button type="button" class="btn primary" data-subject-confidential-password-set ${subjectConfidentialAllowed()?'':'disabled'}>${subjectConfidentialPasswordConfigured()?'비밀번호 변경':'비밀번호 설정'}</button><button type="button" class="btn secondary" data-subject-confidential-lock ${subjectConfidentialAllowed()?'':'disabled'}>즉시 잠금</button></div></article>
+    <article class="setting-card role-settings-card"><div class="connection-title"><div><h3>사용자·권한 프로필</h3><p>현재 로그인 사용자의 역할과 담당 범위를 확인합니다.</p></div><span class="state">${escapeHtml(currentRoleDisplay())}</span></div><div class="user-profile-summary"><div><small>사용자</small><b>${escapeHtml(profile.name||"미설정")}</b></div><div><small>부서</small><b>${escapeHtml(profile.department||"미설정")}</b></div><div><small>조회 범위</small><b>${escapeHtml(access.label)}</b></div></div><p class="safe-note">담임은 학년 자료를 조회할 수 있고 타반 연락정보는 기본 마스킹합니다. 성적·응답·정규화 원천자료는 UEP에서 직접 수정하지 않습니다.</p></article>
+    <article class="setting-card access-control-card"><div class="connection-title"><div><h3>사용자·권한 승인</h3><p>01_사용자계정의 사용여부·역할·담당학년·담임반을 기준으로 로그인과 조회범위를 제어합니다.</p></div><span class="state connected">계정표 승인</span></div><div class="connection-actions"><button class="btn primary" type="button" data-access-control>권한 승인 제어판</button></div><p class="safe-note">신규 사용자 등록은 표준 구글시트에서 관리하고 UEP에서는 승인상태와 역할을 조정합니다.</p></article>
+  </div>`;
+
+  if(settingsPanel==="operations") return `<div class="module-page settings-v064 settings-final">
+    ${header("알림·운영","실제 운영 중 필요한 알림과 오류 신고만 관리합니다.","운영 설정")}
+    <article class="setting-card mail-alert-settings"><h3>메일 알림</h3><p>필요한 운영 알림만 선택합니다. 발송 기준 시각은 일과운영시간과 연동합니다.</p><div class="mail-alert-grid">${[["dormOuting","학사외출"],["afternoonStudy","오후자습 현황"],["night1","야자1 현황"],["night2","야자2 현황"],["nightException","야간 이상상황"],["nightSummary","야간 종료 종합"]].map(([key,label])=>`<label><input type="checkbox" data-mail-alert="${key}" ${state.settings.mailAlerts?.[key]?"checked":""}> ${label}</label>`).join("")}</div><small>※ 실제 자동메일 발송은 연결된 UEP 데이터처리 메일 트리거가 이 설정값을 읽도록 연동됩니다.</small></article>
+    <article class="setting-card issue-admin-card"><div class="connection-title"><div><h3>오류 신고 관리</h3><p>사용자가 저장한 오류 신고를 확인하고 처리 상태와 수정 버전을 기록합니다.</p></div><span class="state">${(state.issueReports||[]).filter(r=>r.status!=='fixed').length}건 처리 중</span></div><div class="connection-actions"><button class="btn secondary" data-open-issue-report>새 신고 작성</button><button class="btn primary" data-open-issue-manager>신고 관리</button></div><p class="safe-note">현재는 PC 로컬 저장 방식이며 중앙 수집은 관리자 서버 또는 관리 시트 연결 단계에서 확장합니다.</p></article>
+  </div>`;
+
+  if(settingsPanel==="system") return `<div class="module-page settings-v064 settings-final">
+    ${header("시스템 관리","연결상태·배포 준비·업데이트처럼 평소에는 건드리지 않는 관리 도구입니다.","관리자 점검")}
+    <article class="setting-card health-check-card"><div class="connection-title"><div><h3>연결 진단</h3><p>필수 탭과 주요 데이터가 정상적으로 읽히는지 한 번에 확인합니다.</p></div><span class="state ${googleConnectionError?'error':'connected'}">${googleConnectionError?'확인 필요':'정상'}</span></div><div class="health-list">${connectionHealthRows().map(row=>`<div><span>${row.ok?'✓':'!'}</span><b>${row.name}</b><small>${row.ok?'인식':'확인 필요'}</small></div>`).join('')}</div>${googleConnectionError?`<div class="connection-error-detail"><b>최근 오류</b><span>${escapeHtml(googleConnectionError)}</span></div>`:''}<div class="connection-actions"><button class="btn primary" data-run-health-check>다시 진단</button></div></article>
+    <article class="setting-card"><h3>조회 연결 상태</h3><p>UEP 기준 구글시트에 실제 자료가 있는 항목을 확인합니다.</p>${connectionRows.map(([label,count]) => `<div class="setting-row"><span><b>${label}</b><small>${Number(count || 0).toLocaleString()}건 인식</small></span><span>${count ? "연결" : "자료 확인"}</span></div>`).join("")}</article>
+    <article class="setting-card release-readiness-card"><div class="connectio
+
+---
+
+=== resources/app/gyomuon.js :: async function setSubjectConfidentialPassword @ 395950 ===
+||'-')}</td><td>${isAdmin?`<select data-inline-access-class><option value="">-</option>${Array.from({length:14},(_,i)=>i+1).map(c=>`<option value="${c}" ${String(a.classNo)==String(c)?'selected':''}>${c}</option>`).join('')}</select>`:escapeHtml(a.classNo||'-')}</td><td><span class="state ${a.active!==false?'connected':'error'}">${a.active!==false?'승인':'차단'}</span></td><td>${isAdmin?`<button class="btn secondary" data-inline-access-toggle>${a.active!==false?'사용 중지':'사용 승인'}</button><button class="btn primary" data-inline-access-save>권한 저장</button>`:'-'}</td></tr>`).join(''):'<tr><td colspan="6">01_사용자계정에 등록된 사용자가 없습니다.</td></tr>';
+  return `<article class="setting-card access-control-inline"><div class="connection-title"><div><small>UEP RELEASE SECURITY</small><h3>사용자·권한 승인</h3><p>01_사용자계정의 사용여부·역할·담당학년·담임반을 이 화면에서 바로 관리합니다.</p></div><span class="state connected">계정표 승인</span></div><div class="security-control-grid release-security-grid"><article><small>등록 사용자</small><b>${accounts.length}명</b><p>01_사용자계정 기준</p></article><article><small>사용 승인</small><b>${activeCount}명</b><p>로그인 가능</p></article><article><small>사용 중지</small><b>${blockedCount}명</b><p>로그인 차단</p></article><article><small>현재 관리자</small><b>${escapeHtml(p.name||'-')}</b><p>${escapeHtml(currentRoleDisplay())}</p></article></div><div class="access-user-table-wrap"><table class="access-user-table"><thead><tr><th>사용자</th><th>역할</th><th>학년</th><th>담임반</th><th>상태</th><th>관리</th></tr></thead><tbody>${rows}</tbody></table></div><div class="connection-actions"><button class="btn secondary" data-inline-access-refresh>계정표 새로고침</button></div><p class="safe-note">현재 로그인한 관리자 자기 계정은 사용 중지할 수 없습니다.</p></article>`;
+}
+
+const UEP_SUBJECT_CONFIDENTIAL_PIN_KEY='uep_subject_confidential_pin_hash_v3';
+const UEP_SUBJECT_CONFIDENTIAL_SESSION_KEY='uep_subject_confidential_unlocked_v3';
+function subjectConfidentialAllowed(){
+  const role=String(currentRoleId?.()||'');
+  return ['admin','grade_head'].includes(role)||['관리자','학년부장'].includes(String(currentRoleDisplay?.()||''));
+}
+function subjectConfidentialPasswordHash(){return String(localStorage.getItem(UEP_SUBJECT_CONFIDENTIAL_PIN_KEY)||'');}
+function subjectConfidentialPasswordConfigured(){return !!subjectConfidentialPasswordHash();}
+async function subjectConfidentialDigest(value){const bytes=new TextEncoder().encode(String(value||''));const hash=await crypto.subtle.digest('SHA-256',bytes);return [...new Uint8Array(hash)].map(x=>x.toString(16).padStart(2,'0')).join('');}
+async function setSubjectConfidentialPassword(){
+  // 0.81.46: Electron에서 차단될 수 있는 prompt 대신 검증된 보안 전용 모달을 사용합니다.
+  if(!subjectConfidentialAllowed()){toast('관리자·학년부장 권한에서 설정할 수 있습니다.');return false;}
+  const configured=subjectConfidentialPasswordConfigured();
+  const result=await sensitivePasswordModal({mode:'set',configured});
+  if(!result)return false;
+  if(configured&&await subjectConfidentialDigest(result.current)!==subjectConfidentialPasswordHash()){
+    toast('현재 선택과목 비밀번호가 일치하지 않습니다.');return false;
+  }
+  localStorage.setItem(UEP_SUBJECT_CONFIDENTIAL_PIN_KEY,await subjectConfidentialDigest(result.first));
+  lockSubjectConfidential();
+  toast('선택과목 신청현황 비밀번호를 저장했습니다.');
+  if(state.activePage==='settings')render('settings');
+  return true;
+}
+function lockSubjectConfidential(){sessionStorage.removeItem(UEP_SUBJECT_CONFIDENTIAL_SESSION_KEY);}
+async function unlockSubjectConfidential(){
+  // __UEP_08159_HOMEROOM_SUBJECT_GATE__
+  const scope=typeof currentTeacherAccessScope==='function'?currentTeacherAccessScope():null;
+  const role=String(currentRoleId?.()||'');
+  const homeroomAllowed=role==='homeroom'||Boolean(scope?.teacher&&scope?.classNo);
+  if(!subjectConfidentialAllowed()&&!homeroomAllowed){toast('담임·학년부장·관리자는 비밀번호 인증 후 과목별 신청현황을 열람할 수 있습니다.');return false;}
+  if(sessionStorage.getItem(UEP_SUBJECT_CONFIDENTIAL_SESSION_KEY)==='1')return true;
+  if(!subjectConfidentialPasswordConfigured()){toast('설정 → 사용자·보안에서 선택과목 대외비 비밀번호를 먼저 설정해 주세요.');return false;}
+  const result=await sensitivePasswordModal({mode:'unlock',configured:true});
+  if(!result)return false;
+  if(await subjectConfidentialDigest(result.first)!==subjectConfidentialPasswordHash()){toast('선택과목 대외비 비밀번호가 일치하지 않습니다.');return false;}
+  sessionStorage.setItem(UEP_SUBJECT_CONFIDENTIAL_SESSION_KEY,'1');
+  return true;
+}
+function settingsView() {
+  const connected = Boolean(readonlyCache?.students?.length && !googleConnectionError);
+  const credentialReady = Boolean(googleConnectionStatus?.ok);
+  const googleStatus = connected ? ["구글시트 연결됨", ""] : googleConnectionError ? ["권한·연결 오류", "error"] : credentialReady ? ["권한 확인 필요", "warn"] : ["인증 필요", "warn"];
+  const connectionRows = [
+    ["학생정보", readonlyCache?.students?.length], ["학사생", readonlyCache?.dormStudents?.length], ["학사외출", readonlyCache?.dormOutings?.length],
+    ["성적", readonlyCache?.scoreRecords?.length], ["수능최저", readonlyCache?.admissionMinimums?.length], ["대학입결", readonlyCache?.admissionCuts?.length],
+  ];
+  const neisStatus = neisData?.ok ? (neisData.offline ? ["저장자료 표시", "warn"] : ["실시간 연결됨", ""]) : neisLoading ? ["불러오는 중", "warn"] : ["연결 확인", "error"];
+  const profile=currentUserProfile(), access=currentTeacherAccessScope();
+
+  const header=(title,desc,badge)=>`${settingsTabsMarkup()}<section class="settings-section-head"><div><small>UEP SETTINGS</small><h2>${title}</h2><p>${desc}</p></div><span>${badge}</span></section>`;
+
+  if(settingsPanel==="security") return `<div class="module-page settings-v064 settings-final">
+    ${header("사용자·보안","계정 승인과 역할, 민감정보 보호를 관리합니다.","관리자·학년부장")}
+    <article class="setting-card sensitive-security-settings"><div><small>PRIVACY · SECURITY</small><h3>🔒 민감정보 보안</h3><p>교육비지원 · 요보호학생 · 위기학생 상세정보의 열람 비밀번호를 관리합니다.</p><p class="settings-help">상세정보는 1차 블라인드 후 비밀번호 인증을 거쳐 확인하며 인증은 10분 동안 유지됩니다.</p></div><div class="sensitive-security-status"><b>${sensitivePasswordConfigured()?'비밀번호 설정됨':'비밀번호 설정 필요'}</b><button type="button" class="btn primary" data-sensitive-password-set>${sensitivePasswordConfigured()?'비밀번호 변경':'비밀번호 설정'}</button><button type="button" class="btn secondary" data-sensitive-lock>즉시 잠금</button></div></article>
+    <article class="setting-card subject-confidential-security-settings"><div><small>CONFIDENTIAL · CURRICULUM</small><h3>🔐 선택과목 대외비 보안</h3><p>과목별 신청현황 전용 비밀번호를 민감정보 비밀번호와 별도로 관리합니다.</p><p class="settings-help">관리자·학년부장만 설정 및 열람할 수 있으며 담임은 비활성화됩니다.</p></div><div class="sensitive-security-status"><b>${subjectConfidentialPasswordConfigured()?'비밀번호 설정됨':'비밀번호 설정 필요'}</b><button type="button" class="btn primary" data-subject-confidential-password-set ${subjectConfidentialAllowed()?'':'disabled'}>${subjectConfidentialPasswordConfigured()?'비밀번호 변경':'비밀번호 설정'}</button><button type="button" class="btn secondary" data-subject-confidential-lock ${subjectConfidentialAllowed()?'':'disabled'}>즉시 잠금</button></div></article>
+    <article class="setting-card role-settings-card"><div class="connection-title"><div><h3>사용자·권한 프로필</h3><p>현재 로그인 사용자의 역할과 담당 범위를 확인합니다.</p></div><span class="state">${escapeHtml(currentRoleDisplay())}</span></div><div class="user-profile-summary"><div><small>사용자</small><b>${escapeHtml(profile.name||"미설정")}</b></div><div><small>부서</small><b>${escapeHtml(profile.department||"미설정")}</b></div><div><small>조회 범위</small><b>${escapeHtml(access.label)}</b></div></div><p class="safe-note">담임은 학년 자료를 조회할 수 있고 타반 연락정보는 기본 마스킹합니다. 성적·응답·정규화 원천자료는 UEP에서 직접 수정하지 않습니다.</p></article>
+    <article class="setting-card access-control-card"><div class="connection-title"><div><h3>사용자·권한 승인</h3><p>01_사용자계정의 사용여부·역할·담당학년·담임반을 기준으로 로그인과 조회범위를 제어합니다.</p></div><span class="state connected">계정표 승인</span></div><div class="connection-actions"><button class="btn primary" type="button" data-access-control>권한 승인 제어판</button></div><p class="safe-note">신규 사용자 등록은 표준 구글시트에서 관리하고 UEP에서는 승인상태와 역할을 조정합니다.</p></article>
+  </div>`;
+
+  if(settingsPanel==="operations") return `<div class="module-page settings-v064 settings-final">
+    ${header("알림·운영","실제 운영 중 필요한 알림과 오류 신고만 관리합니다.","운영 설정")}
+    <article class="setting-card mail-alert-settings"><h3>메일 알림</h3><p>필요한 운영 알림만 선택합니다. 발송 기준 시각은 일과운영시간과 연동합니다.</p><div class="mail-alert-grid">${[["dormOuting","학사외출"],["afternoonStudy","오후자습 현황"],["night1","야자1 현황"],["night2","야자2 현황"],["nightException","야간 이상상황"],["nightSummary","야간 종료 종합"]].map(([key,label])=>`<label><input type="checkbox" data-mail-alert="${key}" ${state.settings.mailAlerts?.[key]?"checked":""}> ${label}</label>`).join("")}</div><small>※ 실제 자동메일 발송은 연결된 UEP 데이터처리 메일 트리거가 이 설정값을 읽도록 연동됩니다.</small></article>
+    <article class="setting-card issue-admin-card"><div class="connection-title"><div><h3>오류 신고 관리</h3><p>사용자가 저장한 오류 신고를 확인하고 처리 상태와 수정 버전을 기록합니다.</p></div><span class="state">${(state.issueReports||[]).filter(r=>r.status!=='fixed').length}건 처리 중</span></div><div class="connection-actions"><button class="btn secondary" data-open-issue-report>새 신고 작성</button><button class="btn primary" data-open-issue-manager>신고 관리</button></div><p class="safe-note">현재는 PC 로컬 저장 방식이며 중앙 수집은 관리자 서버 또는 관리 시트 연결 단계에서 확장합니다.</p></article>
+  </div>`;
+
+  if(settingsPanel==="system") return `<div class="module-page settings-v064 settings-final">
+    ${header("시스템 관리","연결상태·배포 준비·업데이트처럼 평소에는 건드리지 않는 관리 도구입니다.","관리자 점검")}
+    <article class="setting-card health-check-card"><div class="connection-title"><div><h3>연결 진단</h3><p>필수 탭과 주요 데이터가 정상적으로 읽히는지 한 번에 확인합니다.</p></div><span class="state ${googleConnectionError?'error':'connected'}">${googleConnectionError?'확인 필요':'정상'}</span></div><div class="health-list">${connectionHealthRows().map(row=>`<div><span>${row.ok?'✓':'!'}</span><b>${row.name}</b><small>${row.ok?'인식':'확인 필요'}</small></div>`).join('')}</div>${googleConnectionError?`<div class="connection-error-detail"><b>최근 오류</b><span>${escapeHtml(googleConnectionError)}</span></div>`:''}<div class="connection-actions"><button class="btn primary" data-run-health-check>다시 진단</button></div></article>
+    <article class="setting-card"><h3>조회 연결 상태</h3><p>UEP 기준 구글시트에 실제 자료가 있는 항목을 확인합니다.</p>${connectionRows.map(([label,count]) => `<div class="setting-row"><span><b>${label}</b><small>${Number(count || 0).toLocaleString()}건 인식</small></span><span>${count ? "연결" : "자료 확인"}</span></div>`).join("")}</article>
+    <article class="setting-card release-readiness-card"><div class="connection-title"><div><h3>배포 준비 점검</h3><p>교사용 배포 전에 필수 연결·계정·권한·업데이트·API 보호 상태를 확인합니다.</p></div><span class="state ${releaseReadinessRows().every(row=>row.ok)?'connected':'warn'}">${releaseReadinessRows().every(row=>row.ok)?'배포 준비':'확인 필요'}</span></div><div class="health-list release-health-list">${releaseReadinessRows().map(row=>`<div><span>${row.ok?'✓':'!'}</span><b>${escapeHtml(row.name)}</b><small>${escapeHtml(row.note)}</small></div>`).join('')}</div><div class="connection-actions"><button class="btn primary" type="button" data-access-control>권한 점검</button><button class="btn secondary" data-run-health-check>연결 다시 진단</button></div><p class="safe
+
+---
+
+=== resources/app/gyomuon.js :: async function unlockSubjectConfidential @ 396808 ===
+"state connected">계정표 승인</span></div><div class="security-control-grid release-security-grid"><article><small>등록 사용자</small><b>${accounts.length}명</b><p>01_사용자계정 기준</p></article><article><small>사용 승인</small><b>${activeCount}명</b><p>로그인 가능</p></article><article><small>사용 중지</small><b>${blockedCount}명</b><p>로그인 차단</p></article><article><small>현재 관리자</small><b>${escapeHtml(p.name||'-')}</b><p>${escapeHtml(currentRoleDisplay())}</p></article></div><div class="access-user-table-wrap"><table class="access-user-table"><thead><tr><th>사용자</th><th>역할</th><th>학년</th><th>담임반</th><th>상태</th><th>관리</th></tr></thead><tbody>${rows}</tbody></table></div><div class="connection-actions"><button class="btn secondary" data-inline-access-refresh>계정표 새로고침</button></div><p class="safe-note">현재 로그인한 관리자 자기 계정은 사용 중지할 수 없습니다.</p></article>`;
+}
+
+const UEP_SUBJECT_CONFIDENTIAL_PIN_KEY='uep_subject_confidential_pin_hash_v3';
+const UEP_SUBJECT_CONFIDENTIAL_SESSION_KEY='uep_subject_confidential_unlocked_v3';
+function subjectConfidentialAllowed(){
+  const role=String(currentRoleId?.()||'');
+  return ['admin','grade_head'].includes(role)||['관리자','학년부장'].includes(String(currentRoleDisplay?.()||''));
+}
+function subjectConfidentialPasswordHash(){return String(localStorage.getItem(UEP_SUBJECT_CONFIDENTIAL_PIN_KEY)||'');}
+function subjectConfidentialPasswordConfigured(){return !!subjectConfidentialPasswordHash();}
+async function subjectConfidentialDigest(value){const bytes=new TextEncoder().encode(String(value||''));const hash=await crypto.subtle.digest('SHA-256',bytes);return [...new Uint8Array(hash)].map(x=>x.toString(16).padStart(2,'0')).join('');}
+async function setSubjectConfidentialPassword(){
+  // 0.81.46: Electron에서 차단될 수 있는 prompt 대신 검증된 보안 전용 모달을 사용합니다.
+  if(!subjectConfidentialAllowed()){toast('관리자·학년부장 권한에서 설정할 수 있습니다.');return false;}
+  const configured=subjectConfidentialPasswordConfigured();
+  const result=await sensitivePasswordModal({mode:'set',configured});
+  if(!result)return false;
+  if(configured&&await subjectConfidentialDigest(result.current)!==subjectConfidentialPasswordHash()){
+    toast('현재 선택과목 비밀번호가 일치하지 않습니다.');return false;
+  }
+  localStorage.setItem(UEP_SUBJECT_CONFIDENTIAL_PIN_KEY,await subjectConfidentialDigest(result.first));
+  lockSubjectConfidential();
+  toast('선택과목 신청현황 비밀번호를 저장했습니다.');
+  if(state.activePage==='settings')render('settings');
+  return true;
+}
+function lockSubjectConfidential(){sessionStorage.removeItem(UEP_SUBJECT_CONFIDENTIAL_SESSION_KEY);}
+async function unlockSubjectConfidential(){
+  // __UEP_08159_HOMEROOM_SUBJECT_GATE__
+  const scope=typeof currentTeacherAccessScope==='function'?currentTeacherAccessScope():null;
+  const role=String(currentRoleId?.()||'');
+  const homeroomAllowed=role==='homeroom'||Boolean(scope?.teacher&&scope?.classNo);
+  if(!subjectConfidentialAllowed()&&!homeroomAllowed){toast('담임·학년부장·관리자는 비밀번호 인증 후 과목별 신청현황을 열람할 수 있습니다.');return false;}
+  if(sessionStorage.getItem(UEP_SUBJECT_CONFIDENTIAL_SESSION_KEY)==='1')return true;
+  if(!subjectConfidentialPasswordConfigured()){toast('설정 → 사용자·보안에서 선택과목 대외비 비밀번호를 먼저 설정해 주세요.');return false;}
+  const result=await sensitivePasswordModal({mode:'unlock',configured:true});
+  if(!result)return false;
+  if(await subjectConfidentialDigest(result.first)!==subjectConfidentialPasswordHash()){toast('선택과목 대외비 비밀번호가 일치하지 않습니다.');return false;}
+  sessionStorage.setItem(UEP_SUBJECT_CONFIDENTIAL_SESSION_KEY,'1');
+  return true;
+}
+function settingsView() {
+  const connected = Boolean(readonlyCache?.students?.length && !googleConnectionError);
+  const credentialReady = Boolean(googleConnectionStatus?.ok);
+  const googleStatus = connected ? ["구글시트 연결됨", ""] : googleConnectionError ? ["권한·연결 오류", "error"] : credentialReady ? ["권한 확인 필요", "warn"] : ["인증 필요", "warn"];
+  const connectionRows = [
+    ["학생정보", readonlyCache?.students?.length], ["학사생", readonlyCache?.dormStudents?.length], ["학사외출", readonlyCache?.dormOutings?.length],
+    ["성적", readonlyCache?.scoreRecords?.length], ["수능최저", readonlyCache?.admissionMinimums?.length], ["대학입결", readonlyCache?.admissionCuts?.length],
+  ];
+  const neisStatus = neisData?.ok ? (neisData.offline ? ["저장자료 표시", "warn"] : ["실시간 연결됨", ""]) : neisLoading ? ["불러오는 중", "warn"] : ["연결 확인", "error"];
+  const profile=currentUserProfile(), access=currentTeacherAccessScope();
+
+  const header=(title,desc,badge)=>`${settingsTabsMarkup()}<section class="settings-section-head"><div><small>UEP SETTINGS</small><h2>${title}</h2><p>${desc}</p></div><span>${badge}</span></section>`;
+
+  if(settingsPanel==="security") return `<div class="module-page settings-v064 settings-final">
+    ${header("사용자·보안","계정 승인과 역할, 민감정보 보호를 관리합니다.","관리자·학년부장")}
+    <article class="setting-card sensitive-security-settings"><div><small>PRIVACY · SECURITY</small><h3>🔒 민감정보 보안</h3><p>교육비지원 · 요보호학생 · 위기학생 상세정보의 열람 비밀번호를 관리합니다.</p><p class="settings-help">상세정보는 1차 블라인드 후 비밀번호 인증을 거쳐 확인하며 인증은 10분 동안 유지됩니다.</p></div><div class="sensitive-security-status"><b>${sensitivePasswordConfigured()?'비밀번호 설정됨':'비밀번호 설정 필요'}</b><button type="button" class="btn primary" data-sensitive-password-set>${sensitivePasswordConfigured()?'비밀번호 변경':'비밀번호 설정'}</button><button type="button" class="btn secondary" data-sensitive-lock>즉시 잠금</button></div></article>
+    <article class="setting-card subject-confidential-security-settings"><div><small>CONFIDENTIAL · CURRICULUM</small><h3>🔐 선택과목 대외비 보안</h3><p>과목별 신청현황 전용 비밀번호를 민감정보 비밀번호와 별도로 관리합니다.</p><p class="settings-help">관리자·학년부장만 설정 및 열람할 수 있으며 담임은 비활성화됩니다.</p></div><div class="sensitive-security-status"><b>${subjectConfidentialPasswordConfigured()?'비밀번호 설정됨':'비밀번호 설정 필요'}</b><button type="button" class="btn primary" data-subject-confidential-password-set ${subjectConfidentialAllowed()?'':'disabled'}>${subjectConfidentialPasswordConfigured()?'비밀번호 변경':'비밀번호 설정'}</button><button type="button" class="btn secondary" data-subject-confidential-lock ${subjectConfidentialAllowed()?'':'disabled'}>즉시 잠금</button></div></article>
+    <article class="setting-card role-settings-card"><div class="connection-title"><div><h3>사용자·권한 프로필</h3><p>현재 로그인 사용자의 역할과 담당 범위를 확인합니다.</p></div><span class="state">${escapeHtml(currentRoleDisplay())}</span></div><div class="user-profile-summary"><div><small>사용자</small><b>${escapeHtml(profile.name||"미설정")}</b></div><div><small>부서</small><b>${escapeHtml(profile.department||"미설정")}</b></div><div><small>조회 범위</small><b>${escapeHtml(access.label)}</b></div></div><p class="safe-note">담임은 학년 자료를 조회할 수 있고 타반 연락정보는 기본 마스킹합니다. 성적·응답·정규화 원천자료는 UEP에서 직접 수정하지 않습니다.</p></article>
+    <article class="setting-card access-control-card"><div class="connection-title"><div><h3>사용자·권한 승인</h3><p>01_사용자계정의 사용여부·역할·담당학년·담임반을 기준으로 로그인과 조회범위를 제어합니다.</p></div><span class="state connected">계정표 승인</span></div><div class="connection-actions"><button class="btn primary" type="button" data-access-control>권한 승인 제어판</button></div><p class="safe-note">신규 사용자 등록은 표준 구글시트에서 관리하고 UEP에서는 승인상태와 역할을 조정합니다.</p></article>
+  </div>`;
+
+  if(settingsPanel==="operations") return `<div class="module-page settings-v064 settings-final">
+    ${header("알림·운영","실제 운영 중 필요한 알림과 오류 신고만 관리합니다.","운영 설정")}
+    <article class="setting-card mail-alert-settings"><h3>메일 알림</h3><p>필요한 운영 알림만 선택합니다. 발송 기준 시각은 일과운영시간과 연동합니다.</p><div class="mail-alert-grid">${[["dormOuting","학사외출"],["afternoonStudy","오후자습 현황"],["night1","야자1 현황"],["night2","야자2 현황"],["nightException","야간 이상상황"],["nightSummary","야간 종료 종합"]].map(([key,label])=>`<label><input type="checkbox" data-mail-alert="${key}" ${state.settings.mailAlerts?.[key]?"checked":""}> ${label}</label>`).join("")}</div><small>※ 실제 자동메일 발송은 연결된 UEP 데이터처리 메일 트리거가 이 설정값을 읽도록 연동됩니다.</small></article>
+    <article class="setting-card issue-admin-card"><div class="connection-title"><div><h3>오류 신고 관리</h3><p>사용자가 저장한 오류 신고를 확인하고 처리 상태와 수정 버전을 기록합니다.</p></div><span class="state">${(state.issueReports||[]).filter(r=>r.status!=='fixed').length}건 처리 중</span></div><div class="connection-actions"><button class="btn secondary" data-open-issue-report>새 신고 작성</button><button class="btn primary" data-open-issue-manager>신고 관리</button></div><p class="safe-note">현재는 PC 로컬 저장 방식이며 중앙 수집은 관리자 서버 또는 관리 시트 연결 단계에서 확장합니다.</p></article>
+  </div>`;
+
+  if(settingsPanel==="system") return `<div class="module-page settings-v064 settings-final">
+    ${header("시스템 관리","연결상태·배포 준비·업데이트처럼 평소에는 건드리지 않는 관리 도구입니다.","관리자 점검")}
+    <article class="setting-card health-check-card"><div class="connection-title"><div><h3>연결 진단</h3><p>필수 탭과 주요 데이터가 정상적으로 읽히는지 한 번에 확인합니다.</p></div><span class="state ${googleConnectionError?'error':'connected'}">${googleConnectionError?'확인 필요':'정상'}</span></div><div class="health-list">${connectionHealthRows().map(row=>`<div><span>${row.ok?'✓':'!'}</span><b>${row.name}</b><small>${row.ok?'인식':'확인 필요'}</small></div>`).join('')}</div>${googleConnectionError?`<div class="connection-error-detail"><b>최근 오류</b><span>${escapeHtml(googleConnectionError)}</span></div>`:''}<div class="connection-actions"><button class="btn primary" data-run-health-check>다시 진단</button></div></article>
+    <article class="setting-card"><h3>조회 연결 상태</h3><p>UEP 기준 구글시트에 실제 자료가 있는 항목을 확인합니다.</p>${connectionRows.map(([label,count]) => `<div class="setting-row"><span><b>${label}</b><small>${Number(count || 0).toLocaleString()}건 인식</small></span><span>${count ? "연결" : "자료 확인"}</span></div>`).join("")}</article>
+    <article class="setting-card release-readiness-card"><div class="connection-title"><div><h3>배포 준비 점검</h3><p>교사용 배포 전에 필수 연결·계정·권한·업데이트·API 보호 상태를 확인합니다.</p></div><span class="state ${releaseReadinessRows().every(row=>row.ok)?'connected':'warn'}">${releaseReadinessRows().every(row=>row.ok)?'배포 준비':'확인 필요'}</span></div><div class="health-list release-health-list">${releaseReadinessRows().map(row=>`<div><span>${row.ok?'✓':'!'}</span><b>${escapeHtml(row.name)}</b><small>${escapeHtml(row.note)}</small></div>`).join('')}</div><div class="connection-actions"><button class="btn primary" type="button" data-access-control>권한 점검</button><button class="btn secondary" data-run-health-check>연결 다시 진단</button></div><p class="safe-note">자동 설치·롤백은 현재 비활성화되어 있습니다.</p></article>
+    <article class="setting-card update-settings-card"><div class="connection-title"><div><h3>UEP 업데이트</h3><p>현재 버전 ${APP_VERSION} · 담임 배포판부터는 앱 내부 업데이트 채널을 사용합니다.</p></div><span class="state connected">업데이트 확인 작동</span></div><form id="updateSettingsForm" class="update-settings-form"><input id="updateManifestUrl" type="url" value="${escapeHtml(state.settings.updateManifestUrl||'')}" placeholder="https://.../uep-update.json"><button class="btn secondary" type="submit">주소 저장</button><button class="btn primary" type="button" data-check-update>업데이트 확인</button></form><div class="update-roadmap"><span class="done">① 동일 빌드</span><span class="done">② 버전 확인</span><span class="done">③ 업데이트 채널</span><span class="done">④ 앱 내부 적용·롤백</span></div><div id="updateCheckResult" class="update-check-result"><small>새 버전 확
+
+---
+
+=== resources/app/gyomuon.js :: data-curriculum-workspace @ 954171 ===
+id);});
+}
+function applyStorageLocationBadges(){
+  const configs=[["#neisSettingsForm","local","로컬 저장"],["#programSheetForm","local","로컬 저장"],["#updateSettingsForm","local","로컬 저장"],["#programEditor","local","로컬 저장"],["#programOverrideEditor","local","로컬 저장"],["#issueReportForm","local","로컬 저장"],["#studentGuidanceForm","sheet","시트 저장"],["#officialEditorForm","sheet","시트 저장"],["#noticeEditorForm","sheet","시트 저장"]];
+  configs.forEach(([selector,kind,label])=>{const root=$(selector);if(!root||root.querySelector('.storage-location-inline'))return;const button=[...root.querySelectorAll('button')].find(b=>/저장|등록|불러오기/.test(b.textContent||''));if(!button)return;const badge=document.createElement('em');badge.className=`storage-badge ${kind} storage-location-inline`;badge.textContent=label;badge.title=kind==='local'?'이 PC에만 저장됩니다':kind==='sheet'?'UEP 표준 Google 시트에 저장됩니다':'중앙 승인 저장소에 저장됩니다';button.insertAdjacentElement('beforebegin',badge);});
+}
+function selectStudentDashboardById(studentId){
+  studentSensitiveRevealKeys.clear();
+  const students=readonlyCache?.students||[];
+  const key=String(studentId||'').trim();
+  const idx=students.findIndex(student=>String(student.id||'')===key || String(student.studentNo||'')===key);
+  if(idx<0)return false;
+  studentDashboardIndex=idx;
+  selectedStudentId=students[idx].id||students[idx].studentNo||"";
+  studentPageMode='dashboard';
+  window.__uepStudentDashboardSwitchToken=(window.__uepStudentDashboardSwitchToken||0)+1;
+  return true;
+}
+function switchStudentDashboard(studentId){
+  const previous=String(selectedStudentId||'');
+  if(!selectStudentDashboardById(studentId))return false;
+  const current=(readonlyCache?.students||[])[studentDashboardIndex];
+  if(current&&String(current.id||current.studentNo||'')!==previous)touchStudentCardHeat(current);
+  render('students');
+  window.scrollTo(0,0);
+  return true;
+}
+function uepBindOnce(el,key,event,handler){if(!el)return false;const attr='uepBound'+key;if(el.dataset[attr])return false;el.dataset[attr]='1';el.addEventListener(event,handler);return true;}
+function bindPage(page) {
+  requestAnimationFrame(()=>{applyStorageLocationBadges();bindCommonCounselButtons();applyPrivacyMode();const pb=document.getElementById('privacyModeButton');if(pb&&!pb.dataset.bound){pb.dataset.bound='1';pb.addEventListener('click',togglePrivacyMode);}});
+  if(page==="inputs")bindInputCenter();
+  if(page==="records"&&(recordMode==="curriculum"||recordMode==="sdgs"))requestAnimationFrame(()=>{
+    $$('[data-curriculum-workspace]').forEach(b=>b.onclick=async()=>{/* __UEP_08163_CURRICULUM_BINDINGS__ */const next=b.dataset.curriculumWorkspace;if((next==='subjects'||next==='cross')&&!(await unlockSubjectConfidential()))return;curriculumWorkspaceMode=next;render('records');});
+    $$('[data-record-class]').forEach(b=>b.onclick=()=>{recordClassNo=b.dataset.recordClass;recordStudentId='';render('records');});
+    $$('[data-record-query]').forEach(b=>b.onclick=()=>{recordQueryMode=b.dataset.recordQuery||'class';render('records');});
+    $$('[data-record-student]').forEach(b=>b.onclick=()=>openCurriculumStudentSidePanel(b.dataset.recordStudent));
+    $('[data-curriculum-error-only]')?.addEventListener('click',()=>{curriculumErrorOnly=!curriculumErrorOnly;render('records');});
+    $('[data-curriculum-error-type]')?.addEventListener('change',e=>{curriculumErrorType=e.target.value;render('records');});
+  $('[data-cross-class]')?.addEventListener('change',e=>{curriculumCrossClass=e.target.value;render('records');});
+  $('[data-cross-type]')?.addEventListener('change',e=>{curriculumCrossType=e.target.value;render('records');});
+  $('[data-cross-sort]')?.addEventListener('change',e=>{curriculumCrossSort=e.target.value;render('records');});
+  $$('[data-cross-student]').forEach(b=>b.onclick=()=>openCurriculumStudentSidePanel(b.dataset.crossStudent));
+    $$('[data-curriculum-term]').forEach(b=>b.onclick=()=>{curriculumTermFilter=b.dataset.curriculumTerm;curriculumSubjectKey='';render('records');});
+    $$('[data-curriculum-subject]').forEach(b=>b.onclick=()=>{curriculumSubjectKey=b.dataset.curriculumSubject;uepOpenSubjectModal08128(curriculumSubjectKey);});
+    $$('[data-roster-sort]').forEach(b=>b.onclick=()=>{curriculumRosterSort=b.dataset.rosterSort;render('records');});
+    $('[data-copy-current-selection-sms]')?.addEventListener('click',async()=>{try{await navigator.clipboard.writeText($('#currentSelectionSms')?.value||'');toast('보완 문자메시지를 복사했습니다.');}catch{toast('문자 복사에 실패했습니다.');}});
+    $('[data-copy-sdgs-supplement]')?.addEventListener('click',async()=>{try{await navigator.clipboard.writeText($('#sdgsSupplementText')?.value||'');toast('SDGs 근거 보완 질문을 복사했습니다.');}catch{toast('복사에 실패했습니다.');}});
+  });
+  if(page==="recordcheck")requestAnimationFrame(()=>{const mount=document.getElementById("standaloneRecordcheckMount");if(mount&&window.uepMountRecordbookValidator)window.uepMountRecordbookValidator(mount);});
+  $$('[data-student-page-mode]').forEach(button=>button.onclick=()=>{studentPageMode=button.dataset.studentPageMode||"list";render("students");window.scrollTo(0,0);});
+  $$('[data-student-counsel-history]').forEach(button=>button.onclick=()=>{const id=button.dataset.studentCounselHistory;selectedStudentId=id;const idx=(readonlyCache?.students||[]).findIndex(s=>String(s.id)===String(id));if(idx>=0)studentDashboardIndex=idx;studentPageMode='dashboard';render('students');requestAnimationFrame(()=>setTimeout(()=>openCounselSidePanel(id),80));});
+  $$('[data-student-counsel-class]').forEach(button=>button.onclick=()=>{const next=String(button.dataset.studentCounselClass||'');studentCounselClassFilter=String(studentCounselClassFilter)===next?'':next;studentPageMode='counsel';render('students');window.scrollTo(0,0);});
+  $$('[data-student-stats-class]').forEach(button=>button.onclick=()=>{studentStatsClassFilter=button.dataset.studentStatsClass||'all';render('students');window.scrollTo(0,0);});
+  $$('[data-stat-student]').forEach(button=>button.onclick=()=>openStudentStatDetail(button.dataset.statStudent,button.dataset.statMetric));
+  $$('[data-university-badge-list]').forEach(button=>button.onclick=()=>openUniversityBadgeList(button.dataset.universityBadgeList));
+  $$('[data-student-badge-detail]').forEach(button=>button.onclick=()=>openStudentBadgeDetail(button.dataset.badgeStudentId,button.dataset.studentBadgeDetail,button.dataset.badgeUniversity||button.dataset.badgeGroup||''));
+  $$('[data-student-admission-badge]').forEach(button=>button.onclick=()=>openAdmissionStageBadge(button.dataset.admissionStudentId,button.dataset.studentAdmissionBadge,button.dataset.admissionStage));
+  $('[data-student-quick-select]')?.addEventListener('change',event=>switchStudentDashboard(event.target.value));
+  $('[data-student-prev]')?.addEventListener('click',()=>{const select=$('[data-student-quick-select]');if(!select||select.selectedIndex<=0)return;select.selectedIndex-=1;switchStudentDashboard(select.value);});
+  $('[data-student-next]')?.addEventListener('click',()=>{const select=$('[data-student-quick-select]');if(!select||select.selectedIndex>=select.options.length-1)return;select.selectedIndex+=1;switchStudentDashboard(select.value);});
+  if(page==="students"&&studentPageMode==="dashboard"&&studentDashboardIndex>=0){
+    const expectedStudentIndex=studentDashboardIndex;
+    const expectedSwitchToken=window.__uepStudentDashboardSwitchToken||0;
+    requestAnimationFrame(()=>{
+      if(expectedStudentIndex!==studentDashboardIndex || expectedSwitchToken!==(window.__uepStudentDashboardSwitchToken||0))return;
+      const host=$("#studentDashboardEmbedded"); if(!host)return;
+      const moveDrawerToHost=()=>{
+        const body=$("#drawerBody");
+        // drawer에 연결된 기존 이벤트가 임베디드 화면을 다시 숨은 drawer에 그리는 문제를 막기 위해
+        // HTML만 복제하고, 임베디드 화면의 이벤트는 아래에서 명시적으로 다시 연결한다.
+        host.innerHTML=body?.innerHTML||"";
+        if(body) body.innerHTML="";
+        $("#drawer")?.classList.add("hidden"); $("#drawerBackdrop")?.classList.add("hidden");
+        $("#drawer")?.classList.remove("student-expanded","student-dashboard-drawer");
+      };
+      const bindEmbeddedDashboardActions=(mode,live)=>{
+        if(!live)return;
+        if(mode==="participation"){
+          host.querySelector('[data-back-student-dashboard]')?.addEventListener('click',event=>{event.preventDefault();studentDashboardSubmode='dashboard';showEmbeddedDashboard('dashboard');});
+        }else{
+          host.querySelector('[data-open-participation-dashboard]')?.addEventListener('click',event=>{event.preventDefault();studentDashboardSubmode='participation';showEmbeddedDashboard('participation');});
+        }
+        host.querySelectorAll('[data-open-student-report]').forEach(button=>button.addEventListener('click',()=>openSubmittedProgramReport(button.dataset.openStudentReport,live)));
+        host.querySelectorAll('[data-report-tag-detail]').forEach(button=>button.addEventListener('click',()=>openReportTagDetail(button.dataset.reportTagDetail)));
+        host.querySelector('[data-open-student-consult]')?.addEventListener('click',()=>{startStudentFocus(live,{drawerIndex:studentDashboardIndex,originScroll:window.scrollY});goFromStudentDashboard('scores','combined');});
+        host.querySelector('[data-open-student-admission]')?.addEventListener('click',()=>{startStudentFocus(live,{drawerIndex:studentDashboardIndex,originScroll:window.scrollY});goFromStudentDashboard('admissions','combined');});
+        host.querySelectorAll('[data-student-route]').forEach(button=>button.addEventListener('click',()=>{startStudentFocus(live,{drawerIndex:studentDashboardIndex,originScroll:window.scrollY});const target=button.dataset.recordTarget==='curriculum'?'curriculum':'activities';goFromStudentDashboard('records',target);}));
+        host.querySelectorAll('[data-student-attendance-target]').forEach(button=>button.addEventListener('click',()=>{const target=button.dataset.studentAttendanceTarget;startStudentFocus(live,{drawerIndex:studentDashboardIndex,originScroll:window.scrollY});goFromStudentDashboard(target==='program'?'programs':'attendance',target);}));
+        host.querySelectorAll('[data-student-counsel-add]').forEach(button=>button.addEventListener('click',()=>{const candidate=findDashboardCounselCandidate(live.id)||{student:live,group:'student',stage:'interest'};openCounselSidePanel(live.id);}));
+        host.querySelectorAll('[data-student-counsel-edit]').forEach(button=>button.addEventListener('click',()=>openCounselSidePanel(live.id,button.dataset.studentCounselEdit)));
+        host.querySelector('#printStudentDashboard')?.addEventListener('click',()=>printStudentDashboard(live));
+        host.querySelectorAll('[data-student-badge-detail]').forEach(button=>button.addEventListener('click',()=>openStudentBadgeDetail(button.dataset.badgeStudentId,button.dataset.studentBadgeDetail,button.dataset.badgeUniversity||button.dataset.badgeGroup||'')));
+        host.querySelectorAll('[data-student-admission-badg
+
+---
+
+=== resources/app/electron/main.cjs :: ipcMain.handle("notice:receiptSave" @ 145837 ===
+im()===String(payload.targetClass||"전체").trim()&&String(r?.[idx("게시일")]||"").slice(0,10)===String(payload.postDate||"").slice(0,10)&&!["삭제","종료"].includes(String(r?.[idx("상태")]||"게시")));
+      if(same)return {ok:true,id:String(same[idCol]||id),duplicate:true};
+    }
+    // 기존 시트에 마감유형 컬럼이 아직 없으면 데이터 손상 없이 마지막 열에 자동 추가한다.
+    if(headers.indexOf("마감유형")<0){
+      const col=headers.length;
+      await updateSheetValues(token,UEP_SPREADSHEET_ID,`'40_공지마감'!${columnLetter(col)}${header.index+1}:${columnLetter(col)}${header.index+1}`,[["마감유형"]]);
+      headers.push("마감유형");
+    }
+    const row=noticePayloadRow(payload,id,nowIso,headers);
+    const endCol=columnLetter(headers.length-1);
+    if (payload.id) {
+      const rowIndex = matrix.findIndex((r,i)=>i>header.index && String(r?.[idCol]||"")===id);
+      if (rowIndex < 0) throw new Error("수정할 공지를 40_공지마감에서 찾지 못했습니다.");
+      await updateSheetValues(token, UEP_SPREADSHEET_ID, `'40_공지마감'!A${rowIndex+1}:${endCol}${rowIndex+1}`, [row]);
+    } else {
+      await appendSheetValues(token, UEP_SPREADSHEET_ID, `'40_공지마감'!A:${endCol}`, [row]);
+    }
+    liveDataCache = null; liveDataFetchedAt = 0;
+    return { ok: true, id };
+  } catch(error) { return {ok:false,reason:error?.message||"공지 저장 실패"}; }
+});
+ipcMain.handle("notice:delete", async (_event, id = "") => {
+  try {
+    const account=await readEncrypted(credentialPath()); if(!validateServiceAccount(account)) throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+    const token=await getSheetsToken(account), matrix=await readNoticeSheetMatrix(token,"40_공지마감","A1:V2000");
+    const header=findHeaderRowByRequired(matrix,["공지ID","상태"]); if(!header) throw new Error("40_공지마감 헤더를 찾지 못했습니다.");
+    const h=header.index, headers=header.headers, idCol=headers.indexOf("공지ID"), statusCol=headers.indexOf("상태"), modifiedCol=headers.indexOf("수정일시");
+    const rowIndex=matrix.findIndex((r,i)=>i>h&&String(r?.[idCol]||"")===String(id)); if(rowIndex<0) throw new Error("삭제할 공지를 찾지 못했습니다.");
+    if(statusCol>=0) await updateSheetValues(token,UEP_SPREADSHEET_ID,`'40_공지마감'!${columnLetter(statusCol)}${rowIndex+1}:${columnLetter(statusCol)}${rowIndex+1}` ,[["삭제"]]);
+    if(modifiedCol>=0) await updateSheetValues(token,UEP_SPREADSHEET_ID,`'40_공지마감'!${columnLetter(modifiedCol)}${rowIndex+1}:${columnLetter(modifiedCol)}${rowIndex+1}` ,[[new Date().toISOString()]]);
+    liveDataCache=null;liveDataFetchedAt=0;return {ok:true,id};
+  } catch(error){return {ok:false,reason:error?.message||"공지 삭제 실패"};}
+});
+ipcMain.handle("notice:receiptSave", async (_event, payload={}) => {
+  try {
+    const account=await readEncrypted(credentialPath()); if(!validateServiceAccount(account)) throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+    const token=await getSheetsToken(account), now=new Date().toISOString();
+    const noticeId=String(payload.noticeId||"").trim(), teacher=String(payload.teacher||"").trim(), userId=String(payload.userId||"").trim();
+    if(!noticeId||!teacher) throw new Error("공지ID와 교사명이 필요합니다.");
+    const matrix=await readNoticeSheetMatrix(token,"44_공지확인현황","A1:Q3000");
+    const header=findHeaderRowByRequired(matrix,["기록ID","공지ID","교사명","확인상태","제출상태"]); if(!header) throw new Error("44_공지확인현황 헤더를 찾지 못했습니다.");
+    const h=header.index, headers=header.headers, idx=name=>headers.indexOf(name);
+    const rowIndex=matrix.findIndex((r,i)=>i>h&&String(r?.[idx("공지ID")]||"")===noticeId&&((userId&&String(r?.[idx("사용자ID")]||"")===userId)||String(r?.[idx("교사명")]||"")===teacher));
+    const current=rowIndex>=0?matrix[rowIndex]:[];
+    const confirmed=payload.confirmed!=null?Boolean(payload.confirmed):String(current?.[idx("확인상태")]||"N").toUpperCase()==="Y";
+    const submitted=payload.submitted!=null?Boolean(payload.submitted):String(current?.[idx("제출상태")]||"N").toUpperCase()==="Y";
+    const read=payload.read!=null?Boolean(payload.read):String(current?.[idx("읽음상태")]||"N").toUpperCase()==="Y";
+    const dismissed=payload.dismissed!=null?Boolean(payload.dismissed):String(current?.[idx("공지해제")]||"N").toUpperCase()==="Y";
+    const detailViewed=payload.detailViewed!=null?Boolean(payload.detailViewed):String(current?.[idx("상세열람")]||"N").toUpperCase()==="Y";
+    const sourceType=String(payload.sourceType||current?.[idx("원본유형")]||"직접공지");
+    const recordId=String(current?.[idx("기록ID")]||`NACK-${crypto.randomUUID()}`);
+    const confirmedAt=confirmed?(String(current?.[idx("확인일시")]||"")||now):"";
+    const submittedAt=submitted?(String(current?.[idx("제출일시")]||"")||now):"";
+    const row=[recordId,noticeId,userId,teacher,String(payload.grade||""),String(payload.classNo||""),confirmed?"Y":"N",confirmedAt,submitted?"Y":"N",submittedAt,now,teacher,String(payload.note||"UEP 상태 처리"),sourceType,read?"Y":"N",dismissed?"Y":"N",detailViewed?"Y":"N"];
+    if(rowIndex>=0) await updateSheetValues(token,UEP_SPREADSHEET_ID,`'44_공지확인현황'!A${rowIndex+1}:Q${rowIndex+1}`,[row]);
+    else await appendSheetValues(token,UEP_SPREADSHEET_ID,"'44_공지확인현황'!A:Q",[row]);
+    liveDataCache=null;liveDataFetchedAt=0;return {ok:true,recordId,confirmed,submitted,read,dismissed,detailViewed};
+  } catch(error){return {ok:false,reason:error?.message||"공지 확인상태 저장 실패"};}
+});
+ipcMain.handle("calendar:syncSchool", async () => ({
+    ok:false,
+    reason:"학교일정은 데이터처리시트 41_학교캘린더의 직접 이관값만 사용합니다. 자동 가져오기와 IMPORTRANGE는 비활성화되었습니다."
+  }));
+  ipcMain.handle("calendar:savePersonal", async (_event, payload={}) => {
+    try {
+      const credentials=await readEncrypted(credentialPath()); const token=await getSheetsToken(credentials); await ensureCalendarSchema(token); const existing=await currentCalendarRows(token);
+      const id=`PER-${crypto.randomUUID()}`; const date=String(payload.date||""); const now=new Date().toISOString();
+      const row={"일정ID":id,"학년도":date.slice(0,4),"시작일":date,"종료일":date,"시작시각":String(payload.start||""),"종료시각":String(payload.end||""),"종일":payload.start?"N":"Y","일정명":String(payload.title||""),"상세내용":String(payload.note||""),"일정구분":"개인 일정","대상":String(payload.target||""),"장소":String(payload.place||""),"부서":String(payload.department||""),"담당자":String(payload.manager||""),"상태":String(payload.status||"확정"),"검증상태":"정상","출처":"UEP 개인입력","원본일정ID":"","이관방식":"직접기록","수정일시":now,"비고":String(payload.note||"")};
+      await replaceCalendarRows(token,[...existing.map(calendarObjectToRow),calendarObjectToRow(row)]);
+      liveDataCache=null;liveDataFetchedAt=0; return {ok:true,id};
+    } catch(error){return {ok:false,reason:error?.message||"개인 일정 저장 실패"};}
+  });
+
+  ipcMain.handle("calendar:update", async (_event, payload={}) => {
+    try {
+      const credentials=await readEncrypted(credentialPath()); const token=await getSheetsToken(credentials); await ensureCalendarSchema(token); const existing=await currentCalendarRows(token);
+      const index=existing.findIndex(row=>String(row["일정ID"]||"")===String(payload.id||""));
+      if(index<0) return {ok:false,reason:"수정할 일정이 데이터처리시트 41_학교캘린더에 없습니다."};
+      const current=existing[index],now=new Date().toISOString(),date=String(payload.date||current["시작일"]||"");
+      existing[index]={...current,"학년도":date.slice(0,4),"시작일":date,"종료일":current["종료일"]||date,"시작시각":String(payload.start||""),"종료시각":String(payload.end||""),"종일":payload.start?"N":"Y","일정명":String(payload.title||""),"상세내용":String(payload.note||""),"대상":String(payload.target||""),"장소":String(payload.place||""),"부서":String(payload.department||""),"담당자":String(payload.manager||""),"상태":String(payload.status||"확정"),"검증상태":"정상","수정일시":now,"비고":String(payload.note||"")};
+      await replaceCalendarRows(token,existing.map(calendarObjectToRow));
+      liveDataCache=null;liveDataFetchedAt=0; return {ok:true,id:payload.id,modifiedAt:now};
+    } catch(error){return {ok:false,reason:error?.message||"일정 수정 실패"};}
+  });
+  ipcMain.handle("neis:saveApiKey", async (_event, key) => {
+    try {
+      const value=String(key||"").trim();
+      if(!value) return {ok:false,reason:"인증키가 비어 있습니다."};
+      await saveEncrypted(neisApiKeyPath(), {key:value});
+      return {ok:true};
+    } catch(error){ return {ok:false,reason:error?.message||"인증키 저장 실패"}; }
+  });
+  ipcMain.handle("neis:apiKeyStatus", async () => {
+    try { const saved=await readEncrypted(neisApiKeyPath()); return {ok:Boolean(saved?.key),encryption:safeStorage.isEncryptionAvailable()}; }
+    catch { return {ok:false,encryption:safeStorage.isEncryptionAvailable()}; }
+  });
+  ipcMain.handle("neis:loadDashboard", async (_event, options) => {
+    try { return await fetchNeisDashboard(options || {}); }
+    catch (error) { return { ok: false, reason: error.message || "나이스 급식·시간표를 불러오지 못했습니다." }; }
+  });
+  ipcMain.handle("comcigan:test", async (_event, options) => {
+    try { return await fetchComciganTimetable(options || {}); }
+    catch (error) { return {ok:false,reason:error?.message||"컴시간 웹 시간표를 불러오지 못했습니다."}; }
+  });
+  ipcMain.handle("app:applyUpdate", async (_event, payload = {}) => {
+    try {
+      if (process.platform !== "win32") return {ok:false,reason:"현재 자동 업데이트는 Windows 배포판에서만 지원합니다."};
+      const downloadUrl=String(payload.downloadUrl||"").trim();
+      const expectedSha256=String(payload.sha256||"").trim().toLowerCase();
+      const version=String(payload.version||"").trim();
+      if(!/^https:\/\//i.test(downloadUrl)) return {ok:false,reason:"HTTPS 업데이트 파일 주소가 필요합니다."};
+      if(!/^\d+\.\d+\.\d+/.test(version)) return {ok:false,reason:"업데이트 버전 정보가 올바르지 않습니다."};
+      if(!/^[a-f0-9]{64}$/.test(expectedSha256)) return {ok:false,reason:"안전한 자동 업데이트를 위해 SHA-256 값이 필요합니다."};
+      const updateRoot=path.join(stableUserDataRoot(),"updates",version);
+      const zipPath=path.join(updateRoot,`UEP-${version}.zip`);
+      const stagePath=path.join(updateRoot,"stage");
+      await fs.rm(updateRoot,{recursive:true,force:true}); await fs.mkdir(updateRoot,{recursive:true});
+      // Download the release asset from Electron's main process.
+      // Node global fetch was unreliable on some school Windows networks ("fetch failed"),
+      // while Electron net.fetch uses Chromium's network stack and follows GitHub redirects.
+      let response;
+      try {
+        response=await net.fetch(downloadUrl,{
+          method:"GET",
+          redirect:"follow",
+          headers:{
+            "user-agent":`UEP/${app.getVersion()} AutoUpdate`,
+            "accept":"application/octet-stream",
+            "cache-control":"no-cache, no-store, max-age=0",
+            "pragma":"no-cache"
+          }
+        });
+      } catch(downloadError) {
+        return {ok:false,reason:`업데이트 파일 다운로드 연결 실패 · ${String(downloadError?.message||downloadError)}`};
+      }
+      if(!response.ok) return {ok:false,reason:`업데이트 파일 다운로드 실패 (${response.status})`};
+      let bytes;
+      try { bytes=Buffer.from(await response.arrayBuffer()); }
+      catch(readError) { return {ok:false,reason:`업데이트 파일 수신 실패 · ${String(readError?.message||readError)}`}; }
+      if(!bytes.length) return {ok:false,reason:"업데이트 파일이 비어 있습니다."};
+      const actualSha256=crypto.createHash("sha256").update(bytes).digest("hex
+
+---
+
+=== resources/app/electron/main.cjs :: function schoolReadPost @ 20344 ===
+filePath, safeStorage.encryptString(JSON.stringify(recovered))); } catch {}
+        return recovered;
+      }
+    } catch {}
+  }
+  const backup = `${filePath}.unreadable-${Date.now()}.bak`;
+  try { await fs.rename(filePath, backup); } catch {}
+  const error = new Error("저장된 보안 인증정보를 복호화할 수 없습니다. 서비스 계정 JSON을 다시 등록해 주세요.");
+  error.code = "UEP_SAFE_STORAGE_DECRYPT_FAILED";
+  throw error;
+}
+
+
+// __UEP_SCHOOL_READ_API_PRIMARY_08120__
+// __UEP_SCHOOL_READ_ENDPOINT_FALLBACK_08121__
+const UEP_SCHOOL_READ_API_FALLBACK='https://script.google.com/macros/s/AKfycbyLEEam4L2sX653pii69TC3_84wTyfAed_UL8HRY6PBG467im1LmZJ0CIpSKSOj4r6-0w/exec';
+let schoolReadPolicyCache={url:'',expiresAt:0};
+function schoolReadError(message,code='UEP_SCHOOL_READ_ERROR'){const e=new Error(message);e.code=code;return e;}
+async function loadSchoolReadApiUrl(){
+  if(schoolReadPolicyCache.url&&schoolReadPolicyCache.expiresAt>Date.now())return schoolReadPolicyCache.url;
+  let response;
+  try{response=await net.fetch(UEP_UPDATE_POLICY_URL,{cache:'no-store'});}catch(error){throw schoolReadError('UEP School Read API 설정을 확인하지 못했습니다.','UEP_SCHOOL_READ_POLICY_UNAVAILABLE');}
+  if(!response.ok)throw schoolReadError('UEP School Read API 설정 조회 실패 ('+response.status+')','UEP_SCHOOL_READ_POLICY_UNAVAILABLE');
+  const policy=await response.json();
+  const url=String(policy?.schoolReadApiUrl||UEP_SCHOOL_READ_API_FALLBACK||'').trim();
+  if(!/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec(?:\?.*)?$/i.test(url))throw schoolReadError('UEP School Read API 배포 URL이 아직 등록되지 않았습니다.','UEP_SCHOOL_READ_NOT_CONFIGURED');
+  schoolReadPolicyCache={url,expiresAt:Date.now()+10*60*1000};
+  return url;
+}
+async function getOrCreateSchoolReadDeviceId(){
+  try{const saved=String(await fs.readFile(schoolReadDevicePath(),'utf8')).trim();if(saved)return saved;}catch{}
+  const id='UEP-'+crypto.randomUUID();
+  await fs.mkdir(path.dirname(schoolReadDevicePath()),{recursive:true});
+  await fs.writeFile(schoolReadDevicePath(),id,'utf8');
+  return id;
+}
+async function readSchoolReadSession(){
+  try{const value=await readEncrypted(schoolReadSessionPath());return value&&typeof value==='object'?value:null;}catch{return null;}
+}
+async function saveSchoolReadSession(value){await saveEncrypted(schoolReadSessionPath(),value);return value;}
+async function clearSchoolReadSession(){try{await fs.unlink(schoolReadSessionPath());}catch(error){if(error?.code!=='ENOENT')throw error;}liveDataCache=null;liveDataFetchedAt=0;return {ok:true};}
+async function schoolReadPost(action,payload={}){
+  const url=await loadSchoolReadApiUrl();
+  const response=await net.fetch(url,{method:'POST',headers:{'content-type':'application/json;charset=UTF-8','accept':'application/json'},body:JSON.stringify({action,...payload})});
+  let data={};try{data=await response.json();}catch{}
+  if(!response.ok)throw schoolReadError(data?.message||('School Read API HTTP '+response.status),data?.code||'UEP_SCHOOL_READ_HTTP_ERROR');
+  return data;
+}
+async function loginSchoolReadUser({name='',email=''}={}){
+  const deviceId=await getOrCreateSchoolReadDeviceId();
+  const result=await schoolReadPost('login',{name:String(name||'').trim(),email:String(email||'').trim(),deviceId});
+  if(result?.ok&&result?.token){await saveSchoolReadSession({token:String(result.token),deviceId,user:result.user||{},expiresAt:Date.now()+Math.max(300,Number(result.expiresIn||0))*1000,savedAt:new Date().toISOString()});liveDataCache=null;liveDataFetchedAt=0;}
+  return result;
+}
+async function schoolReadSessionStatus({verify=true}={}){
+  let endpointReady=true,endpointError='';
+  try{await loadSchoolReadApiUrl();}catch(error){endpointReady=false;endpointError=String(error?.message||error);}
+  const session=await readSchoolReadSession();
+  if(!session?.token||!session?.deviceId)return {ok:endpointReady,authenticated:false,endpointReady,reason:endpointError,user:null,mode:'school_read_api'};
+  if(!verify)return {ok:true,authenticated:true,endpointReady,user:session.user||null,mode:'school_read_api'};
+  try{const result=await schoolReadPost('verify-token',{token:session.token,deviceId:session.deviceId});if(!result?.ok)throw schoolReadError(result?.message||'UEP 세션 확인 실패',result?.code||'UEP_SCHOOL_READ_TOKEN_INVALID');session.user=result.user||session.user||{};await saveSchoolReadSession(session);return {ok:true,authenticated:true,endpointReady:true,user:session.user,expiresAt:result.expiresAt||'',mode:'school_read_api'};}catch(error){await clearSchoolReadSession();return {ok:false,authenticated:false,endpointReady,reason:String(error?.message||error),code:error?.code||'',user:null,mode:'school_read_api'};}
+}
+async function schoolReadBatchRead(spreadsheetId,ranges){
+  const session=await readSchoolReadSession();
+  if(!session?.token||!session?.deviceId)throw schoolReadError('UEP 로그인이 필요합니다.','UEP_SCHOOL_READ_LOGIN_REQUIRED');
+  const result=await schoolReadPost('batch-read',{token:session.token,deviceId:session.deviceId,spreadsheetId,ranges});
+  if(!result?.ok)throw schoolReadError(result?.message||'학교 데이터를 읽지 못했습니다.',result?.code||'UEP_SCHOOL_READ_BATCH_FAILED');
+  return result.valueRanges||[];
+}
+
+function base64url(value) { return Buffer.from(value).toString("base64url"); }
+
+// __UEP_GOOGLE_USER_OAUTH_08070__
+const UEP_UPDATE_POLICY_URL = "https://raw.githubusercontent.com/hkhsm00-k81c/UEP-Updates/main/uep-policy.json";
+let googleOAuthPolicyCache={clientId:"",expiresAt:0};
+
+function googleOAuthError(message,code){const e=new Error(message);e.code=code;return e;}
+async function loadGoogleOAuthClientId(){
+  if(googleOAuthPolicyCache.clientId && googleOAuthPolicyCache.expiresAt>Date.now()) return googleOAuthPolicyCache.clientId;
+  let response;
+  try{ response=await net.fetch(UEP_UPDATE_POLICY_URL,{cache:"no-store"}); }
+  catch(error){ throw googleOAuthError("Google 계정 연결 설정을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.","UEP_GOOGLE_OAUTH_POLICY_UNAVAILABLE"); }
+  if(!response.ok) throw googleOAuthError(`Google 계정 연결 설정 조회 실패 (${response.status})`,"UEP_GOOGLE_OAUTH_POLICY_UNAVAILABLE");
+  const policy=await response.json();
+  const clientId=String(policy?.googleOAuthClientId||"").trim();
+  if(!/\.apps\.googleusercontent\.com$/i.test(clientId)) throw googleOAuthError("관리자가 UEP Google OAuth 클라이언트를 아직 설정하지 않았습니다.","UEP_GOOGLE_OAUTH_CLIENT_NOT_CONFIGURED");
+  googleOAuthPolicyCache={clientId,expiresAt:Date.now()+10*60*1000};
+  return clientId;
+}
+function googleUserOAuthRecoveryKey(salt){
+  const identity=`${os.hostname()}|${os.userInfo().username}|UEP-GOOGLE-USER-OAUTH-v1`;
+  return crypto.scryptSync(identity,salt,32);
+}
+function encodeGoogleUserOAuthRecovery(value){
+  const salt=crypto.randomBytes(16),iv=crypto.randomBytes(12),key=googleUserOAuthRecoveryKey(salt);
+  const cipher=crypto.createCipheriv('aes-256-gcm',key,iv);
+  const encrypted=Buffer.concat([cipher.update(JSON.stringify(value),'utf8'),cipher.final()]);
+  return {version:1,algorithm:'aes-256-gcm',salt:salt.toString('base64'),iv:iv.toString('base64'),tag:cipher.getAuthTag().toString('base64'),data:encrypted.toString('base64')};
+}
+function decodeGoogleUserOAuthRecovery(payload){
+  if(!payload||payload.version!==1||payload.algorithm!=='aes-256-gcm')throw new Error('invalid OAuth recovery token');
+  const salt=Buffer.from(payload.salt,'base64'),iv=Buffer.from(payload.iv,'base64'),tag=Buffer.from(payload.tag,'base64'),data=Buffer.from(payload.data,'base64');
+  const decipher=crypto.createDecipheriv('aes-256-gcm',googleUserOAuthRecoveryKey(salt),iv);decipher.setAuthTag(tag);
+  return JSON.parse(Buffer.concat([decipher.update(data),decipher.final()]).toString('utf8'));
+}
+async function writeGoogleUserOAuthRecovery(value){
+  const payload=encodeGoogleUserOAuthRecovery(value);
+  for(const target of [googleUserOAuthRecoveryPath(),googleUserOAuthCanonicalRecoveryPath()]){
+    await fs.mkdir(path.dirname(target),{recursive:true});
+    await fs.writeFile(target,JSON.stringify(payload),'utf8');
+  }
+}
+async function readGoogleUserOAuthRecovery(){
+  for(const target of [googleUserOAuthCanonicalRecoveryPath(),googleUserOAuthRecoveryPath()]){
+    try{return decodeGoogleUserOAuthRecovery(JSON.parse(await fs.readFile(target,'utf8')));}catch{}
+  }
+  throw new Error('OAuth recovery token not found');
+}
+async function saveGoogleUserOAuth(value){
+  let primarySaved=false;
+  if(safeStorage.isEncryptionAvailable()){
+    const encrypted=safeStorage.encryptString(JSON.stringify(value));
+    for(const target of [googleUserOAuthCanonicalPath(),googleUserOAuthPath()]){
+      try{await fs.mkdir(path.dirname(target),{recursive:true});await fs.writeFile(target,encrypted);primarySaved=true;}catch{}
+    }
+  }
+  await writeGoogleUserOAuthRecovery(value);
+  return {primarySaved,recoverySaved:true,canonical:true};
+}
+async function readGoogleUserOAuth(){
+  for(const target of [googleUserOAuthCanonicalPath(),googleUserOAuthPath()]){
+    try{
+      const encrypted=await fs.readFile(target);
+      if(safeStorage.isEncryptionAvailable()){
+        try{const value=JSON.parse(safeStorage.decryptString(encrypted));if(value&&typeof value==='object'){await saveGoogleUserOAuth(value);return value;}}catch{}
+      }
+      try{const legacy=JSON.parse(encrypted.toString('utf8'));if(legacy&&typeof legacy==='object'){await saveGoogleUserOAuth(legacy);return legacy;}}catch{}
+    }catch{}
+  }
+  try{
+    const recovered=await readGoogleUserOAuthRecovery();
+    if(recovered&&typeof recovered==='object'){await saveGoogleUserOAuth(recovered);return recovered;}
+  }catch{}
+  return null;
+}
+async function googleUserInfo(accessToken){
+  const response=await net.fetch('https://openidconnect.googleapis.com/v1/userinfo',{headers:{authorization:`Bearer ${accessToken}`}});
+  if(!response.ok) throw googleOAuthError(`Google 사용자 확인 실패 (${response.status})`,'UEP_GOOGLE_OAUTH_USERINFO_FAILED');
+  return await response.json();
+}
+async function refreshGoogleUserOAuth(saved){
+  if(!saved?.refresh_token) throw googleOAuthError("Google 계정 연결을 다시 승인해 주세요.","UEP_GOOGLE_USER_AUTH_REQUIRED");
+  const clientId=await loadGoogleOAuthClientId();
+  if(String(saved.client_id||'').trim() && String(saved.client_id).trim()!==clientId){
+    await disconnectGoogleUser();
+    throw googleOAuthError('Google 연결 설정이 갱신되었습니다. Google 계정 연결을 한 번만 다시 승인해 주세요.','UEP_GOOGLE_USER_AUTH_REQUIRED');
+  }
+  const body=new URLSearchParams({client_id:clientId,refresh_token:String(saved.refresh_token),grant_type:'refresh_token'});
+  const response=await net.fetch('https://oauth2.googleapis.com/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:body.toString()});
+  if(!response.ok){
+    let payload={},detail='',errCode='';
+    try{payload=await response.json();detail=String(payload?.error_description||'');errCode=String(payload?.error||'');}catch{}
+    if(errCode==='invalid_client'||errCode==='invalid_grant'){
+      googleOAuthPolicyCache={clientId:'',expiresAt:0};
+      await disconnectGoogle
+
+---
+
+=== resources/app/electron/main.cjs :: async function schoolReadPost @ 20338 ===
+eFile(filePath, safeStorage.encryptString(JSON.stringify(recovered))); } catch {}
+        return recovered;
+      }
+    } catch {}
+  }
+  const backup = `${filePath}.unreadable-${Date.now()}.bak`;
+  try { await fs.rename(filePath, backup); } catch {}
+  const error = new Error("저장된 보안 인증정보를 복호화할 수 없습니다. 서비스 계정 JSON을 다시 등록해 주세요.");
+  error.code = "UEP_SAFE_STORAGE_DECRYPT_FAILED";
+  throw error;
+}
+
+
+// __UEP_SCHOOL_READ_API_PRIMARY_08120__
+// __UEP_SCHOOL_READ_ENDPOINT_FALLBACK_08121__
+const UEP_SCHOOL_READ_API_FALLBACK='https://script.google.com/macros/s/AKfycbyLEEam4L2sX653pii69TC3_84wTyfAed_UL8HRY6PBG467im1LmZJ0CIpSKSOj4r6-0w/exec';
+let schoolReadPolicyCache={url:'',expiresAt:0};
+function schoolReadError(message,code='UEP_SCHOOL_READ_ERROR'){const e=new Error(message);e.code=code;return e;}
+async function loadSchoolReadApiUrl(){
+  if(schoolReadPolicyCache.url&&schoolReadPolicyCache.expiresAt>Date.now())return schoolReadPolicyCache.url;
+  let response;
+  try{response=await net.fetch(UEP_UPDATE_POLICY_URL,{cache:'no-store'});}catch(error){throw schoolReadError('UEP School Read API 설정을 확인하지 못했습니다.','UEP_SCHOOL_READ_POLICY_UNAVAILABLE');}
+  if(!response.ok)throw schoolReadError('UEP School Read API 설정 조회 실패 ('+response.status+')','UEP_SCHOOL_READ_POLICY_UNAVAILABLE');
+  const policy=await response.json();
+  const url=String(policy?.schoolReadApiUrl||UEP_SCHOOL_READ_API_FALLBACK||'').trim();
+  if(!/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec(?:\?.*)?$/i.test(url))throw schoolReadError('UEP School Read API 배포 URL이 아직 등록되지 않았습니다.','UEP_SCHOOL_READ_NOT_CONFIGURED');
+  schoolReadPolicyCache={url,expiresAt:Date.now()+10*60*1000};
+  return url;
+}
+async function getOrCreateSchoolReadDeviceId(){
+  try{const saved=String(await fs.readFile(schoolReadDevicePath(),'utf8')).trim();if(saved)return saved;}catch{}
+  const id='UEP-'+crypto.randomUUID();
+  await fs.mkdir(path.dirname(schoolReadDevicePath()),{recursive:true});
+  await fs.writeFile(schoolReadDevicePath(),id,'utf8');
+  return id;
+}
+async function readSchoolReadSession(){
+  try{const value=await readEncrypted(schoolReadSessionPath());return value&&typeof value==='object'?value:null;}catch{return null;}
+}
+async function saveSchoolReadSession(value){await saveEncrypted(schoolReadSessionPath(),value);return value;}
+async function clearSchoolReadSession(){try{await fs.unlink(schoolReadSessionPath());}catch(error){if(error?.code!=='ENOENT')throw error;}liveDataCache=null;liveDataFetchedAt=0;return {ok:true};}
+async function schoolReadPost(action,payload={}){
+  const url=await loadSchoolReadApiUrl();
+  const response=await net.fetch(url,{method:'POST',headers:{'content-type':'application/json;charset=UTF-8','accept':'application/json'},body:JSON.stringify({action,...payload})});
+  let data={};try{data=await response.json();}catch{}
+  if(!response.ok)throw schoolReadError(data?.message||('School Read API HTTP '+response.status),data?.code||'UEP_SCHOOL_READ_HTTP_ERROR');
+  return data;
+}
+async function loginSchoolReadUser({name='',email=''}={}){
+  const deviceId=await getOrCreateSchoolReadDeviceId();
+  const result=await schoolReadPost('login',{name:String(name||'').trim(),email:String(email||'').trim(),deviceId});
+  if(result?.ok&&result?.token){await saveSchoolReadSession({token:String(result.token),deviceId,user:result.user||{},expiresAt:Date.now()+Math.max(300,Number(result.expiresIn||0))*1000,savedAt:new Date().toISOString()});liveDataCache=null;liveDataFetchedAt=0;}
+  return result;
+}
+async function schoolReadSessionStatus({verify=true}={}){
+  let endpointReady=true,endpointError='';
+  try{await loadSchoolReadApiUrl();}catch(error){endpointReady=false;endpointError=String(error?.message||error);}
+  const session=await readSchoolReadSession();
+  if(!session?.token||!session?.deviceId)return {ok:endpointReady,authenticated:false,endpointReady,reason:endpointError,user:null,mode:'school_read_api'};
+  if(!verify)return {ok:true,authenticated:true,endpointReady,user:session.user||null,mode:'school_read_api'};
+  try{const result=await schoolReadPost('verify-token',{token:session.token,deviceId:session.deviceId});if(!result?.ok)throw schoolReadError(result?.message||'UEP 세션 확인 실패',result?.code||'UEP_SCHOOL_READ_TOKEN_INVALID');session.user=result.user||session.user||{};await saveSchoolReadSession(session);return {ok:true,authenticated:true,endpointReady:true,user:session.user,expiresAt:result.expiresAt||'',mode:'school_read_api'};}catch(error){await clearSchoolReadSession();return {ok:false,authenticated:false,endpointReady,reason:String(error?.message||error),code:error?.code||'',user:null,mode:'school_read_api'};}
+}
+async function schoolReadBatchRead(spreadsheetId,ranges){
+  const session=await readSchoolReadSession();
+  if(!session?.token||!session?.deviceId)throw schoolReadError('UEP 로그인이 필요합니다.','UEP_SCHOOL_READ_LOGIN_REQUIRED');
+  const result=await schoolReadPost('batch-read',{token:session.token,deviceId:session.deviceId,spreadsheetId,ranges});
+  if(!result?.ok)throw schoolReadError(result?.message||'학교 데이터를 읽지 못했습니다.',result?.code||'UEP_SCHOOL_READ_BATCH_FAILED');
+  return result.valueRanges||[];
+}
+
+function base64url(value) { return Buffer.from(value).toString("base64url"); }
+
+// __UEP_GOOGLE_USER_OAUTH_08070__
+const UEP_UPDATE_POLICY_URL = "https://raw.githubusercontent.com/hkhsm00-k81c/UEP-Updates/main/uep-policy.json";
+let googleOAuthPolicyCache={clientId:"",expiresAt:0};
+
+function googleOAuthError(message,code){const e=new Error(message);e.code=code;return e;}
+async function loadGoogleOAuthClientId(){
+  if(googleOAuthPolicyCache.clientId && googleOAuthPolicyCache.expiresAt>Date.now()) return googleOAuthPolicyCache.clientId;
+  let response;
+  try{ response=await net.fetch(UEP_UPDATE_POLICY_URL,{cache:"no-store"}); }
+  catch(error){ throw googleOAuthError("Google 계정 연결 설정을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.","UEP_GOOGLE_OAUTH_POLICY_UNAVAILABLE"); }
+  if(!response.ok) throw googleOAuthError(`Google 계정 연결 설정 조회 실패 (${response.status})`,"UEP_GOOGLE_OAUTH_POLICY_UNAVAILABLE");
+  const policy=await response.json();
+  const clientId=String(policy?.googleOAuthClientId||"").trim();
+  if(!/\.apps\.googleusercontent\.com$/i.test(clientId)) throw googleOAuthError("관리자가 UEP Google OAuth 클라이언트를 아직 설정하지 않았습니다.","UEP_GOOGLE_OAUTH_CLIENT_NOT_CONFIGURED");
+  googleOAuthPolicyCache={clientId,expiresAt:Date.now()+10*60*1000};
+  return clientId;
+}
+function googleUserOAuthRecoveryKey(salt){
+  const identity=`${os.hostname()}|${os.userInfo().username}|UEP-GOOGLE-USER-OAUTH-v1`;
+  return crypto.scryptSync(identity,salt,32);
+}
+function encodeGoogleUserOAuthRecovery(value){
+  const salt=crypto.randomBytes(16),iv=crypto.randomBytes(12),key=googleUserOAuthRecoveryKey(salt);
+  const cipher=crypto.createCipheriv('aes-256-gcm',key,iv);
+  const encrypted=Buffer.concat([cipher.update(JSON.stringify(value),'utf8'),cipher.final()]);
+  return {version:1,algorithm:'aes-256-gcm',salt:salt.toString('base64'),iv:iv.toString('base64'),tag:cipher.getAuthTag().toString('base64'),data:encrypted.toString('base64')};
+}
+function decodeGoogleUserOAuthRecovery(payload){
+  if(!payload||payload.version!==1||payload.algorithm!=='aes-256-gcm')throw new Error('invalid OAuth recovery token');
+  const salt=Buffer.from(payload.salt,'base64'),iv=Buffer.from(payload.iv,'base64'),tag=Buffer.from(payload.tag,'base64'),data=Buffer.from(payload.data,'base64');
+  const decipher=crypto.createDecipheriv('aes-256-gcm',googleUserOAuthRecoveryKey(salt),iv);decipher.setAuthTag(tag);
+  return JSON.parse(Buffer.concat([decipher.update(data),decipher.final()]).toString('utf8'));
+}
+async function writeGoogleUserOAuthRecovery(value){
+  const payload=encodeGoogleUserOAuthRecovery(value);
+  for(const target of [googleUserOAuthRecoveryPath(),googleUserOAuthCanonicalRecoveryPath()]){
+    await fs.mkdir(path.dirname(target),{recursive:true});
+    await fs.writeFile(target,JSON.stringify(payload),'utf8');
+  }
+}
+async function readGoogleUserOAuthRecovery(){
+  for(const target of [googleUserOAuthCanonicalRecoveryPath(),googleUserOAuthRecoveryPath()]){
+    try{return decodeGoogleUserOAuthRecovery(JSON.parse(await fs.readFile(target,'utf8')));}catch{}
+  }
+  throw new Error('OAuth recovery token not found');
+}
+async function saveGoogleUserOAuth(value){
+  let primarySaved=false;
+  if(safeStorage.isEncryptionAvailable()){
+    const encrypted=safeStorage.encryptString(JSON.stringify(value));
+    for(const target of [googleUserOAuthCanonicalPath(),googleUserOAuthPath()]){
+      try{await fs.mkdir(path.dirname(target),{recursive:true});await fs.writeFile(target,encrypted);primarySaved=true;}catch{}
+    }
+  }
+  await writeGoogleUserOAuthRecovery(value);
+  return {primarySaved,recoverySaved:true,canonical:true};
+}
+async function readGoogleUserOAuth(){
+  for(const target of [googleUserOAuthCanonicalPath(),googleUserOAuthPath()]){
+    try{
+      const encrypted=await fs.readFile(target);
+      if(safeStorage.isEncryptionAvailable()){
+        try{const value=JSON.parse(safeStorage.decryptString(encrypted));if(value&&typeof value==='object'){await saveGoogleUserOAuth(value);return value;}}catch{}
+      }
+      try{const legacy=JSON.parse(encrypted.toString('utf8'));if(legacy&&typeof legacy==='object'){await saveGoogleUserOAuth(legacy);return legacy;}}catch{}
+    }catch{}
+  }
+  try{
+    const recovered=await readGoogleUserOAuthRecovery();
+    if(recovered&&typeof recovered==='object'){await saveGoogleUserOAuth(recovered);return recovered;}
+  }catch{}
+  return null;
+}
+async function googleUserInfo(accessToken){
+  const response=await net.fetch('https://openidconnect.googleapis.com/v1/userinfo',{headers:{authorization:`Bearer ${accessToken}`}});
+  if(!response.ok) throw googleOAuthError(`Google 사용자 확인 실패 (${response.status})`,'UEP_GOOGLE_OAUTH_USERINFO_FAILED');
+  return await response.json();
+}
+async function refreshGoogleUserOAuth(saved){
+  if(!saved?.refresh_token) throw googleOAuthError("Google 계정 연결을 다시 승인해 주세요.","UEP_GOOGLE_USER_AUTH_REQUIRED");
+  const clientId=await loadGoogleOAuthClientId();
+  if(String(saved.client_id||'').trim() && String(saved.client_id).trim()!==clientId){
+    await disconnectGoogleUser();
+    throw googleOAuthError('Google 연결 설정이 갱신되었습니다. Google 계정 연결을 한 번만 다시 승인해 주세요.','UEP_GOOGLE_USER_AUTH_REQUIRED');
+  }
+  const body=new URLSearchParams({client_id:clientId,refresh_token:String(saved.refresh_token),grant_type:'refresh_token'});
+  const response=await net.fetch('https://oauth2.googleapis.com/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:body.toString()});
+  if(!response.ok){
+    let payload={},detail='',errCode='';
+    try{payload=await response.json();detail=String(payload?.error_description||'');errCode=String(payload?.error||'');}catch{}
+    if(errCode==='invalid_client'||errCode==='invalid_grant'){
+      googleOAuthPolicyCache={clientId:'',expiresAt:0};
+      await disconnect
