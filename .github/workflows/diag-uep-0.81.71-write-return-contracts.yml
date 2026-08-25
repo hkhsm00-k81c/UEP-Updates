@@ -1,0 +1,36 @@
+name: Diagnose UEP 0.81.71 Write Return Contracts
+'on':
+  push:
+    branches: [main]
+    paths: [diag-uep-0.81.71-write-return-contracts.trigger]
+permissions:
+  contents: write
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download stable 0.81.71
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop';New-Item -ItemType Directory -Force source,app|Out-Null
+          gh release download v0.81.71 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+      - name: Extract save functions and renderer consumers
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $m='app/resources/app/electron/main.cjs';$g='app/resources/app/gyomuon.js'
+          $ml=Get-Content $m -Encoding UTF8;$gl=Get-Content $g -Encoding UTF8
+          $out=@('# UEP 0.81.71 write return contracts','')
+          $names=@('saveStudentContact','saveOfficialAttendance','deleteOfficialAttendance','saveLateAttendance','deleteLateAttendance','saveDormOuting','saveNightSupervisor','saveLunchDuty')
+          foreach($name in $names){$out+="## MAIN $name";$idx=-1;for($i=0;$i -lt $ml.Count;$i++){if($ml[$i] -match "(?:async\s+)?function\s+$name\b"){$idx=$i;break}};$out+="line=$($idx+1)";if($idx -ge 0){$s=[Math]::Max(0,$idx-4);$e=[Math]::Min($ml.Count-1,$idx+90);for($j=$s;$j -le $e;$j++){$out+=('{0}: {1}' -f ($j+1),$ml[$j])}}}
+          $out+='## Renderer bridge consumers'
+          $need=@('saveStudentContact','saveOfficialAttendance','deleteOfficialAttendance','saveLateAttendance','deleteLateAttendance','saveDormOuting','saveNightSupervisor','saveLunchDuty')
+          for($i=0;$i -lt $gl.Count;$i++){foreach($n in $need){if($gl[$i].Contains($n)){$s=[Math]::Max(0,$i-8);$e=[Math]::Min($gl.Count-1,$i+18);$out+="### $n @ $($i+1)";for($j=$s;$j -le $e;$j++){$out+=('{0}: {1}' -f ($j+1),$gl[$j])};$out+='---';break}}}
+          $out|Set-Content diag-uep-0.81.71-write-return-contracts.txt -Encoding UTF8
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git pull --rebase origin main;git add diag-uep-0.81.71-write-return-contracts.txt;git commit -m 'diag: capture UEP 0.81.71 write return contracts';git push
