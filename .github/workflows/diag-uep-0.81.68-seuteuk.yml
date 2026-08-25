@@ -1,0 +1,37 @@
+name: Diagnose UEP 0.81.68 Seuteuk Validation
+'on':
+  push:
+    branches: [main]
+    paths: [diag-uep-0.81.68-seuteuk.trigger]
+permissions:
+  contents: write
+jobs:
+  diag:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download 0.81.68
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop';New-Item -ItemType Directory -Force source,app|Out-Null
+          gh release download v0.81.68 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+      - name: Extract parser and button context
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $g='app/resources/app/gyomuon.js';$txt=Get-Content $g -Raw -Encoding UTF8
+          $terms=@('검증 규칙','나이스 엑셀 불러오기','검증자료 지우기','오류 리포트 출력','학번 확인','현재 실행 중에만 유지','NEIS LOCAL RECORD CHECK')
+          $out=@()
+          foreach($term in $terms){
+            $idx=$txt.IndexOf($term);$out += "===== $term @ $idx =====";if($idx -ge 0){$s=[Math]::Max(0,$idx-5000);$len=[Math]::Min(12000,$txt.Length-$s);$out += $txt.Substring($s,$len)}
+          }
+          $out -join "`n" | Set-Content diag-seuteuk-0.81.68.txt -Encoding UTF8
+      - name: Commit diagnostic
+        shell: pwsh
+        run: |
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add diag-seuteuk-0.81.68.txt;git commit -m 'diag: capture 0.81.68 seuteuk parser contexts';git push
