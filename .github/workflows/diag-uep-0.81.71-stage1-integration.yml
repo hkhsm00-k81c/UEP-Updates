@@ -1,0 +1,56 @@
+name: Diagnose UEP 0.81.71 Stage1 Integration
+'on':
+  push:
+    branches: [main]
+    paths: [diag-uep-0.81.71-stage1-integration.trigger]
+permissions:
+  contents: write
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download stable 0.81.71
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          gh release download v0.81.71 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+      - name: Trace 08134 responsibilities against current core
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $file='app/resources/app/gyomuon.js'
+          $lines=Get-Content $file -Encoding UTF8
+          $out=@('# UEP 0.81.71 stage1 integration audit','')
+          $names=@('ensureTabs','ensureSettings','fixFalseHolidayBadges','moveSubjectModalRight','subjectConfidentialPasswordHash','unlockSubjectConfidential','sensitivePasswordModal','renderCurriculum','renderRecords','renderSettings','bindSettings','openSubject','subjectConfidential')
+          foreach($name in $names){
+            $hits=@();for($i=0;$i -lt $lines.Count;$i++){if($lines[$i] -match [regex]::Escape($name)){$hits+=$i}}
+            $out+="## $name hits=$($hits.Count)"
+            foreach($idx in ($hits|Select-Object -First 40)){
+              $s=[Math]::Max(0,$idx-8);$e=[Math]::Min($lines.Count-1,$idx+20)
+              for($j=$s;$j -le $e;$j++){$out+=('{0}: {1}' -f ($j+1),$lines[$j])}
+              $out+='---'
+            }
+          }
+          $out+='## 08134 block exact'
+          $start=($lines|Select-String 'UEP_08134_CURRICULUM_SECURITY_START'|Select-Object -First 1).LineNumber
+          $end=($lines|Select-String 'UEP_08134_CURRICULUM_SECURITY_END'|Select-Object -First 1).LineNumber
+          $out+="start=$start end=$end"
+          if($start -and $end){for($j=$start-1;$j -le $end-1;$j++){$out+=('{0}: {1}' -f ($j+1),$lines[$j])}}
+          $out+='## current security block markers'
+          foreach($marker in @('__UEP_08166_CORE_RUNTIME__','__UEP_08168_SHARED_SECURITY_READ__','__UEP_08171')){
+            $hits=$lines|Select-String $marker
+            foreach($h in $hits){$idx=$h.LineNumber-1;$s=[Math]::Max(0,$idx-8);$e=[Math]::Min($lines.Count-1,$idx+90);for($j=$s;$j -le $e;$j++){$out+=('{0}: {1}' -f ($j+1),$lines[$j])};$out+='---'}
+          }
+          $out|Set-Content diag-uep-0.81.71-stage1-integration.txt -Encoding UTF8
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git pull --rebase origin main
+          git add diag-uep-0.81.71-stage1-integration.txt
+          git commit -m 'diag: capture UEP 0.81.71 stage1 integration audit'
+          git push
