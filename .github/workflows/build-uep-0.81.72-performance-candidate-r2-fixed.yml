@@ -1,0 +1,63 @@
+name: Build UEP 0.81.72 Performance Candidate R2 Fixed
+'on':
+  push:
+    branches: [main]
+    paths:
+      - build-uep-0.81.72-performance-candidate-r2-fixed.trigger
+permissions:
+  contents: read
+  actions: read
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download stage1 candidate
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force stage1,app,out | Out-Null
+          gh run download 32909082164 --repo $env:GITHUB_REPOSITORY -n UEP-0.81.72-performance-candidate -D stage1
+          Expand-Archive stage1/UEP-update-0.81.72-candidate.zip app -Force
+      - name: Apply operational write refactor
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node scripts/patch-uep-08172-operational-writes.js
+      - name: Validate runtime structure
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check app/resources/app/gyomuon.js
+          node --check app/resources/app/electron/main.cjs
+          node --check app/resources/app/electron/preload.cjs
+          $m=Get-Content app/resources/app/electron/main.cjs -Raw -Encoding UTF8
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          foreach($fn in @('saveOfficialAttendance','deleteOfficialAttendance','saveLateAttendance','deleteLateAttendance','saveDormOuting','saveNightSupervisor','saveLunchDuty')) {
+            $pattern='(?:async\s+)?function\s+'+[regex]::Escape($fn)+'\b[\s\S]{0,5000}?(?=\n(?:async\s+)?function\s+|\nipcMain\.handle|$)'
+            $match=[regex]::Match($m,$pattern)
+            if(-not $match.Success) { throw "function not found: $fn" }
+            if($match.Value -match 'fetchLiveData\(\{\s*force\s*:\s*true') { throw "full refresh remains in $fn" }
+          }
+          foreach($marker in @('refreshOperationalCacheSilently','data-curriculum-workspace="plan"','previewOperationalSync')) {
+            if(-not ($g.Contains($marker) -or $m.Contains($marker))) { throw "stage marker missing: $marker" }
+          }
+      - name: Package candidate R2
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Compress-Archive -Path app/* -DestinationPath out/UEP-update-0.81.72-candidate-r2.zip -CompressionLevel Optimal
+          New-Item -ItemType Directory -Force verify | Out-Null
+          Expand-Archive out/UEP-update-0.81.72-candidate-r2.zip verify -Force
+          node --check verify/resources/app/gyomuon.js
+          node --check verify/resources/app/electron/main.cjs
+          $sha=(Get-FileHash out/UEP-update-0.81.72-candidate-r2.zip -Algorithm SHA256).Hash.ToLower()
+          @("candidate=0.81.72-r2","base=0.81.72-stage1","sha256=$sha","operational-write-full-refresh=removed","release=no") | Set-Content out/UEP-0.81.72-candidate-r2-report.txt -Encoding UTF8
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UEP-0.81.72-performance-candidate-r2-fixed
+          path: out/*
+          retention-days: 7
