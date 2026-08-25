@@ -1,0 +1,33 @@
+name: Diagnose UEP 0.81.60 Attendance Marker
+'on':
+  push:
+    branches: [main]
+    paths: [diag-08160-attendance.trigger]
+permissions:
+  contents: write
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect released renderer
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          gh release download v0.81.60 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+          $f='app/resources/app/gyomuon.js';$l=Get-Content $f -Encoding UTF8;$o=@()
+          foreach($p in @('__UEP_08160_ISO_CALENDAR_DATE__','function uepComparableDate','function openDashboardStudentStatus')){
+            $hits=$l|Select-String -SimpleMatch $p
+            foreach($h in $hits){$s=[Math]::Max(0,$h.LineNumber-1-12);$e=[Math]::Min($l.Count-1,$h.LineNumber-1+24);$o+="=== $p @ $($h.LineNumber) ===";for($i=$s;$i -le $e;$i++){$o+=('{0}: {1}' -f ($i+1),$l[$i])}}
+          }
+          $o|Set-Content diag-08160-attendance.txt -Encoding UTF8
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add diag-08160-attendance.txt
+          git commit -m 'diag: inspect released 0.81.60 attendance marker'
+          git push
