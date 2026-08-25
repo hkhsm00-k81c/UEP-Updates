@@ -1,0 +1,31 @@
+name: Diagnose UEP 0.81.72 R4 Input Center IPC
+'on':
+  push:
+    branches: [main]
+    paths:
+      - diag-uep-0.81.72-r4-inputcenter-ipc.trigger
+permissions:
+  contents: write
+  actions: read
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download R4 artifact
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop';New-Item -ItemType Directory -Force stage,app|Out-Null
+          gh run download 32910080088 --repo $env:GITHUB_REPOSITORY -n UEP-0.81.72-performance-candidate-r4 -D stage
+          Expand-Archive stage/UEP-update-0.81.72-candidate-r4.zip app -Force
+      - name: Find IPC handlers
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop';$out=@('# R4 input center IPC map','')
+          $files=Get-ChildItem app/resources/app -Recurse -File | Where-Object {$_.Extension -in '.js','.cjs','.mjs'}
+          foreach($f in $files){$lines=Get-Content $f.FullName -Encoding UTF8;for($i=0;$i -lt $lines.Count;$i++){if($lines[$i] -match 'inputCenter:|input-center|registerInput|InputCenter'){ $rel=$f.FullName.Substring((Resolve-Path 'app').Path.Length+1);$out+="## $rel:$($i+1)";$s=[Math]::Max(0,$i-12);$e=[Math]::Min($lines.Count-1,$i+30);for($j=$s;$j -le $e;$j++){$out+=('{0}: {1}' -f ($j+1),$lines[$j])};$out+='---'}}}
+          $out|Set-Content diag-uep-0.81.72-r4-inputcenter-ipc.txt -Encoding UTF8
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git pull --rebase origin main;git add diag-uep-0.81.72-r4-inputcenter-ipc.txt;git commit -m 'diag: capture UEP 0.81.72 R4 input center IPC';git push
