@@ -95,7 +95,7 @@ g=g.replace("<span>${esc(r.sheet)} ${r.row}행</span>","<span>${esc(r.sheet)} ${
 
 fs.writeFileSync(gFile,g,'utf8');
 const out=fs.readFileSync(gFile,'utf8');
-for(const marker of ['const APP_VERSION = "0.81.71"','function makeNeisRecordbookRecords08171','kind=\'subject\'','event.key===\'Enter\'','SUBJECT_CONFIDENTIAL_PIN_HASH','masterMatched'])A(out.includes(marker),'missing marker: '+marker);
+for(const marker of ['const APP_VERSION = "0.81.71"','function makeNeisRecordbookRecords08171','kind:\'subject\'','event.key===\'Enter\'','SUBJECT_CONFIDENTIAL_PIN_HASH','masterMatched'])A(out.includes(marker),'missing marker: '+marker);
 A(!out.includes('__UEP_08169_SUBJECT_SHARED_HASH__'),'legacy 0.81.69 subject hash wrapper remains');
 A(!out.includes('const __uepUnlockSubjectConfidential08168=unlockSubjectConfidential'),'legacy 0.81.68 subject unlock wrapper remains');
 A(out.includes("선택과목 대외비 비밀번호를 입력하세요"),'subject modal wording missing');
