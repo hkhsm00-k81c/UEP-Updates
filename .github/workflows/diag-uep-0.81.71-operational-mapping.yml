@@ -1,0 +1,40 @@
+name: Diagnose UEP 0.81.71 Operational Mapping
+'on':
+  push:
+    branches: [main]
+    paths: [diag-uep-0.81.71-operational-mapping.trigger]
+permissions:
+  contents: write
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download stable 0.81.71
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop';New-Item -ItemType Directory -Force source,app|Out-Null
+          gh release download v0.81.71 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+      - name: Extract mappings
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $g='app/resources/app/electron/google-data.cjs';$m='app/resources/app/electron/main.cjs'
+          $gl=Get-Content $g -Encoding UTF8;$ml=Get-Content $m -Encoding UTF8
+          $out=@('# UEP 0.81.71 operational cache mapping','')
+          $out+='## SHEET_RANGES exact'
+          $idx=($gl|Select-String 'const SHEET_RANGES|SHEET_RANGES\s*='|Select-Object -First 1).LineNumber
+          if($idx){for($j=$idx-1;$j -lt [Math]::Min($gl.Count,$idx+120);$j++){$out+=('{0}: {1}' -f ($j+1),$gl[$j])}}
+          $out+='## parseGoogleSheetData relevant references'
+          $need=@('공결','지각','공지마감','공지확인','급식지도','야자감독','프로그램출석','officialAttendance','late','notice','lunch','night','attendance')
+          for($i=0;$i -lt $gl.Count;$i++){if($need|Where-Object{$gl[$i] -match [regex]::Escape($_)}){$s=[Math]::Max(0,$i-4);$e=[Math]::Min($gl.Count-1,$i+10);for($j=$s;$j -le $e;$j++){$out+=('{0}: {1}' -f ($j+1),$gl[$j])};$out+='---'}}
+          $out+='## fetchLiveData result assembly tail'
+          $idx=($ml|Select-String 'const data = parseGoogleSheetData'|Select-Object -First 1).LineNumber
+          if($idx){for($j=$idx-15;$j -lt [Math]::Min($ml.Count,$idx+130);$j++){$out+=('{0}: {1}' -f ($j+1),$ml[$j])}}
+          $out|Set-Content diag-uep-0.81.71-operational-mapping.txt -Encoding UTF8
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git pull --rebase origin main;git add diag-uep-0.81.71-operational-mapping.txt;git commit -m 'diag: capture UEP 0.81.71 operational mappings';git push
