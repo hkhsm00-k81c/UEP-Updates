@@ -1,0 +1,825 @@
+# UEP 0.81.71 stage1 core functions
+
+## uepCurriculumNav
+line=12974
+12966:     }
+12967:   });
+12968:   return {...base,errors};
+12969: };
+12970: // __UEP_08113_RESTORED_CURRICULUM_SDGS_BODY__
+12971: // __UEP_CURRICULUM_CANONICAL_08127__
+12972: let curriculumWorkspaceMode="students",curriculumErrorOnly=false,curriculumErrorType="all",curriculumTermFilter="2-1",curriculumSubjectKey="",curriculumRosterSort="grade",curriculumCrossClass="all",curriculumCrossType="all",curriculumCrossSort="class";
+12973: function uepMainRecordTabs(){const tabs=[["activities","활동내역"],["sdgs","SDGs 연계 성장 프로파일"],["curriculum","교육과정"],["final","기록"]];return '<div class="record-main-tabs">'+tabs.map(([id,label])=>'<button data-record-mode="'+id+'" class="'+(recordMode===id?'active':'')+'"><b>'+label+'</b><small>'+(id==='activities'?'학생 활동 사실 확인':id==='sdgs'?'진로·전공·탐구주제·사회적 가치 연계':id==='curriculum'?'학기별 선택과목':'학생 성장 자료')+'</small></button>').join('')+'</div>';}
+12974: function uepCurriculumNav(){return '<div class="selection-analysis-tabs curriculum-final-tabs"><button data-curriculum-workspace="students" class="'+(curriculumWorkspaceMode==='students'?'active':'')+'">학생신청</button><button data-curriculum-workspace="cross" class="'+(curriculumWorkspaceMode==='cross'?'active':'')+'">문이과 교차오류</button><button data-curriculum-workspace="subjects" class="'+(curriculumWorkspaceMode==='subjects'?'active':'')+'">과목별 신청현황</button></div>';}
+12975: function uepSelectionErrorLabel(errors){return errors.length?'<span class="selection-error-count">'+errors.length+'건 확인</span>':'<span class="selection-ok">정상</span>';}
+12976: function uepStudentApplicationDetail(row,errors){const student=row.__student,bundle=studentRecordBundle(student),sms=uepSelectionSms(student,errors),className=String(student.className||recordStudentClass(student)||'').replace(/반+$/,'');const career=careerSupportMarkup(student,bundle,false);const alert=errors.length?'<section class="selection-error-panel selection-error-first"><header><h3>먼저 확인할 신청 오류</h3><span>'+errors.length+'건</span></header>'+errors.map(x=>'<article><b>'+escapeHtml(x.type)+'</b><em>'+escapeHtml(x.term)+'</em><p>'+escapeHtml(x.detail)+'</p></article>').join('')+'</section>':'<section class="selection-safe-panel selection-safe-first"><b>✓ 선택과목 검증 정상</b><span>현재 신청자료에서 확인할 오류가 없습니다.</span></section>';const termCards=['2-1','2-2','3-1','3-2'].map(term=>'<section><header><h3>'+term.replace('-','학년 ')+'학기</h3><span>'+uepSelectionTermSubjects(row,term).length+'과목</span></header><div class="selection-group-stack">'+uepSelectionTermGroups08128(row,term).map(g=>'<div class="selection-choice-group"><div class="selection-choice-head"><b>'+escapeHtml(g.label)+'</b><span>'+(g.pick?'택'+g.pick:'선택')+'</span></div>'+((g.subjects||[]).map(x=>{const state=uepSelectionSubjectState(x,term,errors);return '<article class="'+state.cls+'"><b>'+escapeHtml(x)+'</b><em>'+escapeHtml(state.label)+'</em></article>';}).join('')||'<div class="selection-missing">미신청</div>')+'</div>').join('')+'</div></section>').join('');return '<section class="curriculum-student-detail"><header><div><small>'+escapeHtml(student.studentNo)+' · '+escapeHtml(className)+'반</small><h3>'+escapeHtml(student.name)+' 학생신청</h3><em class="selection-rule-source">검증기준 · '+escapeHtml(uepSelectionRuleSource08129())+'</em></div>'+uepSelectionErrorLabel(errors)+'</header>'+career+alert+'<div class="curriculum-term-grid curriculum-term-grid-four">'+termCards+'</div>'+(errors.length?'<section class="curriculum-message-panel"><header><div><small>STUDENT MESSAGE</small><h3>현재 오류 보완 문자</h3></div><button class="btn primary" data-copy-current-selection-sms>문자 복사</button></header><textarea id="currentSelectionSms" readonly>'+escapeHtml(sms)+'</textarea></section>':'')+'</section>';}
+12977: function uepStudentApplicationView(){
+12978:   const data=uepSelectionDataset(),allRows=data.rows.filter(uepSelectionActiveRow08129),types=[...new Set(data.errors.map(x=>x.type))];
+12979:   const errorsFor=r=>data.errors.filter(e=>e.student.id===r.__student.id);
+12980:   const matchesError=r=>{const es=errorsFor(r);return(!curriculumErrorOnly||es.length)&&(curriculumErrorType==='all'||es.some(e=>e.type===curriculumErrorType));};
+12981:   const rowsForClass=no=>no==='all'?allRows:allRows.filter(r=>recordStudentClass(r.__student)===String(no));
+12982:   const classButton=(no,label)=>{const rows=rowsForClass(no),errorRows=rows.filter(r=>errorsFor(r).length);const count=curriculumErrorOnly?errorRows.length:rows.length;const sub=curriculumErrorOnly?'오류 '+count+'명':count+'명';return '<button data-record-class="'+no+'" class="'+(String(recordClassNo)===String(no)?'active':'')+'"><b>'+label+'</b><span>'+sub+'</span></button>';};
+12983:   if(!recordClassNo)recordClassNo='all';
+12984:   const scope=rowsForClass(String(recordClassNo)),visible=scope.filter(matchesError);
+12985:   if(recordStudentId&&!scope.some(r=>r.__student.id===recordStudentId))recordStudentId='';
+12986:   const chosen=recordStudentId?scope.find(r=>r.__student.id===recordStudentId):null,errs=chosen?errorsFor(chosen):[];
+12987:   const controls='<div class="curriculum-mode-block curriculum-unified-mode"><div class="curriculum-filter-bar class-mode"><div class="record-class-cards">'+classButton('all','전체')+Array.from({length:9},(_,i)=>classButton(String(i+1),(i+1)+'반')).join('')+'</div><button class="btn '+(curriculumErrorOnly?'primary':'secondary')+'" data-curriculum-error-only>'+(curriculumErrorOnly?'오류학생만 보는 중':'오류학생만 보기')+'</button><label>오류유형<select data-curriculum-error-type><option value="all">전체 오류</option>'+types.map(x=>'<option value="'+escapeHtml(x)+'" '+(curriculumErrorType===x?'selected':'')+'>'+escapeHtml(x)+'</option>').join('')+'</select></label></div></div>';
+12988:   const list='<div class="curriculum-class-list curriculum-unified-list"><div class="curriculum-class-head"><span>학번·학생</span><span>2-1</span><span>2-2</span><span>3-1</span><span>3-2</span><span>오류종류</span></div>'+visible.map(r=>{const es=errorsFor(r),active=recordStudentId===r.__student.id?' active':'';return '<button class="'+active+'" data-record-student="'+escapeHtml(r.__student.id)+'"><b>'+escapeHtml(r.__student.studentNo)+' '+escapeHtml(r.__student.name)+'</b>'+['2-1','2-2','3-1','3-2'].map(t=>'<span>'+uepSelectionTermSubjects(r,t).length+'과목</span>').join('')+'<span class="selection-error-summary '+(es.length?'has-error':'is-normal')+'">'+escapeHtml(uepSelectionErrorSummary(es))+'</span></button>';}).join('')+'</div>';
+12989:   return controls+list;
+12990: }
+12991: 
+12992: function openCurriculumStudentSidePanel(studentId){
+12993:   const data=uepSelectionDataset(),all=data.rows.filter(uepSelectionActiveRow08129);
+12994:   const scope=String(recordClassNo)==='all'?all:all.filter(row=>recordStudentClass(row.__student)===String(recordClassNo));
+12995:   const row=scope.find(item=>String(item.__student.id)===String(studentId));
+12996:   if(!row)return toast('학생 신청자료를 찾지 못했습니다.');
+12997:   recordStudentId=row.__student.id;
+12998:   const errors=data.errors.filter(error=>error.student.id===row.__student.id),index=scope.indexOf(row);
+12999:   document.querySelector('[data-curriculum-student-panel]')?.remove();
+13000:   const layer=document.createElement('div');layer.dataset.curriculumStudentPanel='1';
+13001:   layer.style.cssText='position:fixed;inset:0;z-index:10020;background:rgba(20,39,48,.34);display:flex;justify-content:flex-end';
+13002:   layer.innerHTML='<aside style="width:min(980px,78vw);height:100%;background:#fff;box-shadow:-14px 0 40px rgba(24,54,65,.18);overflow:auto;padding:22px"><header style="position:sticky;top:-22px;z-index:2;background:#fff;padding:16px 0 14px;border-bottom:1px solid #dce8eb;display:flex;align-items:center;gap:10px"><button class="btn secondary" data-curriculum-panel-prev>‹ 이전</button><div style="flex:1"><small>'+escapeHtml(recordClassNo==='all'?'전체 학생':recordClassNo+'반')+'</small><h2 style="margin:3px 0">'+escapeHtml(row.__student.studentNo)+' '+escapeHtml(row.__student.name)+'</h2></div><button class="btn secondary" data-curriculum-panel-next>다음 ›</button><button class="btn primary" data-curriculum-panel-close>목록으로</button></header><div style="padding-top:18px">'+uepStudentApplicationDetail(row,errors)+'</div></aside>';
+13003:   document.body.appendChild(layer);
+13004:   const close=()=>layer.remove();layer.querySelector('[data-curriculum-panel-close]').onclick=close;layer.onclick=e=>{if(e.target===layer)close();};
+13005:   layer.querySelector('[data-curriculum-panel-prev]').onclick=()=>{const next=scope[(index-1+scope.length)%scope.length];layer.remove();if(next)openCurriculumStudentSidePanel(next.__student.id);};
+13006:   layer.querySelector('[data-curriculum-panel-next]').onclick=()=>{const next=scope[(index+1)%scope.length];layer.remove();if(next)openCurriculumStudentSidePanel(next.__student.id);};
+13007: }
+13008: 
+13009: function uepSubjectGroup08128(subject){const group=uepSelectionCurriculumGroup08129(subject),x=String(subject||'').replace(/\*/g,'').trim();/* __UEP_08161_CURRICULUM_GROUP_PRIORITY__ */if(/정보|제2외국어|외국어|한문/.test(group)||/^(중국어|일본어|중국어 회화|일본어 회화|심화 중국어|심화 일본어|한문|한문 고전 읽기|중국 문화|일본 문화|언어생활과 한자|인공지능 기초|정보과학|데이터 과학|소프트웨어와 생활)$/.test(x))return'일본어·중국어·한문·정보';if(/국어|영어|수학/.test(group))return'국·영·수';if(/사회/.test(group))return'사회';if(/과학/.test(group))return'과학';if(/예술|체육/.test(group))return'음·미·체';if(/국어|문학|독서|수학|미적분|기하|영어/.test(x))return'국·영·수';if(/사회|세계사|윤리|지리|정치|경제|역사/.test(x))return'사회';if(/물리|화학|생명|지구|과학|역학|전자기|세포|물질대사|유전|행성우주/.test(x))return'과학';if(/음악|미술|체육|스포츠/.test(x))return'음·미·체';return'일본어·중국어·한문·정보';}
+13010: 
+13011: // __UEP_08161_CROSS_TRACK_VIEW__
+13012: function uepCrossTrackKind08161(subject){
+13013:   const x=String(subject||'').replace(/\*/g,'').trim();
+13014:   const social=new Set(['세계사','현대사회와 윤리','도시의 미래 탐구','경제','세계시민과 지리','사회와 문화','동아시아 역사 기행','인문학과 윤리','한국지리 탐구','정치','법과 사회','윤리와 사상','역사로 탐구하는 현대세계','여행지리','사회문제탐구','금융과 경제생활','윤리문제탐구']);
+13015:   const science=new Set(['물리학','화학','생명과학','지구과학','역학과 에너지','물질과 에너지','세포와 물질대사','지구시스템과학','전자기와 양자','화학 반응의 세계','생물의 유전','행성우주과학','과학의 역사와 문화','기후변화와 환경생태','융합과학 탐구']);
+13016:   if(social.has(x))return'social';if(science.has(x))return'science';return'';
+13017: }
+13018: function uepCrossTrackRows08161(){
+13019:   const terms=['2-1','2-2','3-1','3-2'],data=uepSelectionDataset();
+13020:   return data.rows.filter(uepSelectionActiveRow08129).map(row=>{
+13021:     const student=row.__student,byTerm={};let science=0,social=0;
+13022:     terms.forEach(term=>{const subjects=uepSelectionSubjectsInTerm08129(row,term),s=subjects.filter(x=>uepCrossTrackKind08161(x)==='science'),h=subjects.filter(x=>uepCrossTrackKind08161(x)==='social');byTerm[term]={science:s.length,social:h.length,scienceSubjects:s,socialSubjects:h};science+=s.length;social+=h.length;});
+13023:     const type=science&&social?'mixed':science?'science':social?'social':'none';
+13024:     const mixed32=byTerm['3-2'].science>0&&byTerm['3-2'].social>0;
+13025:     return{row,student,byTerm,science,social,type,mixed32,avg:uepStudentGradeAverage(student?.id)};
+13026:   }).filter(x=>x.science+x.social>0);
+13027: }
+13028: function uepCrossTrackView08161(){
+13029:   let rows=uepCrossTrackRows08161();
+13030:   if(curriculumCrossClass!=='all')rows=rows.filter(x=>String(recordStudentClass(x.student))===String(curriculumCrossClass));
+13031:   if(curriculumCrossType==='science')rows=rows.filter(x=>x.type==='science');
+13032:   else if(curriculumCrossType==='social')rows=rows.filter(x=>x.type==='social');
+13033:   else if(curriculumCrossType==='mixed')rows=rows.filter(x=>x.type==='mixed');
+13034:   else if(curriculumCrossType==='mixed32')rows=rows.filter(x=>x.mixed32);
+13035:   rows.sort(curriculumCrossSort==='grade'?((a,b)=>(a.avg??99)-(b.avg??99)||String(a.student.studentNo||'').localeCompare(String(b.student.studentNo||''))):((a,b)=>String(a.student.studentNo||'').localeCompare(String(b.student.studentNo||''))));
+13036:   const all=uepCrossTrackRows08161(),count=t=>t==='mixed32'?all.filter(x=>x.mixed32).length:all.filter(x=>x.type===t).length;
+13037:   const filters='<div class="cross-track-controls"><label>반<select data-cross-class><option value="all">전체 반</option>'+Array.from({length:9},(_,i)=>String(i+1)).map(c=>'<option value="'+c+'" '+(curriculumCrossClass===c?'selected':'')+'>'+c+'반</option>').join('')+'</select></label><label>유형<select data-cross-type><option value="all">전체</option><option value="science" '+(curriculumCrossType==='science'?'selected':'')+'>과학만</option><option value="social" '+(curriculumCrossType==='social'?'selected':'')+'>사회만</option><option value="mixed" '+(curriculumCrossType==='mixed'?'selected':'')+'>4학기 혼합</option><option value="mixed32" '+(curriculumCrossType==='mixed32'?'selected':'')+'>3-2 혼합</option></select></label><label>정렬<select data-cross-sort><option value="class" '+(curriculumCrossSort==='class'?'selected':'')+'>반·학번순</option><option value="grade" '+(curriculumCrossSort==='grade'?'selected':'')+'>1학년 내신평균순</option></select></label></div>';
+13038:   const summary='<div class="cross-track-summary"><article><small>분석대상</small><b>'+all.length+'명</b></article><article><small>과학만</small><b>'+count('science')+'명</b></article><article><small>사회만</small><b>'+count('social')+'명</b></article><article><small>4학기 혼합</small><b>'+count('mixed')+'명</b></article><article class="warn"><small>3-2 혼합</small><b>'+count('mixed32')+'명</b></article></div>';
+13039:   const cell=(x,term)=>{const t=x.byTerm[term];return '<span title="과학: '+escapeHtml(t.scienceSubjects.join(', ')||'-')+' / 사회: '+escapeHtml(t.socialSubjects.join(', ')||'-')+'"><b>과 '+t.science+'</b><em>사 '+t.social+'</em></span>';};
+13040:   const body=rows.map(x=>'<button class="cross-track-row '+(x.mixed32?'danger':x.type==='mixed'?'watch':'')+'" data-cross-student="'+escapeHtml(x.student.id)+'"><b>'+escapeHtml(x.student.studentNo||'')+' '+escapeHtml(x.student.name||'')+'</b><span>'+escapeHtml(recordStudentClass(x.student))+'반</span>'+['2-1','2-2','3-1','3-2'].map(t=>cell(x,t)).join('')+'<span><strong>과 '+x.science+' / 사 '+x.social+'</strong><em>'+(x.mixed32?'3-2 혼합':x.type==='mixed'?'4학기 혼합':x.type==='science'?'과학만':'사회만')+'</em></span><span>'+(x.avg==null?'-':Number(x.avg).toFixed(2))+'</span></button>').join('');
+13041:   return '<style>.cross-track-controls{display:flex;gap:10px;justify-content:flex-end;margin:14px 0}.cross-track-controls label{display:flex;gap:6px;align-items:center}.cross-track-summary{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin:12px 0}.cross-track-summary article{padding:14px;border:1px solid #dce9e6;border-radius:14px;background:#f8fbfa}.cross-track-summary small{display:block;color:#668}.cross-track-summary b{font-size:20px}.cross-track-summary .warn{background:#fff5f1;border-color:#f2c9bd}.cross-track-table{border:1px solid #dbe7e5;border-radius:16px;overflow:hidden}.cross-track-head,.cross-track-row{display:grid;grid-template-columns:1.5fr .55fr repeat(4,1fr) 1.1fr .65fr;gap:8px;align-items:center;width:100%;padding:11px 14px;border:0;border-bottom:1px solid #edf1f0;text-align:left;background:#fff}.cross-track-head{font-weight:700;background:#f3f8f7}.cross-track-row>span{display:flex;gap:6px;align-items:center}.cross-track-row span em{font-style:normal;color:#8a5a47}.cross-track-row.watch{background:#fffdf4}.cross-track-row.danger{background:#fff3ef}.cross-track-row:hover{background:#edf9f6}.cross-track-intro{padding:16px 18px;border:1px solid #dce9e6;border-radius:16px;background:#f8fbfa}.cross-track-intro h3{margin:0 0 6px}.cross-track-intro p{margin:0;color:#667}</style><section class="cross-track-intro"><h3>문이과 교차오류</h3><p>260명 기준 선택과목 중 사회·과학 계열을 2-1부터 3-2까지 전수 비교합니다. 한 과목이라도 해당 계열 신청이 있으면 포함하며, 혼합은 상담 확인 대상으로 표시합니다.</p></section>'+summary+filters+'<div class="cross-track-table"><div class="cross-track-head"><span>학번·학생</span><span>반</span><span>2-1</span><span>2-2</span><span>3-1</span><span>3-2</span><span>4학기 누계</span><span>1학년 내신</span></div>'+body+'</div>';
+13042: }
+13043: 
+13044: function uepSubjectStatus(group){const n=group.students.length;if(n<10)return '<i class="subject-risk close">폐강위기</i>';if(n<20)return '<i class="subject-risk watch">개설확인</i>';if(Math.ceil(n/group.sectionCount)>30)return '<i class="subject-risk crowd">과밀가능</i>';return '<i class="subject-risk stable">안정</i>';}
+13045: function uepSubjectApplicationView(){const data=uepSelectionDataset(),terms=['2-1','2-2','3-1','3-2'],groups=data.subjects.filter(x=>x.term===curriculumTermFilter),order=['국·영·수','사회','과학','음·미·체','일본어·중국어·한문·정보','기타'],bucket=new Map(order.map(x=>[x,[]]));groups.forEach(g=>bucket.get(uepSubjectGroup08128(g.subject))?.push(g));return '<div class="term-picker-cards">'+terms.map(t=>'<button data-curriculum-term="'+t+'" class="'+(curriculumTermFilter===t?'active':'')+'"><b>'+t.replace('-','학년 ')+'학기</b><span>'+data.subjects.filter(x=>x.term===t).length+'과목</span></button>').join('')+'</div>'+order.filter(k=>bucket.get(k).length).map(k=>'<section class="subject-group-section group-'+k.replace(/[^가-힣A-Za-z0-9]/g,'')+'"><header><h3>'+k+'</h3><span>'+bucket.get(k).length+'과목</span></header><div class="subject-card-grid">'+bucket.get(k).sort((a,b)=>a.subject.localeCompare(b.subject,'ko')).map(g=>'<button data-curriculum-subject="'+escapeHtml(g.key)+'"><small>'+g.term+'</small><b>'+escapeHtml(g.subject)+'</b><span>신청 '+g.students.length+'명 · 예상 '+g.sectionCount+'분반</span>'+uepSubjectStatus(g)+'</button>').join('')+'</div></section>').join('');}
+13046: function uepOpenSubjectModal08128(key){const data=uepSelectionDataset(),selected=data.subjects.find(x=>x.key===key);if(!selected)return;const rows=[...selected.students].sort(curriculumRosterSort==='class'?((a,b)=>String(a.student.studentNo).localeCompare(String(b.student.studentNo))):((a,b)=>(a.avg??99)-(b.avg??99)||String(a.student.studentNo).localeCompare(String(b.student.studentNo))));const privacy=privacyModeEnabled(),layer=document.createElement('div');layer.className='modal-backdrop subject-roster-modal-backdrop';layer.innerHTML='<div class="modal subject-roster-modal"><button class="modal-close" data-subject-modal-close>×</button><header><small>'+escapeHtml(selected.term)+'</small><h2>'+escapeHtml(selected.subject)+'</h2><p>신청 '+selected.students.length+'명 · 예상 '+selected.sectionCount+'분반</p><div class="roster-sort"><button data-roster-sort="grade" class="'+(curriculumRosterSort==='grade'?'active':'')+'">예상성적순</button><button data-roster-sort="class" class="'+(curriculumRosterSort==='class'?'active':'')+'">반·번호순</button></div></header><div class="selection-roster roster-six-columns '+(privacy?'masked':'')+'"><div class="selection-roster-head"><span>학번·성명</span><span>현재반</span><span>학사여부</span><span>1학년 내신평균</span><span>예상등수</span><span>예상등급</span></div>'+rows.map(x=>'<article><b>'+(privacy?'**** ＊＊＊':escapeHtml(x.student.studentNo)+' '+escapeHtml(x.student.name))+'</b><span>'+escapeHtml(recordStudentClass(x.student))+'반</span><span>'+(x.dorm?'학사':'-')+'</span><span>'+(privacy?'＊.＊＊':x.avg==null?'-':x.avg.toFixed(2))+'</span><span>'+(privacy?'＊위':x.expectedRank?x.expectedRank+'위':'-')+'</span><span>'+(privacy?'＊등급':x.expectedGrade==='-'?'-':x.expectedGrade+'등급')+'</span></article>').join('')+'</div></div>';document.body.appendChild(layer);layer.querySelector('[data-subject-modal-close]').onclick=()=>layer.remove();layer.onclick=e=>{if(e.target===layer)layer.remove();};layer.querySelectorAll('[data-roster-sort]').forEach(b=>b.onclick=()=>{curriculumRosterSort=b.dataset.rosterSort;layer.remove();uepOpenSubjectModal08128(key);});}
+13047: function uepCurriculumFinalView(){const workspace=curriculumWorkspaceMode==='students'?uepStudentApplicationView():curriculumWorkspaceMode==='cross'?uepCrossTrackView08161():uepSubjectApplicationView();return '<div class="module-page records-v0601 curriculum-final-page">'+uepMainRecordTabs()+uepCurriculumNav()+workspace+'</div>';}
+13048: function uepSdgsEvidenceBridge(){
+13049:   const student=(readonlyCache?.students||[]).find(s=>String(s.id)===String(recordStudentId));if(!student)return '';
+13050:   const bundle=studentRecordBundle(student),sources=[];
+13051:   const add=(rows,type)=>rows.forEach(x=>sources.push({type,title:x.title||x.actualTitle||x.recordTitle||x.type||x.subject||type,date:x.date||x.term||x.semester||'',text:[x.title,x.actualTitle,x.recordTitle,x.role,x.detail,x.content,x.summary,x.subject,x.organization].filter(Boolean).join(' · ')}));
+13052:   add(bundle.activities||[],'활동');add(bundle.programs||[],'프로그램');add(bundle.reports||[],'보고서');add(bundle.selected||[],'선택과목');add(bundle.volunteer||[],'봉사');add(bundle.volunteers||[],'봉사');
+13053:   const goals=[[1,'빈곤',/빈곤|복지|취약|기부/],[2,'기아 종식',/기아|식량|급식|농업/],[3,'건강과 웰빙',/건강|의료|보건|심리|치유|운동/],[4,'양질의 교육',/교육|학습|수업|문해|멘토/],[5,'성평등',/성평등|젠더|여성|차별/],[6,'깨끗한 물',/물|수질|위생/],[7,'깨끗한 에너지',/에너지|태양광|전력|재생/],[8,'양질의 일자리',/일자리|노동|경제성장|직업/],[9,'산업·혁신·인프라',/산업|혁신|인프라|기술|공학|인공지능|반도체/],[10,'불평등 감소',/불평등|격차|인권|포용/],[11,'지속가능한 도시',/도시|교통|주거|지역사회/],[12,'책임 있는 소비와 생산',/소비|생산|재활용|폐기물|플라스틱/],[13,'기후행동',/기후|탄소|온난화|환경/],[14,'해양생태계',/해양|바다|수산|미세플라스틱/],[15,'육상생태계',/생태|생물다양성|산림|동물|식물/],[16,'평화·정의·제도',/평화|정의|법|민주|갈등|윤리/],[17,'파트너십',/협력|연대|공동체|국제|유네스코/]];
+13054:   const cards=goals.map(([no,name,rx])=>{const found=sources.filter(s=>rx.test(s.text)).slice(0,8);const state=found.some(s=>s.type==='보고서'||String(s.text).length>45)?'confirmed':found.length?'possible':'empty';return {no,name,found,state};});
+13055:   const confirmed=cards.filter(x=>x.state==='confirmed').length,possible=cards.filter(x=>x.state==='possible').length;
+13056:   return `<section class="sdgs-live-evidence"><header><div><small>LIVE EVIDENCE MAP</small><h3>SDGs 실제 근거 연결</h3><p>보고서 유무와 관계없이 활동·봉사·프로그램·선택과목의 실제 학생 자료를 함께 읽습니다.</p></div><span>${confirmed}개 확인 · ${possible}개 연결 가능</span></header><div class="sdgs-live-grid">${cards.map(c=>`<details class="${c.state}"><summary><b>SDG ${c.no}</b><span>${escapeHtml(c.name)}</span><i>${c.state==='confirmed'?'근거 확인':c.state==='possible'?'연결 가능':'근거 없음'}</i></summary>${c.found.length?`<div>${c.found.map(x=>`<article><b>${escapeHtml(x.title)}</b><small>${escapeHtml([x.type,x.date].filter(Boolean).join(' · '))}</small><p>${escapeHtml(x.text)}</p></article>`).join('')}</div>`:'<p>현재 연결된 학생 자료에서 직접 근거를 찾지 못했습니다.</p>'}</details>`).join('')}</div></section>`;
+13057: }
+13058: const __uepRecordsBefore08106=recordsView;
+13059: recordsView=function(){if(recordMode==='curriculum')return uepCurriculumFinalView();const base=__uepRecordsBefore08106();if(recordMode==='sdgs'){const supplement=uepSdgsSupplementPanel(),clean=base.replace(supplement,'');return clean.replace(/<\/div>\s*$/,uepSdgsEvidenceBridge()+supplement+'</div>');}return base;};
+13060: function bindSelectionAnalysis(){
+13061:   $$('[data-curriculum-workspace]').forEach(b=>b.onclick=async()=>{const next=b.dataset.curriculumWorkspace;if(next==='subjects'&&!(await unlockSubjectConfidential()))return;curriculumWorkspaceMode=next;render('records');});
+13062:   $$('[data-record-class]').forEach(b=>b.onclick=()=>{recordClassNo=b.dataset.recordClass;recordStudentId='';render('records');});
+13063:   $$('[data-record-query]').forEach(b=>b.onclick=()=>{recordQueryMode=b.dataset.recordQuery||'class';render('records');});
+13064:   $$('[data-record-student]').forEach(b=>b.onclick=()=>openCurriculumStudentSidePanel(b.dataset.recordStudent));
+13065:   $('[data-curriculum-error-only]')?.addEventListener('click',()=>{curriculumErrorOnly=!curriculumErrorOnly;render('records');});
+13066:   $('[data-curriculum-error-type]')?.addEventListener('change',e=>{curriculumErrorType=e.target.value;render('records');});
+13067:   $$('[data-curriculum-term]').forEach(b=>b.onclick=()=>{curriculumTermFilter=b.dataset.curriculumTerm;curriculumSubjectKey='';render('records');});
+13068:   $$('[data-curriculum-subject]').forEach(b=>b.onclick=()=>{curriculumSubjectKey=b.dataset.curriculumSubject;render('records');});
+13069:   $$('[data-roster-sort]').forEach(b=>b.onclick=()=>{curriculumRosterSort=b.dataset.rosterSort;render('records');});
+13070:   $('[data-copy-current-selection-sms]')?.addEventListener('click',async()=>{try{await navigator.clipboard.writeText($('#currentSelectionSms')?.value||'');toast('보완 문자메시지를 복사했습니다.');}catch{toast('문자 복사에 실패했습니다.');}});
+13071:   $('[data-open-student-picker]')?.addEventListener('click',()=>{const m=$('.uep-picker-menu');if(m)m.hidden=!m.hidden;});
+13072:   $('[data-uep-student-search]')?.addEventListener('input',e=>{$$('.uep-picker-menu [data-record-student]').forEach(b=>b.hidden=!b.textContent.includes(e.target.value));});
+13073:   const navData=uepSelectionDataset(),navAll=navData.rows.filter(uepSelectionActiveRow08129),navScope=String(recordClassNo)==='all'?navAll:navAll.filter(r=>recordStudentClass(r.__student)===String(recordClassNo)),navRows=navScope.filter(r=>{const es=navData.errors.filter(e=>e.student.id===r.__student.id);return(!curriculumErrorOnly||es.length)&&(curriculumErrorType==='all'||es.some(e=>e.type===curriculumErrorType));}),classRows=navRows.length?navRows:navScope,idx=classRows.findIndex(r=>r.__student.id===recordStudentId);$('[data-uep-student-prev]')?.addEventListener('click',()=>{if(classRows.length){const p=idx<0?0:(idx-1+classRows.length)%classRows.length;recordStudentId=classRows[p].__student.id;render('records');}});$('[data-uep-student-next]')?.addEventListener('click',()=>{if(classRows.length){const n=idx<0?0:(idx+1)%classRows.length;recordStudentId=classRows[n].__student.id;render('records');}});
+13074:   $('[data-copy-sdgs-supplement]')?.addEventListener('click',async()=>{try{await navigator.clipboard.writeText($('#sdgsSupplementText')?.value||'');toast('SDGs 근거 보완 질문을 복사했습니다.');}catch{toast('복사에 실패했습니다.');}});
+## uepCurriculumFinalView
+line=13047
+13037:   const filters='<div class="cross-track-controls"><label>반<select data-cross-class><option value="all">전체 반</option>'+Array.from({length:9},(_,i)=>String(i+1)).map(c=>'<option value="'+c+'" '+(curriculumCrossClass===c?'selected':'')+'>'+c+'반</option>').join('')+'</select></label><label>유형<select data-cross-type><option value="all">전체</option><option value="science" '+(curriculumCrossType==='science'?'selected':'')+'>과학만</option><option value="social" '+(curriculumCrossType==='social'?'selected':'')+'>사회만</option><option value="mixed" '+(curriculumCrossType==='mixed'?'selected':'')+'>4학기 혼합</option><option value="mixed32" '+(curriculumCrossType==='mixed32'?'selected':'')+'>3-2 혼합</option></select></label><label>정렬<select data-cross-sort><option value="class" '+(curriculumCrossSort==='class'?'selected':'')+'>반·학번순</option><option value="grade" '+(curriculumCrossSort==='grade'?'selected':'')+'>1학년 내신평균순</option></select></label></div>';
+13038:   const summary='<div class="cross-track-summary"><article><small>분석대상</small><b>'+all.length+'명</b></article><article><small>과학만</small><b>'+count('science')+'명</b></article><article><small>사회만</small><b>'+count('social')+'명</b></article><article><small>4학기 혼합</small><b>'+count('mixed')+'명</b></article><article class="warn"><small>3-2 혼합</small><b>'+count('mixed32')+'명</b></article></div>';
+13039:   const cell=(x,term)=>{const t=x.byTerm[term];return '<span title="과학: '+escapeHtml(t.scienceSubjects.join(', ')||'-')+' / 사회: '+escapeHtml(t.socialSubjects.join(', ')||'-')+'"><b>과 '+t.science+'</b><em>사 '+t.social+'</em></span>';};
+13040:   const body=rows.map(x=>'<button class="cross-track-row '+(x.mixed32?'danger':x.type==='mixed'?'watch':'')+'" data-cross-student="'+escapeHtml(x.student.id)+'"><b>'+escapeHtml(x.student.studentNo||'')+' '+escapeHtml(x.student.name||'')+'</b><span>'+escapeHtml(recordStudentClass(x.student))+'반</span>'+['2-1','2-2','3-1','3-2'].map(t=>cell(x,t)).join('')+'<span><strong>과 '+x.science+' / 사 '+x.social+'</strong><em>'+(x.mixed32?'3-2 혼합':x.type==='mixed'?'4학기 혼합':x.type==='science'?'과학만':'사회만')+'</em></span><span>'+(x.avg==null?'-':Number(x.avg).toFixed(2))+'</span></button>').join('');
+13041:   return '<style>.cross-track-controls{display:flex;gap:10px;justify-content:flex-end;margin:14px 0}.cross-track-controls label{display:flex;gap:6px;align-items:center}.cross-track-summary{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin:12px 0}.cross-track-summary article{padding:14px;border:1px solid #dce9e6;border-radius:14px;background:#f8fbfa}.cross-track-summary small{display:block;color:#668}.cross-track-summary b{font-size:20px}.cross-track-summary .warn{background:#fff5f1;border-color:#f2c9bd}.cross-track-table{border:1px solid #dbe7e5;border-radius:16px;overflow:hidden}.cross-track-head,.cross-track-row{display:grid;grid-template-columns:1.5fr .55fr repeat(4,1fr) 1.1fr .65fr;gap:8px;align-items:center;width:100%;padding:11px 14px;border:0;border-bottom:1px solid #edf1f0;text-align:left;background:#fff}.cross-track-head{font-weight:700;background:#f3f8f7}.cross-track-row>span{display:flex;gap:6px;align-items:center}.cross-track-row span em{font-style:normal;color:#8a5a47}.cross-track-row.watch{background:#fffdf4}.cross-track-row.danger{background:#fff3ef}.cross-track-row:hover{background:#edf9f6}.cross-track-intro{padding:16px 18px;border:1px solid #dce9e6;border-radius:16px;background:#f8fbfa}.cross-track-intro h3{margin:0 0 6px}.cross-track-intro p{margin:0;color:#667}</style><section class="cross-track-intro"><h3>문이과 교차오류</h3><p>260명 기준 선택과목 중 사회·과학 계열을 2-1부터 3-2까지 전수 비교합니다. 한 과목이라도 해당 계열 신청이 있으면 포함하며, 혼합은 상담 확인 대상으로 표시합니다.</p></section>'+summary+filters+'<div class="cross-track-table"><div class="cross-track-head"><span>학번·학생</span><span>반</span><span>2-1</span><span>2-2</span><span>3-1</span><span>3-2</span><span>4학기 누계</span><span>1학년 내신</span></div>'+body+'</div>';
+13042: }
+13043: 
+13044: function uepSubjectStatus(group){const n=group.students.length;if(n<10)return '<i class="subject-risk close">폐강위기</i>';if(n<20)return '<i class="subject-risk watch">개설확인</i>';if(Math.ceil(n/group.sectionCount)>30)return '<i class="subject-risk crowd">과밀가능</i>';return '<i class="subject-risk stable">안정</i>';}
+13045: function uepSubjectApplicationView(){const data=uepSelectionDataset(),terms=['2-1','2-2','3-1','3-2'],groups=data.subjects.filter(x=>x.term===curriculumTermFilter),order=['국·영·수','사회','과학','음·미·체','일본어·중국어·한문·정보','기타'],bucket=new Map(order.map(x=>[x,[]]));groups.forEach(g=>bucket.get(uepSubjectGroup08128(g.subject))?.push(g));return '<div class="term-picker-cards">'+terms.map(t=>'<button data-curriculum-term="'+t+'" class="'+(curriculumTermFilter===t?'active':'')+'"><b>'+t.replace('-','학년 ')+'학기</b><span>'+data.subjects.filter(x=>x.term===t).length+'과목</span></button>').join('')+'</div>'+order.filter(k=>bucket.get(k).length).map(k=>'<section class="subject-group-section group-'+k.replace(/[^가-힣A-Za-z0-9]/g,'')+'"><header><h3>'+k+'</h3><span>'+bucket.get(k).length+'과목</span></header><div class="subject-card-grid">'+bucket.get(k).sort((a,b)=>a.subject.localeCompare(b.subject,'ko')).map(g=>'<button data-curriculum-subject="'+escapeHtml(g.key)+'"><small>'+g.term+'</small><b>'+escapeHtml(g.subject)+'</b><span>신청 '+g.students.length+'명 · 예상 '+g.sectionCount+'분반</span>'+uepSubjectStatus(g)+'</button>').join('')+'</div></section>').join('');}
+13046: function uepOpenSubjectModal08128(key){const data=uepSelectionDataset(),selected=data.subjects.find(x=>x.key===key);if(!selected)return;const rows=[...selected.students].sort(curriculumRosterSort==='class'?((a,b)=>String(a.student.studentNo).localeCompare(String(b.student.studentNo))):((a,b)=>(a.avg??99)-(b.avg??99)||String(a.student.studentNo).localeCompare(String(b.student.studentNo))));const privacy=privacyModeEnabled(),layer=document.createElement('div');layer.className='modal-backdrop subject-roster-modal-backdrop';layer.innerHTML='<div class="modal subject-roster-modal"><button class="modal-close" data-subject-modal-close>×</button><header><small>'+escapeHtml(selected.term)+'</small><h2>'+escapeHtml(selected.subject)+'</h2><p>신청 '+selected.students.length+'명 · 예상 '+selected.sectionCount+'분반</p><div class="roster-sort"><button data-roster-sort="grade" class="'+(curriculumRosterSort==='grade'?'active':'')+'">예상성적순</button><button data-roster-sort="class" class="'+(curriculumRosterSort==='class'?'active':'')+'">반·번호순</button></div></header><div class="selection-roster roster-six-columns '+(privacy?'masked':'')+'"><div class="selection-roster-head"><span>학번·성명</span><span>현재반</span><span>학사여부</span><span>1학년 내신평균</span><span>예상등수</span><span>예상등급</span></div>'+rows.map(x=>'<article><b>'+(privacy?'**** ＊＊＊':escapeHtml(x.student.studentNo)+' '+escapeHtml(x.student.name))+'</b><span>'+escapeHtml(recordStudentClass(x.student))+'반</span><span>'+(x.dorm?'학사':'-')+'</span><span>'+(privacy?'＊.＊＊':x.avg==null?'-':x.avg.toFixed(2))+'</span><span>'+(privacy?'＊위':x.expectedRank?x.expectedRank+'위':'-')+'</span><span>'+(privacy?'＊등급':x.expectedGrade==='-'?'-':x.expectedGrade+'등급')+'</span></article>').join('')+'</div></div>';document.body.appendChild(layer);layer.querySelector('[data-subject-modal-close]').onclick=()=>layer.remove();layer.onclick=e=>{if(e.target===layer)layer.remove();};layer.querySelectorAll('[data-roster-sort]').forEach(b=>b.onclick=()=>{curriculumRosterSort=b.dataset.rosterSort;layer.remove();uepOpenSubjectModal08128(key);});}
+13047: function uepCurriculumFinalView(){const workspace=curriculumWorkspaceMode==='students'?uepStudentApplicationView():curriculumWorkspaceMode==='cross'?uepCrossTrackView08161():uepSubjectApplicationView();return '<div class="module-page records-v0601 curriculum-final-page">'+uepMainRecordTabs()+uepCurriculumNav()+workspace+'</div>';}
+13048: function uepSdgsEvidenceBridge(){
+13049:   const student=(readonlyCache?.students||[]).find(s=>String(s.id)===String(recordStudentId));if(!student)return '';
+13050:   const bundle=studentRecordBundle(student),sources=[];
+13051:   const add=(rows,type)=>rows.forEach(x=>sources.push({type,title:x.title||x.actualTitle||x.recordTitle||x.type||x.subject||type,date:x.date||x.term||x.semester||'',text:[x.title,x.actualTitle,x.recordTitle,x.role,x.detail,x.content,x.summary,x.subject,x.organization].filter(Boolean).join(' · ')}));
+13052:   add(bundle.activities||[],'활동');add(bundle.programs||[],'프로그램');add(bundle.reports||[],'보고서');add(bundle.selected||[],'선택과목');add(bundle.volunteer||[],'봉사');add(bundle.volunteers||[],'봉사');
+13053:   const goals=[[1,'빈곤',/빈곤|복지|취약|기부/],[2,'기아 종식',/기아|식량|급식|농업/],[3,'건강과 웰빙',/건강|의료|보건|심리|치유|운동/],[4,'양질의 교육',/교육|학습|수업|문해|멘토/],[5,'성평등',/성평등|젠더|여성|차별/],[6,'깨끗한 물',/물|수질|위생/],[7,'깨끗한 에너지',/에너지|태양광|전력|재생/],[8,'양질의 일자리',/일자리|노동|경제성장|직업/],[9,'산업·혁신·인프라',/산업|혁신|인프라|기술|공학|인공지능|반도체/],[10,'불평등 감소',/불평등|격차|인권|포용/],[11,'지속가능한 도시',/도시|교통|주거|지역사회/],[12,'책임 있는 소비와 생산',/소비|생산|재활용|폐기물|플라스틱/],[13,'기후행동',/기후|탄소|온난화|환경/],[14,'해양생태계',/해양|바다|수산|미세플라스틱/],[15,'육상생태계',/생태|생물다양성|산림|동물|식물/],[16,'평화·정의·제도',/평화|정의|법|민주|갈등|윤리/],[17,'파트너십',/협력|연대|공동체|국제|유네스코/]];
+13054:   const cards=goals.map(([no,name,rx])=>{const found=sources.filter(s=>rx.test(s.text)).slice(0,8);const state=found.some(s=>s.type==='보고서'||String(s.text).length>45)?'confirmed':found.length?'possible':'empty';return {no,name,found,state};});
+13055:   const confirmed=cards.filter(x=>x.state==='confirmed').length,possible=cards.filter(x=>x.state==='possible').length;
+13056:   return `<section class="sdgs-live-evidence"><header><div><small>LIVE EVIDENCE MAP</small><h3>SDGs 실제 근거 연결</h3><p>보고서 유무와 관계없이 활동·봉사·프로그램·선택과목의 실제 학생 자료를 함께 읽습니다.</p></div><span>${confirmed}개 확인 · ${possible}개 연결 가능</span></header><div class="sdgs-live-grid">${cards.map(c=>`<details class="${c.state}"><summary><b>SDG ${c.no}</b><span>${escapeHtml(c.name)}</span><i>${c.state==='confirmed'?'근거 확인':c.state==='possible'?'연결 가능':'근거 없음'}</i></summary>${c.found.length?`<div>${c.found.map(x=>`<article><b>${escapeHtml(x.title)}</b><small>${escapeHtml([x.type,x.date].filter(Boolean).join(' · '))}</small><p>${escapeHtml(x.text)}</p></article>`).join('')}</div>`:'<p>현재 연결된 학생 자료에서 직접 근거를 찾지 못했습니다.</p>'}</details>`).join('')}</div></section>`;
+13057: }
+13058: const __uepRecordsBefore08106=recordsView;
+13059: recordsView=function(){if(recordMode==='curriculum')return uepCurriculumFinalView();const base=__uepRecordsBefore08106();if(recordMode==='sdgs'){const supplement=uepSdgsSupplementPanel(),clean=base.replace(supplement,'');return clean.replace(/<\/div>\s*$/,uepSdgsEvidenceBridge()+supplement+'</div>');}return base;};
+13060: function bindSelectionAnalysis(){
+13061:   $$('[data-curriculum-workspace]').forEach(b=>b.onclick=async()=>{const next=b.dataset.curriculumWorkspace;if(next==='subjects'&&!(await unlockSubjectConfidential()))return;curriculumWorkspaceMode=next;render('records');});
+13062:   $$('[data-record-class]').forEach(b=>b.onclick=()=>{recordClassNo=b.dataset.recordClass;recordStudentId='';render('records');});
+13063:   $$('[data-record-query]').forEach(b=>b.onclick=()=>{recordQueryMode=b.dataset.recordQuery||'class';render('records');});
+13064:   $$('[data-record-student]').forEach(b=>b.onclick=()=>openCurriculumStudentSidePanel(b.dataset.recordStudent));
+13065:   $('[data-curriculum-error-only]')?.addEventListener('click',()=>{curriculumErrorOnly=!curriculumErrorOnly;render('records');});
+13066:   $('[data-curriculum-error-type]')?.addEventListener('change',e=>{curriculumErrorType=e.target.value;render('records');});
+13067:   $$('[data-curriculum-term]').forEach(b=>b.onclick=()=>{curriculumTermFilter=b.dataset.curriculumTerm;curriculumSubjectKey='';render('records');});
+13068:   $$('[data-curriculum-subject]').forEach(b=>b.onclick=()=>{curriculumSubjectKey=b.dataset.curriculumSubject;render('records');});
+13069:   $$('[data-roster-sort]').forEach(b=>b.onclick=()=>{curriculumRosterSort=b.dataset.rosterSort;render('records');});
+13070:   $('[data-copy-current-selection-sms]')?.addEventListener('click',async()=>{try{await navigator.clipboard.writeText($('#currentSelectionSms')?.value||'');toast('보완 문자메시지를 복사했습니다.');}catch{toast('문자 복사에 실패했습니다.');}});
+13071:   $('[data-open-student-picker]')?.addEventListener('click',()=>{const m=$('.uep-picker-menu');if(m)m.hidden=!m.hidden;});
+13072:   $('[data-uep-student-search]')?.addEventListener('input',e=>{$$('.uep-picker-menu [data-record-student]').forEach(b=>b.hidden=!b.textContent.includes(e.target.value));});
+13073:   const navData=uepSelectionDataset(),navAll=navData.rows.filter(uepSelectionActiveRow08129),navScope=String(recordClassNo)==='all'?navAll:navAll.filter(r=>recordStudentClass(r.__student)===String(recordClassNo)),navRows=navScope.filter(r=>{const es=navData.errors.filter(e=>e.student.id===r.__student.id);return(!curriculumErrorOnly||es.length)&&(curriculumErrorType==='all'||es.some(e=>e.type===curriculumErrorType));}),classRows=navRows.length?navRows:navScope,idx=classRows.findIndex(r=>r.__student.id===recordStudentId);$('[data-uep-student-prev]')?.addEventListener('click',()=>{if(classRows.length){const p=idx<0?0:(idx-1+classRows.length)%classRows.length;recordStudentId=classRows[p].__student.id;render('records');}});$('[data-uep-student-next]')?.addEventListener('click',()=>{if(classRows.length){const n=idx<0?0:(idx+1)%classRows.length;recordStudentId=classRows[n].__student.id;render('records');}});
+13074:   $('[data-copy-sdgs-supplement]')?.addEventListener('click',async()=>{try{await navigator.clipboard.writeText($('#sdgsSupplementText')?.value||'');toast('SDGs 근거 보완 질문을 복사했습니다.');}catch{toast('복사에 실패했습니다.');}});
+13075: }
+13076: 
+13077: 
+13078: // __UEP_SELECTION_CACHE_08113__
+13079: let __uepSelectionCache08113={students:null,rows:null,scores:null,dorm:null,value:null};
+13080: const __uepSelectionDatasetRaw08113=uepSelectionDataset;
+13081: uepSelectionDataset=function(){
+13082:   const students=readonlyCache?.students||[],rows=readonlyCache?.selectionStudentRows||[],scores=readonlyCache?.scoreRecords||[],dorm=readonlyCache?.dormStudents||[];
+## settingsView
+line=4208
+4200:   if(sessionStorage.getItem(UEP_SUBJECT_CONFIDENTIAL_SESSION_KEY)==='1')return true;
+4201:   if(!subjectConfidentialPasswordConfigured()){toast(subjectConfidentialAllowed()?'설정 → 사용자·보안에서 선택과목 대외비 비밀번호를 먼저 설정해 주세요.':'관리자가 아직 선택과목 열람 비밀번호를 공용 설정하지 않았습니다.');return false;}
+4202:   const result=await sensitivePasswordModal({mode:'unlock',configured:true,kind:'subject'});
+4203:   if(!result)return false;
+4204:   if(await subjectConfidentialDigest(result.first)!==subjectConfidentialPasswordHash()){toast('선택과목 대외비 비밀번호가 일치하지 않습니다.');return false;}
+4205:   sessionStorage.setItem(UEP_SUBJECT_CONFIDENTIAL_SESSION_KEY,'1');
+4206:   return true;
+4207: }
+4208: function settingsView() {
+4209:   const connected = Boolean(readonlyCache?.students?.length && !googleConnectionError);
+4210:   const credentialReady = Boolean(googleConnectionStatus?.ok);
+4211:   const googleStatus = connected ? ["구글시트 연결됨", ""] : googleConnectionError ? ["권한·연결 오류", "error"] : credentialReady ? ["권한 확인 필요", "warn"] : ["인증 필요", "warn"];
+4212:   const connectionRows = [
+4213:     ["학생정보", readonlyCache?.students?.length], ["학사생", readonlyCache?.dormStudents?.length], ["학사외출", readonlyCache?.dormOutings?.length],
+4214:     ["성적", readonlyCache?.scoreRecords?.length], ["수능최저", readonlyCache?.admissionMinimums?.length], ["대학입결", readonlyCache?.admissionCuts?.length],
+4215:   ];
+4216:   const neisStatus = neisData?.ok ? (neisData.offline ? ["저장자료 표시", "warn"] : ["실시간 연결됨", ""]) : neisLoading ? ["불러오는 중", "warn"] : ["연결 확인", "error"];
+4217:   const profile=currentUserProfile(), access=currentTeacherAccessScope();
+4218: 
+4219:   const header=(title,desc,badge)=>`${settingsTabsMarkup()}<section class="settings-section-head"><div><small>UEP SETTINGS</small><h2>${title}</h2><p>${desc}</p></div><span>${badge}</span></section>`;
+4220: 
+4221:   if(settingsPanel==="security") return `<div class="module-page settings-v064 settings-final">
+4222:     ${header("사용자·보안","계정 승인과 역할, 민감정보 보호를 관리합니다.","관리자·학년부장")}
+4223:     <article class="setting-card sensitive-security-settings"><div><small>PRIVACY · SECURITY</small><h3>🔒 민감정보 보안</h3><p>교육비지원 · 요보호학생 · 위기학생 상세정보의 열람 비밀번호를 관리합니다.</p><p class="settings-help">상세정보는 1차 블라인드 후 비밀번호 인증을 거쳐 확인하며 인증은 10분 동안 유지됩니다.</p></div><div class="sensitive-security-status"><b>${sensitivePasswordConfigured()?'비밀번호 설정됨':'비밀번호 설정 필요'}</b><button type="button" class="btn primary" data-sensitive-password-set>${sensitivePasswordConfigured()?'비밀번호 변경':'비밀번호 설정'}</button><button type="button" class="btn secondary" data-sensitive-lock>즉시 잠금</button></div></article>
+4224:     <article class="setting-card subject-confidential-security-settings"><div><small>CONFIDENTIAL · CURRICULUM</small><h3>🔐 선택과목 대외비 보안</h3><p>과목별 신청현황 전용 비밀번호를 민감정보 비밀번호와 별도로 관리합니다.</p><p class="settings-help">관리자·학년부장만 설정 및 열람할 수 있으며 담임은 비활성화됩니다.</p></div><div class="sensitive-security-status"><b>${subjectConfidentialPasswordConfigured()?'비밀번호 설정됨':'비밀번호 설정 필요'}</b><button type="button" class="btn primary" data-subject-confidential-password-set ${subjectConfidentialAllowed()?'':'disabled'}>${subjectConfidentialPasswordConfigured()?'비밀번호 변경':'비밀번호 설정'}</button><button type="button" class="btn secondary" data-subject-confidential-lock ${subjectConfidentialAllowed()?'':'disabled'}>즉시 잠금</button></div></article>
+4225:     <article class="setting-card role-settings-card"><div class="connection-title"><div><h3>사용자·권한 프로필</h3><p>현재 로그인 사용자의 역할과 담당 범위를 확인합니다.</p></div><span class="state">${escapeHtml(currentRoleDisplay())}</span></div><div class="user-profile-summary"><div><small>사용자</small><b>${escapeHtml(profile.name||"미설정")}</b></div><div><small>부서</small><b>${escapeHtml(profile.department||"미설정")}</b></div><div><small>조회 범위</small><b>${escapeHtml(access.label)}</b></div></div><p class="safe-note">담임은 학년 자료를 조회할 수 있고 타반 연락정보는 기본 마스킹합니다. 성적·응답·정규화 원천자료는 UEP에서 직접 수정하지 않습니다.</p></article>
+4226:     <article class="setting-card access-control-card"><div class="connection-title"><div><h3>사용자·권한 승인</h3><p>01_사용자계정의 사용여부·역할·담당학년·담임반을 기준으로 로그인과 조회범위를 제어합니다.</p></div><span class="state connected">계정표 승인</span></div><div class="connection-actions"><button class="btn primary" type="button" data-access-control>권한 승인 제어판</button></div><p class="safe-note">신규 사용자 등록은 표준 구글시트에서 관리하고 UEP에서는 승인상태와 역할을 조정합니다.</p></article>
+4227:   </div>`;
+4228: 
+4229:   if(settingsPanel==="operations") return `<div class="module-page settings-v064 settings-final">
+4230:     ${header("알림·운영","실제 운영 중 필요한 알림과 오류 신고만 관리합니다.","운영 설정")}
+4231:     <article class="setting-card mail-alert-settings"><h3>메일 알림</h3><p>필요한 운영 알림만 선택합니다. 발송 기준 시각은 일과운영시간과 연동합니다.</p><div class="mail-alert-grid">${[["dormOuting","학사외출"],["afternoonStudy","오후자습 현황"],["night1","야자1 현황"],["night2","야자2 현황"],["nightException","야간 이상상황"],["nightSummary","야간 종료 종합"]].map(([key,label])=>`<label><input type="checkbox" data-mail-alert="${key}" ${state.settings.mailAlerts?.[key]?"checked":""}> ${label}</label>`).join("")}</div><small>※ 실제 자동메일 발송은 연결된 UEP 데이터처리 메일 트리거가 이 설정값을 읽도록 연동됩니다.</small></article>
+4232:     <article class="setting-card issue-admin-card"><div class="connection-title"><div><h3>오류 신고 관리</h3><p>사용자가 저장한 오류 신고를 확인하고 처리 상태와 수정 버전을 기록합니다.</p></div><span class="state">${(state.issueReports||[]).filter(r=>r.status!=='fixed').length}건 처리 중</span></div><div class="connection-actions"><button class="btn secondary" data-open-issue-report>새 신고 작성</button><button class="btn primary" data-open-issue-manager>신고 관리</button></div><p class="safe-note">현재는 PC 로컬 저장 방식이며 중앙 수집은 관리자 서버 또는 관리 시트 연결 단계에서 확장합니다.</p></article>
+4233:   </div>`;
+4234: 
+4235:   if(settingsPanel==="system") return `<div class="module-page settings-v064 settings-final">
+4236:     ${header("시스템 관리","연결상태·배포 준비·업데이트처럼 평소에는 건드리지 않는 관리 도구입니다.","관리자 점검")}
+4237:     <article class="setting-card health-check-card"><div class="connection-title"><div><h3>연결 진단</h3><p>필수 탭과 주요 데이터가 정상적으로 읽히는지 한 번에 확인합니다.</p></div><span class="state ${googleConnectionError?'error':'connected'}">${googleConnectionError?'확인 필요':'정상'}</span></div><div class="health-list">${connectionHealthRows().map(row=>`<div><span>${row.ok?'✓':'!'}</span><b>${row.name}</b><small>${row.ok?'인식':'확인 필요'}</small></div>`).join('')}</div>${googleConnectionError?`<div class="connection-error-detail"><b>최근 오류</b><span>${escapeHtml(googleConnectionError)}</span></div>`:''}<div class="connection-actions"><button class="btn primary" data-run-health-check>다시 진단</button></div></article>
+4238:     <article class="setting-card"><h3>조회 연결 상태</h3><p>UEP 기준 구글시트에 실제 자료가 있는 항목을 확인합니다.</p>${connectionRows.map(([label,count]) => `<div class="setting-row"><span><b>${label}</b><small>${Number(count || 0).toLocaleString()}건 인식</small></span><span>${count ? "연결" : "자료 확인"}</span></div>`).join("")}</article>
+4239:     <article class="setting-card release-readiness-card"><div class="connection-title"><div><h3>배포 준비 점검</h3><p>교사용 배포 전에 필수 연결·계정·권한·업데이트·API 보호 상태를 확인합니다.</p></div><span class="state ${releaseReadinessRows().every(row=>row.ok)?'connected':'warn'}">${releaseReadinessRows().every(row=>row.ok)?'배포 준비':'확인 필요'}</span></div><div class="health-list release-health-list">${releaseReadinessRows().map(row=>`<div><span>${row.ok?'✓':'!'}</span><b>${escapeHtml(row.name)}</b><small>${escapeHtml(row.note)}</small></div>`).join('')}</div><div class="connection-actions"><button class="btn primary" type="button" data-access-control>권한 점검</button><button class="btn secondary" data-run-health-check>연결 다시 진단</button></div><p class="safe-note">자동 설치·롤백은 현재 비활성화되어 있습니다.</p></article>
+4240:     <article class="setting-card update-settings-card"><div class="connection-title"><div><h3>UEP 업데이트</h3><p>현재 버전 ${APP_VERSION} · 담임 배포판부터는 앱 내부 업데이트 채널을 사용합니다.</p></div><span class="state connected">업데이트 확인 작동</span></div><form id="updateSettingsForm" class="update-settings-form"><input id="updateManifestUrl" type="url" value="${escapeHtml(state.settings.updateManifestUrl||'')}" placeholder="https://.../uep-update.json"><button class="btn secondary" type="submit">주소 저장</button><button class="btn primary" type="button" data-check-update>업데이트 확인</button></form><div class="update-roadmap"><span class="done">① 동일 빌드</span><span class="done">② 버전 확인</span><span class="done">③ 업데이트 채널</span><span class="done">④ 앱 내부 적용·롤백</span></div><div id="updateCheckResult" class="update-check-result"><small>새 버전 확인 → 무결성 검증 → 앱 내부 적용 → 실패 시 이전판 복구 방식입니다.</small></div></article>
+4241:     <article class="setting-card"><div class="connection-title"><div><h3>UEP 정보</h3><p>UNHO Education Platform · Connect Data. Grow Students.</p></div><span class="state">v${APP_VERSION}</span></div><div class="setting-row"><span><b>기준 데이터</b><small>표준 구글시트 연결</small></span><span>${escapeHtml(readonlyCache?.sourceName||'연결 확인')}</span></div></article>
+4242:   </div>`;
+4243: 
+4244:   // 01 기본·연결 — 초기 설치와 연결 문제가 있을 때만 사용하는 영역
+4245:   return `<div class="module-page settings-v064 settings-final">
+4246:     ${header("기본·연결","초기 설치와 데이터 연결, NEIS 연동을 관리합니다.","학교 공용")}
+4247:     <article class="setting-card setup-wizard-card"><div><small>UEP SETUP GUIDE</small><h3>초기 설정 마법사</h3><p>처음 설치하거나 학교·계정·연결 정보를 다시 잡을 때만 사용합니다. 기존 설정은 유지됩니다.</p></div><button class="btn primary" type="button" data-setup-wizard>설정 마법사 시작</button></article>
+4248:     <article class="setting-card connection-overview"><div class="connection-title"><div><h3>UEP 구글시트 연결</h3><p>표준 구글시트를 조회하고 허용된 운영정보만 안전하게 양방향 수정합니다.</p></div><span class="state ${googleStatus[1]}">${googleStatus[0]}</span></div><div class="readonly-rule"><b>현재 기준</b><span>${escapeHtml(readonlyCache?.sourceName || "2026_운호고_UEP_DB_v1.0_Dev")} · 학생ID 기준 결합</span></div>${googleConnectionError ? `<div class="connection-error-detail"><b>오류 내용</b><span>${escapeHtml(googleConnectionError)}</span></div>` : ""}<div class="connection-actions"><button class="btn secondary" data-oauth-guide>${credentialReady ? "서비스 계정 JSON 변경" : "서비스 계정 JSON 등록"}</button><button class="btn primary" data-readonly-sync>지금 새로고침</button></div><p class="safe-note">서비스 계정 JSON은 Windows 보안 저장소에 암호화하여 보관합니다.</p></article>
+4249:     <article class="setting-card neis-settings-card"><div class="connection-title"><div><h3>NEIS 급식·시간표</h3><p>학교명으로 학교코드를 찾아 급식과 학급 시간표를 자동 조회합니다.</p></div><span class="state ${neisStatus[1]}">${neisStatus[0]}</span></div><form id="neisSettingsForm" class="neis-settings-form"><label>학교명<input id="neisSchoolName" required value="${escapeHtml(state.settings.neis.schoolName)}"></label><label>학년<select id="neisGrade">${[1,2,3].map((value) => `<option ${String(value) === String(state.settings.neis.grade) ? "selected" : ""}>${value}</option>`).join("")}</select></label><label>반<select id="neisClass">${Array.from({length:9},(_,index)=>index+1).map((value) => `<option ${String(value) === String(state.settings.neis.classNo) ? "selected" : ""}>${value}</option>`).join("")}</select></label><label class="neis-key-label">인증키<input id="neisApiKey" type="password" autocomplete="off" placeholder="${state.settings.neis.apiKeyConfigured?"등록됨 · 변경할 때만 입력":"발급받은 인증키 입력"}"></label><label class="neis-key-toggle"><input id="neisUseApiKey" type="checkbox" ${state.settings.neis.useApiKey?"checked":""}> 인증키 사용</label><button class="btn primary">저장 후 불러오기</button></form>${neisError ? `<div class="connection-error-detail"><b>${neisData?.offline ? "저장자료 안내" : "연결 오류"}</b><span>${escapeHtml(neisError)}</span></div>` : ""}<div class="connection-actions"><button class="btn secondary" data-neis-refresh>NEIS 다시 불러오기</button><button class="btn secondary" data-neis-clear-cache>저장자료 지우기</button></div><p class="safe-note">실시간 연결이 실패하면 마지막 정상 조회자료를 저장자료로 구분해 표시합니다.</p></article>
+4250:   </div>`;
+4251: }
+4252: 
+4253: const helpItems = {
+4254:   start:{title:"처음 시작하기",summary:"자료 연결과 기본 설정",steps:["설정에서 UEP 구글시트와 NEIS 연결 상태를 확인합니다.","사용자 역할과 담당 학년·반을 설정합니다.","대시보드에서 오늘의 업무와 프로그램을 확인합니다."],source:"기본연결시트·데이터처리시트·NEIS"},
+4255:   dashboard:{title:"대시보드",summary:"오늘 필요한 정보 한눈에 보기",steps:["시간·날씨와 개인시간표를 확인합니다.","학교 캘린더에서 월간·주간 일정을 조회합니다.","오늘의 업무·공지와 선택·방과후 프로그램을 확인합니다."],source:"학교캘린더·시간표·프로그램DB"},
+4256:   students:{title:"학생정보",summary:"학생 개인 통합 대시보드",steps:["반과 학생을 선택합니다.","연락정보·성적·활동·선택과목·프로그램 참여를 확인합니다.","보고서 보기는 UEP 내부 미리보기로 열고 필요한 자료만 출력합니다."],source:"기본연결시트·데이터처리시트"},
+4257:   timetable:{title:"시간표",summary:"개인·학급·학생·교사 시간표",steps:["개인시간표에서 자신의 수업을 확인합니다.","학급시간표는 날짜·학년·반을 선택해 NEIS 주간자료를 조회합니다.","원본 누락 진단이 표시되면 자동매칭보다 NEIS 자료 확인을 우선합니다."],source:"NEIS 공개 API·개인시간표DB"},
+4258:   attendance:{title:"출결",summary:"공결·지각·야자출결 통합",steps:["상단에서 공결·지각·야자출결을 선택합니다.","야자출결은 실제 운영일만 이동하며 학사·방과후·야간심화가 우선 표시됩니다.","출결 원본과 정규화 결과가 다르면 원본 응답과 데이터처리시트를 먼저 확인합니다."],source:"구글폼연결시트·데이터처리시트"},
+4259:   scores:{title:"성적",summary:"내신·모의고사 상담자료",steps:["반과 학생, 조회범위를 선택합니다.","내신 변화와 모의고사 등락을 비교합니다.","출력센터에서 A4 상담자료로 출력합니다."],source:"기본연결시트 성적DB"},
+4260:   admissions:{title:"입시",summary:"등급환산·수능최저·입결",steps:["학생의 모의고사 성적을 선택합니다.","대학별 수능최저 충족 가능성을 조회합니다.","환산식과 근거자료를 함께 확인합니다."],source:"수능최저DB·대학입결DB"},
+4261:   records:{title:"생활기록부",summary:"활동 근거부터 최종 기록까지",steps:["활동내역과 SDGs 연계 성장 프로파일을 확인합니다.","자율·진로·종합의견 근거자료를 선택합니다.","규칙 기반 또는 AI 초안을 생성하고 규칙 검토 후 최종 저장합니다."],source:"기본연결시트·보고서 정규화·규칙로그"},
+4262:   programs:{title:"프로그램",summary:"공통·선택·방과후 운영",steps:["공통활동은 자율·진로로 구분해 확인합니다.","선택활동은 명단·출석·보고서·SDGs·사진을 관리합니다.","방과후는 반복일정·결강·보강과 야자출결 영향을 관리합니다."],source:"기본연결시트 프로그램DB"},
+4263:   calendar:{title:"학교 일정",summary:"학년도 일정과 개인 일정",steps:["월간·주간 보기를 전환합니다.","학교·프로그램·개인·미확정 일정을 필터링합니다.","학년도 동기화 후 수정 잠금된 일정은 보존합니다."],source:"학교캘린더"},
+4264:   outputs:{title:"출력센터",summary:"확정자료 선택 출력",steps:["보고서·학생자료·선택과목·출석부·생활기록부·성적 그룹을 선택합니다.","반과 학생 또는 프로그램을 선택합니다.","미리보기 후 PDF·인쇄·Excel을 실행합니다."],source:"확정된 UEP 조회자료"},
+4265:   settings:{title:"설정",summary:"연결·역할·화면·업데이트",steps:["구글시트·NEIS 연결을 관리합니다.","역할과 권한 범위를 확인합니다.","업데이트 정보 주소를 등록하고 새 버전을 확인합니다."],source:"PC 보안저장소·UEP 설정"},
+4266: };
+4267: function helpView() {
+4268:   return `<div class="module-page help-manual-page"><div class="setting-card help-intro"><div><h3>UEP 사용 설명서</h3><p>각 메뉴의 자료 출처와 실제 업무 흐름을 기준으로 설명합니다.</p></div><span>${Object.keys(helpItems).length}개 메뉴</span></div><div class="help-grid">${Object.entries(helpItems).map(([key,item])=>`<article class="help-item"><button class="help-button" data-help="${key}"><span><b>${item.title}</b><small>${item.summary}</small></span><span>${helpOpen===key?"⌃":"⌄"}</span></button>${helpOpen===key?`<div class="help-content"><h4>${item.title}</h4><ol>${item.steps.map(step=>`<li>${step}</li>`).join("")}</ol><p><b>자료 출처:</b> ${item.source}</p><p><b>문제 확인 순서:</b> 원본시트 → 데이터처리시트 → UEP 화면 구현</p></div>`:""}</article>`).join("")}</div></div>`;
+4269: }
+4270: 
+4271: function classNumberOf(student) {
+4272:   return String(student?.className || "").replace(/[^0-9]/g, "");
+4273: }
+4274: function availableClasses() {
+4275:   const found = [...new Set((readonlyCache?.students || []).map(classNumberOf).filter(Boolean))].sort((a,b)=>Number(a)-Number(b));
+4276:   return found.length ? found : Array.from({length:9},(_,i)=>String(i+1));
+4277: }
+4278: function optionStudents(classNo, selectedId = "") {
+4279:   return (readonlyCache?.students || []).filter(s => !classNo || classNumberOf(s) === String(classNo)).map(s => `<option value="${escapeHtml(s.id)}" ${s.id === selectedId ? "selected" : ""}>${escapeHtml(s.studentNo)} ${escapeHtml(s.name)}</option>`).join("");
+4280: }
+4281: 
+4282: function scorePeriodKey(row) {
+4283:   const year = String(row?.schoolYear || today.getFullYear()).replace(/[^0-9]/g, "") || String(today.getFullYear());
+4284:   let semester = String(row?.semester || "").match(/[12]/)?.[0] || "";
+4285:   if (!semester && row?.scoreType === "모의고사") {
+4286:     const month = Number(String(row.exam || "").match(/(\d{1,2})\s*월/)?.[1] || 0);
+4287:     semester = month && month >= 8 ? "2" : "1";
+4288:   }
+4289:   return `${year}-${semester || "1"}`;
+4290: }
+4291: function scorePeriodLabel(key) {
+4292:   if (!key || key === "all") return "전체 누적";
+4293:   const [year, semester] = String(key).split("-");
+4294:   return `${year}학년도 ${semester || "1"}학기`;
+4295: }
+4296: function availableScorePeriods(mode = scoreMode) {
+4297:   const rows = (readonlyCache?.scoreRecords || []).filter(row => mode === "combined" || row.scoreType === (mode === "mock" ? "모의고사" : "내신"));
+4298:   return [...new Set(rows.map(scorePeriodKey).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+4299: }
+4300: function scoreExamOrder(exam) {
+4301:   const order = ["1차고사","2차고사","학기말고사","3월모의고사","6월모의고사","9월모의고사","10월모의고사","11월모의고사","수능"];
+4302:   const index = order.indexOf(exam);
+4303:   return index < 0 ? 999 : index;
+4304: }
+4305: function scoreTrend(row, allRows) {
+4306:   const orders = row.scoreType === "모의고사" ? ["3월모의고사","6월모의고사","9월모의고사","10월모의고사","11월모의고사"] : ["1차고사","2차고사","학기말고사"];
+4307:   const index = orders.indexOf(row.exam);
+4308:   if (index <= 0 || row.level === "" || row.level == null) return { text:"-", cls:"" };
+4309:   const period = scorePeriodKey(row);
+4310:   const previous = allRows.find(x => x.studentId === row.studentId && x.scoreType === row.scoreType && x.subject === row.subject && x.exam === orders[index - 1] && scorePeriodKey(x) === period);
+4311:   if (!previous || previous.level === "" || previous.level == null) return { text:"-", cls:"" };
+4312:   const diff = Number(previous.level) - Number(row.level);
+4313:   if (!Number.isFinite(diff) || diff === 0) return { text:"유지", cls:"" };
+4314:   return diff > 0 ? { text:`▲ ${Math.abs(diff)}등급`, cls:"good" } : { text:`▼ ${Math.abs(diff)}등급`, cls:"bad" };
+4315: }
+4316: function gradeToneClass(value) {
+4317:   const grade = Number(value);
+4318:   return Number.isFinite(grade) && grade >= 1 && grade <= 9 ? `grade-${grade}` : "grade-na";
+4319: }
+4320: function gradeBadgeMarkup(value, suffix = "등급") {
+4321:   if (value === "" || value === null || value === undefined || value === "-") return `<span class="grade-badge grade-na">-</span>`;
+4322:   const number = Number(value);
+4323:   if (!Number.isFinite(number)) return `<span class="grade-badge grade-na">${escapeHtml(String(value))}</span>`;
+4324:   return `<span class="grade-badge ${gradeToneClass(number)}"><b>${scoreDisplay(number,2)}</b><small>${suffix}</small></span>`;
+4325: }
+4326: function mockGradeMiniMarkup(studentId, exam) {
+4327:   const order = ["국어", "수학", "영어", "한국사"];
+4328:   const rows = (readonlyCache?.scoreRecords || []).filter(row => row.studentId === studentId && row.scoreType === "모의고사" && row.exam === exam);
+4329:   if (!rows.length) return `<span class="mock-grade-empty">자료 없음</span>`;
+4330:   const sorted = rows.slice().sort((a,b)=>{
+4331:     const ai=order.indexOf(a.subject), bi=order.indexOf(b.subject);
+4332:     if(ai>=0||bi>=0) return (ai<0?99:ai)-(bi<0?99:bi);
+4333:     return String(a.subject).localeCompare(String(b.subject),"ko");
+4334:   });
+4335:   return `<div class="mock-grade-mini-strip">${sorted.map(row=>`<span><small>${escapeHtml(row.subject)}</small><b class="${gradeToneClass(row.level)}">${escapeHtml(String(row.level || "-"))}</b></span>`).join("")}</div>`;
+4336: }
+4337: function scoreTableMarkup(rows, mode = scoreMode) {
+4338:   const coreOrder = mode === "mock" ? ["국어","수학","영어","한국사"] : ["공통국어1","공통수학1","공통영어1","한국사1","통합사회1","통합과학1","한문","과학탐구실험1","체육1","음악"];
+4339:   const subjects = [...new Set(rows.map(row=>row.subject).filter(Boolean))].sort((a,b)=>{
+4340:     const ai=coreOrder.indexOf(a), bi=coreOrder.indexOf(b);
+4341:     if(ai>=0||bi>=0) return (ai<0?999:ai)-(bi<0?999:bi);
+4342:     return a.localeCompare(b,"ko");
+4343:   });
+4344:   const groups = new Map();
+4345:   rows.forEach(row=>{
+4346:     const period = scorePeriodKey(row);
+4347:     const key=`${row.studentId}|${period}|${row.exam}`;
+4348:     if(!groups.has(key)) groups.set(key,{studentId:row.studentId,studentNo:row.studentNo,name:row.name,period,exam:row.exam,items:new Map()});
+4349:     groups.get(key).items.set(row.subject,row);
+4350:   });
+4351:   const grouped=[...groups.values()].sort((a,b)=>String(a.studentNo).localeCompare(String(b.studentNo)) || a.period.localeCompare(b.period) || scoreExamOrder(a.exam)-scoreExamOrder(b.exam) || String(a.exam).localeCompare(String(b.exam),"ko"));
+4352:   const cell=(row)=>{
+4353:     if(!row) return `<td class="empty-score-cell">-</td>`;
+4354:     const trend=scoreTrend(row,readonlyCache?.scoreRecords||[]);
+4355:     const trendMarkup=trend.text!=="-"?`<em class="trend ${trend.cls}">${trend.text}</em>`:"";
+4356:     if(row.scoreType==="모의고사") return `<td><div class="score-cell-primary">${gradeBadgeMarkup(row.level)}${trendMarkup}</div><small>원점수 ${scoreDisplay(row.rawScore)} · 표준 ${scoreDisplay(row.standardScore)}${row.percentile!==""?` · 백분위 ${scoreDisplay(row.percentile)}`:""}</small></td>`;
+4357:     const gradeValue = row.level === "산출제외" ? (row.achievement || "산출제외") : row.level;
+4358:     return `<td><div class="score-cell-primary">${gradeBadgeMarkup(gradeValue, Number.isFinite(Number(gradeValue))?"등급":"")}${trendMarkup}</div><small>원점수 ${scoreDisplay(row.rawScore)} · 석차 ${escapeHtml(String(row.rank||"-"))}/${escapeHtml(String(row.enrollment||"-"))}${row.achievement?` · ${escapeHtml(row.achievement)}`:""}</small></td>`;
+4359:   };
+4360:   const title = mode === "mock" ? "모의고사 과목별 등급" : "내신 과목별 등급";
+4361:   return `<div class="data-card score-matrix-card"><div class="card-head"><div><strong>${title}</strong></div><small>전체 누적 또는 선택 학기를 표시합니다.</small></div><div class="score-matrix-scroll"><table class="score-matrix-table"><thead><tr><th class="student-col">학생</th><th class="exam-col">학기·시험</th>${subjects.map(subject=>`<th>${escapeHtml(subject)}</th>`).join("")}</tr></thead><tbody>${grouped.map(group=>`<tr><th class="student-col"><b>${escapeHtml(group.studentNo)}</b><small>${escapeHtml(group.name)}</small></th><th class="exam-col"><b>${escapeHtml(scorePeriodLabel(group.period).replace("학년도 ","· "))}</b><small>${escapeHtml(group.exam)}</small></th>${subjects.map(subject=>cell(group.items.get(subject))).join("")}</tr>`).join("")}</tbody></table></div></div>`;
+4362: }
+4363: 
+4364: function scoreDisplay(value, digits = 1) {
+4365:   if (value === "" || value === null || value === undefined || value === "-") return "-";
+4366:   const number = Number(value);
+4367:   if (!Number.isFinite(number)) return escapeHtml(String(value));
+4368:   return Number.isInteger(number) ? String(number) : number.toFixed(digits).replace(/\.0+$/, "");
+4369: }
+4370: function scoreAverage(rows) {
+4371:   const values = rows.filter((row) => row.level !== "" && row.level !== null && row.level !== undefined).map((row) => Number(row.level)).filter(Number.isFinite);
+4372:   return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+4373: }
+4374: function combinedScoreDashboardMarkup(student, rows) {
+4375:   const allRows = readonlyCache?.scoreRecords || [];
+4376:   const scopedRows = Array.isArray(rows) ? rows.filter(row=>row.studentId===student.id) : allRows.filter(row=>row.studentId===student.id);
+4377:   const internal = scopedRows.filter((row) => row.scoreType === "내신");
+4378:   const mock = scopedRows.filter((row) => row.scoreType === "모의고사");
+4379:   const internalPeriods = [...new Set(internal.map(scorePeriodKey))].sort();
+4380:   const latestInternalPeriod = internalPeriods.at(-1) || "";
+4381:   const summaryInternal = scorePeriod === "all" && latestInternalPeriod ? internal.filter(row=>scorePeriodKey(row)===latestInternalPeriod) : internal;
+4382:   const periodLabel = scorePeriodLabel(scorePeriod);
+4383:   const coreInternalOrder = ["공통국어1","공통수학1","공통영어1","한국사1","통합사회1","통합과학1","한문","과학탐구실험1","체육1","음악"];
+4384:   const internalSubjects = [...new Set(summaryInternal.map((row) => row.subject).filter(Boolean))].sort((a, b) => {
+4385:     const ai = coreInternalOrder.indexOf(a), bi = coreInternalOrder.indexOf(b);
+4386:     if (ai >= 0 || bi >= 0) return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi);
+4387:     return a.localeCompare(b, "ko");
+4388:   });
+4389:   const byInternal = (subject, exam) => summaryInternal.find((row) => row.subject === subject && row.exam === exam);
+4390:   const internalRows = internalSubjects.map((subject) => {
+4391:     const first = byInternal(subject, "1차고사"), second = byInternal(subject, "2차고사"), final = byInternal(subject, "학기말고사");
+4392:     const finalGrade = final?.level === "산출제외" ? (final?.achievement || "산출제외") : final?.level;
+4393:     return `<div class="consult-score-row consult-internal-grid"><b>${escapeHtml(subject)}</b><span>${gradeBadgeMarkup(first?.level)}</span><span>${scoreDisplay(first?.rawScore)}</span><span>${gradeBadgeMarkup(second?.level)}</span><span>${scoreDisplay(second?.rawScore)}</span><span>${gradeBadgeMarkup(finalGrade,Number.isFinite(Number(finalGrade))?"등급":"")}${final?.achievement&&Number.isFinite(Number(finalGrade))?`<small>${escapeHtml(final.achievement)}</small>`:""}</span><span>${scoreDisplay(final?.rawScore)}</span></div>`;
+4394:   }).join("") || `<div class="consult-empty">선택 범위의 내신 성적이 없습니다.</div>`;
+4395: 
+4396:   const mockExamList = [...new Set(mock.map(row=>row.exam).filter(Boolean))].sort((a,b)=>scoreExamOrder(a)-scoreExamOrder(b)||a.localeCompare(b,"ko"));
+4397:   const summaryMockExams = mockExamList.slice(-2);
+4398:   const firstMockExam = summaryMockExams[0] || "3월모의고사";
+4399:   const secondMockExam = summaryMockExams[1] || summaryMockExams[0] || "6월모의고사";
+4400:   const coreMockOrder = ["국어","수학","영어","한국사"];
+4401:   const mockSubjects = [...new Set(mock.filter(row=>summaryMockExams.includes(row.exam)).map((row) => row.subject).filter(Boolean))].sort((a,b)=>{
+4402:     const ai=coreMockOrder.indexOf(a),bi=coreMockOrder.indexOf(b); return (ai<0?99:ai)-(bi<0?99:bi)||a.localeCompare(b,"ko");
+4403:   });
+4404:   const byMock = (subject, exam) => mock.find(row=>row.subject===subject&&row.exam===exam);
+4405:   const mockRows = mockSubjects.map(subject=>{
+4406:     const first=byMock(subject,firstMockExam), second=byMock(subject,secondMockExam);
+4407:     const trend = first && second && Number.isFinite(Number(first.level)) && Number.isFinite(Number(second.level)) ? Number(first.level)-Number(second.level) : null;
+4408:     const trendText = trend == null ? "" : trend > 0 ? `<small class="trend good">▲${Math.abs(trend)}등급</small>` : trend < 0 ? `<small class="trend bad">▼${Math.abs(trend)}등급</small>` : `<small class="trend">유지</small>`;
+4409:     return `<div class="consult-score-row consult-mock-grid"><b>${escapeHtml(subject)}</b><span>${gradeBadgeMarkup(first?.level)}</span><span>${scoreDisplay(first?.rawScore)}</span><span>${scoreDisplay(first?.standardScore)}</span><span>${gradeBadgeMarkup(second?.level)}${trendText}</span><span>${scoreDisplay(second?.rawScore)}</span><span>${scoreDisplay(second?.standardScore)}</span></div>`;
+4410:   }).join("") || `<div class="consult-empty">선택 범위의 모의고사 성적이 없습니다.</div>`;
+4411: 
+4412:   const finalInternal = internal.filter(row=>row.exam==="학기말고사");
+4413:   const semesterSource = finalInternal.length ? finalInternal : internal;
+4414:   const yearValues = semesterSource.map(row=>Number(row.schoolYear)).filter(Number.isFinite);
+4415:   const firstYear = yearValues.length ? Math.min(...yearValues) : Number(String(today.getFullYear()));
+4416:   const semesterSlots=["1-1","1-2","2-1","2-2","3-1","3-2"], semesterAverages=new Map();
+4417:   semesterSource.forEach(row=>{const year=Number(row.schoolYear);const grade=Number.isFinite(year)?Math.max(1,Math.min(3,year-firstYear+1)):1;const sem=String(row.semester||"1").match(/[12]/)?.[0]||"1";const key=`${grade}-${sem}`;if(!semesterAverages.has(key))semesterAverages.set(key,[]);if(Number.isFinite(Number(row.level)))semesterAverages.get(key).push(Number(row.level));});
+4418:   const semesterCells=semesterSlots.map(slot=>{const values=semesterAverages.get(slot)||[];const average=values.length?(values.reduce((a,b)=>a+b,0)/values.length).toFixed(2):"-";return `<span><b>${slot}</b><em>${average}</em></span>`;}).join("");
+4419:   const cumulative=scoreAverage(semesterSource);
+4420:   const latestInternalExam = ["학기말고사","2차고사","1차고사"].find(exam=>summaryInternal.some(row=>row.exam===exam)) || "내신";
+4421:   const latestInternalRows=summaryInternal.filter(row=>row.exam===latestInternalExam);
+4422:   const latestInternalAverage=scoreAverage(latestInternalRows.length?latestInternalRows:summaryInternal);
+4423:   const mockGradeCard=(exam)=>{const examRows=mock.filter(row=>row.exam===exam).sort((a,b)=>{const ai=coreMockOrder.indexOf(a.subject),bi=coreMockOrder.indexOf(b.subject);return (ai<0?99:ai)-(bi<0?99:bi)||String(a.subject).localeCompare(String(b.subject),"ko");});return `<span class="mock-grade-metric"><small>${escapeHtml(exam)}</small><div>${examRows.map(row=>`<i title="${escapeHtml(row.subject)}">${escapeHtml(String(row.subject).replace("통합","").slice(0,2))}${gradeBadgeMarkup(row.level)}</i>`).join("")||"<em>-</em>"}</div><em>과목별 등급</em></span>`;};
+4424: 
+4425:   const baseFirst=admissionBase(student.id,firstMockExam), baseSecond=admissionBase(student.id,secondMockExam);
+4426:   const rules=readonlyCache?.admissionMinimums||[];
+4427:   const cutRows=(readonlyCache?.admissionCuts||[]).map(cut=>({...cut,diff:baseSecond.actual9==null?null:baseSecond.actual9-Number(cut.cut)})).filter(cut=>cut.diff==null||Number.isFinite(cut.diff)).sort((a,b)=>Math.abs(a.diff??99)-Math.abs(b.diff??99));
+4428:   const uniqueCuts=[],seenCuts=new Set();for(const cut of cutRows){const key=`${cut.university}|${cut.unit}|${cut.name}`;if(seenCuts.has(key))continue;seenCuts.add(key);uniqueCuts.push(cut);if(uniqueCuts.length>=7)break;}
+## bindSettings
+line=0
+## subjectConfidentialPasswordHash
+line=4174
+4166:   const role=String(currentRoleId?.()||'');
+4167:   return ['admin','grade_head'].includes(role)||['관리자','학년부장'].includes(String(currentRoleDisplay?.()||''));
+4168: }
+4169: function subjectConfidentialSharedHash(){
+4170:   const rows=Array.isArray(readonlyCache?.settings)?readonlyCache.settings:[];
+4171:   const hit=rows.find(r=>String(r?.key||r?.settingKey||r?.['설정키']||'').trim()==='SUBJECT_CONFIDENTIAL_PIN_HASH');
+4172:   return String(hit?.value||hit?.settingValue||hit?.['설정값']||'').trim();
+4173: }
+4174: function subjectConfidentialPasswordHash(){const central=typeof uepSharedSettingValue08166==='function'?String(uepSharedSettingValue08166('SUBJECT_CONFIDENTIAL_PIN_HASH')||'').trim():'';return central||subjectConfidentialSharedHash()||String(localStorage.getItem(UEP_SUBJECT_CONFIDENTIAL_PIN_KEY)||'');}
+4175: function subjectConfidentialPasswordConfigured(){return !!subjectConfidentialPasswordHash();}
+4176: async function subjectConfidentialDigest(value){const bytes=new TextEncoder().encode(String(value||''));const hash=await crypto.subtle.digest('SHA-256',bytes);return [...new Uint8Array(hash)].map(x=>x.toString(16).padStart(2,'0')).join('');}
+4177: async function setSubjectConfidentialPassword(){
+4178:   // 0.81.46: Electron에서 차단될 수 있는 prompt 대신 검증된 보안 전용 모달을 사용합니다.
+4179:   if(!subjectConfidentialAllowed()){toast('관리자·학년부장 권한에서 설정할 수 있습니다.');return false;}
+4180:   const configured=subjectConfidentialPasswordConfigured();
+4181:   const result=await sensitivePasswordModal({mode:'set',configured});
+4182:   if(!result)return false;
+4183:   if(configured&&await subjectConfidentialDigest(result.current)!==subjectConfidentialPasswordHash()){
+4184:     toast('현재 선택과목 비밀번호가 일치하지 않습니다.');return false;
+4185:   }
+4186:   localStorage.setItem(UEP_SUBJECT_CONFIDENTIAL_PIN_KEY,await subjectConfidentialDigest(result.first));
+4187:   lockSubjectConfidential();
+4188:   toast('선택과목 신청현황 비밀번호를 저장했습니다.');
+4189:   if(state.activePage==='settings')render('settings');
+4190:   return true;
+4191: }
+4192: function lockSubjectConfidential(){sessionStorage.removeItem(UEP_SUBJECT_CONFIDENTIAL_SESSION_KEY);}
+4193: async function unlockSubjectConfidential(){
+4194:   if(!subjectConfidentialPasswordConfigured()&&typeof uepLoadSharedSecurity08168==='function')await uepLoadSharedSecurity08168(true);
+4195:   // __UEP_08159_HOMEROOM_SUBJECT_GATE__
+4196:   const scope=typeof currentTeacherAccessScope==='function'?currentTeacherAccessScope():null;
+4197:   const role=String(currentRoleId?.()||'');
+4198:   const homeroomAllowed=role==='homeroom'||Boolean(scope?.teacher&&scope?.classNo);
+4199:   if(!subjectConfidentialAllowed()&&!homeroomAllowed){toast('담임·학년부장·관리자는 비밀번호 인증 후 과목별 신청현황을 열람할 수 있습니다.');return false;}
+4200:   if(sessionStorage.getItem(UEP_SUBJECT_CONFIDENTIAL_SESSION_KEY)==='1')return true;
+4201:   if(!subjectConfidentialPasswordConfigured()){toast(subjectConfidentialAllowed()?'설정 → 사용자·보안에서 선택과목 대외비 비밀번호를 먼저 설정해 주세요.':'관리자가 아직 선택과목 열람 비밀번호를 공용 설정하지 않았습니다.');return false;}
+4202:   const result=await sensitivePasswordModal({mode:'unlock',configured:true,kind:'subject'});
+4203:   if(!result)return false;
+4204:   if(await subjectConfidentialDigest(result.first)!==subjectConfidentialPasswordHash()){toast('선택과목 대외비 비밀번호가 일치하지 않습니다.');return false;}
+4205:   sessionStorage.setItem(UEP_SUBJECT_CONFIDENTIAL_SESSION_KEY,'1');
+4206:   return true;
+4207: }
+4208: function settingsView() {
+4209:   const connected = Boolean(readonlyCache?.students?.length && !googleConnectionError);
+4210:   const credentialReady = Boolean(googleConnectionStatus?.ok);
+4211:   const googleStatus = connected ? ["구글시트 연결됨", ""] : googleConnectionError ? ["권한·연결 오류", "error"] : credentialReady ? ["권한 확인 필요", "warn"] : ["인증 필요", "warn"];
+4212:   const connectionRows = [
+4213:     ["학생정보", readonlyCache?.students?.length], ["학사생", readonlyCache?.dormStudents?.length], ["학사외출", readonlyCache?.dormOutings?.length],
+4214:     ["성적", readonlyCache?.scoreRecords?.length], ["수능최저", readonlyCache?.admissionMinimums?.length], ["대학입결", readonlyCache?.admissionCuts?.length],
+4215:   ];
+4216:   const neisStatus = neisData?.ok ? (neisData.offline ? ["저장자료 표시", "warn"] : ["실시간 연결됨", ""]) : neisLoading ? ["불러오는 중", "warn"] : ["연결 확인", "error"];
+4217:   const profile=currentUserProfile(), access=currentTeacherAccessScope();
+4218: 
+4219:   const header=(title,desc,badge)=>`${settingsTabsMarkup()}<section class="settings-section-head"><div><small>UEP SETTINGS</small><h2>${title}</h2><p>${desc}</p></div><span>${badge}</span></section>`;
+4220: 
+4221:   if(settingsPanel==="security") return `<div class="module-page settings-v064 settings-final">
+4222:     ${header("사용자·보안","계정 승인과 역할, 민감정보 보호를 관리합니다.","관리자·학년부장")}
+4223:     <article class="setting-card sensitive-security-settings"><div><small>PRIVACY · SECURITY</small><h3>🔒 민감정보 보안</h3><p>교육비지원 · 요보호학생 · 위기학생 상세정보의 열람 비밀번호를 관리합니다.</p><p class="settings-help">상세정보는 1차 블라인드 후 비밀번호 인증을 거쳐 확인하며 인증은 10분 동안 유지됩니다.</p></div><div class="sensitive-security-status"><b>${sensitivePasswordConfigured()?'비밀번호 설정됨':'비밀번호 설정 필요'}</b><button type="button" class="btn primary" data-sensitive-password-set>${sensitivePasswordConfigured()?'비밀번호 변경':'비밀번호 설정'}</button><button type="button" class="btn secondary" data-sensitive-lock>즉시 잠금</button></div></article>
+4224:     <article class="setting-card subject-confidential-security-settings"><div><small>CONFIDENTIAL · CURRICULUM</small><h3>🔐 선택과목 대외비 보안</h3><p>과목별 신청현황 전용 비밀번호를 민감정보 비밀번호와 별도로 관리합니다.</p><p class="settings-help">관리자·학년부장만 설정 및 열람할 수 있으며 담임은 비활성화됩니다.</p></div><div class="sensitive-security-status"><b>${subjectConfidentialPasswordConfigured()?'비밀번호 설정됨':'비밀번호 설정 필요'}</b><button type="button" class="btn primary" data-subject-confidential-password-set ${subjectConfidentialAllowed()?'':'disabled'}>${subjectConfidentialPasswordConfigured()?'비밀번호 변경':'비밀번호 설정'}</button><button type="button" class="btn secondary" data-subject-confidential-lock ${subjectConfidentialAllowed()?'':'disabled'}>즉시 잠금</button></div></article>
+4225:     <article class="setting-card role-settings-card"><div class="connection-title"><div><h3>사용자·권한 프로필</h3><p>현재 로그인 사용자의 역할과 담당 범위를 확인합니다.</p></div><span class="state">${escapeHtml(currentRoleDisplay())}</span></div><div class="user-profile-summary"><div><small>사용자</small><b>${escapeHtml(profile.name||"미설정")}</b></div><div><small>부서</small><b>${escapeHtml(profile.department||"미설정")}</b></div><div><small>조회 범위</small><b>${escapeHtml(access.label)}</b></div></div><p class="safe-note">담임은 학년 자료를 조회할 수 있고 타반 연락정보는 기본 마스킹합니다. 성적·응답·정규화 원천자료는 UEP에서 직접 수정하지 않습니다.</p></article>
+4226:     <article class="setting-card access-control-card"><div class="connection-title"><div><h3>사용자·권한 승인</h3><p>01_사용자계정의 사용여부·역할·담당학년·담임반을 기준으로 로그인과 조회범위를 제어합니다.</p></div><span class="state connected">계정표 승인</span></div><div class="connection-actions"><button class="btn primary" type="button" data-access-control>권한 승인 제어판</button></div><p class="safe-note">신규 사용자 등록은 표준 구글시트에서 관리하고 UEP에서는 승인상태와 역할을 조정합니다.</p></article>
+4227:   </div>`;
+4228: 
+4229:   if(settingsPanel==="operations") return `<div class="module-page settings-v064 settings-final">
+4230:     ${header("알림·운영","실제 운영 중 필요한 알림과 오류 신고만 관리합니다.","운영 설정")}
+4231:     <article class="setting-card mail-alert-settings"><h3>메일 알림</h3><p>필요한 운영 알림만 선택합니다. 발송 기준 시각은 일과운영시간과 연동합니다.</p><div class="mail-alert-grid">${[["dormOuting","학사외출"],["afternoonStudy","오후자습 현황"],["night1","야자1 현황"],["night2","야자2 현황"],["nightException","야간 이상상황"],["nightSummary","야간 종료 종합"]].map(([key,label])=>`<label><input type="checkbox" data-mail-alert="${key}" ${state.settings.mailAlerts?.[key]?"checked":""}> ${label}</label>`).join("")}</div><small>※ 실제 자동메일 발송은 연결된 UEP 데이터처리 메일 트리거가 이 설정값을 읽도록 연동됩니다.</small></article>
+4232:     <article class="setting-card issue-admin-card"><div class="connection-title"><div><h3>오류 신고 관리</h3><p>사용자가 저장한 오류 신고를 확인하고 처리 상태와 수정 버전을 기록합니다.</p></div><span class="state">${(state.issueReports||[]).filter(r=>r.status!=='fixed').length}건 처리 중</span></div><div class="connection-actions"><button class="btn secondary" data-open-issue-report>새 신고 작성</button><button class="btn primary" data-open-issue-manager>신고 관리</button></div><p class="safe-note">현재는 PC 로컬 저장 방식이며 중앙 수집은 관리자 서버 또는 관리 시트 연결 단계에서 확장합니다.</p></article>
+4233:   </div>`;
+4234: 
+4235:   if(settingsPanel==="system") return `<div class="module-page settings-v064 settings-final">
+4236:     ${header("시스템 관리","연결상태·배포 준비·업데이트처럼 평소에는 건드리지 않는 관리 도구입니다.","관리자 점검")}
+4237:     <article class="setting-card health-check-card"><div class="connection-title"><div><h3>연결 진단</h3><p>필수 탭과 주요 데이터가 정상적으로 읽히는지 한 번에 확인합니다.</p></div><span class="state ${googleConnectionError?'error':'connected'}">${googleConnectionError?'확인 필요':'정상'}</span></div><div class="health-list">${connectionHealthRows().map(row=>`<div><span>${row.ok?'✓':'!'}</span><b>${row.name}</b><small>${row.ok?'인식':'확인 필요'}</small></div>`).join('')}</div>${googleConnectionError?`<div class="connection-error-detail"><b>최근 오류</b><span>${escapeHtml(googleConnectionError)}</span></div>`:''}<div class="connection-actions"><button class="btn primary" data-run-health-check>다시 진단</button></div></article>
+4238:     <article class="setting-card"><h3>조회 연결 상태</h3><p>UEP 기준 구글시트에 실제 자료가 있는 항목을 확인합니다.</p>${connectionRows.map(([label,count]) => `<div class="setting-row"><span><b>${label}</b><small>${Number(count || 0).toLocaleString()}건 인식</small></span><span>${count ? "연결" : "자료 확인"}</span></div>`).join("")}</article>
+4239:     <article class="setting-card release-readiness-card"><div class="connection-title"><div><h3>배포 준비 점검</h3><p>교사용 배포 전에 필수 연결·계정·권한·업데이트·API 보호 상태를 확인합니다.</p></div><span class="state ${releaseReadinessRows().every(row=>row.ok)?'connected':'warn'}">${releaseReadinessRows().every(row=>row.ok)?'배포 준비':'확인 필요'}</span></div><div class="health-list release-health-list">${releaseReadinessRows().map(row=>`<div><span>${row.ok?'✓':'!'}</span><b>${escapeHtml(row.name)}</b><small>${escapeHtml(row.note)}</small></div>`).join('')}</div><div class="connection-actions"><button class="btn primary" type="button" data-access-control>권한 점검</button><button class="btn secondary" data-run-health-check>연결 다시 진단</button></div><p class="safe-note">자동 설치·롤백은 현재 비활성화되어 있습니다.</p></article>
+4240:     <article class="setting-card update-settings-card"><div class="connection-title"><div><h3>UEP 업데이트</h3><p>현재 버전 ${APP_VERSION} · 담임 배포판부터는 앱 내부 업데이트 채널을 사용합니다.</p></div><span class="state connected">업데이트 확인 작동</span></div><form id="updateSettingsForm" class="update-settings-form"><input id="updateManifestUrl" type="url" value="${escapeHtml(state.settings.updateManifestUrl||'')}" placeholder="https://.../uep-update.json"><button class="btn secondary" type="submit">주소 저장</button><button class="btn primary" type="button" data-check-update>업데이트 확인</button></form><div class="update-roadmap"><span class="done">① 동일 빌드</span><span class="done">② 버전 확인</span><span class="done">③ 업데이트 채널</span><span class="done">④ 앱 내부 적용·롤백</span></div><div id="updateCheckResult" class="update-check-result"><small>새 버전 확인 → 무결성 검증 → 앱 내부 적용 → 실패 시 이전판 복구 방식입니다.</small></div></article>
+4241:     <article class="setting-card"><div class="connection-title"><div><h3>UEP 정보</h3><p>UNHO Education Platform · Connect Data. Grow Students.</p></div><span class="state">v${APP_VERSION}</span></div><div class="setting-row"><span><b>기준 데이터</b><small>표준 구글시트 연결</small></span><span>${escapeHtml(readonlyCache?.sourceName||'연결 확인')}</span></div></article>
+4242:   </div>`;
+4243: 
+4244:   // 01 기본·연결 — 초기 설치와 연결 문제가 있을 때만 사용하는 영역
+4245:   return `<div class="module-page settings-v064 settings-final">
+4246:     ${header("기본·연결","초기 설치와 데이터 연결, NEIS 연동을 관리합니다.","학교 공용")}
+4247:     <article class="setting-card setup-wizard-card"><div><small>UEP SETUP GUIDE</small><h3>초기 설정 마법사</h3><p>처음 설치하거나 학교·계정·연결 정보를 다시 잡을 때만 사용합니다. 기존 설정은 유지됩니다.</p></div><button class="btn primary" type="button" data-setup-wizard>설정 마법사 시작</button></article>
+4248:     <article class="setting-card connection-overview"><div class="connection-title"><div><h3>UEP 구글시트 연결</h3><p>표준 구글시트를 조회하고 허용된 운영정보만 안전하게 양방향 수정합니다.</p></div><span class="state ${googleStatus[1]}">${googleStatus[0]}</span></div><div class="readonly-rule"><b>현재 기준</b><span>${escapeHtml(readonlyCache?.sourceName || "2026_운호고_UEP_DB_v1.0_Dev")} · 학생ID 기준 결합</span></div>${googleConnectionError ? `<div class="connection-error-detail"><b>오류 내용</b><span>${escapeHtml(googleConnectionError)}</span></div>` : ""}<div class="connection-actions"><button class="btn secondary" data-oauth-guide>${credentialReady ? "서비스 계정 JSON 변경" : "서비스 계정 JSON 등록"}</button><button class="btn primary" data-readonly-sync>지금 새로고침</button></div><p class="safe-note">서비스 계정 JSON은 Windows 보안 저장소에 암호화하여 보관합니다.</p></article>
+4249:     <article class="setting-card neis-settings-card"><div class="connection-title"><div><h3>NEIS 급식·시간표</h3><p>학교명으로 학교코드를 찾아 급식과 학급 시간표를 자동 조회합니다.</p></div><span class="state ${neisStatus[1]}">${neisStatus[0]}</span></div><form id="neisSettingsForm" class="neis-settings-form"><label>학교명<input id="neisSchoolName" required value="${escapeHtml(state.settings.neis.schoolName)}"></label><label>학년<select id="neisGrade">${[1,2,3].map((value) => `<option ${String(value) === String(state.settings.neis.grade) ? "selected" : ""}>${value}</option>`).join("")}</select></label><label>반<select id="neisClass">${Array.from({length:9},(_,index)=>index+1).map((value) => `<option ${String(value) === String(state.settings.neis.classNo) ? "selected" : ""}>${value}</option>`).join("")}</select></label><label class="neis-key-label">인증키<input id="neisApiKey" type="password" autocomplete="off" placeholder="${state.settings.neis.apiKeyConfigured?"등록됨 · 변경할 때만 입력":"발급받은 인증키 입력"}"></label><label class="neis-key-toggle"><input id="neisUseApiKey" type="checkbox" ${state.settings.neis.useApiKey?"checked":""}> 인증키 사용</label><button class="btn primary">저장 후 불러오기</button></form>${neisError ? `<div class="connection-error-detail"><b>${neisData?.offline ? "저장자료 안내" : "연결 오류"}</b><span>${escapeHtml(neisError)}</span></div>` : ""}<div class="connection-actions"><button class="btn secondary" data-neis-refresh>NEIS 다시 불러오기</button><button class="btn secondary" data-neis-clear-cache>저장자료 지우기</button></div><p class="safe-note">실시간 연결이 실패하면 마지막 정상 조회자료를 저장자료로 구분해 표시합니다.</p></article>
+4250:   </div>`;
+4251: }
+4252: 
+4253: const helpItems = {
+4254:   start:{title:"처음 시작하기",summary:"자료 연결과 기본 설정",steps:["설정에서 UEP 구글시트와 NEIS 연결 상태를 확인합니다.","사용자 역할과 담당 학년·반을 설정합니다.","대시보드에서 오늘의 업무와 프로그램을 확인합니다."],source:"기본연결시트·데이터처리시트·NEIS"},
+## unlockSubjectConfidential
+line=4193
+4185:   }
+4186:   localStorage.setItem(UEP_SUBJECT_CONFIDENTIAL_PIN_KEY,await subjectConfidentialDigest(result.first));
+4187:   lockSubjectConfidential();
+4188:   toast('선택과목 신청현황 비밀번호를 저장했습니다.');
+4189:   if(state.activePage==='settings')render('settings');
+4190:   return true;
+4191: }
+4192: function lockSubjectConfidential(){sessionStorage.removeItem(UEP_SUBJECT_CONFIDENTIAL_SESSION_KEY);}
+4193: async function unlockSubjectConfidential(){
+4194:   if(!subjectConfidentialPasswordConfigured()&&typeof uepLoadSharedSecurity08168==='function')await uepLoadSharedSecurity08168(true);
+4195:   // __UEP_08159_HOMEROOM_SUBJECT_GATE__
+4196:   const scope=typeof currentTeacherAccessScope==='function'?currentTeacherAccessScope():null;
+4197:   const role=String(currentRoleId?.()||'');
+4198:   const homeroomAllowed=role==='homeroom'||Boolean(scope?.teacher&&scope?.classNo);
+4199:   if(!subjectConfidentialAllowed()&&!homeroomAllowed){toast('담임·학년부장·관리자는 비밀번호 인증 후 과목별 신청현황을 열람할 수 있습니다.');return false;}
+4200:   if(sessionStorage.getItem(UEP_SUBJECT_CONFIDENTIAL_SESSION_KEY)==='1')return true;
+4201:   if(!subjectConfidentialPasswordConfigured()){toast(subjectConfidentialAllowed()?'설정 → 사용자·보안에서 선택과목 대외비 비밀번호를 먼저 설정해 주세요.':'관리자가 아직 선택과목 열람 비밀번호를 공용 설정하지 않았습니다.');return false;}
+4202:   const result=await sensitivePasswordModal({mode:'unlock',configured:true,kind:'subject'});
+4203:   if(!result)return false;
+4204:   if(await subjectConfidentialDigest(result.first)!==subjectConfidentialPasswordHash()){toast('선택과목 대외비 비밀번호가 일치하지 않습니다.');return false;}
+4205:   sessionStorage.setItem(UEP_SUBJECT_CONFIDENTIAL_SESSION_KEY,'1');
+4206:   return true;
+4207: }
+4208: function settingsView() {
+4209:   const connected = Boolean(readonlyCache?.students?.length && !googleConnectionError);
+4210:   const credentialReady = Boolean(googleConnectionStatus?.ok);
+4211:   const googleStatus = connected ? ["구글시트 연결됨", ""] : googleConnectionError ? ["권한·연결 오류", "error"] : credentialReady ? ["권한 확인 필요", "warn"] : ["인증 필요", "warn"];
+4212:   const connectionRows = [
+4213:     ["학생정보", readonlyCache?.students?.length], ["학사생", readonlyCache?.dormStudents?.length], ["학사외출", readonlyCache?.dormOutings?.length],
+4214:     ["성적", readonlyCache?.scoreRecords?.length], ["수능최저", readonlyCache?.admissionMinimums?.length], ["대학입결", readonlyCache?.admissionCuts?.length],
+4215:   ];
+4216:   const neisStatus = neisData?.ok ? (neisData.offline ? ["저장자료 표시", "warn"] : ["실시간 연결됨", ""]) : neisLoading ? ["불러오는 중", "warn"] : ["연결 확인", "error"];
+4217:   const profile=currentUserProfile(), access=currentTeacherAccessScope();
+4218: 
+4219:   const header=(title,desc,badge)=>`${settingsTabsMarkup()}<section class="settings-section-head"><div><small>UEP SETTINGS</small><h2>${title}</h2><p>${desc}</p></div><span>${badge}</span></section>`;
+4220: 
+4221:   if(settingsPanel==="security") return `<div class="module-page settings-v064 settings-final">
+4222:     ${header("사용자·보안","계정 승인과 역할, 민감정보 보호를 관리합니다.","관리자·학년부장")}
+4223:     <article class="setting-card sensitive-security-settings"><div><small>PRIVACY · SECURITY</small><h3>🔒 민감정보 보안</h3><p>교육비지원 · 요보호학생 · 위기학생 상세정보의 열람 비밀번호를 관리합니다.</p><p class="settings-help">상세정보는 1차 블라인드 후 비밀번호 인증을 거쳐 확인하며 인증은 10분 동안 유지됩니다.</p></div><div class="sensitive-security-status"><b>${sensitivePasswordConfigured()?'비밀번호 설정됨':'비밀번호 설정 필요'}</b><button type="button" class="btn primary" data-sensitive-password-set>${sensitivePasswordConfigured()?'비밀번호 변경':'비밀번호 설정'}</button><button type="button" class="btn secondary" data-sensitive-lock>즉시 잠금</button></div></article>
+4224:     <article class="setting-card subject-confidential-security-settings"><div><small>CONFIDENTIAL · CURRICULUM</small><h3>🔐 선택과목 대외비 보안</h3><p>과목별 신청현황 전용 비밀번호를 민감정보 비밀번호와 별도로 관리합니다.</p><p class="settings-help">관리자·학년부장만 설정 및 열람할 수 있으며 담임은 비활성화됩니다.</p></div><div class="sensitive-security-status"><b>${subjectConfidentialPasswordConfigured()?'비밀번호 설정됨':'비밀번호 설정 필요'}</b><button type="button" class="btn primary" data-subject-confidential-password-set ${subjectConfidentialAllowed()?'':'disabled'}>${subjectConfidentialPasswordConfigured()?'비밀번호 변경':'비밀번호 설정'}</button><button type="button" class="btn secondary" data-subject-confidential-lock ${subjectConfidentialAllowed()?'':'disabled'}>즉시 잠금</button></div></article>
+4225:     <article class="setting-card role-settings-card"><div class="connection-title"><div><h3>사용자·권한 프로필</h3><p>현재 로그인 사용자의 역할과 담당 범위를 확인합니다.</p></div><span class="state">${escapeHtml(currentRoleDisplay())}</span></div><div class="user-profile-summary"><div><small>사용자</small><b>${escapeHtml(profile.name||"미설정")}</b></div><div><small>부서</small><b>${escapeHtml(profile.department||"미설정")}</b></div><div><small>조회 범위</small><b>${escapeHtml(access.label)}</b></div></div><p class="safe-note">담임은 학년 자료를 조회할 수 있고 타반 연락정보는 기본 마스킹합니다. 성적·응답·정규화 원천자료는 UEP에서 직접 수정하지 않습니다.</p></article>
+4226:     <article class="setting-card access-control-card"><div class="connection-title"><div><h3>사용자·권한 승인</h3><p>01_사용자계정의 사용여부·역할·담당학년·담임반을 기준으로 로그인과 조회범위를 제어합니다.</p></div><span class="state connected">계정표 승인</span></div><div class="connection-actions"><button class="btn primary" type="button" data-access-control>권한 승인 제어판</button></div><p class="safe-note">신규 사용자 등록은 표준 구글시트에서 관리하고 UEP에서는 승인상태와 역할을 조정합니다.</p></article>
+4227:   </div>`;
+4228: 
+4229:   if(settingsPanel==="operations") return `<div class="module-page settings-v064 settings-final">
+4230:     ${header("알림·운영","실제 운영 중 필요한 알림과 오류 신고만 관리합니다.","운영 설정")}
+4231:     <article class="setting-card mail-alert-settings"><h3>메일 알림</h3><p>필요한 운영 알림만 선택합니다. 발송 기준 시각은 일과운영시간과 연동합니다.</p><div class="mail-alert-grid">${[["dormOuting","학사외출"],["afternoonStudy","오후자습 현황"],["night1","야자1 현황"],["night2","야자2 현황"],["nightException","야간 이상상황"],["nightSummary","야간 종료 종합"]].map(([key,label])=>`<label><input type="checkbox" data-mail-alert="${key}" ${state.settings.mailAlerts?.[key]?"checked":""}> ${label}</label>`).join("")}</div><small>※ 실제 자동메일 발송은 연결된 UEP 데이터처리 메일 트리거가 이 설정값을 읽도록 연동됩니다.</small></article>
+4232:     <article class="setting-card issue-admin-card"><div class="connection-title"><div><h3>오류 신고 관리</h3><p>사용자가 저장한 오류 신고를 확인하고 처리 상태와 수정 버전을 기록합니다.</p></div><span class="state">${(state.issueReports||[]).filter(r=>r.status!=='fixed').length}건 처리 중</span></div><div class="connection-actions"><button class="btn secondary" data-open-issue-report>새 신고 작성</button><button class="btn primary" data-open-issue-manager>신고 관리</button></div><p class="safe-note">현재는 PC 로컬 저장 방식이며 중앙 수집은 관리자 서버 또는 관리 시트 연결 단계에서 확장합니다.</p></article>
+4233:   </div>`;
+4234: 
+4235:   if(settingsPanel==="system") return `<div class="module-page settings-v064 settings-final">
+4236:     ${header("시스템 관리","연결상태·배포 준비·업데이트처럼 평소에는 건드리지 않는 관리 도구입니다.","관리자 점검")}
+4237:     <article class="setting-card health-check-card"><div class="connection-title"><div><h3>연결 진단</h3><p>필수 탭과 주요 데이터가 정상적으로 읽히는지 한 번에 확인합니다.</p></div><span class="state ${googleConnectionError?'error':'connected'}">${googleConnectionError?'확인 필요':'정상'}</span></div><div class="health-list">${connectionHealthRows().map(row=>`<div><span>${row.ok?'✓':'!'}</span><b>${row.name}</b><small>${row.ok?'인식':'확인 필요'}</small></div>`).join('')}</div>${googleConnectionError?`<div class="connection-error-detail"><b>최근 오류</b><span>${escapeHtml(googleConnectionError)}</span></div>`:''}<div class="connection-actions"><button class="btn primary" data-run-health-check>다시 진단</button></div></article>
+4238:     <article class="setting-card"><h3>조회 연결 상태</h3><p>UEP 기준 구글시트에 실제 자료가 있는 항목을 확인합니다.</p>${connectionRows.map(([label,count]) => `<div class="setting-row"><span><b>${label}</b><small>${Number(count || 0).toLocaleString()}건 인식</small></span><span>${count ? "연결" : "자료 확인"}</span></div>`).join("")}</article>
+4239:     <article class="setting-card release-readiness-card"><div class="connection-title"><div><h3>배포 준비 점검</h3><p>교사용 배포 전에 필수 연결·계정·권한·업데이트·API 보호 상태를 확인합니다.</p></div><span class="state ${releaseReadinessRows().every(row=>row.ok)?'connected':'warn'}">${releaseReadinessRows().every(row=>row.ok)?'배포 준비':'확인 필요'}</span></div><div class="health-list release-health-list">${releaseReadinessRows().map(row=>`<div><span>${row.ok?'✓':'!'}</span><b>${escapeHtml(row.name)}</b><small>${escapeHtml(row.note)}</small></div>`).join('')}</div><div class="connection-actions"><button class="btn primary" type="button" data-access-control>권한 점검</button><button class="btn secondary" data-run-health-check>연결 다시 진단</button></div><p class="safe-note">자동 설치·롤백은 현재 비활성화되어 있습니다.</p></article>
+4240:     <article class="setting-card update-settings-card"><div class="connection-title"><div><h3>UEP 업데이트</h3><p>현재 버전 ${APP_VERSION} · 담임 배포판부터는 앱 내부 업데이트 채널을 사용합니다.</p></div><span class="state connected">업데이트 확인 작동</span></div><form id="updateSettingsForm" class="update-settings-form"><input id="updateManifestUrl" type="url" value="${escapeHtml(state.settings.updateManifestUrl||'')}" placeholder="https://.../uep-update.json"><button class="btn secondary" type="submit">주소 저장</button><button class="btn primary" type="button" data-check-update>업데이트 확인</button></form><div class="update-roadmap"><span class="done">① 동일 빌드</span><span class="done">② 버전 확인</span><span class="done">③ 업데이트 채널</span><span class="done">④ 앱 내부 적용·롤백</span></div><div id="updateCheckResult" class="update-check-result"><small>새 버전 확인 → 무결성 검증 → 앱 내부 적용 → 실패 시 이전판 복구 방식입니다.</small></div></article>
+4241:     <article class="setting-card"><div class="connection-title"><div><h3>UEP 정보</h3><p>UNHO Education Platform · Connect Data. Grow Students.</p></div><span class="state">v${APP_VERSION}</span></div><div class="setting-row"><span><b>기준 데이터</b><small>표준 구글시트 연결</small></span><span>${escapeHtml(readonlyCache?.sourceName||'연결 확인')}</span></div></article>
+4242:   </div>`;
+4243: 
+4244:   // 01 기본·연결 — 초기 설치와 연결 문제가 있을 때만 사용하는 영역
+4245:   return `<div class="module-page settings-v064 settings-final">
+4246:     ${header("기본·연결","초기 설치와 데이터 연결, NEIS 연동을 관리합니다.","학교 공용")}
+4247:     <article class="setting-card setup-wizard-card"><div><small>UEP SETUP GUIDE</small><h3>초기 설정 마법사</h3><p>처음 설치하거나 학교·계정·연결 정보를 다시 잡을 때만 사용합니다. 기존 설정은 유지됩니다.</p></div><button class="btn primary" type="button" data-setup-wizard>설정 마법사 시작</button></article>
+4248:     <article class="setting-card connection-overview"><div class="connection-title"><div><h3>UEP 구글시트 연결</h3><p>표준 구글시트를 조회하고 허용된 운영정보만 안전하게 양방향 수정합니다.</p></div><span class="state ${googleStatus[1]}">${googleStatus[0]}</span></div><div class="readonly-rule"><b>현재 기준</b><span>${escapeHtml(readonlyCache?.sourceName || "2026_운호고_UEP_DB_v1.0_Dev")} · 학생ID 기준 결합</span></div>${googleConnectionError ? `<div class="connection-error-detail"><b>오류 내용</b><span>${escapeHtml(googleConnectionError)}</span></div>` : ""}<div class="connection-actions"><button class="btn secondary" data-oauth-guide>${credentialReady ? "서비스 계정 JSON 변경" : "서비스 계정 JSON 등록"}</button><button class="btn primary" data-readonly-sync>지금 새로고침</button></div><p class="safe-note">서비스 계정 JSON은 Windows 보안 저장소에 암호화하여 보관합니다.</p></article>
+4249:     <article class="setting-card neis-settings-card"><div class="connection-title"><div><h3>NEIS 급식·시간표</h3><p>학교명으로 학교코드를 찾아 급식과 학급 시간표를 자동 조회합니다.</p></div><span class="state ${neisStatus[1]}">${neisStatus[0]}</span></div><form id="neisSettingsForm" class="neis-settings-form"><label>학교명<input id="neisSchoolName" required value="${escapeHtml(state.settings.neis.schoolName)}"></label><label>학년<select id="neisGrade">${[1,2,3].map((value) => `<option ${String(value) === String(state.settings.neis.grade) ? "selected" : ""}>${value}</option>`).join("")}</select></label><label>반<select id="neisClass">${Array.from({length:9},(_,index)=>index+1).map((value) => `<option ${String(value) === String(state.settings.neis.classNo) ? "selected" : ""}>${value}</option>`).join("")}</select></label><label class="neis-key-label">인증키<input id="neisApiKey" type="password" autocomplete="off" placeholder="${state.settings.neis.apiKeyConfigured?"등록됨 · 변경할 때만 입력":"발급받은 인증키 입력"}"></label><label class="neis-key-toggle"><input id="neisUseApiKey" type="checkbox" ${state.settings.neis.useApiKey?"checked":""}> 인증키 사용</label><button class="btn primary">저장 후 불러오기</button></form>${neisError ? `<div class="connection-error-detail"><b>${neisData?.offline ? "저장자료 안내" : "연결 오류"}</b><span>${escapeHtml(neisError)}</span></div>` : ""}<div class="connection-actions"><button class="btn secondary" data-neis-refresh>NEIS 다시 불러오기</button><button class="btn secondary" data-neis-clear-cache>저장자료 지우기</button></div><p class="safe-note">실시간 연결이 실패하면 마지막 정상 조회자료를 저장자료로 구분해 표시합니다.</p></article>
+4250:   </div>`;
+4251: }
+4252: 
+4253: const helpItems = {
+4254:   start:{title:"처음 시작하기",summary:"자료 연결과 기본 설정",steps:["설정에서 UEP 구글시트와 NEIS 연결 상태를 확인합니다.","사용자 역할과 담당 학년·반을 설정합니다.","대시보드에서 오늘의 업무와 프로그램을 확인합니다."],source:"기본연결시트·데이터처리시트·NEIS"},
+4255:   dashboard:{title:"대시보드",summary:"오늘 필요한 정보 한눈에 보기",steps:["시간·날씨와 개인시간표를 확인합니다.","학교 캘린더에서 월간·주간 일정을 조회합니다.","오늘의 업무·공지와 선택·방과후 프로그램을 확인합니다."],source:"학교캘린더·시간표·프로그램DB"},
+4256:   students:{title:"학생정보",summary:"학생 개인 통합 대시보드",steps:["반과 학생을 선택합니다.","연락정보·성적·활동·선택과목·프로그램 참여를 확인합니다.","보고서 보기는 UEP 내부 미리보기로 열고 필요한 자료만 출력합니다."],source:"기본연결시트·데이터처리시트"},
+4257:   timetable:{title:"시간표",summary:"개인·학급·학생·교사 시간표",steps:["개인시간표에서 자신의 수업을 확인합니다.","학급시간표는 날짜·학년·반을 선택해 NEIS 주간자료를 조회합니다.","원본 누락 진단이 표시되면 자동매칭보다 NEIS 자료 확인을 우선합니다."],source:"NEIS 공개 API·개인시간표DB"},
+4258:   attendance:{title:"출결",summary:"공결·지각·야자출결 통합",steps:["상단에서 공결·지각·야자출결을 선택합니다.","야자출결은 실제 운영일만 이동하며 학사·방과후·야간심화가 우선 표시됩니다.","출결 원본과 정규화 결과가 다르면 원본 응답과 데이터처리시트를 먼저 확인합니다."],source:"구글폼연결시트·데이터처리시트"},
+4259:   scores:{title:"성적",summary:"내신·모의고사 상담자료",steps:["반과 학생, 조회범위를 선택합니다.","내신 변화와 모의고사 등락을 비교합니다.","출력센터에서 A4 상담자료로 출력합니다."],source:"기본연결시트 성적DB"},
+4260:   admissions:{title:"입시",summary:"등급환산·수능최저·입결",steps:["학생의 모의고사 성적을 선택합니다.","대학별 수능최저 충족 가능성을 조회합니다.","환산식과 근거자료를 함께 확인합니다."],source:"수능최저DB·대학입결DB"},
+4261:   records:{title:"생활기록부",summary:"활동 근거부터 최종 기록까지",steps:["활동내역과 SDGs 연계 성장 프로파일을 확인합니다.","자율·진로·종합의견 근거자료를 선택합니다.","규칙 기반 또는 AI 초안을 생성하고 규칙 검토 후 최종 저장합니다."],source:"기본연결시트·보고서 정규화·규칙로그"},
+4262:   programs:{title:"프로그램",summary:"공통·선택·방과후 운영",steps:["공통활동은 자율·진로로 구분해 확인합니다.","선택활동은 명단·출석·보고서·SDGs·사진을 관리합니다.","방과후는 반복일정·결강·보강과 야자출결 영향을 관리합니다."],source:"기본연결시트 프로그램DB"},
+4263:   calendar:{title:"학교 일정",summary:"학년도 일정과 개인 일정",steps:["월간·주간 보기를 전환합니다.","학교·프로그램·개인·미확정 일정을 필터링합니다.","학년도 동기화 후 수정 잠금된 일정은 보존합니다."],source:"학교캘린더"},
+4264:   outputs:{title:"출력센터",summary:"확정자료 선택 출력",steps:["보고서·학생자료·선택과목·출석부·생활기록부·성적 그룹을 선택합니다.","반과 학생 또는 프로그램을 선택합니다.","미리보기 후 PDF·인쇄·Excel을 실행합니다."],source:"확정된 UEP 조회자료"},
+4265:   settings:{title:"설정",summary:"연결·역할·화면·업데이트",steps:["구글시트·NEIS 연결을 관리합니다.","역할과 권한 범위를 확인합니다.","업데이트 정보 주소를 등록하고 새 버전을 확인합니다."],source:"PC 보안저장소·UEP 설정"},
+4266: };
+4267: function helpView() {
+4268:   return `<div class="module-page help-manual-page"><div class="setting-card help-intro"><div><h3>UEP 사용 설명서</h3><p>각 메뉴의 자료 출처와 실제 업무 흐름을 기준으로 설명합니다.</p></div><span>${Object.keys(helpItems).length}개 메뉴</span></div><div class="help-grid">${Object.entries(helpItems).map(([key,item])=>`<article class="help-item"><button class="help-button" data-help="${key}"><span><b>${item.title}</b><small>${item.summary}</small></span><span>${helpOpen===key?"⌃":"⌄"}</span></button>${helpOpen===key?`<div class="help-content"><h4>${item.title}</h4><ol>${item.steps.map(step=>`<li>${step}</li>`).join("")}</ol><p><b>자료 출처:</b> ${item.source}</p><p><b>문제 확인 순서:</b> 원본시트 → 데이터처리시트 → UEP 화면 구현</p></div>`:""}</article>`).join("")}</div></div>`;
+4269: }
+4270: 
+4271: function classNumberOf(student) {
+4272:   return String(student?.className || "").replace(/[^0-9]/g, "");
+4273: }
+## sensitivePasswordModal
+line=908
+900: function lockSensitiveSession(){uepSensitiveUnlockedUntil=0;}
+901: function closeSensitivePasswordModal(result=null){
+902:   const layer=document.getElementById('sensitivePasswordLayer');
+903:   if(!layer)return;
+904:   const resolver=layer._resolver;
+905:   layer.remove();
+906:   if(typeof resolver==='function')resolver(result);
+907: }
+908: function sensitivePasswordModal({mode='unlock',configured=sensitivePasswordConfigured(),kind='sensitive'}={}){
+909:   return new Promise(resolve=>{
+910:     document.getElementById('sensitivePasswordLayer')?.remove();
+911:     const subject=kind==='subject';
+912:     const change=mode==='set'&&configured;
+913:     const label=subject?'선택과목 대외비':'민감정보';
+914:     const layer=document.createElement('div');
+915:     layer.id='sensitivePasswordLayer';
+916:     layer.className='issue-layer sensitive-password-layer';
+917:     layer._resolver=resolve;
+918:     const title=mode==='unlock'?`${label} 인증`:(change?`${label} 비밀번호 변경`:`${label} 비밀번호 설정`);
+919:     const desc=mode==='unlock'?(subject?'과목별 신청현황을 확인하려면 선택과목 대외비 비밀번호를 입력하세요.':'상세정보를 확인하려면 민감정보 비밀번호를 입력하세요.'):'비밀번호 원문은 저장하지 않고 해시값만 기본정보 연결시트의 공용 설정에 보관합니다.';
+920:     layer.innerHTML=`<div class="issue-dialog sensitive-password-dialog">
+921:       <header><div><small>${subject?'CONFIDENTIAL · CURRICULUM':'PRIVACY · SECURITY'}</small><h3>🔒 ${title}</h3><p>${desc}</p></div><button type="button" data-sensitive-modal-close>×</button></header>
+922:       <div class="sensitive-password-form">
+923:         ${change?'<label>현재 비밀번호<input type="password" autocomplete="current-password" data-sensitive-current></label>':''}
+924:         <label>${mode==='unlock'?'비밀번호':'새 비밀번호'}<input type="password" autocomplete="${mode==='unlock'?'current-password':'new-password'}" data-sensitive-first></label>
+925:         ${mode==='set'?'<label>새 비밀번호 확인<input type="password" autocomplete="new-password" data-sensitive-second></label>':''}
+926:         <p class="sensitive-password-error" data-sensitive-error></p>
+927:       </div>
+928:       <div class="modal-actions"><button type="button" class="btn secondary" data-sensitive-modal-close>취소</button><button type="button" class="btn primary" data-sensitive-modal-submit>${mode==='unlock'?'인증':'저장'}</button></div>
+929:     </div>`;
+930:     document.body.appendChild(layer);
+931:     const error=msg=>{const el=layer.querySelector('[data-sensitive-error]');if(el)el.textContent=msg||'';};
+932:     const cancel=()=>closeSensitivePasswordModal(null);
+933:     const submit=()=>{
+934:       const current=layer.querySelector('[data-sensitive-current]')?.value||'';
+935:       const first=layer.querySelector('[data-sensitive-first]')?.value||'';
+936:       const second=layer.querySelector('[data-sensitive-second]')?.value||'';
+937:       if(!first)return error('비밀번호를 입력해 주세요.');
+938:       if(mode==='set'&&first.length<4)return error('비밀번호는 4자 이상으로 설정해 주세요.');
+939:       if(mode==='set'&&first!==second)return error('새 비밀번호 확인이 일치하지 않습니다.');
+940:       closeSensitivePasswordModal({current,first});
+941:     };
+942:     layer.querySelectorAll('[data-sensitive-modal-close]').forEach(b=>b.onclick=cancel);
+943:     layer.onclick=e=>{if(e.target===layer)cancel();};
+944:     layer.querySelector('[data-sensitive-modal-submit]').onclick=submit;
+945:     const passwordInputs=[...layer.querySelectorAll('input[type="password"]')];
+946:     passwordInputs.forEach(input=>{
+947:       input.readOnly=false;input.disabled=false;input.inputMode='numeric';input.autocomplete='off';
+948:       input.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();event.stopImmediatePropagation();submit();return;}event.stopImmediatePropagation();},true);
+949:       ['keypress','keyup','beforeinput','input','paste'].forEach(type=>input.addEventListener(type,event=>event.stopImmediatePropagation(),true));
+950:     });
+951:     setTimeout(()=>layer.querySelector('[data-sensitive-current],[data-sensitive-first]')?.focus(),0);
+952:   });
+953: }
+954: function canConfigureSensitivePassword(){
+955:   // __UEP_08160_SENSITIVE_CONFIG_ROLE__
+956:   const role=String(currentRoleId?.()||'');
+957:   return role==='admin'||role==='grade_head';
+958: }
+959: async function setSensitivePasswordFlow(){
+960:   if(!canConfigureSensitivePassword())return toast('관리자·학년부장만 민감정보 비밀번호를 설정·변경할 수 있습니다.');
+961:   const configured=sensitivePasswordConfigured();
+962:   const result=await sensitivePasswordModal({mode:'set',configured,kind:'subject'});
+963:   if(!result)return;
+964:   if(configured&&await sensitiveHash(result.current)!==sensitiveSecurityConfig().passwordHash){
+965:     return toast('현재 비밀번호가 일치하지 않습니다.');
+966:   }
+967:   const passwordHash=await sensitiveHash(result.first);
+968:   localStorage.setItem(UEP_SENSITIVE_SECURITY_KEY,JSON.stringify({passwordHash,updatedAt:new Date().toISOString()}));
+969:   lockSensitiveSession();
+970:   toast('민감정보 열람 비밀번호를 저장했습니다.');
+971:   if(state.activePage==='settings')render('settings');
+972: }
+973: async function unlockSensitiveInfo(){
+974:   if(sensitiveSessionOpen())return true;
+975:   if(!sensitivePasswordConfigured()){
+976:     toast('설정 → 사용자·보안에서 먼저 비밀번호를 설정해 주세요.');
+977:     return false;
+978:   }
+979:   const result=await sensitivePasswordModal({mode:'unlock',configured:true});
+980:   if(!result)return false;
+981:   if(await sensitiveHash(result.first)!==sensitiveSecurityConfig().passwordHash){
+982:     toast('비밀번호가 일치하지 않습니다.');
+983:     return false;
+984:   }
+985:   uepSensitiveUnlockedUntil=Date.now()+10*60*1000;
+986:   return true;
+987: }
+988: window.addEventListener('beforeunload',lockSensitiveSession);
+989: // 0.81.42: 재렌더링과 Electron 인라인 이벤트 제한에 영향받지 않는 보안 버튼 처리
+990: document.addEventListener('click',async event=>{
+991:   const sensitiveSet=event.target.closest?.('[data-sensitive-password-set]');
+992:   if(sensitiveSet){event.preventDefault();event.stopImmediatePropagation();await setSensitivePasswordFlow();return;}
+993:   const sensitiveLock=event.target.closest?.('[data-sensitive-lock]');
+994:   if(sensitiveLock){event.preventDefault();event.stopImmediatePropagation();lockSensitiveSession();toast('민감정보를 잠갔습니다.');if(state.activePage==='settings')render('settings');return;}
+995:   const subjectSet=event.target.closest?.('[data-subject-confidential-password-set],[data-uep134-pin-btn]');
+996:   if(subjectSet&&!subjectSet.disabled){event.preventDefault();event.stopImmediatePropagation();await setSubjectConfidentialPassword();return;}
+997:   const subjectLock=event.target.closest?.('[data-subject-confidential-lock]');
+998:   if(subjectLock&&!subjectLock.disabled){event.preventDefault();event.stopImmediatePropagation();lockSubjectConfidential();render('settings');toast('과목별 신청현황을 잠갔습니다.');}
+999: },true);
+1000: 
+1001: 
+1002: 
+1003: 
+1004: function updateStudentSignalIndicator(){
+1005:   const button=document.getElementById('studentSignalButton'); if(!button)return;
+1006:   const student=currentSignalStudent();
+1007:   if(!student){button.classList.add('hidden');button.classList.remove('signal-green','signal-yellow','signal-red');return;}
+1008:   const level=student.supportSignal?.level||'green';
+1009:   button.classList.remove('hidden','signal-green','signal-yellow','signal-red');button.classList.add(`signal-${level}`);
+1010:   const label=level==='red'?'확인 필요':(level==='yellow'?'지원 확인':'확인 완료');
+1011:   button.innerHTML=`<i></i><b>${escapeHtml(student.studentNo||'')} ${escapeHtml(student.name||'')}</b><span>${label}</span>`;
+1012:   button.title=`${student.studentNo||''} ${student.name||''} · ${student.supportSignal?.summary||'별도 확인사항 없음'}`;
+1013: }
+1014: function openStudentSignalDialog(){
+1015:   const student=currentSignalStudent(); if(!student)return toast('학생을 먼저 선택해 주세요.');
+1016:   const signal=student.supportSignal||{level:'green',summary:'별도 확인사항이 없습니다.'};
+1017:   document.getElementById('studentSignalLayer')?.remove();
+1018:   const level=signal.level||'green';
+1019:   const title=level==='red'?'지도·상담 전 확인':(level==='yellow'?'지원정보 확인':'확인 완료');
+1020:   const generic=level==='red'
+1021:     ?'지도·상담 전에 확인해야 할 보호정보가 있습니다.'
+1022:     :(level==='yellow'?'학생 지원과 관련해 확인할 정보가 있습니다.':'현재 별도 확인이 필요한 지원·보호 정보가 없습니다.');
+1023:   const layer=document.createElement('div');layer.id='studentSignalLayer';layer.className='issue-layer student-signal-layer';
+1024:   layer.innerHTML=`<div class="issue-dialog student-signal-dialog">
+1025:     <header><div><small>STUDENT SIGNAL</small><h3>${escapeHtml(student.studentNo||'')} ${escapeHtml(student.name||'')}</h3><p>학생 선택 시 표시되는 지원·보호 확인 신호입니다.</p></div><button type="button" data-signal-close>×</button></header>
+1026:     <div class="student-signal-summary signal-${level}"><i></i><div><b>${title}</b><p>${escapeHtml(generic)}</p></div></div>
+1027:     <div class="student-signal-privacy"><b>민감정보 보호</b><p>이 화면에서는 상세 진단·가구자격·검사·상담 내용을 표시하지 않습니다. 필요한 경우 아래 버튼을 눌러 한 번 더 확인하세요.</p></div>
+1028:     <div id="studentSignalDetails" class="student-signal-details hidden"></div>
+1029:     <div class="modal-actions">${level!=='green'?'<button class="btn primary" data-signal-reveal>상세정보 확인</button>':''}<button class="btn secondary" data-signal-close>닫기</button></div>
+1030:   </div>`;
+1031:   document.body.appendChild(layer);
+1032:   const close=()=>layer.remove();
+1033:   layer.querySelectorAll('[data-signal-close]').forEach(b=>b.onclick=close);
+1034:   layer.onclick=e=>{if(e.target===layer)close();};
+1035:   layer.querySelector('[data-signal-reveal]')?.addEventListener('click',async()=>{
+1036:     if(!canRevealStudentProtection())return toast('담임·학년부·관리자 권한에서 확인할 수 있습니다.');
+1037:     if(!(await unlockSensitiveInfo()))return;
+1038:     const details=layer.querySelector('#studentSignalDetails');const cards=[];
+1039:     const field=(label,value)=>String(value||'').trim()?`<div class="student-signal-field"><span>${escapeHtml(label)}</span><b>${escapeHtml(String(value))}</b></div>`:'';
+1040: 
+1041:     if(signal.educationSupport){
+1042:       const x=signal.educationSupport;
+1043:       cards.push(`<article><small>지원정보</small><h4>교육비지원</h4>
+1044:         ${field('선정여부',x.selected)}
+1045:         ${field('학생자격',x.studentQualification)}
+1046:         ${field('가구자격',x.householdQualification)}
+1047:         ${field('중위소득',x.incomePercent?`${x.incomePercent}%`:'')}
+1048:         ${field('기준일',x.baseDate)}
+## curriculum modal CSS
+line=13046
+13031:   if(curriculumCrossType==='science')rows=rows.filter(x=>x.type==='science');
+13032:   else if(curriculumCrossType==='social')rows=rows.filter(x=>x.type==='social');
+13033:   else if(curriculumCrossType==='mixed')rows=rows.filter(x=>x.type==='mixed');
+13034:   else if(curriculumCrossType==='mixed32')rows=rows.filter(x=>x.mixed32);
+13035:   rows.sort(curriculumCrossSort==='grade'?((a,b)=>(a.avg??99)-(b.avg??99)||String(a.student.studentNo||'').localeCompare(String(b.student.studentNo||''))):((a,b)=>String(a.student.studentNo||'').localeCompare(String(b.student.studentNo||''))));
+13036:   const all=uepCrossTrackRows08161(),count=t=>t==='mixed32'?all.filter(x=>x.mixed32).length:all.filter(x=>x.type===t).length;
+13037:   const filters='<div class="cross-track-controls"><label>반<select data-cross-class><option value="all">전체 반</option>'+Array.from({length:9},(_,i)=>String(i+1)).map(c=>'<option value="'+c+'" '+(curriculumCrossClass===c?'selected':'')+'>'+c+'반</option>').join('')+'</select></label><label>유형<select data-cross-type><option value="all">전체</option><option value="science" '+(curriculumCrossType==='science'?'selected':'')+'>과학만</option><option value="social" '+(curriculumCrossType==='social'?'selected':'')+'>사회만</option><option value="mixed" '+(curriculumCrossType==='mixed'?'selected':'')+'>4학기 혼합</option><option value="mixed32" '+(curriculumCrossType==='mixed32'?'selected':'')+'>3-2 혼합</option></select></label><label>정렬<select data-cross-sort><option value="class" '+(curriculumCrossSort==='class'?'selected':'')+'>반·학번순</option><option value="grade" '+(curriculumCrossSort==='grade'?'selected':'')+'>1학년 내신평균순</option></select></label></div>';
+13038:   const summary='<div class="cross-track-summary"><article><small>분석대상</small><b>'+all.length+'명</b></article><article><small>과학만</small><b>'+count('science')+'명</b></article><article><small>사회만</small><b>'+count('social')+'명</b></article><article><small>4학기 혼합</small><b>'+count('mixed')+'명</b></article><article class="warn"><small>3-2 혼합</small><b>'+count('mixed32')+'명</b></article></div>';
+13039:   const cell=(x,term)=>{const t=x.byTerm[term];return '<span title="과학: '+escapeHtml(t.scienceSubjects.join(', ')||'-')+' / 사회: '+escapeHtml(t.socialSubjects.join(', ')||'-')+'"><b>과 '+t.science+'</b><em>사 '+t.social+'</em></span>';};
+13040:   const body=rows.map(x=>'<button class="cross-track-row '+(x.mixed32?'danger':x.type==='mixed'?'watch':'')+'" data-cross-student="'+escapeHtml(x.student.id)+'"><b>'+escapeHtml(x.student.studentNo||'')+' '+escapeHtml(x.student.name||'')+'</b><span>'+escapeHtml(recordStudentClass(x.student))+'반</span>'+['2-1','2-2','3-1','3-2'].map(t=>cell(x,t)).join('')+'<span><strong>과 '+x.science+' / 사 '+x.social+'</strong><em>'+(x.mixed32?'3-2 혼합':x.type==='mixed'?'4학기 혼합':x.type==='science'?'과학만':'사회만')+'</em></span><span>'+(x.avg==null?'-':Number(x.avg).toFixed(2))+'</span></button>').join('');
+13041:   return '<style>.cross-track-controls{display:flex;gap:10px;justify-content:flex-end;margin:14px 0}.cross-track-controls label{display:flex;gap:6px;align-items:center}.cross-track-summary{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin:12px 0}.cross-track-summary article{padding:14px;border:1px solid #dce9e6;border-radius:14px;background:#f8fbfa}.cross-track-summary small{display:block;color:#668}.cross-track-summary b{font-size:20px}.cross-track-summary .warn{background:#fff5f1;border-color:#f2c9bd}.cross-track-table{border:1px solid #dbe7e5;border-radius:16px;overflow:hidden}.cross-track-head,.cross-track-row{display:grid;grid-template-columns:1.5fr .55fr repeat(4,1fr) 1.1fr .65fr;gap:8px;align-items:center;width:100%;padding:11px 14px;border:0;border-bottom:1px solid #edf1f0;text-align:left;background:#fff}.cross-track-head{font-weight:700;background:#f3f8f7}.cross-track-row>span{display:flex;gap:6px;align-items:center}.cross-track-row span em{font-style:normal;color:#8a5a47}.cross-track-row.watch{background:#fffdf4}.cross-track-row.danger{background:#fff3ef}.cross-track-row:hover{background:#edf9f6}.cross-track-intro{padding:16px 18px;border:1px solid #dce9e6;border-radius:16px;background:#f8fbfa}.cross-track-intro h3{margin:0 0 6px}.cross-track-intro p{margin:0;color:#667}</style><section class="cross-track-intro"><h3>문이과 교차오류</h3><p>260명 기준 선택과목 중 사회·과학 계열을 2-1부터 3-2까지 전수 비교합니다. 한 과목이라도 해당 계열 신청이 있으면 포함하며, 혼합은 상담 확인 대상으로 표시합니다.</p></section>'+summary+filters+'<div class="cross-track-table"><div class="cross-track-head"><span>학번·학생</span><span>반</span><span>2-1</span><span>2-2</span><span>3-1</span><span>3-2</span><span>4학기 누계</span><span>1학년 내신</span></div>'+body+'</div>';
+13042: }
+13043: 
+13044: function uepSubjectStatus(group){const n=group.students.length;if(n<10)return '<i class="subject-risk close">폐강위기</i>';if(n<20)return '<i class="subject-risk watch">개설확인</i>';if(Math.ceil(n/group.sectionCount)>30)return '<i class="subject-risk crowd">과밀가능</i>';return '<i class="subject-risk stable">안정</i>';}
+13045: function uepSubjectApplicationView(){const data=uepSelectionDataset(),terms=['2-1','2-2','3-1','3-2'],groups=data.subjects.filter(x=>x.term===curriculumTermFilter),order=['국·영·수','사회','과학','음·미·체','일본어·중국어·한문·정보','기타'],bucket=new Map(order.map(x=>[x,[]]));groups.forEach(g=>bucket.get(uepSubjectGroup08128(g.subject))?.push(g));return '<div class="term-picker-cards">'+terms.map(t=>'<button data-curriculum-term="'+t+'" class="'+(curriculumTermFilter===t?'active':'')+'"><b>'+t.replace('-','학년 ')+'학기</b><span>'+data.subjects.filter(x=>x.term===t).length+'과목</span></button>').join('')+'</div>'+order.filter(k=>bucket.get(k).length).map(k=>'<section class="subject-group-section group-'+k.replace(/[^가-힣A-Za-z0-9]/g,'')+'"><header><h3>'+k+'</h3><span>'+bucket.get(k).length+'과목</span></header><div class="subject-card-grid">'+bucket.get(k).sort((a,b)=>a.subject.localeCompare(b.subject,'ko')).map(g=>'<button data-curriculum-subject="'+escapeHtml(g.key)+'"><small>'+g.term+'</small><b>'+escapeHtml(g.subject)+'</b><span>신청 '+g.students.length+'명 · 예상 '+g.sectionCount+'분반</span>'+uepSubjectStatus(g)+'</button>').join('')+'</div></section>').join('');}
+13046: function uepOpenSubjectModal08128(key){const data=uepSelectionDataset(),selected=data.subjects.find(x=>x.key===key);if(!selected)return;const rows=[...selected.students].sort(curriculumRosterSort==='class'?((a,b)=>String(a.student.studentNo).localeCompare(String(b.student.studentNo))):((a,b)=>(a.avg??99)-(b.avg??99)||String(a.student.studentNo).localeCompare(String(b.student.studentNo))));const privacy=privacyModeEnabled(),layer=document.createElement('div');layer.className='modal-backdrop subject-roster-modal-backdrop';layer.innerHTML='<div class="modal subject-roster-modal"><button class="modal-close" data-subject-modal-close>×</button><header><small>'+escapeHtml(selected.term)+'</small><h2>'+escapeHtml(selected.subject)+'</h2><p>신청 '+selected.students.length+'명 · 예상 '+selected.sectionCount+'분반</p><div class="roster-sort"><button data-roster-sort="grade" class="'+(curriculumRosterSort==='grade'?'active':'')+'">예상성적순</button><button data-roster-sort="class" class="'+(curriculumRosterSort==='class'?'active':'')+'">반·번호순</button></div></header><div class="selection-roster roster-six-columns '+(privacy?'masked':'')+'"><div class="selection-roster-head"><span>학번·성명</span><span>현재반</span><span>학사여부</span><span>1학년 내신평균</span><span>예상등수</span><span>예상등급</span></div>'+rows.map(x=>'<article><b>'+(privacy?'**** ＊＊＊':escapeHtml(x.student.studentNo)+' '+escapeHtml(x.student.name))+'</b><span>'+escapeHtml(recordStudentClass(x.student))+'반</span><span>'+(x.dorm?'학사':'-')+'</span><span>'+(privacy?'＊.＊＊':x.avg==null?'-':x.avg.toFixed(2))+'</span><span>'+(privacy?'＊위':x.expectedRank?x.expectedRank+'위':'-')+'</span><span>'+(privacy?'＊등급':x.expectedGrade==='-'?'-':x.expectedGrade+'등급')+'</span></article>').join('')+'</div></div>';document.body.appendChild(layer);layer.querySelector('[data-subject-modal-close]').onclick=()=>layer.remove();layer.onclick=e=>{if(e.target===layer)layer.remove();};layer.querySelectorAll('[data-roster-sort]').forEach(b=>b.onclick=()=>{curriculumRosterSort=b.dataset.rosterSort;layer.remove();uepOpenSubjectModal08128(key);});}
+13047: function uepCurriculumFinalView(){const workspace=curriculumWorkspaceMode==='students'?uepStudentApplicationView():curriculumWorkspaceMode==='cross'?uepCrossTrackView08161():uepSubjectApplicationView();return '<div class="module-page records-v0601 curriculum-final-page">'+uepMainRecordTabs()+uepCurriculumNav()+workspace+'</div>';}
+13048: function uepSdgsEvidenceBridge(){
+13049:   const student=(readonlyCache?.students||[]).find(s=>String(s.id)===String(recordStudentId));if(!student)return '';
+13050:   const bundle=studentRecordBundle(student),sources=[];
+13051:   const add=(rows,type)=>rows.forEach(x=>sources.push({type,title:x.title||x.actualTitle||x.recordTitle||x.type||x.subject||type,date:x.date||x.term||x.semester||'',text:[x.title,x.actualTitle,x.recordTitle,x.role,x.detail,x.content,x.summary,x.subject,x.organization].filter(Boolean).join(' · ')}));
+13052:   add(bundle.activities||[],'활동');add(bundle.programs||[],'프로그램');add(bundle.reports||[],'보고서');add(bundle.selected||[],'선택과목');add(bundle.volunteer||[],'봉사');add(bundle.volunteers||[],'봉사');
+13053:   const goals=[[1,'빈곤',/빈곤|복지|취약|기부/],[2,'기아 종식',/기아|식량|급식|농업/],[3,'건강과 웰빙',/건강|의료|보건|심리|치유|운동/],[4,'양질의 교육',/교육|학습|수업|문해|멘토/],[5,'성평등',/성평등|젠더|여성|차별/],[6,'깨끗한 물',/물|수질|위생/],[7,'깨끗한 에너지',/에너지|태양광|전력|재생/],[8,'양질의 일자리',/일자리|노동|경제성장|직업/],[9,'산업·혁신·인프라',/산업|혁신|인프라|기술|공학|인공지능|반도체/],[10,'불평등 감소',/불평등|격차|인권|포용/],[11,'지속가능한 도시',/도시|교통|주거|지역사회/],[12,'책임 있는 소비와 생산',/소비|생산|재활용|폐기물|플라스틱/],[13,'기후행동',/기후|탄소|온난화|환경/],[14,'해양생태계',/해양|바다|수산|미세플라스틱/],[15,'육상생태계',/생태|생물다양성|산림|동물|식물/],[16,'평화·정의·제도',/평화|정의|법|민주|갈등|윤리/],[17,'파트너십',/협력|연대|공동체|국제|유네스코/]];
+13054:   const cards=goals.map(([no,name,rx])=>{const found=sources.filter(s=>rx.test(s.text)).slice(0,8);const state=found.some(s=>s.type==='보고서'||String(s.text).length>45)?'confirmed':found.length?'possible':'empty';return {no,name,found,state};});
+13055:   const confirmed=cards.filter(x=>x.state==='confirmed').length,possible=cards.filter(x=>x.state==='possible').length;
+13056:   return `<section class="sdgs-live-evidence"><header><div><small>LIVE EVIDENCE MAP</small><h3>SDGs 실제 근거 연결</h3><p>보고서 유무와 관계없이 활동·봉사·프로그램·선택과목의 실제 학생 자료를 함께 읽습니다.</p></div><span>${confirmed}개 확인 · ${possible}개 연결 가능</span></header><div class="sdgs-live-grid">${cards.map(c=>`<details class="${c.state}"><summary><b>SDG ${c.no}</b><span>${escapeHtml(c.name)}</span><i>${c.state==='confirmed'?'근거 확인':c.state==='possible'?'연결 가능':'근거 없음'}</i></summary>${c.found.length?`<div>${c.found.map(x=>`<article><b>${escapeHtml(x.title)}</b><small>${escapeHtml([x.type,x.date].filter(Boolean).join(' · '))}</small><p>${escapeHtml(x.text)}</p></article>`).join('')}</div>`:'<p>현재 연결된 학생 자료에서 직접 근거를 찾지 못했습니다.</p>'}</details>`).join('')}</div></section>`;
+13057: }
+13058: const __uepRecordsBefore08106=recordsView;
+13059: recordsView=function(){if(recordMode==='curriculum')return uepCurriculumFinalView();const base=__uepRecordsBefore08106();if(recordMode==='sdgs'){const supplement=uepSdgsSupplementPanel(),clean=base.replace(supplement,'');return clean.replace(/<\/div>\s*$/,uepSdgsEvidenceBridge()+supplement+'</div>');}return base;};
+13060: function bindSelectionAnalysis(){
+13061:   $$('[data-curriculum-workspace]').forEach(b=>b.onclick=async()=>{const next=b.dataset.curriculumWorkspace;if(next==='subjects'&&!(await unlockSubjectConfidential()))return;curriculumWorkspaceMode=next;render('records');});
+13062:   $$('[data-record-class]').forEach(b=>b.onclick=()=>{recordClassNo=b.dataset.recordClass;recordStudentId='';render('records');});
+13063:   $$('[data-record-query]').forEach(b=>b.onclick=()=>{recordQueryMode=b.dataset.recordQuery||'class';render('records');});
+13064:   $$('[data-record-student]').forEach(b=>b.onclick=()=>openCurriculumStudentSidePanel(b.dataset.recordStudent));
+13065:   $('[data-curriculum-error-only]')?.addEventListener('click',()=>{curriculumErrorOnly=!curriculumErrorOnly;render('records');});
+13066:   $('[data-curriculum-error-type]')?.addEventListener('change',e=>{curriculumErrorType=e.target.value;render('records');});
+13067:   $$('[data-curriculum-term]').forEach(b=>b.onclick=()=>{curriculumTermFilter=b.dataset.curriculumTerm;curriculumSubjectKey='';render('records');});
+13068:   $$('[data-curriculum-subject]').forEach(b=>b.onclick=()=>{curriculumSubjectKey=b.dataset.curriculumSubject;render('records');});
+13069:   $$('[data-roster-sort]').forEach(b=>b.onclick=()=>{curriculumRosterSort=b.dataset.rosterSort;render('records');});
+13070:   $('[data-copy-current-selection-sms]')?.addEventListener('click',async()=>{try{await navigator.clipboard.writeText($('#currentSelectionSms')?.value||'');toast('보완 문자메시지를 복사했습니다.');}catch{toast('문자 복사에 실패했습니다.');}});
+13071:   $('[data-open-student-picker]')?.addEventListener('click',()=>{const m=$('.uep-picker-menu');if(m)m.hidden=!m.hidden;});
+13072:   $('[data-uep-student-search]')?.addEventListener('input',e=>{$$('.uep-picker-menu [data-record-student]').forEach(b=>b.hidden=!b.textContent.includes(e.target.value));});
+13073:   const navData=uepSelectionDataset(),navAll=navData.rows.filter(uepSelectionActiveRow08129),navScope=String(recordClassNo)==='all'?navAll:navAll.filter(r=>recordStudentClass(r.__student)===String(recordClassNo)),navRows=navScope.filter(r=>{const es=navData.errors.filter(e=>e.student.id===r.__student.id);return(!curriculumErrorOnly||es.length)&&(curriculumErrorType==='all'||es.some(e=>e.type===curriculumErrorType));}),classRows=navRows.length?navRows:navScope,idx=classRows.findIndex(r=>r.__student.id===recordStudentId);$('[data-uep-student-prev]')?.addEventListener('click',()=>{if(classRows.length){const p=idx<0?0:(idx-1+classRows.length)%classRows.length;recordStudentId=classRows[p].__student.id;render('records');}});$('[data-uep-student-next]')?.addEventListener('click',()=>{if(classRows.length){const n=idx<0?0:(idx+1)%classRows.length;recordStudentId=classRows[n].__student.id;render('records');}});
+13074:   $('[data-copy-sdgs-supplement]')?.addEventListener('click',async()=>{try{await navigator.clipboard.writeText($('#sdgsSupplementText')?.value||'');toast('SDGs 근거 보완 질문을 복사했습니다.');}catch{toast('복사에 실패했습니다.');}});
+13075: }
+13076: 
+13077: 
+13078: // __UEP_SELECTION_CACHE_08113__
+13079: let __uepSelectionCache08113={students:null,rows:null,scores:null,dorm:null,value:null};
+13080: const __uepSelectionDatasetRaw08113=uepSelectionDataset;
+13081: uepSelectionDataset=function(){
+13082:   const students=readonlyCache?.students||[],rows=readonlyCache?.selectionStudentRows||[],scores=readonlyCache?.scoreRecords||[],dorm=readonlyCache?.dormStudents||[];
+13083:   const c=__uepSelectionCache08113;
+13084:   if(c.value&&c.students===students&&c.rows===rows&&c.scores===scores&&c.dorm===dorm)return c.value;
+13085:   const value=__uepSelectionDatasetRaw08113();
+13086:   __uepSelectionCache08113={students,rows,scores,dorm,value};
+13087:   return value;
+13088: };
+13089: 
+13090: 
+13091: // __UEP_RECORD_MAIN_TAB_BIND_08114__
+13092: if(!window.__UEP_RECORD_MAIN_TAB_BIND_08114__){
+13093:   window.__UEP_RECORD_MAIN_TAB_BIND_08114__=true;
+13094:   document.addEventListener('click',event=>{
+13095:     const button=event.target?.closest?.('[data-record-mode]');
+13096:     if(!button)return;
+13097:     const mode=String(button.dataset.recordMode||'').trim();
+13098:     if(!['activities','sdgs','curriculum','final'].includes(mode))return;
+13099:     recordMode=mode;
+13100:     render('records');
+13101:   });
+13102: }
+13103: 
+13104: // __UEP_08115_SELECTION_HELPERS__
+13105: function uepActiveSelectionRows(){
+13106:   const students=readonlyCache?.students||[];
+13107:   const byId=new Map(students.map(s=>[String(s.id||""),s]));
+13108:   const byNo=new Map(students.map(s=>[String(s.studentNo||""),s]));
+13109:   return (readonlyCache?.selectionStudentRows||[]).map(row=>{
+13110:     const student=byId.get(String(row["학생ID"]||""))||byNo.get(String(row["학번"]||""))||null;
+13111:     const status=String(student?.status||row["학적상태"]||"").trim();
+13112:     return {...row,__student:student,__status:status};
+13113:   }).filter(row=>row.__student&&!/전출|자퇴|퇴학|제적/.test(row.__status));
+13114: }
+13115: function uepDormStudentIds(){
+13116:   return new Set((readonlyCache?.dormStudents||[]).filter(x=>!/퇴사/.test(String(x.status||""))).map(x=>String(x.studentId||x.studentNo||"")));
+13117: }
+13118: function uepSelectionTermSubjects(row,term){
+13119:   const keys=Object.keys(row).filter(key=>key.startsWith(term+" ")&&/선택\d+|정보·외국어|예술/.test(key));
+13120:   return keys.map(key=>String(row[key]||"").trim()).filter(Boolean);
+13121: }
+13122: function uepStudentGradeAverage(studentId){
+13123:   const rows=(readonlyCache?.scoreRecords||[]).filter(x=>String(x.studentId||"")===String(studentId||"")&&x.scoreType==="내신"&&Number.isFinite(Number(x.level)));
+13124:   if(!rows.length)return null;
+13125:   return rows.reduce((sum,x)=>sum+Number(x.level),0)/rows.length;
+13126: }
