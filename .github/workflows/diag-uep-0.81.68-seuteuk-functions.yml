@@ -1,0 +1,45 @@
+name: Diagnose UEP 0.81.68 Seuteuk Functions
+'on':
+  push:
+    branches: [main]
+    paths: [diag-uep-0.81.68-seuteuk-functions.trigger]
+permissions:
+  contents: write
+jobs:
+  diag:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          gh release download v0.81.68 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+      - name: Extract
+        shell: pwsh
+        run: |
+          @'
+          const fs=require('fs');
+          const t=fs.readFileSync('app/resources/app/gyomuon.js','utf8');
+          const terms=['makeRecords','const forbidden','let forbidden','forbidden=','openRuleManager','inspectNeisRecordbook'];
+          let out='';
+          for(const term of terms){
+            let from=0,n=0;
+            while((from=t.indexOf(term,from))>=0 && n<8){
+              const s=Math.max(0,from-3500),e=Math.min(t.length,from+9000);
+              out+=`\n===== ${term} #${n+1} @ ${from} =====\n${t.slice(s,e)}\n`;
+              from+=term.length;n++;
+            }
+          }
+          fs.writeFileSync('diag-seuteuk-functions-0.81.68.txt',out);
+          '@ | Set-Content diag.js -Encoding UTF8
+          node diag.js
+      - name: Commit
+        shell: pwsh
+        run: |
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add diag-seuteuk-functions-0.81.68.txt;git commit -m 'diag: capture seuteuk parser functions';git push
