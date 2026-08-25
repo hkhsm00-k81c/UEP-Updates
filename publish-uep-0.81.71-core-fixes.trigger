@@ -1,4 +1,4 @@
-UEP v0.81.71 core-fix build trigger
+UEP v0.81.71 core-fix build trigger R2
 base: v0.81.70 stable
-scope: finish 0.81.70 missing fixes before performance work
+scope: diagnose parser merge regression before release
 requested: 2026-08-26
