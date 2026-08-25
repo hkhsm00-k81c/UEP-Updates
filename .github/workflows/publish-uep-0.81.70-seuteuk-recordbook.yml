@@ -34,6 +34,8 @@ jobs:
           node --check app/resources/app/electron/preload.cjs
           $pkg='app/resources/app/package.json';$p=Get-Content $pkg -Raw -Encoding UTF8|ConvertFrom-Json;$p.version='0.81.70';$p|ConvertTo-Json -Depth 50|Set-Content $pkg -Encoding UTF8
           $g=(Get-FileHash app/resources/app/gyomuon.js -Algorithm SHA256).Hash.ToLower();"GYOMUON_SHA256=$g"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          $m=(Get-FileHash app/resources/app/electron/main.cjs -Algorithm SHA256).Hash.ToLower();"MAIN_SHA256=$m"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          $pr=(Get-FileHash app/resources/app/electron/preload.cjs -Algorithm SHA256).Hash.ToLower();"PRELOAD_SHA256=$pr"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
       - name: Reopen and verify exact payload
         shell: pwsh
         run: |
@@ -42,11 +44,20 @@ jobs:
           Expand-Archive UEP-update.zip verify -Force
           if(!(Test-Path verify/UEP.exe)){throw 'root UEP.exe missing'}
           node --check verify/resources/app/gyomuon.js
+          node --check verify/resources/app/electron/main.cjs
+          node --check verify/resources/app/electron/preload.cjs
           $g=(Get-FileHash verify/resources/app/gyomuon.js -Algorithm SHA256).Hash.ToLower();if($g -ne $env:GYOMUON_SHA256){throw 'gyomuon hash mismatch'}
+          $m=(Get-FileHash verify/resources/app/electron/main.cjs -Algorithm SHA256).Hash.ToLower();if($m -ne $env:MAIN_SHA256){throw 'main hash mismatch'}
+          $pr=(Get-FileHash verify/resources/app/electron/preload.cjs -Algorithm SHA256).Hash.ToLower();if($pr -ne $env:PRELOAD_SHA256){throw 'preload hash mismatch'}
           $pkg=Get-Content verify/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json;if($pkg.version -ne '0.81.70'){throw "package version mismatch: $($pkg.version)"}
           $gy=Get-Content verify/resources/app/gyomuon.js -Raw -Encoding UTF8
-          foreach($x in @('__UEP_08169_SUBJECT_SHARED_HASH__','uepNeisRuleStorageKey08169',"category:'반 확인'")){if(!$gy.Contains($x)){throw "0.81.70 marker missing: $x"}}
+          $main=Get-Content verify/resources/app/electron/main.cjs -Raw -Encoding UTF8
+          $preload=Get-Content verify/resources/app/electron/preload.cjs -Raw -Encoding UTF8
+          foreach($x in @('__UEP_08168_SHARED_SECURITY_READ_RUNTIME__','__UEP_08169_SUBJECT_SHARED_HASH__','uepNeisRuleStorageKey08169',"category:'반 확인'",'학교생활기록부','교과학습발달상황')){if(!$gy.Contains($x)){throw "0.81.70 gyomuon marker missing: $x"}}
+          foreach($x in @('__UEP_08168_SHARED_SECURITY_READ__','securityConfig:readShared','SUBJECT_CONFIDENTIAL_PIN_HASH')){if(!$main.Contains($x)){throw "0.81.70 main marker missing: $x"}}
+          foreach($x in @('readSharedSecurityConfig','resetSharedSecurityConfig')){if(!$preload.Contains($x)){throw "0.81.70 preload marker missing: $x"}}
           if($gy.Contains("category:'학번 확인',hits:[],reason:'학년·반·번호를 안정적으로 복원하지 못했습니다")){throw 'legacy all-students number error remains'}
+          if($gy.Contains('saveRules();if(session.sourceSheets)')){throw 'legacy undefined saveRules remains'}
           $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower();"UEP_SHA256=$sha"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
           Write-Host '0.81.70 package verification PASS'
       - name: Publish only after verification passes
@@ -56,10 +67,10 @@ jobs:
         run: |
           $ErrorActionPreference='Stop';$PSNativeCommandUseErrorActionPreference=$true
           $exists=$false;try{gh release view v0.81.70 --repo $env:GITHUB_REPOSITORY *> $null;$exists=$true}catch{$exists=$false};if($exists){gh release delete v0.81.70 --repo $env:GITHUB_REPOSITORY --cleanup-tag --yes}
-          gh release create v0.81.70 UEP-update.zip --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.70 Seuteuk Recordbook Parser' --notes '교과세특 오류검증을 나이스 학교생활기록부 출력 형식 중심으로 조정합니다. 학번 열이 없는 정상 출력물을 전원 오류로 처리하지 않고 반·학생·과목·세특 본문 중심으로 검증하며, 학교 메타데이터의 과목 오인식과 일반어 다음의 브랜드 오탐을 줄입니다.'
+          gh release create v0.81.70 UEP-update.zip --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.70 Subject Security + NEIS Seuteuk Recordbook Parser' --notes '0.81.69 정상 배포판을 기준으로 선택과목 대외비 중앙 비밀번호 조회와 인증 흐름을 유지·보강하고, 선택과목 인증창 문구 및 민감정보/선택과목 Enter 인증 동작을 포함합니다. 현재 제공된 나이스 학교생활기록부 세특 XLSX 형식에 맞춘 전용 파서를 적용하여 페이지 경계 세특 연결, 반복 헤더·학교명·학년도·출력정보 등 메타정보 제외, 학생마스터 매칭 흐름을 보존하며, 검증규칙 버튼 정상화와 일반어 다음 등의 오탐을 줄입니다. 학번 열이 없는 정상 출력물은 전원 오류 처리하지 않고 반·학생·과목·세특 본문 중심으로 검증합니다.'
           $url='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.70/UEP-update.zip'
           git pull --rebase origin main
-          $policy=Get-Content uep-policy.json -Raw -Encoding UTF8|ConvertFrom-Json;$policy.latestVersion='0.81.70';$policy.downloadUrl=$url;$policy.sha256=$env:UEP_SHA256;$policy.message='교과세특 나이스 생활기록부 전용 파서 보정';$policy.forceUpdate=$false;$policy|ConvertTo-Json -Depth 50|Set-Content uep-policy.json -Encoding UTF8
-          $manifest=@{version='0.81.70';channel='stable';downloadUrl=$url;sha256=$env:UEP_SHA256;notes='교과세특 생활기록부 전용 파서 보정'}|ConvertTo-Json;Set-Content uep-update.json $manifest -Encoding UTF8;Set-Content uep-version.json $manifest -Encoding UTF8
+          $policy=Get-Content uep-policy.json -Raw -Encoding UTF8|ConvertFrom-Json;$policy.latestVersion='0.81.70';$policy.downloadUrl=$url;$policy.sha256=$env:UEP_SHA256;$policy.message='선택과목 인증 보강 · 나이스 세특 XLSX 전용 파서/검증 개선';$policy.forceUpdate=$false;$policy|ConvertTo-Json -Depth 50|Set-Content uep-policy.json -Encoding UTF8
+          $manifest=@{version='0.81.70';channel='stable';downloadUrl=$url;sha256=$env:UEP_SHA256;notes='선택과목 중앙 인증 + 나이스 세특 XLSX 전용 파서·페이지 경계·메타 제외·학생매칭·검증 오탐 개선'}|ConvertTo-Json;Set-Content uep-update.json $manifest -Encoding UTF8;Set-Content uep-version.json $manifest -Encoding UTF8
           git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add uep-policy.json uep-update.json uep-version.json;git commit -m 'release: promote UEP 0.81.70 seuteuk recordbook parser';git push
+          git add uep-policy.json uep-update.json uep-version.json;git commit -m 'release: promote UEP 0.81.70 subject security and seuteuk parser';git push
