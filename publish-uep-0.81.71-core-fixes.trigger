@@ -1,4 +1,4 @@
-UEP v0.81.71 core-fix build trigger R5
+UEP v0.81.71 core-fix build trigger R6
 base: v0.81.70 stable
-scope: verified parser regression + subject auth runtime integration
+scope: final runtime verification and release
 requested: 2026-08-26
