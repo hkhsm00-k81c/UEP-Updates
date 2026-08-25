@@ -4,7 +4,7 @@ name: Diagnose UEP 0.81.64 for 0.81.66
     branches: [main]
     paths: [diag-uep-0.81.64-next.trigger]
 permissions:
-  contents: read
+  contents: write
 jobs:
   diag:
     runs-on: windows-latest
@@ -18,10 +18,11 @@ jobs:
           New-Item -ItemType Directory -Force source,app|Out-Null
           gh release download v0.81.64 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
           Expand-Archive source/UEP-update.zip app -Force
-      - name: Print anchors
+      - name: Persist anchors
         shell: pwsh
         run: |
-          $g='app/resources/app/gyomuon.js';$m='app/resources/app/electron/main.cjs';$p='app/resources/app/electron/preload.cjs'
-          foreach($term in @('subjectConfidential','민감정보','비밀번호 변경','급식지도','오늘의 급식','settingsView','saveNoticeReceipt')){Write-Host "===== GYOMUON $term =====";Select-String -Path $g -Pattern $term -Context 3,8 | Select-Object -First 8 | ForEach-Object {$_.ToString()}}
-          foreach($term in @('setLoginItemSettings','getLoginItemSettings','app.whenReady','ipcMain.handle','credentialPath')){Write-Host "===== MAIN $term =====";Select-String -Path $m -Pattern $term -Context 3,8 | Select-Object -First 8 | ForEach-Object {$_.ToString()}}
-          if(Test-Path $p){foreach($term in @('contextBridge','schoolBoard')){Write-Host "===== PRELOAD $term =====";Select-String -Path $p -Pattern $term -Context 3,8 | Select-Object -First 8 | ForEach-Object {$_.ToString()}}}
+          $g='app/resources/app/gyomuon.js';$m='app/resources/app/electron/main.cjs';$p='app/resources/app/electron/preload.cjs';$out='diag-0.81.64-anchors.txt';''|Set-Content $out -Encoding UTF8
+          foreach($term in @('subjectConfidential','민감정보','비밀번호 변경','급식지도','오늘의 급식','settingsView','saveNoticeReceipt','todayMeal','meal')){Add-Content $out "===== GYOMUON $term =====";Select-String -Path $g -Pattern $term -Context 4,12 | Select-Object -First 10 | ForEach-Object {Add-Content $out $_.ToString()}}
+          foreach($term in @('setLoginItemSettings','getLoginItemSettings','app.whenReady','ipcMain.handle','credentialPath','notice:receiptSave')){Add-Content $out "===== MAIN $term =====";Select-String -Path $m -Pattern $term -Context 4,12 | Select-Object -First 10 | ForEach-Object {Add-Content $out $_.ToString()}}
+          if(Test-Path $p){foreach($term in @('contextBridge','schoolBoard','saveNotice')){Add-Content $out "===== PRELOAD $term =====";Select-String -Path $p -Pattern $term -Context 4,12 | Select-Object -First 10 | ForEach-Object {Add-Content $out $_.ToString()}}}
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add $out;git commit -m 'diag: save 0.81.64 anchors';git push
