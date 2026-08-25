@@ -1,0 +1,20 @@
+const fs=require('fs');
+const path=require('path');
+const root=process.argv[2]||'app';
+const g=fs.readFileSync(path.join(root,'resources','app','gyomuon.js'),'utf8');
+const gd=fs.readFileSync(path.join(root,'resources','app','electron','google-data.cjs'),'utf8');
+const main=fs.readFileSync(path.join(root,'resources','app','electron','main.cjs'),'utf8');
+function around(text,needle,before=1200,after=2600){const i=text.indexOf(needle);if(i<0)return `NOT FOUND: ${needle}`;return text.slice(Math.max(0,i-before),Math.min(text.length,i+after));}
+let out=[];
+out.push('=== VERSION ===\n'+(g.match(/const\s+APP_VERSION\s*=\s*["'][^"']+/)||['?'])[0]);
+out.push('\n=== CURRICULUM BINDING BLOCK ===\n'+around(g,"data-curriculum-workspace",1800,6500));
+out.push('\n=== CROSS STUDENT BLOCK ===\n'+around(g,"data-cross-student",1200,4200));
+out.push('\n=== CURRICULUM SUBJECT BLOCK ===\n'+around(g,"data-curriculum-subject",1200,4200));
+out.push('\n=== REQUESTANIMATIONFRAME NEAR CURRICULUM ===\n'+around(g,"__UEP_08162_CURRICULUM_BINDINGS__",2500,7000));
+out.push('\n=== OFFICIAL HELPER ===\n'+around(g,"officialAttendanceRowsForDate08162",1800,5500));
+out.push('\n=== NOTICE UI/SAVE ===\n'+around(g,"saveCurrentNoticeReceipt",2200,6200));
+out.push('\n=== SCHOOLBOARD PRELOAD/API REFERENCES ===\n'+[...main.matchAll(/saveNoticeReceipt/g)].map(m=>around(main,'saveNoticeReceipt',1800,4000)).join('\n---\n'));
+out.push('\n=== GOOGLE DATA NOTICE RECEIPT REFERENCES ===\n'+[...gd.matchAll(/saveNoticeReceipt|공지확인현황|구글시트|연결/g)].slice(0,12).map(m=>gd.slice(Math.max(0,m.index-1000),Math.min(gd.length,m.index+2600))).join('\n---\n'));
+out.push('\n=== SINGULAR $ FOREACH CANDIDATES ===\n'+(g.match(/(^|\n)[^\n]{0,120}\$\([^\n]+\)\.forEach[^\n]*/g)||[]).slice(0,80).join('\n'));
+fs.writeFileSync('diag-08162-live.txt',out.join('\n\n'),'utf8');
+console.log('written diag-08162-live.txt');
