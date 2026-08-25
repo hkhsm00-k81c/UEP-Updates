@@ -18,16 +18,12 @@ jobs:
           New-Item -ItemType Directory -Force source,app|Out-Null
           gh release download v0.81.64 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
           Expand-Archive source/UEP-update.zip app -Force
-      - name: Persist exact ranges
+      - name: Persist helper ranges
         shell: pwsh
         run: |
-          $g=Get-Content 'app/resources/app/gyomuon.js';$m=Get-Content 'app/resources/app/electron/main.cjs';$p=Get-Content 'app/resources/app/electron/preload.cjs';$out='diag-0.81.64-ranges.txt';''|Set-Content $out -Encoding UTF8
+          $g=Get-Content 'app/resources/app/gyomuon.js';$m=Get-Content 'app/resources/app/electron/main.cjs';$p=Get-Content 'app/resources/app/electron/preload.cjs';$out='diag-0.81.64-helpers.txt';''|Set-Content $out -Encoding UTF8
           function AddRange($title,$arr,$start,$end){Add-Content $out "===== $title $start-$end =====";for($i=$start;$i -le $end;$i++){if($i -le $arr.Count){Add-Content $out ("{0}: {1}" -f $i,$arr[$i-1])}}}
-          AddRange 'GYOMUON sensitive' $g 930 990
-          AddRange 'GYOMUON subject' $g 4155 4225
-          $mealHits=Select-String -Path 'app/resources/app/gyomuon.js' -Pattern '오늘의 급식지도|TODAY LUNCH DUTY|급식지도 전체 보기|오늘의 급식정보';foreach($h in $mealHits|Select-Object -First 8){AddRange 'GYOMUON meal' $g ([Math]::Max(1,$h.LineNumber-15)) ([Math]::Min($g.Count,$h.LineNumber+35))}
-          $settingsHit=Select-String -Path 'app/resources/app/gyomuon.js' -Pattern 'function settingsView';foreach($h in $settingsHit|Select-Object -First 1){AddRange 'GYOMUON settings' $g $h.LineNumber ([Math]::Min($g.Count,$h.LineNumber+180))}
-          $readyHit=Select-String -Path 'app/resources/app/electron/main.cjs' -Pattern 'app.whenReady';foreach($h in $readyHit|Select-Object -First 2){AddRange 'MAIN ready' $m ([Math]::Max(1,$h.LineNumber-10)) ([Math]::Min($m.Count,$h.LineNumber+50))}
-          $ipcHit=Select-String -Path 'app/resources/app/electron/main.cjs' -Pattern 'notice:receiptSave';foreach($h in $ipcHit|Select-Object -First 1){AddRange 'MAIN receipt' $m ([Math]::Max(1,$h.LineNumber-10)) ([Math]::Min($m.Count,$h.LineNumber+55))}
-          AddRange 'PRELOAD tail' $p ([Math]::Max(1,$p.Count-120)) $p.Count
-          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add $out;git commit -m 'diag: save exact 0.81.64 ranges';git push
+          AddRange 'GYOMUON sensitive-start' $g 860 930
+          foreach($pat in @('notice:save','lunchDuty:save','userAccount:update','student:contactSave','function write','values.append','values.update','spreadsheets.values','batchUpdate','appendSheet','updateSheet','resolveGoogleWrite','credentialPath')){ $hits=Select-String -Path 'app/resources/app/electron/main.cjs' -Pattern $pat -SimpleMatch; foreach($h in $hits|Select-Object -First 5){AddRange ("MAIN "+$pat) $m ([Math]::Max(1,$h.LineNumber-15)) ([Math]::Min($m.Count,$h.LineNumber+55))}}
+          AddRange 'PRELOAD all' $p 1 $p.Count
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add $out;git commit -m 'diag: save 0.81.64 write helpers';git push
