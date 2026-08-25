@@ -1,0 +1,38 @@
+name: Diagnose UEP 0.81.71 Timer Network Functions
+'on':
+  push:
+    branches: [main]
+    paths: [diag-uep-0.81.71-performance-timers.trigger]
+permissions:
+  contents: write
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download stable 0.81.71
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop';New-Item -ItemType Directory -Force source,app|Out-Null
+          gh release download v0.81.71 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+      - name: Extract timer-linked functions
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $file='app/resources/app/gyomuon.js';$lines=Get-Content $file -Encoding UTF8
+          $names=@('syncSchoolReadAuthBadge','checkPeriodAlerts','loadNeisDashboard','uepLoadSharedSecurity08168','uepUrgentTick08166','updateHeroClock')
+          $out=@('# UEP 0.81.71 timer/network exact functions','')
+          foreach($name in $names){
+            $idx=-1;for($i=0;$i -lt $lines.Count;$i++){if($lines[$i] -match "(async\s+function|function)\s+$name\b|const\s+$name\s*="){$idx=$i;break}}
+            $out+="## $name @ $($idx+1)"
+            if($idx -ge 0){$depth=0;$started=$false;$max=[Math]::Min($lines.Count-1,$idx+180);for($j=$idx;$j -le $max;$j++){$ln=$lines[$j];$out+=('{0}: {1}' -f ($j+1),$ln);$opens=([regex]::Matches($ln,'\{')).Count;$closes=([regex]::Matches($ln,'\}')).Count;if($opens -gt 0){$started=$true};$depth+=$opens-$closes;if($started -and $depth -le 0){break}}}
+          }
+          $out+='';$out+='## Direct bridge/network calls near timers'
+          for($i=0;$i -lt $lines.Count;$i++){if($lines[$i] -match 'schoolReadSessionStatus|previewReadonlySync|loadNeisDashboard|uepLoadSharedSecurity08168'){if($i -gt 11800){$out+=('{0}: {1}' -f ($i+1),$lines[$i].Trim())}}}
+          $out|Set-Content diag-uep-0.81.71-performance-timers.txt -Encoding UTF8
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git pull --rebase origin main;git add diag-uep-0.81.71-performance-timers.txt;git commit -m 'diag: capture UEP 0.81.71 timer network functions';git push
