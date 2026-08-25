@@ -1,0 +1,77 @@
+name: Publish UEP 0.81.69 Subject Auth + Seuteuk Fix R2
+'on':
+  push:
+    branches: [main]
+    paths: [publish-uep-0.81.69-subject-seuteuk-r2.trigger]
+permissions:
+  contents: write
+concurrency:
+  group: publish-uep-0.81.69-subject-seuteuk-r2
+  cancel-in-progress: true
+jobs:
+  build-publish:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download known-good 0.81.68
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop';$PSNativeCommandUseErrorActionPreference=$true
+          New-Item -ItemType Directory -Force source,app,verify|Out-Null
+          gh release download v0.81.68 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+      - name: Prepare and validate patcher R2
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop';$PSNativeCommandUseErrorActionPreference=$true
+          node --check scripts/fix-uep-0.81.69-patcher-r2.js
+          node scripts/fix-uep-0.81.69-patcher-r2.js
+          node --check scripts/patch-uep-0.81.69-subject-seuteuk-r2.js
+      - name: Apply 0.81.69 patch R2
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop';$PSNativeCommandUseErrorActionPreference=$true
+          node scripts/patch-uep-0.81.69-subject-seuteuk-r2.js app
+          node --check app/resources/app/gyomuon.js
+          node --check app/resources/app/electron/main.cjs
+          node --check app/resources/app/electron/preload.cjs
+          $pkg='app/resources/app/package.json';$p=Get-Content $pkg -Raw -Encoding UTF8|ConvertFrom-Json;$p.version='0.81.69';$p|ConvertTo-Json -Depth 50|Set-Content $pkg -Encoding UTF8
+          $g=(Get-FileHash app/resources/app/gyomuon.js -Algorithm SHA256).Hash.ToLower();"GYOMUON_SHA256=$g"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          $m=(Get-FileHash app/resources/app/electron/main.cjs -Algorithm SHA256).Hash.ToLower();"MAIN_SHA256=$m"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          $pr=(Get-FileHash app/resources/app/electron/preload.cjs -Algorithm SHA256).Hash.ToLower();"PRELOAD_SHA256=$pr"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Build reopen and verify exact payload
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop';$PSNativeCommandUseErrorActionPreference=$true
+          Compress-Archive -Path 'app/*' -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          Expand-Archive UEP-update.zip verify -Force
+          if(!(Test-Path verify/UEP.exe)){throw 'root UEP.exe missing'}
+          node --check verify/resources/app/gyomuon.js
+          node --check verify/resources/app/electron/main.cjs
+          node --check verify/resources/app/electron/preload.cjs
+          $g=(Get-FileHash verify/resources/app/gyomuon.js -Algorithm SHA256).Hash.ToLower();if($g -ne $env:GYOMUON_SHA256){throw 'gyomuon hash mismatch'}
+          $m=(Get-FileHash verify/resources/app/electron/main.cjs -Algorithm SHA256).Hash.ToLower();if($m -ne $env:MAIN_SHA256){throw 'main hash mismatch'}
+          $pr=(Get-FileHash verify/resources/app/electron/preload.cjs -Algorithm SHA256).Hash.ToLower();if($pr -ne $env:PRELOAD_SHA256){throw 'preload hash mismatch'}
+          $pkg=Get-Content verify/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json;if($pkg.version -ne '0.81.69'){throw "package version mismatch: $($pkg.version)"}
+          $gy=Get-Content verify/resources/app/gyomuon.js -Raw -Encoding UTF8
+          foreach($x in @('__UEP_08169_SUBJECT_SHARED_HASH__','uepNeisRuleStorageKey08169','학교명|학년도')){if(!$gy.Contains($x)){throw "0.81.69 marker missing: $x"}}
+          if($gy.Contains('saveRules();if(session.sourceSheets)'){throw 'legacy undefined saveRules remains'}
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower();"UEP_SHA256=$sha"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host '0.81.69 package verification PASS'
+      - name: Publish only after verification passes
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop';$PSNativeCommandUseErrorActionPreference=$true
+          $exists=$false;try{gh release view v0.81.69 --repo $env:GITHUB_REPOSITORY *> $null;$exists=$true}catch{$exists=$false};if($exists){gh release delete v0.81.69 --repo $env:GITHUB_REPOSITORY --cleanup-tag --yes}
+          gh release create v0.81.69 UEP-update.zip --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.69 Subject Auth + Seuteuk Parser Fix' --notes '선택과목 비밀번호를 민감정보와 동일한 중앙 설정 조회 함수로 통일합니다. 교과세특 오류검증의 검증규칙 모달 표시/저장을 정상화하고, 나이스 엑셀 파서의 학교명 오인식 및 학번 복원 문제를 보완합니다.'
+          $url='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.69/UEP-update.zip'
+          git pull --rebase origin main
+          $policy=Get-Content uep-policy.json -Raw -Encoding UTF8|ConvertFrom-Json;$policy.latestVersion='0.81.69';$policy.downloadUrl=$url;$policy.sha256=$env:UEP_SHA256;$policy.message='선택과목 비밀번호 중앙조회 · 교과세특 검증규칙/파서 수정';$policy.forceUpdate=$false;$policy|ConvertTo-Json -Depth 50|Set-Content uep-policy.json -Encoding UTF8
+          $manifest=@{version='0.81.69';channel='stable';downloadUrl=$url;sha256=$env:UEP_SHA256;notes='선택과목 중앙 비밀번호 + 세특 검증규칙/파서 수정'}|ConvertTo-Json;Set-Content uep-update.json $manifest -Encoding UTF8;Set-Content uep-version.json $manifest -Encoding UTF8
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add uep-policy.json uep-update.json uep-version.json;git commit -m 'release: promote UEP 0.81.69 subject auth and seuteuk fixes';git push
