@@ -1,0 +1,15 @@
+const fs=require('fs');
+const src='scripts/patch-uep-0.81.69-subject-seuteuk.js';
+const dst='scripts/patch-uep-0.81.69-subject-seuteuk-r2.js';
+let s=fs.readFileSync(src,'utf8');
+const A=(c,m)=>{if(!c)throw new Error(m)};
+const before=s;
+s=s.replace(/const endMarker=';\\n    const key=\(record,issue\)=>';\s*const end=g\.indexOf\(endMarker,start\);/,"const end=g.indexOf('const key=(record,issue)=>',start);");
+s=s.replace("g=g.slice(0,start)+newParser+g.slice(end);","g=g.slice(0,start)+newParser+';\\n    '+g.slice(end);");
+s=s.replace(/const ruleEnd=g\.indexOf\(';\\n  const mount=host=>',ruleStart\);/,"const ruleEnd=g.indexOf('const mount=host=>',ruleStart);");
+s=s.replace("g=g.slice(0,ruleStart)+newRules+g.slice(ruleEnd);","g=g.slice(0,ruleStart)+newRules+';\\n  '+g.slice(ruleEnd);");
+A(s!==before,'patcher source unchanged');
+A(s.includes("const end=g.indexOf('const key=(record,issue)=>',start);"),'makeRecords boundary fix missing');
+A(s.includes("const ruleEnd=g.indexOf('const mount=host=>',ruleStart);"),'rule boundary fix missing');
+fs.writeFileSync(dst,s,'utf8');
+console.log('0.81.69 patcher r2 generated');
