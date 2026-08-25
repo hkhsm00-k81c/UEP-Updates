@@ -1,0 +1,56 @@
+name: Build UEP 0.81.72 Performance Candidate R6
+'on':
+  push:
+    branches: [main]
+    paths:
+      - build-uep-0.81.72-performance-candidate-r6.trigger
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download stable 0.81.71
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop';New-Item -ItemType Directory -Force source,app,out|Out-Null
+          gh release download v0.81.71 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+      - name: Apply 0.81.72 structural scripts through R6
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($script in @('scripts/patch-uep-08172-structure.js','scripts/patch-uep-08172-operational-writes.js','scripts/patch-uep-08172-refresh-policy.js','scripts/patch-uep-08172-input-contact.js','scripts/patch-uep-08172-program-write-r6.js')){node $script;if($LASTEXITCODE -ne 0){throw "patch failed: $script"}}
+      - name: Hard syntax checks
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop';foreach($f in @('app/resources/app/gyomuon.js','app/resources/app/electron/main.cjs','app/resources/app/electron/preload.cjs')){node --check $f;if($LASTEXITCODE -ne 0){throw "syntax failed: $f"}}
+      - name: R6 hot-path regression
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop';$g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8;$m=Get-Content app/resources/app/electron/main.cjs -Raw -Encoding UTF8;$p=Get-Content app/resources/app/electron/preload.cjs -Raw -Encoding UTF8
+          foreach($fn in @('saveOfficialAttendance','deleteOfficialAttendance','saveLateAttendance','deleteLateAttendance','saveDormOuting','saveNightSupervisor','saveLunchDuty','saveStudentContact','saveProgramOperation')){$start=$m.IndexOf("async function $fn");if($start -lt 0){throw "missing $fn"};$next=$m.IndexOf('async function ',$start+20);if($next -lt 0){$next=$m.Length};$block=$m.Substring($start,$next-$start);if($block -match 'fetchLiveData\(\{\s*force\s*:\s*true'){throw "$fn still forces full refresh"}}
+          foreach($good in @('applyProgramWritePatch08172','programPatch','refreshInputCenterSourceSilently','refreshOperationalCacheSilently','READONLY_FULL_REFRESH_MAX_AGE_MS','syncSchoolReadAuthBadgeFromState')){if(-not ($g.Contains($good) -or $m.Contains($good))){throw "R6 marker missing: $good"}}
+          foreach($bad in @('UEP_08134_CURRICULUM_SECURITY_START','setInterval(tick,2000)','setInterval(syncSchoolReadAuthBadge,5000)')){if($g.Contains($bad)){throw "legacy marker remains: $bad"}}
+          if($g -match 'saveProgramOperation[\s\S]{0,1200}?readonlyCache=result\.data'){throw 'program renderer still whole-cache replaces'}
+          if($g -match 'inputCenterDrafts=\[\];\s*await refreshReadonlyCacheSilently'){throw 'input source save regressed to full refresh'}
+          if(-not $p.Contains('refreshInputCenterSource')){throw 'input source preload bridge missing'}
+      - name: Preserve intentional normalize full sync
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop';$g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8;$idx=$g.IndexOf('normalizeInputBatch');if($idx -lt 0){throw 'normalize input path missing'};$block=$g.Substring($idx,[Math]::Min(2800,$g.Length-$idx));if(-not $block.Contains('refreshReadonlyCacheSilently({force:true,rerender:false})')){throw 'normalize full refresh removed before domain-safe replacement exists'}
+      - name: Package and archive revalidation
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop';Compress-Archive -Path app/* -DestinationPath out/UEP-update-0.81.72-candidate-r6.zip -CompressionLevel Optimal;New-Item -ItemType Directory -Force verify|Out-Null;Expand-Archive out/UEP-update-0.81.72-candidate-r6.zip verify -Force
+          foreach($f in @('verify/resources/app/gyomuon.js','verify/resources/app/electron/main.cjs','verify/resources/app/electron/preload.cjs')){node --check $f;if($LASTEXITCODE -ne 0){throw "archive syntax failed: $f"}}
+          $sha=(Get-FileHash out/UEP-update-0.81.72-candidate-r6.zip -Algorithm SHA256).Hash.ToLower();@("candidate=0.81.72-r6","base=0.81.71-stable","sha256=$sha","operational=partial","input-save-classify=source-only","contact=record-patch","program=record-patch","input-normalize=full-intentional","release=no")|Set-Content out/UEP-0.81.72-candidate-r6-report.txt -Encoding UTF8
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UEP-0.81.72-performance-candidate-r6
+          path: out/*
+          retention-days: 7
