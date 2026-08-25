@@ -1,0 +1,40 @@
+name: Build UEP 0.81.64 Focused Auth Fix
+'on':
+  push:
+    branches: [main]
+    paths: [build-uep-0.81.64-auth.trigger]
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download actual 0.81.63
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force source,app,verify|Out-Null
+          gh release download v0.81.63 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+      - name: Apply focused patch
+        shell: pwsh
+        run: |
+          node scripts/patch-uep-0.81.64-auth.js app
+          node --check app/resources/app/gyomuon.js
+          node --check app/resources/app/electron/main.cjs
+          $pkg='app/resources/app/package.json';$p=Get-Content $pkg -Raw|ConvertFrom-Json;$p.version='0.81.64';$p|ConvertTo-Json -Depth 50|Set-Content $pkg -Encoding UTF8
+      - name: Verify package only
+        shell: pwsh
+        run: |
+          Compress-Archive -Path 'app/*' -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          Expand-Archive UEP-update.zip verify -Force
+          node --check verify/resources/app/gyomuon.js
+          node --check verify/resources/app/electron/main.cjs
+          $g=Get-Content verify/resources/app/gyomuon.js -Raw;$m=Get-Content verify/resources/app/electron/main.cjs -Raw
+          if(!$g.Contains('SUBJECT_CONFIDENTIAL_PIN_HASH')){throw 'shared curriculum password route missing'}
+          if(!$m.Contains('__UEP_08164_NOTICE_RECEIPT_SCHOOL_READ__')){throw 'School Read notice route missing'}
+          if(!$m.Contains("action:'notice-receipt-save'")){throw 'notice receipt action missing'}
+          Write-Host '0.81.64 focused package verified. NOT promoted.'
