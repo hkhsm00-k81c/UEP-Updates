@@ -1,0 +1,55 @@
+name: Publish UEP 0.81.60 Normalization Fix
+
+'on':
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [publish-uep-0.81.60.trigger]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-uep-0.81.60
+  cancel-in-progress: true
+
+jobs:
+  build-publish:
+    runs-on: windows-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download 0.81.59
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop';New-Item -ItemType Directory -Force source,app,verify|Out-Null
+          gh release download v0.81.59 --repo $env:GITHUB_REPOSITORY --pattern '*.zip' --dir source
+          $zip=Get-ChildItem source -File -Filter '*.zip'|Select-Object -First 1;if(!$zip){throw '0.81.59 release zip not found'};Expand-Archive $zip.FullName app -Force
+      - name: Apply 0.81.60 patch and verify
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop';node scripts/patch-uep-0.81.60.js app
+          node --check app/resources/app/gyomuon.js;node --check app/resources/app/electron/main.cjs;node --check app/resources/app/electron/google-data.cjs
+          $pkg='app/resources/app/package.json';$p=Get-Content $pkg -Raw -Encoding UTF8|ConvertFrom-Json;$p.version='0.81.60';$p|ConvertTo-Json -Depth 50|Set-Content $pkg -Encoding UTF8
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          foreach($x in @('const APP_VERSION = "0.81.60";','__UEP_08160_ISO_CALENDAR_DATE__','__UEP_08160_SENSITIVE_CONFIG_ROLE__','__UEP_08160_NOTICE_LATEST_REVISION__','__UEP_08159_HOMEROOM_SENSITIVE_GATE__','__UEP_08159_HOMEROOM_SUBJECT_GATE__')){if(!$g.Contains($x)){throw "marker missing: $x"}}
+          if(!$g.Contains("return ['admin','grade_head'].includes(role)")){throw 'subject configure role widened'}
+      - name: Build package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop';Compress-Archive -Path 'app/*' -DestinationPath UEP-update.zip -CompressionLevel Optimal;Expand-Archive UEP-update.zip verify -Force
+          if(!(Test-Path 'verify/UEP.exe')){throw 'root UEP.exe missing'};node --check verify/resources/app/gyomuon.js
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower();"UEP_SHA256=$sha"|Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Publish and promote 0.81.60
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop';gh release view v0.81.60 --repo $env:GITHUB_REPOSITORY *> $null
+          if($LASTEXITCODE -eq 0){gh release delete v0.81.60 --repo $env:GITHUB_REPOSITORY --cleanup-tag --yes};$global:LASTEXITCODE=0
+          gh release create v0.81.60 UEP-update.zip --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.60 Dashboard + Notice Normalization' --notes '공결 대시보드 날짜는 보정값 없이 timezone이 있는 ISO 날짜를 학교 달력 날짜로 먼저 해석합니다. 민감정보 비밀번호는 관리자·학년부장만 설정/변경하고 담임은 기존 비밀번호 입력 후 열람만 허용합니다. 학교업무 공지는 40_공지마감의 동일 공지ID 이력을 최신 상태 1건으로 접어 유령·중복 공지를 제거합니다.'
+          $url='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.60/UEP-update.zip';$policy=Get-Content uep-policy.json -Raw -Encoding UTF8|ConvertFrom-Json;$policy.latestVersion='0.81.60';$policy.downloadUrl=$url;$policy.sha256=$env:UEP_SHA256;$policy.message='공결 대시보드 날짜 정상화 · 민감정보 설정/열람권한 분리 · 학교업무 공지 최신이력 정규화';$policy.forceUpdate=$false;$policy|ConvertTo-Json -Depth 50|Set-Content uep-policy.json -Encoding UTF8
+          $manifest=@{version='0.81.60';channel='stable';downloadUrl=$url;sha256=$env:UEP_SHA256;notes='공결 대시보드 날짜 + 보안권한 분리 + 공지 최신이력 정규화'}|ConvertTo-Json;Set-Content uep-update.json $manifest -Encoding UTF8;Set-Content uep-version.json $manifest -Encoding UTF8
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add uep-policy.json uep-update.json uep-version.json;git commit -m 'release: promote UEP 0.81.60 normalization fix';git push
