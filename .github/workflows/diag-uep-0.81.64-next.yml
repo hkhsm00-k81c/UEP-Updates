@@ -18,11 +18,16 @@ jobs:
           New-Item -ItemType Directory -Force source,app|Out-Null
           gh release download v0.81.64 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
           Expand-Archive source/UEP-update.zip app -Force
-      - name: Persist anchors
+      - name: Persist exact ranges
         shell: pwsh
         run: |
-          $g='app/resources/app/gyomuon.js';$m='app/resources/app/electron/main.cjs';$p='app/resources/app/electron/preload.cjs';$out='diag-0.81.64-anchors.txt';''|Set-Content $out -Encoding UTF8
-          foreach($term in @('subjectConfidential','민감정보','비밀번호 변경','급식지도','오늘의 급식','settingsView','saveNoticeReceipt','todayMeal','meal')){Add-Content $out "===== GYOMUON $term =====";Select-String -Path $g -Pattern $term -Context 4,12 | Select-Object -First 10 | ForEach-Object {Add-Content $out $_.ToString()}}
-          foreach($term in @('setLoginItemSettings','getLoginItemSettings','app.whenReady','ipcMain.handle','credentialPath','notice:receiptSave')){Add-Content $out "===== MAIN $term =====";Select-String -Path $m -Pattern $term -Context 4,12 | Select-Object -First 10 | ForEach-Object {Add-Content $out $_.ToString()}}
-          if(Test-Path $p){foreach($term in @('contextBridge','schoolBoard','saveNotice')){Add-Content $out "===== PRELOAD $term =====";Select-String -Path $p -Pattern $term -Context 4,12 | Select-Object -First 10 | ForEach-Object {Add-Content $out $_.ToString()}}}
-          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add $out;git commit -m 'diag: save 0.81.64 anchors';git push
+          $g=Get-Content 'app/resources/app/gyomuon.js';$m=Get-Content 'app/resources/app/electron/main.cjs';$p=Get-Content 'app/resources/app/electron/preload.cjs';$out='diag-0.81.64-ranges.txt';''|Set-Content $out -Encoding UTF8
+          function AddRange($title,$arr,$start,$end){Add-Content $out "===== $title $start-$end =====";for($i=$start;$i -le $end;$i++){if($i -le $arr.Count){Add-Content $out ("{0}: {1}" -f $i,$arr[$i-1])}}}
+          AddRange 'GYOMUON sensitive' $g 930 990
+          AddRange 'GYOMUON subject' $g 4155 4225
+          $mealHits=Select-String -Path 'app/resources/app/gyomuon.js' -Pattern '오늘의 급식지도|TODAY LUNCH DUTY|급식지도 전체 보기|오늘의 급식정보';foreach($h in $mealHits|Select-Object -First 8){AddRange 'GYOMUON meal' $g ([Math]::Max(1,$h.LineNumber-15)) ([Math]::Min($g.Count,$h.LineNumber+35))}
+          $settingsHit=Select-String -Path 'app/resources/app/gyomuon.js' -Pattern 'function settingsView';foreach($h in $settingsHit|Select-Object -First 1){AddRange 'GYOMUON settings' $g $h.LineNumber ([Math]::Min($g.Count,$h.LineNumber+180))}
+          $readyHit=Select-String -Path 'app/resources/app/electron/main.cjs' -Pattern 'app.whenReady';foreach($h in $readyHit|Select-Object -First 2){AddRange 'MAIN ready' $m ([Math]::Max(1,$h.LineNumber-10)) ([Math]::Min($m.Count,$h.LineNumber+50))}
+          $ipcHit=Select-String -Path 'app/resources/app/electron/main.cjs' -Pattern 'notice:receiptSave';foreach($h in $ipcHit|Select-Object -First 1){AddRange 'MAIN receipt' $m ([Math]::Max(1,$h.LineNumber-10)) ([Math]::Min($m.Count,$h.LineNumber+55))}
+          AddRange 'PRELOAD tail' $p ([Math]::Max(1,$p.Count-120)) $p.Count
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add $out;git commit -m 'diag: save exact 0.81.64 ranges';git push
