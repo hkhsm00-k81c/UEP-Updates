@@ -74,8 +74,9 @@ const wrap68Start=g.indexOf('// 선택과목 비밀번호 게이트는 클릭 �
 const wrap68End=g.indexOf('// 민감정보도 화면 진입 전에 중앙 설정을 확보한다.',wrap68Start);
 A(wrap68Start>=0&&wrap68End>wrap68Start,'0.81.68 subject unlock wrapper not found');
 g=g.slice(0,wrap68Start)+g.slice(wrap68End);
-const wrap69Start=g.indexOf('// __UEP_08169_SUBJECT_SHARED_HASH__');
-if(wrap69Start>=0){const wrap69End=g.indexOf('\n\n',wrap69Start);A(wrap69End>wrap69Start,'0.81.69 subject hash wrapper end not found');g=g.slice(0,wrap69Start)+g.slice(wrap69End+2);}
+const wrap69Rx=/\/\/ __UEP_08169_SUBJECT_SHARED_HASH__[\s\S]*?subjectConfidentialPasswordConfigured=function\(\)\{return !!subjectConfidentialPasswordHash\(\);\};\s*/;
+A(wrap69Rx.test(g),'0.81.69 subject hash wrapper not found');
+g=g.replace(wrap69Rx,'');
 
 // 3) Replace the record validator parser with a tested pure core: subject transitions, page-boundary merge,
 // metadata exclusion and student-master matching are performed before rule evaluation.
