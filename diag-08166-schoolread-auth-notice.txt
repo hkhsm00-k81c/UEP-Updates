@@ -1,0 +1,794 @@
+===== schoolReadApiRequest @ 0 =====
+===== schoolReadBatchRead @ 379 =====
+371: async function schoolReadSessionStatus({verify=true}={}){
+372:   let endpointReady=true,endpointError='';
+373:   try{await loadSchoolReadApiUrl();}catch(error){endpointReady=false;endpointError=String(error?.message||error);}
+374:   const session=await readSchoolReadSession();
+375:   if(!session?.token||!session?.deviceId)return {ok:endpointReady,authenticated:false,endpointReady,reason:endpointError,user:null,mode:'school_read_api'};
+376:   if(!verify)return {ok:true,authenticated:true,endpointReady,user:session.user||null,mode:'school_read_api'};
+377:   try{const result=await schoolReadPost('verify-token',{token:session.token,deviceId:session.deviceId});if(!result?.ok)throw schoolReadError(result?.message||'UEP 세션 확인 실패',result?.code||'UEP_SCHOOL_READ_TOKEN_INVALID');session.user=result.user||session.user||{};await saveSchoolReadSession(session);return {ok:true,authenticated:true,endpointReady:true,user:session.user,expiresAt:result.expiresAt||'',mode:'school_read_api'};}catch(error){await clearSchoolReadSession();return {ok:false,authenticated:false,endpointReady,reason:String(error?.message||error),code:error?.code||'',user:null,mode:'school_read_api'};}
+378: }
+379: async function schoolReadBatchRead(spreadsheetId,ranges){
+380:   const session=await readSchoolReadSession();
+381:   if(!session?.token||!session?.deviceId)throw schoolReadError('UEP 로그인이 필요합니다.','UEP_SCHOOL_READ_LOGIN_REQUIRED');
+382:   const result=await schoolReadPost('batch-read',{token:session.token,deviceId:session.deviceId,spreadsheetId,ranges});
+383:   if(!result?.ok)throw schoolReadError(result?.message||'학교 데이터를 읽지 못했습니다.',result?.code||'UEP_SCHOOL_READ_BATCH_FAILED');
+384:   return result.valueRanges||[];
+385: }
+386: 
+387: function base64url(value) { return Buffer.from(value).toString("base64url"); }
+388: 
+389: // __UEP_GOOGLE_USER_OAUTH_08070__
+390: const UEP_UPDATE_POLICY_URL = "https://raw.githubusercontent.com/hkhsm00-k81c/UEP-Updates/main/uep-policy.json";
+391: let googleOAuthPolicyCache={clientId:"",expiresAt:0};
+392: 
+393: function googleOAuthError(message,code){const e=new Error(message);e.code=code;return e;}
+394: async function loadGoogleOAuthClientId(){
+395:   if(googleOAuthPolicyCache.clientId && googleOAuthPolicyCache.expiresAt>Date.now()) return googleOAuthPolicyCache.clientId;
+396:   let response;
+397:   try{ response=await net.fetch(UEP_UPDATE_POLICY_URL,{cache:"no-store"}); }
+398:   catch(error){ throw googleOAuthError("Google 계정 연결 설정을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.","UEP_GOOGLE_OAUTH_POLICY_UNAVAILABLE"); }
+399:   if(!response.ok) throw googleOAuthError(`Google 계정 연결 설정 조회 실패 (${response.status})`,"UEP_GOOGLE_OAUTH_POLICY_UNAVAILABLE");
+400:   const policy=await response.json();
+401:   const clientId=String(policy?.googleOAuthClientId||"").trim();
+402:   if(!/\.apps\.googleusercontent\.com$/i.test(clientId)) throw googleOAuthError("관리자가 UEP Google OAuth 클라이언트를 아직 설정하지 않았습니다.","UEP_GOOGLE_OAUTH_CLIENT_NOT_CONFIGURED");
+403:   googleOAuthPolicyCache={clientId,expiresAt:Date.now()+10*60*1000};
+404:   return clientId;
+405: }
+406: function googleUserOAuthRecoveryKey(salt){
+407:   const identity=`${os.hostname()}|${os.userInfo().username}|UEP-GOOGLE-USER-OAUTH-v1`;
+408:   return crypto.scryptSync(identity,salt,32);
+409: }
+410: function encodeGoogleUserOAuthRecovery(value){
+411:   const salt=crypto.randomBytes(16),iv=crypto.randomBytes(12),key=googleUserOAuthRecoveryKey(salt);
+412:   const cipher=crypto.createCipheriv('aes-256-gcm',key,iv);
+413:   const encrypted=Buffer.concat([cipher.update(JSON.stringify(value),'utf8'),cipher.final()]);
+414:   return {version:1,algorithm:'aes-256-gcm',salt:salt.toString('base64'),iv:iv.toString('base64'),tag:cipher.getAuthTag().toString('base64'),data:encrypted.toString('base64')};
+415: }
+416: function decodeGoogleUserOAuthRecovery(payload){
+417:   if(!payload||payload.version!==1||payload.algorithm!=='aes-256-gcm')throw new Error('invalid OAuth recovery token');
+418:   const salt=Buffer.from(payload.salt,'base64'),iv=Buffer.from(payload.iv,'base64'),tag=Buffer.from(payload.tag,'base64'),data=Buffer.from(payload.data,'base64');
+419:   const decipher=crypto.createDecipheriv('aes-256-gcm',googleUserOAuthRecoveryKey(salt),iv);decipher.setAuthTag(tag);
+420:   return JSON.parse(Buffer.concat([decipher.update(data),decipher.final()]).toString('utf8'));
+421: }
+422: async function writeGoogleUserOAuthRecovery(value){
+423:   const payload=encodeGoogleUserOAuthRecovery(value);
+424:   for(const target of [googleUserOAuthRecoveryPath(),googleUserOAuthCanonicalRecoveryPath()]){
+425:     await fs.mkdir(path.dirname(target),{recursive:true});
+426:     await fs.writeFile(target,JSON.stringify(payload),'utf8');
+427:   }
+428: }
+429: async function readGoogleUserOAuthRecovery(){
+430:   for(const target of [googleUserOAuthCanonicalRecoveryPath(),googleUserOAuthRecoveryPath()]){
+431:     try{return decodeGoogleUserOAuthRecovery(JSON.parse(await fs.readFile(target,'utf8')));}catch{}
+432:   }
+433:   throw new Error('OAuth recovery token not found');
+434: }
+435: async function saveGoogleUserOAuth(value){
+436:   let primarySaved=false;
+437:   if(safeStorage.isEncryptionAvailable()){
+438:     const encrypted=safeStorage.encryptString(JSON.stringify(value));
+439:     for(const target of [googleUserOAuthCanonicalPath(),googleUserOAuthPath()]){
+440:       try{await fs.mkdir(path.dirname(target),{recursive:true});await fs.writeFile(target,encrypted);primarySaved=true;}catch{}
+441:     }
+442:   }
+443:   await writeGoogleUserOAuthRecovery(value);
+444:   return {primarySaved,recoverySaved:true,canonical:true};
+445: }
+446: async function readGoogleUserOAuth(){
+447:   for(const target of [googleUserOAuthCanonicalPath(),googleUserOAuthPath()]){
+448:     try{
+449:       const encrypted=await fs.readFile(target);
+450:       if(safeStorage.isEncryptionAvailable()){
+451:         try{const value=JSON.parse(safeStorage.decryptString(encrypted));if(value&&typeof value==='object'){await saveGoogleUserOAuth(value);return value;}}catch{}
+452:       }
+453:       try{const legacy=JSON.parse(encrypted.toString('utf8'));if(legacy&&typeof legacy==='object'){await saveGoogleUserOAuth(legacy);return legacy;}}catch{}
+454:     }catch{}
+455:   }
+456:   try{
+457:     const recovered=await readGoogleUserOAuthRecovery();
+458:     if(recovered&&typeof recovered==='object'){await saveGoogleUserOAuth(recovered);return recovered;}
+459:   }catch{}
+460:   return null;
+461: }
+462: async function googleUserInfo(accessToken){
+463:   const response=await net.fetch('https://openidconnect.googleapis.com/v1/userinfo',{headers:{authorization:`Bearer ${accessToken}`}});
+464:   if(!response.ok) throw googleOAuthError(`Google 사용자 확인 실패 (${response.status})`,'UEP_GOOGLE_OAUTH_USERINFO_FAILED');
+465:   return await response.json();
+466: }
+467: async function refreshGoogleUserOAuth(saved){
+468:   if(!saved?.refresh_token) throw googleOAuthError("Google 계정 연결을 다시 승인해 주세요.","UEP_GOOGLE_USER_AUTH_REQUIRED");
+469:   const clientId=await loadGoogleOAuthClientId();
+470:   if(String(saved.client_id||'').trim() && String(saved.client_id).trim()!==clientId){
+471:     await disconnectGoogleUser();
+472:     throw googleOAuthError('Google 연결 설정이 갱신되었습니다. Google 계정 연결을 한 번만 다시 승인해 주세요.','UEP_GOOGLE_USER_AUTH_REQUIRED');
+473:   }
+474:   const body=new URLSearchParams({client_id:clientId,refresh_token:String(saved.refresh_token),grant_type:'refresh_token'});
+475:   const response=await net.fetch('https://oauth2.googleapis.com/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:body.toString()});
+476:   if(!response.ok){
+477:     let payload={},detail='',errCode='';
+478:     try{payload=await response.json();detail=String(payload?.error_description||'');errCode=String(payload?.error||'');}catch{}
+479:     if(errCode==='invalid_client'||errCode==='invalid_grant'){
+480:       googleOAuthPolicyCache={clientId:'',expiresAt:0};
+481:       await disconnectGoogleUser();
+482:       throw googleOAuthError('저장된 Google 인증정보가 현재 UEP 연결설정과 맞지 않습니다. Google 계정 연결을 다시 승인해 주세요.','UEP_GOOGLE_USER_AUTH_REQUIRED');
+483:     }
+484:     throw googleOAuthError(`Google 계정 토큰 갱신 실패 (${response.status})${detail?`: ${detail}`:''}`,"UEP_GOOGLE_USER_AUTH_REQUIRED");
+485:   }
+486:   const next=await response.json();
+487:   const merged={...saved,...next,client_id:clientId,expires_at:Date.now()+Math.max(60,Number(next.expires_in||3600))*1000,updated_at:new Date().toISOString()};
+488:   await saveGoogleUserOAuth(merged);
+489:   return merged;
+490: }
+491: async function getGoogleUserSheetsToken(){
+492:   let saved=await readGoogleUserOAuth();
+493:   if(!saved) throw googleOAuthError("Google 계정 연결이 필요합니다.","UEP_GOOGLE_USER_AUTH_REQUIRED");
+494:   if(saved.access_token && Number(saved.expires_at||0)>Date.now()+90000) return String(saved.access_token);
+495:   saved=await refreshGoogleUserOAuth(saved);
+496:   if(!saved.access_token) throw googleOAuthError("Google 계정 액세스 토큰을 받지 못했습니다.","UEP_GOOGLE_USER_AUTH_REQUIRED");
+497:   return String(saved.access_token);
+498: }
+499: async function getReadonlySheetsAuth(credentials=null){
+===== resolveGoogleReadAuth @ 0 =====
+===== readSchoolReadSession @ 353 =====
+345: }
+346: async function getOrCreateSchoolReadDeviceId(){
+347:   try{const saved=String(await fs.readFile(schoolReadDevicePath(),'utf8')).trim();if(saved)return saved;}catch{}
+348:   const id='UEP-'+crypto.randomUUID();
+349:   await fs.mkdir(path.dirname(schoolReadDevicePath()),{recursive:true});
+350:   await fs.writeFile(schoolReadDevicePath(),id,'utf8');
+351:   return id;
+352: }
+353: async function readSchoolReadSession(){
+354:   try{const value=await readEncrypted(schoolReadSessionPath());return value&&typeof value==='object'?value:null;}catch{return null;}
+355: }
+356: async function saveSchoolReadSession(value){await saveEncrypted(schoolReadSessionPath(),value);return value;}
+357: async function clearSchoolReadSession(){try{await fs.unlink(schoolReadSessionPath());}catch(error){if(error?.code!=='ENOENT')throw error;}liveDataCache=null;liveDataFetchedAt=0;return {ok:true};}
+358: async function schoolReadPost(action,payload={}){
+359:   const url=await loadSchoolReadApiUrl();
+360:   const response=await net.fetch(url,{method:'POST',headers:{'content-type':'application/json;charset=UTF-8','accept':'application/json'},body:JSON.stringify({action,...payload})});
+361:   let data={};try{data=await response.json();}catch{}
+362:   if(!response.ok)throw schoolReadError(data?.message||('School Read API HTTP '+response.status),data?.code||'UEP_SCHOOL_READ_HTTP_ERROR');
+363:   return data;
+364: }
+365: async function loginSchoolReadUser({name='',email=''}={}){
+366:   const deviceId=await getOrCreateSchoolReadDeviceId();
+367:   const result=await schoolReadPost('login',{name:String(name||'').trim(),email:String(email||'').trim(),deviceId});
+368:   if(result?.ok&&result?.token){await saveSchoolReadSession({token:String(result.token),deviceId,user:result.user||{},expiresAt:Date.now()+Math.max(300,Number(result.expiresIn||0))*1000,savedAt:new Date().toISOString()});liveDataCache=null;liveDataFetchedAt=0;}
+369:   return result;
+370: }
+371: async function schoolReadSessionStatus({verify=true}={}){
+372:   let endpointReady=true,endpointError='';
+373:   try{await loadSchoolReadApiUrl();}catch(error){endpointReady=false;endpointError=String(error?.message||error);}
+374:   const session=await readSchoolReadSession();
+375:   if(!session?.token||!session?.deviceId)return {ok:endpointReady,authenticated:false,endpointReady,reason:endpointError,user:null,mode:'school_read_api'};
+376:   if(!verify)return {ok:true,authenticated:true,endpointReady,user:session.user||null,mode:'school_read_api'};
+377:   try{const result=await schoolReadPost('verify-token',{token:session.token,deviceId:session.deviceId});if(!result?.ok)throw schoolReadError(result?.message||'UEP 세션 확인 실패',result?.code||'UEP_SCHOOL_READ_TOKEN_INVALID');session.user=result.user||session.user||{};await saveSchoolReadSession(session);return {ok:true,authenticated:true,endpointReady:true,user:session.user,expiresAt:result.expiresAt||'',mode:'school_read_api'};}catch(error){await clearSchoolReadSession();return {ok:false,authenticated:false,endpointReady,reason:String(error?.message||error),code:error?.code||'',user:null,mode:'school_read_api'};}
+378: }
+379: async function schoolReadBatchRead(spreadsheetId,ranges){
+380:   const session=await readSchoolReadSession();
+381:   if(!session?.token||!session?.deviceId)throw schoolReadError('UEP 로그인이 필요합니다.','UEP_SCHOOL_READ_LOGIN_REQUIRED');
+382:   const result=await schoolReadPost('batch-read',{token:session.token,deviceId:session.deviceId,spreadsheetId,ranges});
+383:   if(!result?.ok)throw schoolReadError(result?.message||'학교 데이터를 읽지 못했습니다.',result?.code||'UEP_SCHOOL_READ_BATCH_FAILED');
+384:   return result.valueRanges||[];
+385: }
+386: 
+387: function base64url(value) { return Buffer.from(value).toString("base64url"); }
+388: 
+389: // __UEP_GOOGLE_USER_OAUTH_08070__
+390: const UEP_UPDATE_POLICY_URL = "https://raw.githubusercontent.com/hkhsm00-k81c/UEP-Updates/main/uep-policy.json";
+391: let googleOAuthPolicyCache={clientId:"",expiresAt:0};
+392: 
+393: function googleOAuthError(message,code){const e=new Error(message);e.code=code;return e;}
+394: async function loadGoogleOAuthClientId(){
+395:   if(googleOAuthPolicyCache.clientId && googleOAuthPolicyCache.expiresAt>Date.now()) return googleOAuthPolicyCache.clientId;
+396:   let response;
+397:   try{ response=await net.fetch(UEP_UPDATE_POLICY_URL,{cache:"no-store"}); }
+398:   catch(error){ throw googleOAuthError("Google 계정 연결 설정을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.","UEP_GOOGLE_OAUTH_POLICY_UNAVAILABLE"); }
+399:   if(!response.ok) throw googleOAuthError(`Google 계정 연결 설정 조회 실패 (${response.status})`,"UEP_GOOGLE_OAUTH_POLICY_UNAVAILABLE");
+400:   const policy=await response.json();
+401:   const clientId=String(policy?.googleOAuthClientId||"").trim();
+402:   if(!/\.apps\.googleusercontent\.com$/i.test(clientId)) throw googleOAuthError("관리자가 UEP Google OAuth 클라이언트를 아직 설정하지 않았습니다.","UEP_GOOGLE_OAUTH_CLIENT_NOT_CONFIGURED");
+403:   googleOAuthPolicyCache={clientId,expiresAt:Date.now()+10*60*1000};
+404:   return clientId;
+405: }
+406: function googleUserOAuthRecoveryKey(salt){
+407:   const identity=`${os.hostname()}|${os.userInfo().username}|UEP-GOOGLE-USER-OAUTH-v1`;
+408:   return crypto.scryptSync(identity,salt,32);
+409: }
+410: function encodeGoogleUserOAuthRecovery(value){
+411:   const salt=crypto.randomBytes(16),iv=crypto.randomBytes(12),key=googleUserOAuthRecoveryKey(salt);
+412:   const cipher=crypto.createCipheriv('aes-256-gcm',key,iv);
+413:   const encrypted=Buffer.concat([cipher.update(JSON.stringify(value),'utf8'),cipher.final()]);
+414:   return {version:1,algorithm:'aes-256-gcm',salt:salt.toString('base64'),iv:iv.toString('base64'),tag:cipher.getAuthTag().toString('base64'),data:encrypted.toString('base64')};
+415: }
+416: function decodeGoogleUserOAuthRecovery(payload){
+417:   if(!payload||payload.version!==1||payload.algorithm!=='aes-256-gcm')throw new Error('invalid OAuth recovery token');
+418:   const salt=Buffer.from(payload.salt,'base64'),iv=Buffer.from(payload.iv,'base64'),tag=Buffer.from(payload.tag,'base64'),data=Buffer.from(payload.data,'base64');
+419:   const decipher=crypto.createDecipheriv('aes-256-gcm',googleUserOAuthRecoveryKey(salt),iv);decipher.setAuthTag(tag);
+420:   return JSON.parse(Buffer.concat([decipher.update(data),decipher.final()]).toString('utf8'));
+421: }
+422: async function writeGoogleUserOAuthRecovery(value){
+423:   const payload=encodeGoogleUserOAuthRecovery(value);
+424:   for(const target of [googleUserOAuthRecoveryPath(),googleUserOAuthCanonicalRecoveryPath()]){
+425:     await fs.mkdir(path.dirname(target),{recursive:true});
+426:     await fs.writeFile(target,JSON.stringify(payload),'utf8');
+427:   }
+428: }
+429: async function readGoogleUserOAuthRecovery(){
+430:   for(const target of [googleUserOAuthCanonicalRecoveryPath(),googleUserOAuthRecoveryPath()]){
+431:     try{return decodeGoogleUserOAuthRecovery(JSON.parse(await fs.readFile(target,'utf8')));}catch{}
+432:   }
+433:   throw new Error('OAuth recovery token not found');
+434: }
+435: async function saveGoogleUserOAuth(value){
+436:   let primarySaved=false;
+437:   if(safeStorage.isEncryptionAvailable()){
+438:     const encrypted=safeStorage.encryptString(JSON.stringify(value));
+439:     for(const target of [googleUserOAuthCanonicalPath(),googleUserOAuthPath()]){
+440:       try{await fs.mkdir(path.dirname(target),{recursive:true});await fs.writeFile(target,encrypted);primarySaved=true;}catch{}
+441:     }
+442:   }
+443:   await writeGoogleUserOAuthRecovery(value);
+444:   return {primarySaved,recoverySaved:true,canonical:true};
+445: }
+446: async function readGoogleUserOAuth(){
+447:   for(const target of [googleUserOAuthCanonicalPath(),googleUserOAuthPath()]){
+448:     try{
+449:       const encrypted=await fs.readFile(target);
+450:       if(safeStorage.isEncryptionAvailable()){
+451:         try{const value=JSON.parse(safeStorage.decryptString(encrypted));if(value&&typeof value==='object'){await saveGoogleUserOAuth(value);return value;}}catch{}
+452:       }
+453:       try{const legacy=JSON.parse(encrypted.toString('utf8'));if(legacy&&typeof legacy==='object'){await saveGoogleUserOAuth(legacy);return legacy;}}catch{}
+454:     }catch{}
+455:   }
+456:   try{
+457:     const recovered=await readGoogleUserOAuthRecovery();
+458:     if(recovered&&typeof recovered==='object'){await saveGoogleUserOAuth(recovered);return recovered;}
+459:   }catch{}
+460:   return null;
+461: }
+462: async function googleUserInfo(accessToken){
+463:   const response=await net.fetch('https://openidconnect.googleapis.com/v1/userinfo',{headers:{authorization:`Bearer ${accessToken}`}});
+464:   if(!response.ok) throw googleOAuthError(`Google 사용자 확인 실패 (${response.status})`,'UEP_GOOGLE_OAUTH_USERINFO_FAILED');
+465:   return await response.json();
+466: }
+467: async function refreshGoogleUserOAuth(saved){
+468:   if(!saved?.refresh_token) throw googleOAuthError("Google 계정 연결을 다시 승인해 주세요.","UEP_GOOGLE_USER_AUTH_REQUIRED");
+469:   const clientId=await loadGoogleOAuthClientId();
+470:   if(String(saved.client_id||'').trim() && String(saved.client_id).trim()!==clientId){
+471:     await disconnectGoogleUser();
+472:     throw googleOAuthError('Google 연결 설정이 갱신되었습니다. Google 계정 연결을 한 번만 다시 승인해 주세요.','UEP_GOOGLE_USER_AUTH_REQUIRED');
+473:   }
+===== saveSchoolReadSession @ 356 =====
+348:   const id='UEP-'+crypto.randomUUID();
+349:   await fs.mkdir(path.dirname(schoolReadDevicePath()),{recursive:true});
+350:   await fs.writeFile(schoolReadDevicePath(),id,'utf8');
+351:   return id;
+352: }
+353: async function readSchoolReadSession(){
+354:   try{const value=await readEncrypted(schoolReadSessionPath());return value&&typeof value==='object'?value:null;}catch{return null;}
+355: }
+356: async function saveSchoolReadSession(value){await saveEncrypted(schoolReadSessionPath(),value);return value;}
+357: async function clearSchoolReadSession(){try{await fs.unlink(schoolReadSessionPath());}catch(error){if(error?.code!=='ENOENT')throw error;}liveDataCache=null;liveDataFetchedAt=0;return {ok:true};}
+358: async function schoolReadPost(action,payload={}){
+359:   const url=await loadSchoolReadApiUrl();
+360:   const response=await net.fetch(url,{method:'POST',headers:{'content-type':'application/json;charset=UTF-8','accept':'application/json'},body:JSON.stringify({action,...payload})});
+361:   let data={};try{data=await response.json();}catch{}
+362:   if(!response.ok)throw schoolReadError(data?.message||('School Read API HTTP '+response.status),data?.code||'UEP_SCHOOL_READ_HTTP_ERROR');
+363:   return data;
+364: }
+365: async function loginSchoolReadUser({name='',email=''}={}){
+366:   const deviceId=await getOrCreateSchoolReadDeviceId();
+367:   const result=await schoolReadPost('login',{name:String(name||'').trim(),email:String(email||'').trim(),deviceId});
+368:   if(result?.ok&&result?.token){await saveSchoolReadSession({token:String(result.token),deviceId,user:result.user||{},expiresAt:Date.now()+Math.max(300,Number(result.expiresIn||0))*1000,savedAt:new Date().toISOString()});liveDataCache=null;liveDataFetchedAt=0;}
+369:   return result;
+370: }
+371: async function schoolReadSessionStatus({verify=true}={}){
+372:   let endpointReady=true,endpointError='';
+373:   try{await loadSchoolReadApiUrl();}catch(error){endpointReady=false;endpointError=String(error?.message||error);}
+374:   const session=await readSchoolReadSession();
+375:   if(!session?.token||!session?.deviceId)return {ok:endpointReady,authenticated:false,endpointReady,reason:endpointError,user:null,mode:'school_read_api'};
+376:   if(!verify)return {ok:true,authenticated:true,endpointReady,user:session.user||null,mode:'school_read_api'};
+377:   try{const result=await schoolReadPost('verify-token',{token:session.token,deviceId:session.deviceId});if(!result?.ok)throw schoolReadError(result?.message||'UEP 세션 확인 실패',result?.code||'UEP_SCHOOL_READ_TOKEN_INVALID');session.user=result.user||session.user||{};await saveSchoolReadSession(session);return {ok:true,authenticated:true,endpointReady:true,user:session.user,expiresAt:result.expiresAt||'',mode:'school_read_api'};}catch(error){await clearSchoolReadSession();return {ok:false,authenticated:false,endpointReady,reason:String(error?.message||error),code:error?.code||'',user:null,mode:'school_read_api'};}
+378: }
+379: async function schoolReadBatchRead(spreadsheetId,ranges){
+380:   const session=await readSchoolReadSession();
+381:   if(!session?.token||!session?.deviceId)throw schoolReadError('UEP 로그인이 필요합니다.','UEP_SCHOOL_READ_LOGIN_REQUIRED');
+382:   const result=await schoolReadPost('batch-read',{token:session.token,deviceId:session.deviceId,spreadsheetId,ranges});
+383:   if(!result?.ok)throw schoolReadError(result?.message||'학교 데이터를 읽지 못했습니다.',result?.code||'UEP_SCHOOL_READ_BATCH_FAILED');
+384:   return result.valueRanges||[];
+385: }
+386: 
+387: function base64url(value) { return Buffer.from(value).toString("base64url"); }
+388: 
+389: // __UEP_GOOGLE_USER_OAUTH_08070__
+390: const UEP_UPDATE_POLICY_URL = "https://raw.githubusercontent.com/hkhsm00-k81c/UEP-Updates/main/uep-policy.json";
+391: let googleOAuthPolicyCache={clientId:"",expiresAt:0};
+392: 
+393: function googleOAuthError(message,code){const e=new Error(message);e.code=code;return e;}
+394: async function loadGoogleOAuthClientId(){
+395:   if(googleOAuthPolicyCache.clientId && googleOAuthPolicyCache.expiresAt>Date.now()) return googleOAuthPolicyCache.clientId;
+396:   let response;
+397:   try{ response=await net.fetch(UEP_UPDATE_POLICY_URL,{cache:"no-store"}); }
+398:   catch(error){ throw googleOAuthError("Google 계정 연결 설정을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.","UEP_GOOGLE_OAUTH_POLICY_UNAVAILABLE"); }
+399:   if(!response.ok) throw googleOAuthError(`Google 계정 연결 설정 조회 실패 (${response.status})`,"UEP_GOOGLE_OAUTH_POLICY_UNAVAILABLE");
+400:   const policy=await response.json();
+401:   const clientId=String(policy?.googleOAuthClientId||"").trim();
+402:   if(!/\.apps\.googleusercontent\.com$/i.test(clientId)) throw googleOAuthError("관리자가 UEP Google OAuth 클라이언트를 아직 설정하지 않았습니다.","UEP_GOOGLE_OAUTH_CLIENT_NOT_CONFIGURED");
+403:   googleOAuthPolicyCache={clientId,expiresAt:Date.now()+10*60*1000};
+404:   return clientId;
+405: }
+406: function googleUserOAuthRecoveryKey(salt){
+407:   const identity=`${os.hostname()}|${os.userInfo().username}|UEP-GOOGLE-USER-OAUTH-v1`;
+408:   return crypto.scryptSync(identity,salt,32);
+409: }
+410: function encodeGoogleUserOAuthRecovery(value){
+411:   const salt=crypto.randomBytes(16),iv=crypto.randomBytes(12),key=googleUserOAuthRecoveryKey(salt);
+412:   const cipher=crypto.createCipheriv('aes-256-gcm',key,iv);
+413:   const encrypted=Buffer.concat([cipher.update(JSON.stringify(value),'utf8'),cipher.final()]);
+414:   return {version:1,algorithm:'aes-256-gcm',salt:salt.toString('base64'),iv:iv.toString('base64'),tag:cipher.getAuthTag().toString('base64'),data:encrypted.toString('base64')};
+415: }
+416: function decodeGoogleUserOAuthRecovery(payload){
+417:   if(!payload||payload.version!==1||payload.algorithm!=='aes-256-gcm')throw new Error('invalid OAuth recovery token');
+418:   const salt=Buffer.from(payload.salt,'base64'),iv=Buffer.from(payload.iv,'base64'),tag=Buffer.from(payload.tag,'base64'),data=Buffer.from(payload.data,'base64');
+419:   const decipher=crypto.createDecipheriv('aes-256-gcm',googleUserOAuthRecoveryKey(salt),iv);decipher.setAuthTag(tag);
+420:   return JSON.parse(Buffer.concat([decipher.update(data),decipher.final()]).toString('utf8'));
+421: }
+422: async function writeGoogleUserOAuthRecovery(value){
+423:   const payload=encodeGoogleUserOAuthRecovery(value);
+424:   for(const target of [googleUserOAuthRecoveryPath(),googleUserOAuthCanonicalRecoveryPath()]){
+425:     await fs.mkdir(path.dirname(target),{recursive:true});
+426:     await fs.writeFile(target,JSON.stringify(payload),'utf8');
+427:   }
+428: }
+429: async function readGoogleUserOAuthRecovery(){
+430:   for(const target of [googleUserOAuthCanonicalRecoveryPath(),googleUserOAuthRecoveryPath()]){
+431:     try{return decodeGoogleUserOAuthRecovery(JSON.parse(await fs.readFile(target,'utf8')));}catch{}
+432:   }
+433:   throw new Error('OAuth recovery token not found');
+434: }
+435: async function saveGoogleUserOAuth(value){
+436:   let primarySaved=false;
+437:   if(safeStorage.isEncryptionAvailable()){
+438:     const encrypted=safeStorage.encryptString(JSON.stringify(value));
+439:     for(const target of [googleUserOAuthCanonicalPath(),googleUserOAuthPath()]){
+440:       try{await fs.mkdir(path.dirname(target),{recursive:true});await fs.writeFile(target,encrypted);primarySaved=true;}catch{}
+441:     }
+442:   }
+443:   await writeGoogleUserOAuthRecovery(value);
+444:   return {primarySaved,recoverySaved:true,canonical:true};
+445: }
+446: async function readGoogleUserOAuth(){
+447:   for(const target of [googleUserOAuthCanonicalPath(),googleUserOAuthPath()]){
+448:     try{
+449:       const encrypted=await fs.readFile(target);
+450:       if(safeStorage.isEncryptionAvailable()){
+451:         try{const value=JSON.parse(safeStorage.decryptString(encrypted));if(value&&typeof value==='object'){await saveGoogleUserOAuth(value);return value;}}catch{}
+452:       }
+453:       try{const legacy=JSON.parse(encrypted.toString('utf8'));if(legacy&&typeof legacy==='object'){await saveGoogleUserOAuth(legacy);return legacy;}}catch{}
+454:     }catch{}
+455:   }
+456:   try{
+457:     const recovered=await readGoogleUserOAuthRecovery();
+458:     if(recovered&&typeof recovered==='object'){await saveGoogleUserOAuth(recovered);return recovered;}
+459:   }catch{}
+460:   return null;
+461: }
+462: async function googleUserInfo(accessToken){
+463:   const response=await net.fetch('https://openidconnect.googleapis.com/v1/userinfo',{headers:{authorization:`Bearer ${accessToken}`}});
+464:   if(!response.ok) throw googleOAuthError(`Google 사용자 확인 실패 (${response.status})`,'UEP_GOOGLE_OAUTH_USERINFO_FAILED');
+465:   return await response.json();
+466: }
+467: async function refreshGoogleUserOAuth(saved){
+468:   if(!saved?.refresh_token) throw googleOAuthError("Google 계정 연결을 다시 승인해 주세요.","UEP_GOOGLE_USER_AUTH_REQUIRED");
+469:   const clientId=await loadGoogleOAuthClientId();
+470:   if(String(saved.client_id||'').trim() && String(saved.client_id).trim()!==clientId){
+471:     await disconnectGoogleUser();
+472:     throw googleOAuthError('Google 연결 설정이 갱신되었습니다. Google 계정 연결을 한 번만 다시 승인해 주세요.','UEP_GOOGLE_USER_AUTH_REQUIRED');
+473:   }
+474:   const body=new URLSearchParams({client_id:clientId,refresh_token:String(saved.refresh_token),grant_type:'refresh_token'});
+475:   const response=await net.fetch('https://oauth2.googleapis.com/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:body.toString()});
+476:   if(!response.ok){
+===== fetchLiveData @ 1416 =====
+1408:   }
+1409:   if(unmatchedPrograms)throw new Error(`선택보고서 프로그램 매칭 실패 ${unmatchedPrograms}건이 있어 자동 복구를 중단했습니다.`);
+1410:   await clearSheetValues(token,UEP_PROCESSING_SPREADSHEET_ID,`'${target}'!A3:X5000`);
+1411:   await updateSheetValues(token,UEP_PROCESSING_SPREADSHEET_ID,`'${target}'!A3:X${rows.length+3}`,[required,...rows]);
+1412:   console.log(`[UEP] 선택보고서 정규화 자동 복구 완료: ${rows.length}건 · 학생확인 ${unmatchedStudents}건`);
+1413:   return {ok:true,repaired:true,count:rows.length,unmatchedStudents};
+1414: }
+1415: 
+1416: async function fetchLiveData({ force = false, credentials = null } = {}) {
+1417:   if (!force && liveDataCache && Date.now() - liveDataFetchedAt < 120000) return liveDataCache;
+1418:   // 0.81.40: 관리자 로컬 서비스계정과 담임 School Read API 세션을 동일 읽기 파이프라인으로 연결합니다.
+1419:   const auth = await getReadonlySheetsAuth(credentials);
+1420:   const token = auth.token;
+1421:   const entries = Object.entries(SHEET_RANGES);
+1422:   const matrices = {};
+1423:   // 기본정보 연결시트를 가장 먼저, 작은 묶음으로 읽습니다.
+1424:   // 탭 추가로 URL이 길어지거나 특정 탭이 잠시 실패해도 전체 연결이 끊기지 않도록 합니다.
+1425:   const chunkSize = 12;
+1426:   const chunks = [];
+1427:   for (let offset = 0; offset < entries.length; offset += chunkSize) {
+1428:     chunks.push({ offset, chunk: entries.slice(offset, offset + chunkSize) });
+1429:   }
+1430:   await mapWithConcurrency(chunks, 1, async ({ offset, chunk }) => {
+1431:     try {
+1432:       const valueRanges = await readSheetBatch(token, UEP_SPREADSHEET_ID, chunk.map(([, range]) => range));
+1433:       valueRanges.forEach((item, index) => {
+1434:         const fallbackName = chunk[index]?.[0];
+1435:         matrices[fallbackName] = item.values || [];
+1436:       });
+1437:     } catch (chunkError) {
+1438:       console.warn(`[UEP] 기본정보 묶음 조회 실패(${offset + 1}~${offset + chunk.length}), 개별 재시도`, chunkError?.message || chunkError);
+1439:       await mapWithConcurrency(chunk, 1, async ([logicalName, range]) => {
+1440:         try {
+1441:           const one = await readSheetBatch(token, UEP_SPREADSHEET_ID, [range]);
+1442:           matrices[logicalName] = one?.[0]?.values || [];
+1443:         } catch (sheetError) {
+1444:           matrices[logicalName] = [];
+1445:           console.warn(`[UEP] 기본정보 탭 조회 실패: ${logicalName}`, sheetError?.message || sheetError);
+1446:         }
+1447:       });
+1448:     }
+1449:   });
+1450:   entries.forEach(([name]) => { if (!matrices[name]) matrices[name] = []; });
+1451: 
+1452:   // 선택보고서 정규화 탭의 구조가 손상된 경우 구글폼 원본으로 복구한 뒤 읽습니다.
+1453:   // 읽기 전용 담임 세션에서는 정규화 탭 자동복구(쓰기)를 실행하지 않습니다.
+1454:   if(auth.mode!=='school_read_api') await ensureSelectedReportNormalization(token);
+1455: 
+1456:   // 학생응답 가공 결과: 현재 실제 존재하는 데이터 처리 탭만 직접 읽습니다.
+1457:   // 선택과목은 응답수집 06_선택과목응답을 별도 읽고 기존 fallback 로직으로 구성합니다.
+1458:   const processingRanges = [
+1459:     ["02_학사외출_일자별", "'02_학사외출_일자별'!A1:AD10000"],
+1460:     ["20_공통보고서_정규화", "'20_공통보고서_정규화'!A1:X5000"],
+1461:     ["21_선택보고서_정규화", "'21_선택보고서_정규화'!A1:X5000"],
+1462:     ["30_야자출결_정규화", "'30_야자출결_정규화'!A1:P70000"],
+1463:     // 학교캘린더는 기본정보 연결시트가 아니라 데이터 처리시트의 직접 이관값만 사용합니다.
+1464:     ["41_학교캘린더", "'41_학교캘린더'!A1:W3000"],
+1465:   ];
+1466:   try {
+1467:     const result = await readSheetBatch(token, UEP_PROCESSING_SPREADSHEET_ID, processingRanges.map(([,range])=>range));
+1468:     processingRanges.forEach(([logicalName],index)=>{matrices[logicalName]=result?.[index]?.values||[];});
+1469:   } catch(error) {
+1470:     // 한 탭의 일시 오류가 보고서·학사외출·선택과목 등 정상 탭까지 모두 비우지 않도록
+1471:     // 묶음 조회 실패 시 각 탭을 독립적으로 재시도합니다. 평상시에는 1회 batchGet으로 quota를 보호합니다.
+1472:     console.warn("[UEP] 처리시트 묶음 조회 실패 - 개별 복구 시도",error?.message||error);
+1473:     await mapWithConcurrency(processingRanges,1,async([logicalName,range])=>{
+1474:       try{const one=await readSheetBatch(token,UEP_PROCESSING_SPREADSHEET_ID,[range]);matrices[logicalName]=one?.[0]?.values||[];}
+1475:       catch(sheetError){matrices[logicalName]=[];console.warn(`[UEP] 처리시트 개별 조회 실패: ${logicalName}`,sheetError?.message||sheetError);}
+1476:     });
+1477:   }
+1478: 
+1479:   // 학사외출은 데이터 처리시트의 02_학사외출_일자별만 조회합니다.
+1480:   // 응답 원본이나 기본정보 연결시트, 별도 운영 시트를 직접 참조하지 않습니다.
+1481: 
+1482:   // 입력센터 원본은 별도 [UEP] 입력센터 원본 스프레드시트에서 읽습니다.
+1483:   try {
+1484:     const inputResult=await readSheetBatch(token,UEP_INPUT_CENTER_SPREADSHEET_ID,["'02_자료원본'!A1:X10000"]);
+1485:     matrices["__INPUT_CENTER_SOURCE"]=inputResult?.[0]?.values||[];
+1486:   } catch(error) {
+1487:     matrices["__INPUT_CENTER_SOURCE"]=[];
+1488:     console.warn("[UEP] 입력센터 원본 조회 실패",error?.message||error);
+1489:   }
+1490: 
+1491:   // 학생이 직접 입력한 희망계열·희망전공은 정규화 자료의 유무와 관계없이 항상 읽습니다.
+1492:   // 선택과목 목록은 처리시트/고교학점제 결과를 우선하되, 진로 보조정보는 원응답의 최신값을 기준으로 합니다.
+1493:   try {
+1494:     const rawSelection = await readSheetBatch(token, "1K-Me8Pm8T2d5fGHoqSPEAu4RXozETUQ-N5pZVxjs8Hw", ["'06_선택과목응답'!A1:U2000"]);
+1495:     matrices["__SELECTION_RESPONSES"] = rawSelection?.[0]?.values || [];
+1496:   } catch (error) {
+1497:     matrices["__SELECTION_RESPONSES"] = [];
+1498:     console.warn("[UEP] 선택과목 응답 조회 실패", error?.message || error);
+1499:   }
+1500: 
+1501:   // 규칙 적용 자료: 평상시는 batchGet, 한 탭이라도 실패하면 각 탭을 독립 재조회합니다.
+1502:   // 특히 40_학사외출규칙은 다른 규칙 탭 오류와 무관하게 반드시 복구를 시도합니다.
+1503:   const ruleEntries = Object.entries(RULE_SHEET_RANGES);
+1504:   try {
+1505:     const ruleValueRanges = await readSheetBatch(token, UEP_RULES_SPREADSHEET_ID, ruleEntries.map(([, range]) => range));
+1506:     ruleValueRanges.forEach((item, index) => {
+1507:       const logicalName = ruleEntries[index]?.[0];
+1508:       matrices[logicalName] = item.values || [];
+1509:     });
+1510:     ruleEntries.forEach(([name]) => { if (!matrices[name]) matrices[name] = []; });
+1511:   } catch (error) {
+1512:     console.warn("[UEP] 규칙로그 묶음 조회 실패 - 개별 복구 시도", error?.message || error);
+1513:     await mapWithConcurrency(ruleEntries, 1, async ([logicalName, range]) => {
+1514:       try {
+1515:         const one = await readSheetBatch(token, UEP_RULES_SPREADSHEET_ID, [range]);
+1516:         matrices[logicalName] = one?.[0]?.values || [];
+1517:       } catch (sheetError) {
+1518:         matrices[logicalName] = [];
+1519:         console.warn(`[UEP] 규칙로그 개별 조회 실패: ${logicalName}`, sheetError?.message || sheetError);
+1520:       }
+1521:     });
+1522:   }
+1523:   // v0.76.93: 학사외출 규칙은 화면 운영의 핵심이므로 규칙 묶음 결과와 무관하게 마지막에 단독 재조회합니다.
+1524:   // batchGet의 일부 누락/순서 문제 또는 다른 규칙 탭 오류가 있어도 40_학사외출규칙 원본을 우선합니다.
+1525:   try {
+1526:     const dormRuleResult = await readSheetBatch(
+1527:       token,
+1528:       UEP_RULES_SPREADSHEET_ID,
+1529:       ["'40_학사외출규칙'!A1:X1000"]
+1530:     );
+1531:     const dormRuleMatrix = dormRuleResult?.[0]?.values || [];
+1532:     if (dormRuleMatrix.length >= 3) {
+1533:       matrices["40_학사외출규칙"] = dormRuleMatrix;
+1534:       console.log(`[UEP] 40_학사외출규칙 단독 조회 성공: ${Math.max(0,dormRuleMatrix.length-3)}건`);
+1535:     } else {
+1536:       console.warn("[UEP] 40_학사외출규칙 단독 조회 결과가 비어 있습니다.");
+===== parseGoogleSheetData @ 0 =====
+===== references 00_UEP설정 / settings / notice-receipt-save =====
+845:   if(specs.fields.status) add(specs.fields.status,status);
+846:   if(!updates.length && (commonReportFormUrl===undefined || !reportFormSettingKey)) throw new Error(`${specs.sheet}에서 수정 가능한 운영정보 열을 찾지 못했습니다.`);
+847:   const sheetRow=dataRow+1;
+848:   for(const [colIndex,value] of updates){
+849:     const col=columnLetter(colIndex);
+850:     await updateSheetValues(token,UEP_SPREADSHEET_ID,`'${specs.sheet}'!${col}${sheetRow}:${col}${sheetRow}`,[[value]]);
+851:   }
+852:   if(reportFormSettingKey && commonReportFormUrl!==undefined){
+853:     const settingRange="'00_UEP설정'!A1:E500";
+854:     const settingResult=await readSheetBatch(token,UEP_SPREADSHEET_ID,[settingRange]);
+855:     const settingMatrix=settingResult?.[0]?.values||[];
+856:     const settingHeader=findHeaderRowByRequired(settingMatrix,["설정키","설정값"]);
+857:     if(!settingHeader) throw new Error("00_UEP설정의 설정키·설정값 헤더를 찾지 못했습니다.");
+858:     const keyCol=settingHeader.headers.indexOf("설정키");
+859:     const valueCol=settingHeader.headers.indexOf("설정값");
+860:     let settingRow=-1;
+861:     for(let r=settingHeader.index+1;r<settingMatrix.length;r+=1){ if(String(settingMatrix[r]?.[keyCol]||"").trim()===reportFormSettingKey){settingRow=r;break;} }
+862:     if(settingRow<0) throw new Error(`${reportFormSettingKey} 설정키를 찾지 못했습니다.`);
+863:     const col=columnLetter(valueCol);
+864:     await updateSheetValues(token,UEP_SPREADSHEET_ID,`'00_UEP설정'!${col}${settingRow+1}:${col}${settingRow+1}`,[[commonReportFormUrl]]);
+865:   }
+866:   liveDataCache=null; liveDataFetchedAt=0;
+867:   const data=await fetchLiveData({force:true});
+868:   return {ok:true,data,sheet:specs.sheet};
+869: }
+870: 
+871: async function clearSheetValues(token, spreadsheetId, range) {
+849:     const col=columnLetter(colIndex);
+850:     await updateSheetValues(token,UEP_SPREADSHEET_ID,`'${specs.sheet}'!${col}${sheetRow}:${col}${sheetRow}`,[[value]]);
+851:   }
+852:   if(reportFormSettingKey && commonReportFormUrl!==undefined){
+853:     const settingRange="'00_UEP설정'!A1:E500";
+854:     const settingResult=await readSheetBatch(token,UEP_SPREADSHEET_ID,[settingRange]);
+855:     const settingMatrix=settingResult?.[0]?.values||[];
+856:     const settingHeader=findHeaderRowByRequired(settingMatrix,["설정키","설정값"]);
+857:     if(!settingHeader) throw new Error("00_UEP설정의 설정키·설정값 헤더를 찾지 못했습니다.");
+858:     const keyCol=settingHeader.headers.indexOf("설정키");
+859:     const valueCol=settingHeader.headers.indexOf("설정값");
+860:     let settingRow=-1;
+861:     for(let r=settingHeader.index+1;r<settingMatrix.length;r+=1){ if(String(settingMatrix[r]?.[keyCol]||"").trim()===reportFormSettingKey){settingRow=r;break;} }
+862:     if(settingRow<0) throw new Error(`${reportFormSettingKey} 설정키를 찾지 못했습니다.`);
+863:     const col=columnLetter(valueCol);
+864:     await updateSheetValues(token,UEP_SPREADSHEET_ID,`'00_UEP설정'!${col}${settingRow+1}:${col}${settingRow+1}`,[[commonReportFormUrl]]);
+865:   }
+866:   liveDataCache=null; liveDataFetchedAt=0;
+867:   const data=await fetchLiveData({force:true});
+868:   return {ok:true,data,sheet:specs.sheet};
+869: }
+870: 
+871: async function clearSheetValues(token, spreadsheetId, range) {
+872:   const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}:clear`;
+873:   const response = await fetch(url, {
+874:     method: "POST",
+875:     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+856:     const settingHeader=findHeaderRowByRequired(settingMatrix,["설정키","설정값"]);
+857:     if(!settingHeader) throw new Error("00_UEP설정의 설정키·설정값 헤더를 찾지 못했습니다.");
+858:     const keyCol=settingHeader.headers.indexOf("설정키");
+859:     const valueCol=settingHeader.headers.indexOf("설정값");
+860:     let settingRow=-1;
+861:     for(let r=settingHeader.index+1;r<settingMatrix.length;r+=1){ if(String(settingMatrix[r]?.[keyCol]||"").trim()===reportFormSettingKey){settingRow=r;break;} }
+862:     if(settingRow<0) throw new Error(`${reportFormSettingKey} 설정키를 찾지 못했습니다.`);
+863:     const col=columnLetter(valueCol);
+864:     await updateSheetValues(token,UEP_SPREADSHEET_ID,`'00_UEP설정'!${col}${settingRow+1}:${col}${settingRow+1}`,[[commonReportFormUrl]]);
+865:   }
+866:   liveDataCache=null; liveDataFetchedAt=0;
+867:   const data=await fetchLiveData({force:true});
+868:   return {ok:true,data,sheet:specs.sheet};
+869: }
+870: 
+871: async function clearSheetValues(token, spreadsheetId, range) {
+872:   const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}:clear`;
+873:   const response = await fetch(url, {
+874:     method: "POST",
+875:     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+876:     body: "{}",
+877:   });
+878:   if (!response.ok) throw new Error(`공결 삭제 실패 (${response.status})`);
+879:   return response.json();
+880: }
+881: 
+882: function officialAttendanceRow(payload={}, id="") {
+2272: ipcMain.handle("securityConfig:save", async (_event, payload={}) => {
+2273:   try {
+2274:     const key=String(payload.key||'').trim(), value=String(payload.value||'').trim();
+2275:     if(!key||!value) throw new Error('설정키와 설정값이 필요합니다.');
+2276:     if(!['SENSITIVE_PIN_HASH','SUBJECT_CONFIDENTIAL_PIN_HASH'].includes(key)) throw new Error('허용되지 않은 보안 설정키입니다.');
+2277:     const account=await readEncrypted(credentialPath());
+2278:     if(!validateServiceAccount(account)) throw new Error('관리자 Google 연결이 필요합니다.');
+2279:     const token=await getSheetsToken(account);
+2280:     const matrix=await readNoticeSheetMatrix(token,'00_UEP설정','A1:F500');
+2281:     const header=findHeaderRowByRequired(matrix,['설정키','설정값']);
+2282:     if(!header) throw new Error('00_UEP설정 헤더를 찾지 못했습니다.');
+2283:     const headers=header.headers.slice(), idx=name=>headers.indexOf(name), keyCol=idx('설정키');
+2284:     const now=new Date().toISOString(), editor=String(payload.editor||'관리자').trim();
+2285:     const values={'설정키':key,'설정값':value,'설명':String(payload.description||'UEP 공용 보안설정'),'수정일시':now,'수정자':editor};
+2286:     const rowIndex=matrix.findIndex((r,i)=>i>header.index&&String(r?.[keyCol]||'').trim()===key);
+2287:     if(rowIndex>=0){
+2288:       const row=Array.from({length:headers.length},(_,i)=>matrix[rowIndex]?.[i]??'');
+2289:       for(const [name,v] of Object.entries(values)){const c=idx(name);if(c>=0)row[c]=v;}
+2290:       await updateSheetValues(token,UEP_SPREADSHEET_ID,`'00_UEP설정'!A${rowIndex+1}:${columnLetter(headers.length-1)}${rowIndex+1}`,[row]);
+2291:     }else{
+2292:       const row=Array.from({length:headers.length},()=> '');
+2293:       for(const [name,v] of Object.entries(values)){const c=idx(name);if(c>=0)row[c]=v;}
+2294:       await appendSheetValues(token,UEP_SPREADSHEET_ID,`'00_UEP설정'!A:${columnLetter(headers.length-1)}`,[row]);
+2295:     }
+2296:     liveDataCache=null;liveDataFetchedAt=0;
+2297:     return {ok:true,key,value};
+2298:   } catch(error){return {ok:false,reason:error?.message||'공용 보안설정 저장 실패'};}
+2274:     const key=String(payload.key||'').trim(), value=String(payload.value||'').trim();
+2275:     if(!key||!value) throw new Error('설정키와 설정값이 필요합니다.');
+2276:     if(!['SENSITIVE_PIN_HASH','SUBJECT_CONFIDENTIAL_PIN_HASH'].includes(key)) throw new Error('허용되지 않은 보안 설정키입니다.');
+2277:     const account=await readEncrypted(credentialPath());
+2278:     if(!validateServiceAccount(account)) throw new Error('관리자 Google 연결이 필요합니다.');
+2279:     const token=await getSheetsToken(account);
+2280:     const matrix=await readNoticeSheetMatrix(token,'00_UEP설정','A1:F500');
+2281:     const header=findHeaderRowByRequired(matrix,['설정키','설정값']);
+2282:     if(!header) throw new Error('00_UEP설정 헤더를 찾지 못했습니다.');
+2283:     const headers=header.headers.slice(), idx=name=>headers.indexOf(name), keyCol=idx('설정키');
+2284:     const now=new Date().toISOString(), editor=String(payload.editor||'관리자').trim();
+2285:     const values={'설정키':key,'설정값':value,'설명':String(payload.description||'UEP 공용 보안설정'),'수정일시':now,'수정자':editor};
+2286:     const rowIndex=matrix.findIndex((r,i)=>i>header.index&&String(r?.[keyCol]||'').trim()===key);
+2287:     if(rowIndex>=0){
+2288:       const row=Array.from({length:headers.length},(_,i)=>matrix[rowIndex]?.[i]??'');
+2289:       for(const [name,v] of Object.entries(values)){const c=idx(name);if(c>=0)row[c]=v;}
+2290:       await updateSheetValues(token,UEP_SPREADSHEET_ID,`'00_UEP설정'!A${rowIndex+1}:${columnLetter(headers.length-1)}${rowIndex+1}`,[row]);
+2291:     }else{
+2292:       const row=Array.from({length:headers.length},()=> '');
+2293:       for(const [name,v] of Object.entries(values)){const c=idx(name);if(c>=0)row[c]=v;}
+2294:       await appendSheetValues(token,UEP_SPREADSHEET_ID,`'00_UEP설정'!A:${columnLetter(headers.length-1)}`,[row]);
+2295:     }
+2296:     liveDataCache=null;liveDataFetchedAt=0;
+2297:     return {ok:true,key,value};
+2298:   } catch(error){return {ok:false,reason:error?.message||'공용 보안설정 저장 실패'};}
+2299: });
+2300: ipcMain.handle("system:autoStartGet",()=>{
+2282:     if(!header) throw new Error('00_UEP설정 헤더를 찾지 못했습니다.');
+2283:     const headers=header.headers.slice(), idx=name=>headers.indexOf(name), keyCol=idx('설정키');
+2284:     const now=new Date().toISOString(), editor=String(payload.editor||'관리자').trim();
+2285:     const values={'설정키':key,'설정값':value,'설명':String(payload.description||'UEP 공용 보안설정'),'수정일시':now,'수정자':editor};
+2286:     const rowIndex=matrix.findIndex((r,i)=>i>header.index&&String(r?.[keyCol]||'').trim()===key);
+2287:     if(rowIndex>=0){
+2288:       const row=Array.from({length:headers.length},(_,i)=>matrix[rowIndex]?.[i]??'');
+2289:       for(const [name,v] of Object.entries(values)){const c=idx(name);if(c>=0)row[c]=v;}
+2290:       await updateSheetValues(token,UEP_SPREADSHEET_ID,`'00_UEP설정'!A${rowIndex+1}:${columnLetter(headers.length-1)}${rowIndex+1}`,[row]);
+2291:     }else{
+2292:       const row=Array.from({length:headers.length},()=> '');
+2293:       for(const [name,v] of Object.entries(values)){const c=idx(name);if(c>=0)row[c]=v;}
+2294:       await appendSheetValues(token,UEP_SPREADSHEET_ID,`'00_UEP설정'!A:${columnLetter(headers.length-1)}`,[row]);
+2295:     }
+2296:     liveDataCache=null;liveDataFetchedAt=0;
+2297:     return {ok:true,key,value};
+2298:   } catch(error){return {ok:false,reason:error?.message||'공용 보안설정 저장 실패'};}
+2299: });
+2300: ipcMain.handle("system:autoStartGet",()=>{
+2301:   try{return {ok:true,enabled:Boolean(app.getLoginItemSettings().openAtLogin)};}catch(error){return {ok:false,reason:error?.message||'자동실행 상태 확인 실패'};}
+2302: });
+2303: ipcMain.handle("system:autoStartSet",(_event,enabled)=>{
+2304:   try{app.setLoginItemSettings({openAtLogin:Boolean(enabled),path:process.execPath});return {ok:true,enabled:Boolean(app.getLoginItemSettings().openAtLogin)};}catch(error){return {ok:false,reason:error?.message||'자동실행 설정 실패'};}
+2305: });
+2306: 
+2307: ipcMain.handle("notice:save", async (_event, payload = {}) => {
+2308:   try {
+2286:     const rowIndex=matrix.findIndex((r,i)=>i>header.index&&String(r?.[keyCol]||'').trim()===key);
+2287:     if(rowIndex>=0){
+2288:       const row=Array.from({length:headers.length},(_,i)=>matrix[rowIndex]?.[i]??'');
+2289:       for(const [name,v] of Object.entries(values)){const c=idx(name);if(c>=0)row[c]=v;}
+2290:       await updateSheetValues(token,UEP_SPREADSHEET_ID,`'00_UEP설정'!A${rowIndex+1}:${columnLetter(headers.length-1)}${rowIndex+1}`,[row]);
+2291:     }else{
+2292:       const row=Array.from({length:headers.length},()=> '');
+2293:       for(const [name,v] of Object.entries(values)){const c=idx(name);if(c>=0)row[c]=v;}
+2294:       await appendSheetValues(token,UEP_SPREADSHEET_ID,`'00_UEP설정'!A:${columnLetter(headers.length-1)}`,[row]);
+2295:     }
+2296:     liveDataCache=null;liveDataFetchedAt=0;
+2297:     return {ok:true,key,value};
+2298:   } catch(error){return {ok:false,reason:error?.message||'공용 보안설정 저장 실패'};}
+2299: });
+2300: ipcMain.handle("system:autoStartGet",()=>{
+2301:   try{return {ok:true,enabled:Boolean(app.getLoginItemSettings().openAtLogin)};}catch(error){return {ok:false,reason:error?.message||'자동실행 상태 확인 실패'};}
+2302: });
+2303: ipcMain.handle("system:autoStartSet",(_event,enabled)=>{
+2304:   try{app.setLoginItemSettings({openAtLogin:Boolean(enabled),path:process.execPath});return {ok:true,enabled:Boolean(app.getLoginItemSettings().openAtLogin)};}catch(error){return {ok:false,reason:error?.message||'자동실행 설정 실패'};}
+2305: });
+2306: 
+2307: ipcMain.handle("notice:save", async (_event, payload = {}) => {
+2308:   try {
+2309:     const account = await readEncrypted(credentialPath());
+2310:     if (!validateServiceAccount(account)) throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+2311:     const token = await getSheetsToken(account);
+2312:     const nowIso = new Date().toISOString();
+2293:       for(const [name,v] of Object.entries(values)){const c=idx(name);if(c>=0)row[c]=v;}
+2294:       await appendSheetValues(token,UEP_SPREADSHEET_ID,`'00_UEP설정'!A:${columnLetter(headers.length-1)}`,[row]);
+2295:     }
+2296:     liveDataCache=null;liveDataFetchedAt=0;
+2297:     return {ok:true,key,value};
+2298:   } catch(error){return {ok:false,reason:error?.message||'공용 보안설정 저장 실패'};}
+2299: });
+2300: ipcMain.handle("system:autoStartGet",()=>{
+2301:   try{return {ok:true,enabled:Boolean(app.getLoginItemSettings().openAtLogin)};}catch(error){return {ok:false,reason:error?.message||'자동실행 상태 확인 실패'};}
+2302: });
+2303: ipcMain.handle("system:autoStartSet",(_event,enabled)=>{
+2304:   try{app.setLoginItemSettings({openAtLogin:Boolean(enabled),path:process.execPath});return {ok:true,enabled:Boolean(app.getLoginItemSettings().openAtLogin)};}catch(error){return {ok:false,reason:error?.message||'자동실행 설정 실패'};}
+2305: });
+2306: 
+2307: ipcMain.handle("notice:save", async (_event, payload = {}) => {
+2308:   try {
+2309:     const account = await readEncrypted(credentialPath());
+2310:     if (!validateServiceAccount(account)) throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+2311:     const token = await getSheetsToken(account);
+2312:     const nowIso = new Date().toISOString();
+2313:     const id = String(payload.id || `NTC-${nowIso.replace(/[-:.TZ]/g, "").slice(0,14)}`);
+2314:     const matrix = await readNoticeSheetMatrix(token, "40_공지마감", "A1:AZ2000");
+2315:     const header = findHeaderRowByRequired(matrix,["공지ID","제목","상태"]);
+2316:     if(!header) throw new Error("40_공지마감 헤더를 찾지 못했습니다.");
+2317:     const headers=header.headers.slice(), idCol=headers.indexOf("공지ID");
+2318:     if(!payload.id){
+2319:       const idx=name=>headers.indexOf(name), same=matrix.find((r,i)=>i>header.index&&String(r?.[idx("제목")]||"").trim()===String(payload.title||"").trim()&&String(r?.[idx("내용")]||"").trim()===String(payload.content||"").trim()&&String(r?.[idx("대상반")]||"전체").trim()===String(payload.targetClass||"전체").trim()&&String(r?.[idx("게시일")]||"").slice(0,10)===String(payload.postDate||"").slice(0,10)&&!["삭제","종료"].includes(String(r?.[idx("상태")]||"게시")));
+2296:     liveDataCache=null;liveDataFetchedAt=0;
+2297:     return {ok:true,key,value};
+2298:   } catch(error){return {ok:false,reason:error?.message||'공용 보안설정 저장 실패'};}
+2299: });
+2300: ipcMain.handle("system:autoStartGet",()=>{
+2301:   try{return {ok:true,enabled:Boolean(app.getLoginItemSettings().openAtLogin)};}catch(error){return {ok:false,reason:error?.message||'자동실행 상태 확인 실패'};}
+2302: });
+2303: ipcMain.handle("system:autoStartSet",(_event,enabled)=>{
+2304:   try{app.setLoginItemSettings({openAtLogin:Boolean(enabled),path:process.execPath});return {ok:true,enabled:Boolean(app.getLoginItemSettings().openAtLogin)};}catch(error){return {ok:false,reason:error?.message||'자동실행 설정 실패'};}
+2305: });
+2306: 
+2307: ipcMain.handle("notice:save", async (_event, payload = {}) => {
+2308:   try {
+2309:     const account = await readEncrypted(credentialPath());
+2310:     if (!validateServiceAccount(account)) throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+2311:     const token = await getSheetsToken(account);
+2312:     const nowIso = new Date().toISOString();
+2313:     const id = String(payload.id || `NTC-${nowIso.replace(/[-:.TZ]/g, "").slice(0,14)}`);
+2314:     const matrix = await readNoticeSheetMatrix(token, "40_공지마감", "A1:AZ2000");
+2315:     const header = findHeaderRowByRequired(matrix,["공지ID","제목","상태"]);
+2316:     if(!header) throw new Error("40_공지마감 헤더를 찾지 못했습니다.");
+2317:     const headers=header.headers.slice(), idCol=headers.indexOf("공지ID");
+2318:     if(!payload.id){
+2319:       const idx=name=>headers.indexOf(name), same=matrix.find((r,i)=>i>header.index&&String(r?.[idx("제목")]||"").trim()===String(payload.title||"").trim()&&String(r?.[idx("내용")]||"").trim()===String(payload.content||"").trim()&&String(r?.[idx("대상반")]||"전체").trim()===String(payload.targetClass||"전체").trim()&&String(r?.[idx("게시일")]||"").slice(0,10)===String(payload.postDate||"").slice(0,10)&&!["삭제","종료"].includes(String(r?.[idx("상태")]||"게시")));
+2320:       if(same)return {ok:true,id:String(same[idCol]||id),duplicate:true};
+2321:     }
+2322:     // 기존 시트에 마감유형 컬럼이 아직 없으면 데이터 손상 없이 마지막 열에 자동 추가한다.
+2350:     liveDataCache=null;liveDataFetchedAt=0;return {ok:true,id};
+2351:   } catch(error){return {ok:false,reason:error?.message||"공지 삭제 실패"};}
+2352: });
+2353: ipcMain.handle("notice:receiptSave", async (_event, payload={}) => {
+2354:   try {
+2355:     const auth=await resolveGoogleReadAuth().catch(()=>null);
+2356:     if(auth?.mode==='school_read_api'){
+2357:       // __UEP_08164_NOTICE_RECEIPT_SCHOOL_READ__
+2358:       const result=await schoolReadApiRequest(auth,{action:'notice-receipt-save',noticeId:String(payload.noticeId||'').trim(),teacher:String(payload.teacher||'').trim(),userId:String(payload.userId||'').trim(),confirmedAt:new Date().toISOString()}).catch(error=>({ok:false,reason:error?.message||'School Read 공지확인 저장 실패'}));
+2359:       if(result?.ok)return result;
+2360:       return {ok:false,reason:result?.reason||result?.message||'School Read 공지확인 저장 기능이 아직 배포되지 않았습니다.',requiresSchoolReadWrite:true};
+2361:     }
+2362:     const account=await readEncrypted(credentialPath()); if(!validateServiceAccount(account)) throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+2363:     const token=await getSheetsToken(account), now=new Date().toISOString();
+2364:     const noticeId=String(payload.noticeId||"").trim(), teacher=String(payload.teacher||"").trim(), userId=String(payload.userId||"").trim();
+2365:     if(!noticeId||!teacher) throw new Error("공지ID와 교사명이 필요합니다.");
+2366:     const matrix=await readNoticeSheetMatrix(token,"44_공지확인현황","A1:Q3000");
+2367:     const header=findHeaderRowByRequired(matrix,["기록ID","공지ID","교사명","확인상태","제출상태"]); if(!header) throw new Error("44_공지확인현황 헤더를 찾지 못했습니다.");
+2368:     const h=header.index, headers=header.headers, idx=name=>headers.indexOf(name);
+2369:     const rowIndex=matrix.findIndex((r,i)=>i>h&&String(r?.[idx("공지ID")]||"")===noticeId&&((userId&&String(r?.[idx("사용자ID")]||"")===userId)||String(r?.[idx("교사명")]||"")===teacher));
+2370:     const current=rowIndex>=0?matrix[rowIndex]:[];
+2371:     const confirmed=payload.confirmed!=null?Boolean(payload.confirmed):String(current?.[idx("확인상태")]||"N").toUpperCase()==="Y";
+2372:     const submitted=payload.submitted!=null?Boolean(payload.submitted):String(current?.[idx("제출상태")]||"N").toUpperCase()==="Y";
+2373:     const read=payload.read!=null?Boolean(payload.read):String(current?.[idx("읽음상태")]||"N").toUpperCase()==="Y";
+2374:     const dismissed=payload.dismissed!=null?Boolean(payload.dismissed):String(current?.[idx("공지해제")]||"N").toUpperCase()==="Y";
+2375:     const detailViewed=payload.detailViewed!=null?Boolean(payload.detailViewed):String(current?.[idx("상세열람")]||"N").toUpperCase()==="Y";
+2376:     const sourceType=String(payload.sourceType||current?.[idx("원본유형")]||"직접공지");
