@@ -1,0 +1,131 @@
+# UEP 0.81.71 timer/network exact functions
+
+## syncSchoolReadAuthBadge @ 13183
+13183:   async function syncSchoolReadAuthBadge(){
+13184:     try{
+13185:       if(!window.schoolBoard?.schoolReadSessionStatus)return;
+13186:       const status=await window.schoolBoard.schoolReadSessionStatus({verify:false});
+13187:       const authenticated=Boolean(status?.authenticated);
+13188:       const nodes=[...document.querySelectorAll('button,span,div,a')];
+13189:       for(const node of nodes){
+13190:         const text=String(node.textContent||'').trim();
+13191:         if(authenticated && text==='인증 필요'){
+13192:           node.dataset.uepSchoolReadAuthBadge='1';
+13193:           node.textContent='연결됨';
+13194:           node.title='UEP School Read API 인증 정상';
+13195:         }else if(!authenticated && node.dataset?.uepSchoolReadAuthBadge==='1' && text==='연결됨'){
+13196:           node.textContent='인증 필요';
+13197:           node.title='UEP 로그인이 필요합니다.';
+13198:         }
+13199:       }
+13200:     }catch(error){console.warn('[UEP] School Read auth badge sync failed',error);}
+13201:   }
+## checkPeriodAlerts @ 794
+794: function checkPeriodAlerts() {
+795:   const setting = state.settings.widgetSettings.timetable || {};
+796:   if (!setting.startAlert && !setting.endAlert) return;
+797:   const now = new Date();
+798:   const hhmm = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+799:   const key = `${dateKey(now)}-${hhmm}`;
+800:   if (key === lastPeriodAlertKey) return;
+801:   for (const row of (state.settings.schoolHours || [])) {
+802:     const name = row[0], start = row[1], end = row[2];
+803:     let message = "";
+804:     if (setting.startAlert && start === hhmm && String(name).includes("교시")) message = `${name} 수업이 시작됩니다.`;
+805:     if (setting.endAlert && end === hhmm && String(name).includes("교시")) message = `${name} 수업이 종료됩니다.`;
+806:     if (message) {
+807:       lastPeriodAlertKey = key;
+808:       toast(message);
+809:       try { if ("Notification" in window && Notification.permission === "granted") new Notification("UEP 시간표 알림", { body: message }); } catch {}
+810:       break;
+811:     }
+812:   }
+813: }
+## loadNeisDashboard @ 674
+674: async function loadNeisDashboard(force = false, requestedDate = "") {
+675:   if (!window.schoolBoard?.loadNeisDashboard) {
+676:     neisError = "이 실행환경에서는 NEIS 연결 기능을 사용할 수 없습니다.";
+677:     updateTopSyncStatus();
+678:     return;
+679:   }
+680:   if (neisLoading) return;
+681:   neisLoading = true;
+682:   if (state.activePage === "dashboard" || state.activePage === "timetable" || state.activePage === "settings") render(state.activePage);
+683:   const options = {
+684:     schoolName: state.settings.neis.schoolName,
+685:     officeCode: state.settings.neis.officeCode,
+686:     schoolCode: state.settings.neis.schoolCode,
+687:     grade: state.settings.neis.grade,
+688:     classNo: state.settings.neis.classNo,
+689:     date: requestedDate || dateKey(new Date()),
+690:     useApiKey: Boolean(state.settings.neis.useApiKey),
+691:     comciganSchoolCode: state.settings.neis.comciganSchoolCode || "69092",
+692:     force,
+693:   };
+694:   try {
+695:     const result = await window.schoolBoard.loadNeisDashboard(options);
+696:     if (!result?.ok) throw new Error(result?.reason || "NEIS 자료를 불러오지 못했습니다.");
+697:     neisData = result;
+698:     neisError = result.offline ? result.staleReason || "실시간 연결 실패로 마지막 저장자료를 표시합니다." : "";
+699:     if (result.school) {
+700:       state.settings.neis.schoolName = result.school.schoolName || state.settings.neis.schoolName;
+701:       state.settings.neis.officeCode = result.school.officeCode || state.settings.neis.officeCode;
+702:       state.settings.neis.schoolCode = result.school.schoolCode || state.settings.neis.schoolCode;
+703:       await save();
+704:     }
+705:   } catch (error) {
+706:     neisError = error?.message || String(error);
+707:     if (!neisData?.ok) neisData = null;
+708:   } finally {
+709:     neisLoading = false;
+710:     updateTopSyncStatus();
+711:     if (["dashboard", "timetable", "settings"].includes(state.activePage)) render(state.activePage);
+712:   }
+713: }
+## uepLoadSharedSecurity08168 @ 13577
+13577: async function uepLoadSharedSecurity08168(force=false){
+13578:   if(!window.schoolBoard?.readSharedSecurityConfig)return false;
+13579:   if(!force&&uepSharedSettingValue08166?.('SENSITIVE_PIN_HASH')&&uepSharedSettingValue08166?.('SUBJECT_CONFIDENTIAL_PIN_HASH'))return true;
+13580:   if(__uepSharedSecurityLoading08168)return __uepSharedSecurityLoading08168;
+13581:   __uepSharedSecurityLoading08168=(async()=>{
+13582:     try{
+13583:       const result=await window.schoolBoard.readSharedSecurityConfig();
+13584:       if(!result?.ok)throw new Error(result?.reason||'공용 비밀번호 설정을 읽지 못했습니다.');
+13585:       for(const row of (result.settings||[])){
+13586:         const key=String(row.key||row['설정키']||'').trim();
+13587:         const value=String(row.value||row['설정값']||'').trim();
+13588:         if(key&&value)uepUpsertLocalSharedSetting08166?.(key,value,String(row.description||row['설명']||''));
+13589:       }
+13590:       return true;
+13591:     }catch(error){console.warn('[UEP 0.81.68 shared security read]',error);return false;}
+13592:     finally{__uepSharedSecurityLoading08168=null;}
+13593:   })();
+13594:   return __uepSharedSecurityLoading08168;
+13595: }
+## uepUrgentTick08166 @ 13569
+13569: function uepUrgentTick08166(){try{uepEnsureBell08166();if(typeof currentUserCanManageNotices==='function'&&currentUserCanManageNotices())return;const first=uepUrgentPending08166()[0];if(first)uepOpenUrgent08166(first);}catch(error){console.warn('[UEP urgent]',error);}}
+## updateHeroClock @ 12077
+12077: function updateHeroClock() {
+12078:   const clock = $("#heroClock"),
+12079:     date = $("#heroDate");
+12080:   if (!clock || !date) return;
+12081:   const now = new Date();
+12082:   const hour = now.getHours(),
+12083:     period = hour < 12 ? "오전" : "오후",
+12084:     displayHour = hour % 12 || 12;
+12085:   clock.textContent = `${period} ${String(displayHour).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`;
+12086:   date.textContent = new Intl.DateTimeFormat("ko-KR", {
+12087:     year: "numeric",
+12088:     month: "long",
+12089:     day: "numeric",
+12090:     weekday: "long",
+12091:   }).format(now);
+12092: }
+
+## Direct bridge/network calls near timers
+12111: setInterval(() => { const minutes = Number(state.settings.neis?.autoRefreshMinutes || 30); if (minutes > 0 && neisData?.fetchedAt && Date.now() - new Date(neisData.fetchedAt).getTime() >= minutes * 60000) loadNeisDashboard(true); }, 60000);
+13185: if(!window.schoolBoard?.schoolReadSessionStatus)return;
+13186: const status=await window.schoolBoard.schoolReadSessionStatus({verify:false});
+13577: async function uepLoadSharedSecurity08168(force=false){
+13606: setTimeout(()=>uepLoadSharedSecurity08168(true),1200);
+13607: setInterval(()=>uepLoadSharedSecurity08168(true),10*60*1000);
