@@ -1,0 +1,24 @@
+name: Diagnose UEP 0.81.62 Patch Error
+'on':
+  push:
+    branches: [main]
+    paths: [diag-08162-patch-error.trigger]
+permissions:
+  contents: write
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          gh release download v0.81.61 --repo $env:GITHUB_REPOSITORY --pattern '*.zip' --dir source
+          $z=Get-ChildItem source -Filter '*.zip'|Select-Object -First 1;Expand-Archive $z.FullName app -Force
+          node scripts/patch-uep-0.81.62.js app *> diag-08162-patch-error.txt
+          "EXIT=$LASTEXITCODE" | Add-Content diag-08162-patch-error.txt
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add diag-08162-patch-error.txt;git commit -m 'diag: capture 0.81.62 patch failure';git push
