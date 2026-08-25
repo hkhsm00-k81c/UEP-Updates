@@ -1,0 +1,59 @@
+name: Build UEP 0.81.72 Performance Candidate R8
+'on':
+  push:
+    branches: [main]
+    paths:
+      - build-uep-0.81.72-performance-candidate-r8.trigger
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download stable 0.81.71
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop';New-Item -ItemType Directory -Force source,app,out|Out-Null
+          gh release download v0.81.71 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+      - name: Apply 0.81.72 scripts through R8
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($script in @('scripts/patch-uep-08172-structure.js','scripts/patch-uep-08172-operational-writes.js','scripts/patch-uep-08172-refresh-policy.js','scripts/patch-uep-08172-input-contact.js','scripts/patch-uep-08172-program-write-r6.js','scripts/patch-uep-08172-render-r7.js','scripts/patch-uep-08172-observers-r8.js')){node $script;if($LASTEXITCODE -ne 0){throw "patch failed: $script"}}
+      - name: Hard syntax checks
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop';foreach($f in @('app/resources/app/gyomuon.js','app/resources/app/electron/main.cjs','app/resources/app/electron/preload.cjs')){node --check $f;if($LASTEXITCODE -ne 0){throw "syntax failed: $f"}}
+      - name: R8 observer and render regression checks
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop';$g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8;$m=Get-Content app/resources/app/electron/main.cjs -Raw -Encoding UTF8
+          foreach($good in @('__uepRefineGrowth089','__uepFinalRefinement090','__uepGrowthProgramGuide082','UEP render refine','OPERATIONAL_RENDER_PAGES08172','UEP_APPROVAL_POPUP_FIX_08068')){if(-not $g.Contains($good)){throw "R8 marker missing: $good"}}
+          if($g.Contains('observe(document.documentElement')){throw 'document-wide MutationObserver remains'}
+          $drawerObserverCount=([regex]::Matches($g,"querySelector\('#drawerBody'\).*?obs\.observe\(target",'Singleline')).Count;if($drawerObserverCount -lt 4){throw "drawer observer scope count too low: $drawerObserverCount"}
+          foreach($bad in @('UEP_APPROVAL_POPUP_FIX_08066','UEP_APPROVAL_POPUP_FIX_08067','setInterval(tick,2000)','setInterval(syncSchoolReadAuthBadge,5000)')){if($g.Contains($bad)){throw "legacy runtime remains: $bad"}}
+          if($g.Contains('if(rerender&&state.activePage)render(state.activePage);')){throw 'unconditional operational rerender remains'}
+          foreach($fn in @('saveOfficialAttendance','deleteOfficialAttendance','saveLateAttendance','deleteLateAttendance','saveDormOuting','saveNightSupervisor','saveLunchDuty','saveStudentContact','saveProgramOperation')){$start=$m.IndexOf("async function $fn");if($start -lt 0){throw "missing $fn"};$next=$m.IndexOf('async function ',$start+20);if($next -lt 0){$next=$m.Length};$block=$m.Substring($start,$next-$start);if($block -match 'fetchLiveData\(\{\s*force\s*:\s*true'){throw "$fn full-refresh regression"}}
+      - name: Intentional full-sync contracts remain
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop';$g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8;$m=Get-Content app/resources/app/electron/main.cjs -Raw -Encoding UTF8
+          if(-not $m.Contains('ipcMain.handle("google:previewReadonlySync"')){throw 'manual/full sync bridge missing'}
+          $idx=$g.IndexOf('normalizeInputBatch');if($idx -lt 0){throw 'normalize path missing'};$block=$g.Substring($idx,[Math]::Min(2800,$g.Length-$idx));if(-not $block.Contains('refreshReadonlyCacheSilently({force:true,rerender:false})')){throw 'normalize full refresh removed prematurely'}
+      - name: Package and archive revalidation
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop';Compress-Archive -Path app/* -DestinationPath out/UEP-update-0.81.72-candidate-r8.zip -CompressionLevel Optimal;New-Item -ItemType Directory -Force verify|Out-Null;Expand-Archive out/UEP-update-0.81.72-candidate-r8.zip verify -Force
+          foreach($f in @('verify/resources/app/gyomuon.js','verify/resources/app/electron/main.cjs','verify/resources/app/electron/preload.cjs')){node --check $f;if($LASTEXITCODE -ne 0){throw "archive syntax failed: $f"}}
+          $vg=Get-Content verify/resources/app/gyomuon.js -Raw -Encoding UTF8;if($vg.Contains('observe(document.documentElement')){throw 'archive document-wide observer regression'}
+          $sha=(Get-FileHash out/UEP-update-0.81.72-candidate-r8.zip -Algorithm SHA256).Hash.ToLower();@("candidate=0.81.72-r8","base=0.81.71-stable","sha256=$sha","network=domain-partial","operational-render=page-scoped","global-observers=removed","drawer-observers=scoped","growth-refinement=post-render-hook","normalize=full-intentional","release=no")|Set-Content out/UEP-0.81.72-candidate-r8-report.txt -Encoding UTF8
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UEP-0.81.72-performance-candidate-r8
+          path: out/*
+          retention-days: 7
