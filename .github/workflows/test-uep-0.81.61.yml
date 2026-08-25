@@ -1,0 +1,24 @@
+name: Test UEP 0.81.61 Patch
+'on':
+  push:
+    branches: [main]
+    paths: [test-uep-0.81.61.trigger]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop';New-Item -ItemType Directory -Force source,app|Out-Null
+          gh release download v0.81.60 --repo $env:GITHUB_REPOSITORY --pattern '*.zip' --dir source
+          $z=Get-ChildItem source -Filter '*.zip'|Select-Object -First 1;Expand-Archive $z.FullName app -Force
+          node scripts/patch-uep-0.81.61.js app
+          node --check app/resources/app/gyomuon.js
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          foreach($m in @('__UEP_08161_CURRICULUM_GROUP_PRIORITY__','__UEP_08161_CROSS_TRACK_VIEW__','__UEP_08161_PASSWORD_GATE_NOT_ROLE_DISABLE__','__UEP_08161_DASHBOARD_OFFICIAL_DATE_SCOPE__')){if(!$g.Contains($m)){throw "missing $m"}}
