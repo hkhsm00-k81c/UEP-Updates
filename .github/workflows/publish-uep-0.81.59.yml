@@ -1,0 +1,56 @@
+name: Publish UEP 0.81.59 Four Fixes
+
+'on':
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [publish-uep-0.81.59.trigger]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-uep-0.81.59
+  cancel-in-progress: true
+
+jobs:
+  build-publish:
+    runs-on: windows-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download 0.81.58
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop';New-Item -ItemType Directory -Force source,app,verify|Out-Null
+          gh release download v0.81.58 --repo $env:GITHUB_REPOSITORY --pattern '*.zip' --dir source
+          $zip=Get-ChildItem source -File -Filter '*.zip'|Select-Object -First 1;if(!$zip){throw '0.81.58 release zip not found'};Expand-Archive $zip.FullName app -Force
+      - name: Apply 0.81.59 patch and verify
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop';node scripts/patch-uep-0.81.59.js app
+          node --check app/resources/app/gyomuon.js;node --check app/resources/app/electron/main.cjs;node --check app/resources/app/electron/google-data.cjs
+          $pkg='app/resources/app/package.json';$p=Get-Content $pkg -Raw -Encoding UTF8|ConvertFrom-Json;$p.version='0.81.59';$p|ConvertTo-Json -Depth 50|Set-Content $pkg -Encoding UTF8
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8;$d=Get-Content app/resources/app/electron/google-data.cjs -Raw -Encoding UTF8
+          foreach($x in @('const APP_VERSION = "0.81.59";','__UEP_08159_HOMEROOM_SENSITIVE_GATE__','__UEP_08159_HOMEROOM_SUBJECT_GATE__','terms:[''2-1'',''2-2'']')){if(!$g.Contains($x)){throw "marker missing: $x"}}
+          if($g.Contains('iso.getTime()+9*60*60*1000')){throw 'old UI date workaround remains'}
+          foreach($x in @('__UEP_08159_SCHOOL_READ_DATE_CANONICAL__','timeZone:''Asia/Seoul''')){if(!$d.Contains($x)){throw "data marker missing: $x"}}
+      - name: Build package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop';Compress-Archive -Path 'app/*' -DestinationPath UEP-update.zip -CompressionLevel Optimal;Expand-Archive UEP-update.zip verify -Force
+          if(!(Test-Path 'verify/UEP.exe')){throw 'root UEP.exe missing'};node --check verify/resources/app/gyomuon.js;node --check verify/resources/app/electron/google-data.cjs
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower();"UEP_SHA256=$sha"|Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Publish and promote 0.81.59
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop';gh release view v0.81.59 --repo $env:GITHUB_REPOSITORY *> $null
+          if($LASTEXITCODE -eq 0){gh release delete v0.81.59 --repo $env:GITHUB_REPOSITORY --cleanup-tag --yes};$global:LASTEXITCODE=0
+          gh release create v0.81.59 UEP-update.zip --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.59 Attendance + Protected Access Fix' --notes '공결 날짜는 +1일 보정 없이 School Read에서 직렬화된 DATE 값을 수집 단계에서 Asia/Seoul 날짜로 정상 환원합니다. 0.81.58의 화면단 UTC/KST 보정은 제거합니다. 예술계열 교차선택 시 실제 오류 과목을 강조하고, 담임의 학생 보호정보 상세 및 과목별 신청현황을 기존 비밀번호 인증을 거쳐 열람할 수 있게 합니다. 역할 승격은 하지 않습니다.'
+          $url='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.59/UEP-update.zip';$policy=Get-Content uep-policy.json -Raw -Encoding UTF8|ConvertFrom-Json;$policy.latestVersion='0.81.59';$policy.downloadUrl=$url;$policy.sha256=$env:UEP_SHA256;$policy.message='공결 날짜 수집경로 정상화 · 예술 오류과목 강조 · 담임 비밀번호 열람 허용';$policy.forceUpdate=$false;$policy|ConvertTo-Json -Depth 50|Set-Content uep-policy.json -Encoding UTF8
+          $manifest=@{version='0.81.59';channel='stable';downloadUrl=$url;sha256=$env:UEP_SHA256;notes='공결 날짜 수집 정상화 + 예술 오류과목 강조 + 담임 보호정보/과목별현황 비밀번호 열람'}|ConvertTo-Json;Set-Content uep-update.json $manifest -Encoding UTF8;Set-Content uep-version.json $manifest -Encoding UTF8
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add uep-policy.json uep-update.json uep-version.json;git commit -m 'release: promote UEP 0.81.59 four fixes';git push
