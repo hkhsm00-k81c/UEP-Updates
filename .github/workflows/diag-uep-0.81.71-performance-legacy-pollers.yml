@@ -1,0 +1,31 @@
+name: Diagnose UEP 0.81.71 Legacy Pollers
+'on':
+  push:
+    branches: [main]
+    paths: [diag-uep-0.81.71-performance-legacy-pollers.trigger]
+permissions:
+  contents: write
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download stable
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          gh release download v0.81.71 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+      - name: Extract legacy poller blocks
+        shell: pwsh
+        run: |
+          $l=Get-Content app/resources/app/gyomuon.js -Encoding UTF8
+          $ranges=@(@(12690,12760),@(13160,13220),@(13335,13410),@(13545,13620))
+          $o=@('# UEP 0.81.71 legacy poller blocks','')
+          foreach($r in $ranges){$o+="## lines $($r[0])-$($r[1])";for($n=$r[0];$n -le $r[1];$n++){if($n -le $l.Count){$o+=('{0}: {1}' -f $n,$l[$n-1])}}}
+          $o|Set-Content diag-uep-0.81.71-performance-legacy-pollers.txt -Encoding UTF8
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git pull --rebase origin main;git add diag-uep-0.81.71-performance-legacy-pollers.txt;git commit -m 'diag: capture UEP 0.81.71 legacy pollers';git push
