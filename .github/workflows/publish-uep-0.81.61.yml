@@ -1,0 +1,60 @@
+name: Publish UEP 0.81.61 Curriculum Cross Audit
+
+'on':
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [publish-uep-0.81.61.trigger]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-uep-0.81.61
+  cancel-in-progress: true
+
+jobs:
+  build-publish:
+    runs-on: windows-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download 0.81.60
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop';New-Item -ItemType Directory -Force source,app,verify|Out-Null
+          gh release download v0.81.60 --repo $env:GITHUB_REPOSITORY --pattern '*.zip' --dir source
+          $zip=Get-ChildItem source -File -Filter '*.zip'|Select-Object -First 1;if(!$zip){throw '0.81.60 release zip not found'};Expand-Archive $zip.FullName app -Force
+      - name: Apply 0.81.61 patch and verify
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node scripts/patch-uep-0.81.61.js app
+          node scripts/patch-uep-0.81.61-attendance.js app
+          node --check app/resources/app/gyomuon.js;node --check app/resources/app/electron/main.cjs;node --check app/resources/app/electron/google-data.cjs
+          $pkg='app/resources/app/package.json';$p=Get-Content $pkg -Raw -Encoding UTF8|ConvertFrom-Json;$p.version='0.81.61';$p|ConvertTo-Json -Depth 50|Set-Content $pkg -Encoding UTF8
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          foreach($x in @('const APP_VERSION = "0.81.61";','__UEP_08161_CURRICULUM_GROUP_PRIORITY__','__UEP_08161_CROSS_TRACK_VIEW__','__UEP_08161_PASSWORD_GATE_NOT_ROLE_DISABLE__','__UEP_08161_DASHBOARD_OFFICIAL_CANONICAL_DATE__','__UEP_08160_SENSITIVE_CONFIG_ROLE__','__UEP_08159_HOMEROOM_SENSITIVE_GATE__','__UEP_08159_HOMEROOM_SUBJECT_GATE__')){if(!$g.Contains($x)){throw "marker missing: $x"}}
+          if($g.Contains('__UEP_08161_DASHBOARD_OFFICIAL_DATE_SCOPE__')){throw 'intermediate dashboard reparser remains'}
+          if($g.Contains("subject.title='관리자·학년부장 전용 대외비'")){throw 'legacy subject role-disable remains'}
+          if(!$g.Contains("(next==='subjects'||next==='cross')&&!(await unlockSubjectConfidential())")){throw 'subject/cross password gate missing'}
+          if(!$g.Contains("return ['admin','grade_head'].includes(role)")){throw 'password configure role widened'}
+      - name: Build package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop';Compress-Archive -Path 'app/*' -DestinationPath UEP-update.zip -CompressionLevel Optimal;Expand-Archive UEP-update.zip verify -Force
+          if(!(Test-Path 'verify/UEP.exe')){throw 'root UEP.exe missing'};node --check verify/resources/app/gyomuon.js
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower();"UEP_SHA256=$sha"|Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Publish and promote 0.81.61
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop';gh release view v0.81.61 --repo $env:GITHUB_REPOSITORY *> $null
+          if($LASTEXITCODE -eq 0){gh release delete v0.81.61 --repo $env:GITHUB_REPOSITORY --cleanup-tag --yes};$global:LASTEXITCODE=0
+          gh release create v0.81.61 UEP-update.zip --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.61 Curriculum Cross Audit' --notes '교육과정 과목군에서 일본어·중국어·한문·정보를 별도 교과군으로 정상화하고 한문 고전 읽기 등 잘못된 국영수 분류를 바로잡았습니다. 문이과 교차오류 화면을 추가해 사회·과학 선택이 1건이라도 있는 학생을 2-1·2-2·3-1·3-2 전체에서 전수 조회하고 과학만·사회만·4학기 혼합·3-2 혼합, 반별 및 내신순으로 확인할 수 있습니다. 문이과 교차오류와 과목별 신청현황은 기존 민감정보 비밀번호 입력 후 열람하며 비밀번호 설정 권한은 관리자·학년부장만 유지합니다. 대시보드 공결은 google-data 단계에서 이미 정규화된 officialAttendance.date를 다시 날짜 변환하지 않고 조회일과 직접 비교합니다. 날짜 +/- 보정은 사용하지 않습니다.'
+          $url='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.61/UEP-update.zip';$policy=Get-Content uep-policy.json -Raw -Encoding UTF8|ConvertFrom-Json;$policy.latestVersion='0.81.61';$policy.downloadUrl=$url;$policy.sha256=$env:UEP_SHA256;$policy.message='교과군 매칭 정상화 · 문이과 4학기 전수조회 · 비밀번호 열람 게이트 · 공결 표준날짜 직접비교';$policy.forceUpdate=$false;$policy|ConvertTo-Json -Depth 50|Set-Content uep-policy.json -Encoding UTF8
+          $manifest=@{version='0.81.61';channel='stable';downloadUrl=$url;sha256=$env:UEP_SHA256;notes='교과군 + 문이과 교차조회 + 비밀번호 게이트 + 공결 표준날짜 직접비교'}|ConvertTo-Json;Set-Content uep-update.json $manifest -Encoding UTF8;Set-Content uep-version.json $manifest -Encoding UTF8
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add uep-policy.json uep-update.json uep-version.json;git commit -m 'release: promote UEP 0.81.61 curriculum cross audit';git push
