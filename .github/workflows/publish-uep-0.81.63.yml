@@ -1,0 +1,54 @@
+name: Publish UEP 0.81.63 Curriculum Attendance Fix
+'on':
+  push:
+    branches: [main]
+    paths: [publish-uep-0.81.63.trigger]
+permissions:
+  contents: write
+concurrency:
+  group: publish-uep-0.81.63
+  cancel-in-progress: true
+jobs:
+  build-publish:
+    runs-on: windows-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download actual 0.81.62
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop';New-Item -ItemType Directory -Force source,app,verify|Out-Null
+          gh release download v0.81.62 --repo $env:GITHUB_REPOSITORY --pattern 'UEP-update.zip' --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+      - name: Apply 0.81.63 patch and verify actual output
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop';node scripts/patch-uep-0.81.63.js app
+          node --check app/resources/app/gyomuon.js;node --check app/resources/app/electron/main.cjs;node --check app/resources/app/electron/google-data.cjs
+          $pkg='app/resources/app/package.json';$p=Get-Content $pkg -Raw -Encoding UTF8|ConvertFrom-Json;$p.version='0.81.63';$p|ConvertTo-Json -Depth 50|Set-Content $pkg -Encoding UTF8
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8;$m=Get-Content app/resources/app/electron/main.cjs -Raw -Encoding UTF8
+          foreach($x in @("$$('[data-curriculum-workspace]').forEach","$$('[data-cross-student]').forEach","$$('[data-curriculum-subject]').forEach")){if(!$g.Contains($x)){throw "selector output missing: $x"}}
+          if(!$m.Contains('__UEP_08163_SCHOOL_READ_OFFICIAL_DATE_SHIFT__')){throw 'attendance correction missing'}
+      - name: Build and re-open package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop';Compress-Archive -Path 'app/*' -DestinationPath UEP-update.zip -CompressionLevel Optimal;Expand-Archive UEP-update.zip verify -Force
+          if(!(Test-Path 'verify/UEP.exe')){throw 'root UEP.exe missing'}
+          node --check verify/resources/app/gyomuon.js;node --check verify/resources/app/electron/main.cjs
+          $vg=Get-Content verify/resources/app/gyomuon.js -Raw -Encoding UTF8;$vm=Get-Content verify/resources/app/electron/main.cjs -Raw -Encoding UTF8
+          foreach($x in @("$$('[data-curriculum-workspace]').forEach","$$('[data-cross-student]').forEach","$$('[data-curriculum-subject]').forEach")){if(!$vg.Contains($x)){throw "ZIP selector output missing: $x"}}
+          if(!$vm.Contains('__UEP_08163_SCHOOL_READ_OFFICIAL_DATE_SHIFT__')){throw 'ZIP attendance correction missing'}
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower();"UEP_SHA256=$sha"|Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Publish and promote 0.81.63
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          gh release view v0.81.63 --repo $env:GITHUB_REPOSITORY *> $null;if($LASTEXITCODE -eq 0){gh release delete v0.81.63 --repo $env:GITHUB_REPOSITORY --cleanup-tag --yes};$global:LASTEXITCODE=0
+          gh release create v0.81.63 UEP-update.zip --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.63 Curriculum Click + School Read Attendance Date' --notes '실제 0.81.62 산출물에서 단일 $ 선택자가 남은 원인을 수정하여 교육과정 문이과 교차오류/과목별 신청현황 클릭을 복구합니다. School Read API 경로의 공결 날짜가 하루 앞당겨지는 현상을 현재 백엔드에 한해 공결 데이터만 보정합니다. 직접공지 중앙 확인 집계는 School Read API 쓰기 기능이 없어 이번 릴리즈에 포함하지 않습니다.'
+          $url='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.63/UEP-update.zip';$policy=Get-Content uep-policy.json -Raw -Encoding UTF8|ConvertFrom-Json;$policy.latestVersion='0.81.63';$policy.downloadUrl=$url;$policy.sha256=$env:UEP_SHA256;$policy.message='교육과정 클릭 실산출물 복구 · School Read 공결 하루 이동 수정';$policy.forceUpdate=$false;$policy|ConvertTo-Json -Depth 50|Set-Content uep-policy.json -Encoding UTF8
+          $manifest=@{version='0.81.63';channel='stable';downloadUrl=$url;sha256=$env:UEP_SHA256;notes='교육과정 클릭 실산출물 복구 + School Read 공결 날짜 보정'}|ConvertTo-Json;Set-Content uep-update.json $manifest -Encoding UTF8;Set-Content uep-version.json $manifest -Encoding UTF8
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add uep-policy.json uep-update.json uep-version.json;git commit -m 'release: promote UEP 0.81.63 curriculum attendance fixes';git push
