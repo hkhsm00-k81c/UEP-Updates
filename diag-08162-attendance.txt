@@ -1,0 +1,1736 @@
+=== resources/app/electron/google-data.cjs :: const officialRows @ 45844 ===
+  const program = connectedPrograms.find(item => item.date === row.date && programOverlaps(item,row) && (item.students || []).some(student => String(student.studentId || "") === String(row.studentId || "") || String(student.studentNo || "") === String(row.studentNo || "")));
+    if (!program) return;
+    const participant = (program.students || []).find(student => String(student.studentId || "") === String(row.studentId || "") || String(student.studentNo || "") === String(row.studentNo || "")) || {};
+    const status = String(participant.result || "대상");
+    const confirmed = /출석|지각|공결|정상|참여|입실/.test(status) || (!participant.attendance && /참여|등록/.test(String(participant.participation||"")));
+    row.originalResult = row.result;
+    row.result = confirmed ? "프로그램 인정" : "프로그램 확인";
+    row.recognizedByProgram = confirmed;
+    row.programPending = !confirmed;
+    row.programTitle = program.actualTitle || program.title;
+    row.programId = program.id || "";
+    row.programKind = program.kind;
+    row.type = program.kind === "after" ? "방과후학교" : (program.type || "프로그램");
+    row.affiliation = row.programTitle;
+    row.detail = [row.programTitle, program.time, program.place].filter(Boolean).join(" · ");
+  });
+  // 방과후 기록도 월간 야자표에서는 상태 표시가 필요하므로 제거하지 않습니다.
+  // 결석·미대상 기록은 화면 판정 단계에서 '기록 없음'으로 처리됩니다.
+  const nightAttendance = allMappedNightRows;
+  afterSchoolAttendance = nightAttendance.filter(row => row.recognizedByProgram || isAfterSchool(row));
+  const attendance = nightAttendance.slice(-500).reverse();
+  const attended = nightRows.filter((row) =>
+    String(row["출결"] || row["입실상태"] || "").includes("출석"),
+  ).length;
+  const outsideQr = nightRows.filter((row) =>
+    String(row["출결"] || "").includes("명단외"),
+  ).length;
+  // v0.69.2: 공결은 순수 출결 데이터로서 기본정보 연결시트의 30_공결기록만 사용합니다.
+  const officialRows = rowsFrom("30_공식출결기록")
+    .map((row, index) => ({
+      id: String(row["출결ID"] || `official-${index}`).trim(),
+      studentId: String(row["학생ID"] || "").trim(),
+      studentNo: String(row["학번"] || "").replace(/\.0$/, ""),
+      name: String(row["성명"] || "").trim(),
+      className: String(row["반"] || "").replace(/\.0$/, ""),
+      date: localDate(row["일자"]),
+      attendanceType: String(row["출결구분"] || "출석인정").trim(),
+      detailType: String(row["세부구분"] || "결석").trim(),
+      type: [row["출결구분"], row["세부구분"]].filter(Boolean).join(" · ") || "공결",
+      startPeriod: String(row["시작교시"] || "").replace(/\.0$/, ""),
+      endPeriod: String(row["종료교시"] || "").replace(/\.0$/, ""),
+      period: [row["시작교시"], row["종료교시"]].filter(Boolean).join("~") || String(row["인정범위"] || "종일").trim(),
+      reasonText: String(row["사유"] || "").trim(),
+      place: String(row["장소"] || "").trim(),
+      reason: [row["사유"], row["장소"]].filter(Boolean).join(" · "),
+      evidenceRequired: String(row["증빙필요"] || "N").trim(),
+      evidence: String(row["증빙상태"] || "").trim(),
+      signatureRequired: String(row["학생서명필요"] || "N").trim(),
+      signatureStatus: String(row["학생서명상태"] || "").trim(),
+      unit: String(row["출결단위"] || "일일").trim(),
+      scope: String(row["인정범위"] || "하루 전체").trim(),
+      originalType: String(row["원본구분"] || "공결").trim(),
+      result: String(row["증빙상태"] || "확인").trim(),
+      sourceTab: String(row["원본탭"] || "30_공결기록").trim(),
+      sourceSpreadsheet: "[UEP] 2026 운호고 기본정보 연결시트",
+      sourceRow: String(row["원본행"] || "").trim(),
+      note: String(row["비고"] || "").trim(),
+    }))
+    .filter((row) => row.studentNo && row.name && row.date);
+  const lateRows = rowsFrom("31_지각기록")
+    .filter((row) => studentIds.has(String(row["학생ID"] || "").trim()))
+    .map((row, index) => ({
+      id: String(row["지각ID"] || `late-${index}`).trim(),
+      studentId: String(row["학생ID"] || "").trim(),
+      studentNo: String(row["학번"] || "").replace(/\.0$/, ""),
+      name: String(row["성명"] || "").trim(),
+      className: String(row["반"] || "").replace(/\.0$/, ""),
+      date: localDate(row["제출일자"]),
+      time: localTime(row["제출시각"]),
+      reason: String(row["사유"] || "").trim(),
+      minutes: Number(row["지각시간분"] || 0),
+      cumulativeCount: Number(row["누적횟수"] || 0),
+      cumulativeMinutes: Number(row["누적지각시간분"] || 0),
+      guidance: String(row["지도상태"] || "일반").trim(),
+    }))
+    .filter((row) => row.studentNo && row.name);
+  const internalScoreRows = rowsFrom("50_내신DB")
+    .filter((row) => studentIds.has(String(row["학생ID"] || "").trim()))
+    .map((row, index) => ({
+      id: String(row["내신성적ID"] || `grade-${index}`).trim(),
+      studentId: String(row["학생ID"] || "").trim(),
+      studentNo: String(row["학번"] || "").replace(/\.0$/, ""),
+      name: String(row["성명"] || "").trim(),
+      schoolYear: String(row["학년도"] || "").replace(/\.0$/, ""),
+      semester: String(row["학기"] || "").trim(),
+      exam: String(row["고사구분"] || "").trim(),
+      subject: String(row["과목명"] || "").trim(),
+      rawScore: row["원점수"] ?? "",
+      standardScore: "",
+      percentile: "",
+      level: row["등급"] ?? "",
+      rank: row["석차"] ?? "",
+      enrollment: row["수강자수"] ?? "",
+      achievement: String(row["성취도"] || "").trim(),
+      source: "50_내신DB",
+      scoreType: "내신",
+    }))
+    .filter((row) => row.studentNo && row.exam && row.subject);
+  const mockScoreRows = rowsFrom("51_모의고사DB")
+    .map((row) => {
+      const enteredId = String(valueByHeader(row, "학생ID", "학생 ID") || "").trim();
+      const enteredNo = String(valueByHeader(row, "학번", "학생학번") || "").replace(/\.0$/, "").trim();
+      const enteredName = String(valueByHeader(row, "성명", "이름", "학생명") || "").trim();
+      const enteredClass = classNumberSafe(valueByHeader(row, "반", "학급", "학급반"));
+      const master = studentById.get(enteredId) || studentByNo.get(enteredNo) || studentByNameClass.get(`${enteredName}|${enteredClass}`) || null;
+      return master ? { row, master, enteredId, enteredNo, enteredName } : null;
+    })
+    .filter(Boolean)
+    .flatMap(({ row, master, enteredId, enteredNo, enteredName }, index) => {
+      const base = {
+        id: String(valueByHeader(row, "모의성적ID", "모의 성적 ID", "성적ID", "기록ID") || `mock-${index}`).trim(),
+        studentId: enteredId || String(master?.id || ""),
+        studentNo: enteredNo || String(master?.studentNo || ""),
+        name: enteredName || String(master?.name || ""),
+        schoolYear: String(valueByHeader(row, "시험년도", "학년도") || "").replace(/\.0$/, ""),
+        semester: "",
+        exam: String(valueByHeader(row, "시험명", "고사명") || `${valueByHeader(row, "시험월", "월") || ""}월모의고사`).trim(),
+        rank: "",
+        enrollment: "",
+        achievement: "",
+        source: "51_모의고사DB",
+        scoreType: "모의고사",
+      };
+      return [
+        ["국어", valueByHeader(row, "국어 원점수", "국어\n원점수"), valueByHeader(row, "국어 표준점수", "국어\n표준점수"), valueByHeader(row, "국어 백분위", "국어\n백분위"), valueByHeader(row, "국어 등급", "국어\n등급")],
+        ["수학", valueByHeader(row, "수학 원점수", "수학\n원점수"), valueByHeader(row, "수학 표준점수", "수학\n표준점수"), valueByHeader(row, "수학 백분위", "수학\n백분위"), valueByHeader(row, "수학 등급", "수학\n등급")],
+        ["영어", valueByHeader(row, "영어 원점수", "영어\n원점수"), "", "", valueByHeader(row, "영어 등급", "영어\n등급")],
+        ["한국사", valueByHeader(row, "한국사 원점수", "한국사\n원점수"), "", "", valueByHeader(row, "한국사 등급", "한국사\n등급")],
+        [String(valueByHeader(row, "탐구1 과목", "탐구1\n과목", "탐구 1 과목") || "탐구1"), valueByHeader(row, "탐구1 원점수", "탐구1\n원점수"), valueByHeader(row, "탐구1 표준점수", "탐구1\n표준점수"), valueByHeader(row, "탐구1 백분위", "탐구1\n백분위"), valueByHeader(row, "탐구1 등급", "탐구1\n등급")],
+        [String(valueByHeader(row, "탐구2 과목", "탐구2\n과목", "탐구 2 과목") || "탐구2"), valueByHeader(row, "탐구2 원점수", "탐구2\n원점수"), valueByHeader(row, "탐구2 표준점수", "탐구2\n표준점수"), valueByHeader(row, "탐구2 백분위", "탐구2\n백분위"), valueByHeader(row, "탐구2 등급", "탐구2\n등급")],
+      ].filter((subject) => subject.slice(1).some((value) => value !== "" && value !== null && value !== undefined))
+        .map((subject, subjectIndex) => ({
+          ...base,
+          id: `${base.id}-${subjectIndex + 1}`,
+          subject: subject[0],
+          rawScore: subject[1] ?? "",
+          standardScore: subject[2] ?? "",
+          percentile: subject[3] ?? "",
+          level: subject[4] ?? "",
+        }));
+    });
+  const normalizeSelectionTerm = value => {
+    const text = String(value ?? "").trim();
+    const serialMap = {"46054":"2학년 1학기","46055":"2학년 2학기","46082":"3학년 1학기","46083":"3학년 2학기"};
+    if (serialMap[text]) return serialMap[text];
+    if (/^2\s*[-학년 ]?\s*1/.test(text)) return "2학년 1학기";
+    if (/^2\s*[-학년 ]?\s*2/.test(text)) return "2학년 2학기";
+    if (/^3\s*[-학년 ]?\s*1/.test(text)) return "3학년 1학기";
+    if (/^3\s*[-학년 ]?\s*2/.test(text)) return "3학년 2학기";
+    return text;
+  };
+  const normalizedSubjectRows = rowsFrom("40_선택과목_정규화").map((row,index)=>({
+    id:String(row["선택기록ID"]||`normalized-subject-${index}`), studentId:String(valueByHeader(row, "학생ID", "학생 ID")||"").t
+
+---
+
+=== resources/app/electron/google-data.cjs :: officialRows = @ 45850 ===
+t program = connectedPrograms.find(item => item.date === row.date && programOverlaps(item,row) && (item.students || []).some(student => String(student.studentId || "") === String(row.studentId || "") || String(student.studentNo || "") === String(row.studentNo || "")));
+    if (!program) return;
+    const participant = (program.students || []).find(student => String(student.studentId || "") === String(row.studentId || "") || String(student.studentNo || "") === String(row.studentNo || "")) || {};
+    const status = String(participant.result || "대상");
+    const confirmed = /출석|지각|공결|정상|참여|입실/.test(status) || (!participant.attendance && /참여|등록/.test(String(participant.participation||"")));
+    row.originalResult = row.result;
+    row.result = confirmed ? "프로그램 인정" : "프로그램 확인";
+    row.recognizedByProgram = confirmed;
+    row.programPending = !confirmed;
+    row.programTitle = program.actualTitle || program.title;
+    row.programId = program.id || "";
+    row.programKind = program.kind;
+    row.type = program.kind === "after" ? "방과후학교" : (program.type || "프로그램");
+    row.affiliation = row.programTitle;
+    row.detail = [row.programTitle, program.time, program.place].filter(Boolean).join(" · ");
+  });
+  // 방과후 기록도 월간 야자표에서는 상태 표시가 필요하므로 제거하지 않습니다.
+  // 결석·미대상 기록은 화면 판정 단계에서 '기록 없음'으로 처리됩니다.
+  const nightAttendance = allMappedNightRows;
+  afterSchoolAttendance = nightAttendance.filter(row => row.recognizedByProgram || isAfterSchool(row));
+  const attendance = nightAttendance.slice(-500).reverse();
+  const attended = nightRows.filter((row) =>
+    String(row["출결"] || row["입실상태"] || "").includes("출석"),
+  ).length;
+  const outsideQr = nightRows.filter((row) =>
+    String(row["출결"] || "").includes("명단외"),
+  ).length;
+  // v0.69.2: 공결은 순수 출결 데이터로서 기본정보 연결시트의 30_공결기록만 사용합니다.
+  const officialRows = rowsFrom("30_공식출결기록")
+    .map((row, index) => ({
+      id: String(row["출결ID"] || `official-${index}`).trim(),
+      studentId: String(row["학생ID"] || "").trim(),
+      studentNo: String(row["학번"] || "").replace(/\.0$/, ""),
+      name: String(row["성명"] || "").trim(),
+      className: String(row["반"] || "").replace(/\.0$/, ""),
+      date: localDate(row["일자"]),
+      attendanceType: String(row["출결구분"] || "출석인정").trim(),
+      detailType: String(row["세부구분"] || "결석").trim(),
+      type: [row["출결구분"], row["세부구분"]].filter(Boolean).join(" · ") || "공결",
+      startPeriod: String(row["시작교시"] || "").replace(/\.0$/, ""),
+      endPeriod: String(row["종료교시"] || "").replace(/\.0$/, ""),
+      period: [row["시작교시"], row["종료교시"]].filter(Boolean).join("~") || String(row["인정범위"] || "종일").trim(),
+      reasonText: String(row["사유"] || "").trim(),
+      place: String(row["장소"] || "").trim(),
+      reason: [row["사유"], row["장소"]].filter(Boolean).join(" · "),
+      evidenceRequired: String(row["증빙필요"] || "N").trim(),
+      evidence: String(row["증빙상태"] || "").trim(),
+      signatureRequired: String(row["학생서명필요"] || "N").trim(),
+      signatureStatus: String(row["학생서명상태"] || "").trim(),
+      unit: String(row["출결단위"] || "일일").trim(),
+      scope: String(row["인정범위"] || "하루 전체").trim(),
+      originalType: String(row["원본구분"] || "공결").trim(),
+      result: String(row["증빙상태"] || "확인").trim(),
+      sourceTab: String(row["원본탭"] || "30_공결기록").trim(),
+      sourceSpreadsheet: "[UEP] 2026 운호고 기본정보 연결시트",
+      sourceRow: String(row["원본행"] || "").trim(),
+      note: String(row["비고"] || "").trim(),
+    }))
+    .filter((row) => row.studentNo && row.name && row.date);
+  const lateRows = rowsFrom("31_지각기록")
+    .filter((row) => studentIds.has(String(row["학생ID"] || "").trim()))
+    .map((row, index) => ({
+      id: String(row["지각ID"] || `late-${index}`).trim(),
+      studentId: String(row["학생ID"] || "").trim(),
+      studentNo: String(row["학번"] || "").replace(/\.0$/, ""),
+      name: String(row["성명"] || "").trim(),
+      className: String(row["반"] || "").replace(/\.0$/, ""),
+      date: localDate(row["제출일자"]),
+      time: localTime(row["제출시각"]),
+      reason: String(row["사유"] || "").trim(),
+      minutes: Number(row["지각시간분"] || 0),
+      cumulativeCount: Number(row["누적횟수"] || 0),
+      cumulativeMinutes: Number(row["누적지각시간분"] || 0),
+      guidance: String(row["지도상태"] || "일반").trim(),
+    }))
+    .filter((row) => row.studentNo && row.name);
+  const internalScoreRows = rowsFrom("50_내신DB")
+    .filter((row) => studentIds.has(String(row["학생ID"] || "").trim()))
+    .map((row, index) => ({
+      id: String(row["내신성적ID"] || `grade-${index}`).trim(),
+      studentId: String(row["학생ID"] || "").trim(),
+      studentNo: String(row["학번"] || "").replace(/\.0$/, ""),
+      name: String(row["성명"] || "").trim(),
+      schoolYear: String(row["학년도"] || "").replace(/\.0$/, ""),
+      semester: String(row["학기"] || "").trim(),
+      exam: String(row["고사구분"] || "").trim(),
+      subject: String(row["과목명"] || "").trim(),
+      rawScore: row["원점수"] ?? "",
+      standardScore: "",
+      percentile: "",
+      level: row["등급"] ?? "",
+      rank: row["석차"] ?? "",
+      enrollment: row["수강자수"] ?? "",
+      achievement: String(row["성취도"] || "").trim(),
+      source: "50_내신DB",
+      scoreType: "내신",
+    }))
+    .filter((row) => row.studentNo && row.exam && row.subject);
+  const mockScoreRows = rowsFrom("51_모의고사DB")
+    .map((row) => {
+      const enteredId = String(valueByHeader(row, "학생ID", "학생 ID") || "").trim();
+      const enteredNo = String(valueByHeader(row, "학번", "학생학번") || "").replace(/\.0$/, "").trim();
+      const enteredName = String(valueByHeader(row, "성명", "이름", "학생명") || "").trim();
+      const enteredClass = classNumberSafe(valueByHeader(row, "반", "학급", "학급반"));
+      const master = studentById.get(enteredId) || studentByNo.get(enteredNo) || studentByNameClass.get(`${enteredName}|${enteredClass}`) || null;
+      return master ? { row, master, enteredId, enteredNo, enteredName } : null;
+    })
+    .filter(Boolean)
+    .flatMap(({ row, master, enteredId, enteredNo, enteredName }, index) => {
+      const base = {
+        id: String(valueByHeader(row, "모의성적ID", "모의 성적 ID", "성적ID", "기록ID") || `mock-${index}`).trim(),
+        studentId: enteredId || String(master?.id || ""),
+        studentNo: enteredNo || String(master?.studentNo || ""),
+        name: enteredName || String(master?.name || ""),
+        schoolYear: String(valueByHeader(row, "시험년도", "학년도") || "").replace(/\.0$/, ""),
+        semester: "",
+        exam: String(valueByHeader(row, "시험명", "고사명") || `${valueByHeader(row, "시험월", "월") || ""}월모의고사`).trim(),
+        rank: "",
+        enrollment: "",
+        achievement: "",
+        source: "51_모의고사DB",
+        scoreType: "모의고사",
+      };
+      return [
+        ["국어", valueByHeader(row, "국어 원점수", "국어\n원점수"), valueByHeader(row, "국어 표준점수", "국어\n표준점수"), valueByHeader(row, "국어 백분위", "국어\n백분위"), valueByHeader(row, "국어 등급", "국어\n등급")],
+        ["수학", valueByHeader(row, "수학 원점수", "수학\n원점수"), valueByHeader(row, "수학 표준점수", "수학\n표준점수"), valueByHeader(row, "수학 백분위", "수학\n백분위"), valueByHeader(row, "수학 등급", "수학\n등급")],
+        ["영어", valueByHeader(row, "영어 원점수", "영어\n원점수"), "", "", valueByHeader(row, "영어 등급", "영어\n등급")],
+        ["한국사", valueByHeader(row, "한국사 원점수", "한국사\n원점수"), "", "", valueByHeader(row, "한국사 등급", "한국사\n등급")],
+        [String(valueByHeader(row, "탐구1 과목", "탐구1\n과목", "탐구 1 과목") || "탐구1"), valueByHeader(row, "탐구1 원점수", "탐구1\n원점수"), valueByHeader(row, "탐구1 표준점수", "탐구1\n표준점수"), valueByHeader(row, "탐구1 백분위", "탐구1\n백분위"), valueByHeader(row, "탐구1 등급", "탐구1\n등급")],
+        [String(valueByHeader(row, "탐구2 과목", "탐구2\n과목", "탐구 2 과목") || "탐구2"), valueByHeader(row, "탐구2 원점수", "탐구2\n원점수"), valueByHeader(row, "탐구2 표준점수", "탐구2\n표준점수"), valueByHeader(row, "탐구2 백분위", "탐구2\n백분위"), valueByHeader(row, "탐구2 등급", "탐구2\n등급")],
+      ].filter((subject) => subject.slice(1).some((value) => value !== "" && value !== null && value !== undefined))
+        .map((subject, subjectIndex) => ({
+          ...base,
+          id: `${base.id}-${subjectIndex + 1}`,
+          subject: subject[0],
+          rawScore: subject[1] ?? "",
+          standardScore: subject[2] ?? "",
+          percentile: subject[3] ?? "",
+          level: subject[4] ?? "",
+        }));
+    });
+  const normalizeSelectionTerm = value => {
+    const text = String(value ?? "").trim();
+    const serialMap = {"46054":"2학년 1학기","46055":"2학년 2학기","46082":"3학년 1학기","46083":"3학년 2학기"};
+    if (serialMap[text]) return serialMap[text];
+    if (/^2\s*[-학년 ]?\s*1/.test(text)) return "2학년 1학기";
+    if (/^2\s*[-학년 ]?\s*2/.test(text)) return "2학년 2학기";
+    if (/^3\s*[-학년 ]?\s*1/.test(text)) return "3학년 1학기";
+    if (/^3\s*[-학년 ]?\s*2/.test(text)) return "3학년 2학기";
+    return text;
+  };
+  const normalizedSubjectRows = rowsFrom("40_선택과목_정규화").map((row,index)=>({
+    id:String(row["선택기록ID"]||`normalized-subject-${index}`), studentId:String(valueByHeader(row, "학생ID", "학생 ID")||"").trim(),
+
+---
+
+=== resources/app/electron/google-data.cjs :: parseGoogleSheetData( @ 11810 ===
+eoul',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(instant);
+      const p=Object.fromEntries(parts.map(part=>[part.type,part.value]));
+      if(p.year&&p.month&&p.day)return p.year+'-'+p.month+'-'+p.day;
+    }
+  }
+  const match = text.match(/(\d{4})[.\-/년]\s*(\d{1,2})[.\-/월]\s*(\d{1,2})/);
+  if (match) return `${match[1]}-${match[2].padStart(2, "0")}-${match[3].padStart(2, "0")}`;
+  const parsedText = new Date(text);
+  if (!Number.isNaN(parsedText.getTime()) && /GMT|UTC|^[A-Za-z]{3}/.test(text))
+    return `${parsedText.getUTCFullYear()}-${String(parsedText.getUTCMonth() + 1).padStart(2, "0")}-${String(parsedText.getUTCDate()).padStart(2, "0")}`;
+  const compact=text.replace(/\D/g,'');
+  if(/^20\d{6}$/.test(compact))return compact.slice(0,4)+'-'+compact.slice(4,6)+'-'+compact.slice(6,8);
+  const monthDay=text.match(/(?:^|\D)(\d{1,2})\s*(?:월|[.\-/])\s*(\d{1,2})(?:\s*일)?(?:\D|$)/);
+  if(monthDay)return '2026-'+monthDay[1].padStart(2,'0')+'-'+monthDay[2].padStart(2,'0');
+  return text;
+}
+
+function localTime(value) {
+  if (value === "" || value == null) return "";
+  if (value instanceof Date && !Number.isNaN(value.getTime()))
+    return `${String(value.getHours()).padStart(2, "0")}:${String(value.getMinutes()).padStart(2, "0")}`;
+  if (typeof value === "number") {
+    const totalMinutes = Math.round((value % 1) * 24 * 60);
+    return `${String(Math.floor(totalMinutes / 60) % 24).padStart(2, "0")}:${String(totalMinutes % 60).padStart(2, "0")}`;
+  }
+  const text = String(value).trim();
+  if (/^0\.\d+$/.test(text)) return localTime(Number(text));
+  const match = text.match(/(\d{1,2}):(\d{2})/);
+  return match ? `${match[1].padStart(2, "0")}:${match[2]}` : text;
+}
+
+function classNumberSafe(value) { return String(value || "").replace(/[^0-9]/g, ""); }
+
+function parseGoogleSheetData(sheetMatrices) {
+  const rowsFrom = (name) => matrixToObjectRows(sheetMatrices[name] || []);
+  const masters = rowsFrom("02_학생마스터").filter(
+    (row) => String(row["활성여부"] || "Y").trim() !== "N",
+  );
+  const contactSourceRows = rowsFrom("04_학생연락식별정보");
+  const contacts = new Map(
+    contactSourceRows
+      .filter((row) => String(row["현재사용여부"] || "Y").trim() !== "N")
+      .map((row) => [String(row["학생ID"] || "").trim(), row]),
+  );
+  const dormRows = rowsFrom("20_학사생마스터");
+  const currentDorm = new Map(
+    dormRows
+      .filter(
+        (row) =>
+          String(row["현재여부"] || "").trim() === "Y" ||
+          String(row["학사상태"] || "").trim() === "재사",
+      )
+      .map((row) => [String(row["학생ID"] || "").trim(), row]),
+  );
+  const careerRows = (rowsFrom("05_대학적성데이터").length ? rowsFrom("05_대학적성데이터") : rowsFrom("05_진로희망이력")).filter(row => String(row["현재여부"] || "Y").trim() !== "N");
+  const careerProfiles = new Map(careerRows.map(row => {
+    const id=String(row["학생ID"] || "").trim();
+    const career=String(row["대학적성데이터"] || row["진로희망분야"] || row["진로희망"] || "").trim();
+    const major=String(row["희망학과"] || row["희망전공"] || "").trim();
+    const track=String(row["희망계열"] || row["계열"] || "").trim();
+    const interest=String(row["흥미"] || row["흥미유형"] || row["관심분야"] || "").trim();
+    const aptitude=String(row["적성"] || row["적성유형"] || row["강점"] || "").trim();
+    return [id,{career,major,track,interest,aptitude}];
+  }));
+  const careers = new Map([...careerProfiles].map(([id,p]) => [id, [p.career,p.major].filter(Boolean).join(" · ")]));
+
+  // 학생 지원·보호 신호 원본. 목록 화면에는 민감 상세를 직접 노출하지 않고,
+  // 학생이 선택된 경우에만 renderer가 신호등과 의도적 확인 UI를 표시합니다.
+  const educationSupportByStudent = new Map(rowsFrom("47_교육비지원")
+    .filter(row => String(row["학생ID"] || "").trim() && String(row["신호등반영"] || "").trim().toUpperCase() === "Y")
+    .map(row => [String(row["학생ID"] || "").trim(), {
+      selected: String(row["선정여부"] || "").trim(),
+      studentQualification: String(row["학생자격"] || "").trim(),
+      householdQualification: String(row["가구자격"] || "").trim(),
+      incomePercent: String(row["중위소득(%)"] || "").trim(),
+      baseDate: localDate(row["기준일"]),
+    }]));
+  const healthProtectionByStudent = new Map(rowsFrom("48_요보호학생")
+    .filter(row => String(row["학생ID"] || "").trim() && String(row["신호등반영"] || "").trim().toUpperCase() === "Y")
+    .map(row => [String(row["학생ID"] || "").trim(), {
+      diagnosis: String(row["진단및증상"] || "").trim(),
+      caution: String(row["주의사항"] || "").trim(),
+      category: String(row["분류"] || "보건/요보호").trim(),
+    }]));
+  const crisisProtectionByStudent = new Map(rowsFrom("49_위기학생관리")
+    .filter(row => String(row["학생ID"] || "").trim()
+      && String(row["신호등반영"] || "").trim().toUpperCase() === "Y"
+      && String(row["매칭상태"] || "").trim() === "정상매칭")
+    .map(row => [String(row["학생ID"] || "").trim(), {
+      result: String(row["검사결과"] || "").trim(),
+      status: String(row["관리상태"] || "").trim(),
+      schoolCounsel: String(row["학교상담"] || "").trim(),
+      externalLink: String(row["외부기관연계"] || "").trim(),
+    }]));
+
+  const students = masters.map((row) => {
+    const id = String(row["학생ID"] || "").trim();
+    const contact = contacts.get(id) || {};
+    const dorm = currentDorm.get(id);
+    const grade = String(row["학년"] || "").trim();
+    const classNo = String(row["반"] || "").trim();
+    const number = String(row["번호"] || "").trim();
+    const studentNo = String(row["학번"] || "").replace(/\.0$/, "") ||
+      `${grade}${classNo}${number.padStart(2, "0")}`;
+    const educationSupport = educationSupportByStudent.get(id) || null;
+    const healthProtection = healthProtectionByStudent.get(id) || null;
+    const crisisProtection = crisisProtectionByStudent.get(id) || null;
+    const signalLevel = (healthProtection || crisisProtection) ? "red" : (educationSupport ? "yellow" : "green");
+    return {
+      id,
+      studentNo,
+      className: classNo ? `${classNo}반` : "-",
+      number,
+      name: String(row["사용성명"] || row["성명"] || "").trim(),
+      officialName: String(row["성명"] || "").trim(),
+      displayName: String(row["검색표시명"] || "").trim(),
+      status: String(row["학적상태"] || "재학").trim(),
+      entryDate: localDate(row["학적기준일"] || row["입학일"]),
+      statusDate: localDate(row["학적기준일"]),
+      enrollmentReason: String(row["학적변동사유"] || "").trim(),
+      dorm: dorm ? "학사" : "-",
+      dormRoom: dorm ? String(dorm["호실"] || "").trim() : "",
+      dormStatus: dorm ? String(dorm["학사상태"] || "재사").trim() : "",
+      dormStart: dorm ? localDate(dorm["적용시작일"]) : "",
+      career: careers.get(id) || "-",
+      careerProfile: careerProfiles.get(id) || {career:"",major:"",track:"",interest:"",aptitude:""},
+      group: "-",
+      phone: String(contact["학생연락처"] || "").trim() || "-",
+      email: String(contact["학생이메일"] || contact["이메일"] || contact["이메일주소"] || "").trim() || "-",
+      guardian1Relation: String(contact["보호자1관계"] || "").trim() || "보호자1",
+      guardian1Phone: String(contact["보호자1연락처"] || "").trim() || "-",
+      guardian2Relation: String(contact["보호자2관계"] || "").trim() || "보호자2",
+      guardian2Phone: String(contact["보호자2연락처"] || "").trim() || "-",
+      nfc: String(contact["NFC_ID"] || "").trim() ? "등록" : "-",
+      middleSchool: String(row["출신중학교"] || "").trim(),
+      supportSignal: {
+        level: signalLevel,
+        hasEducationSupport: Boolean(educationSupport),
+        hasHealthProtection: Boolean(healthProtection),
+        hasCrisisProtection: Boolean(crisisProtection),
+        summary: signalLevel === "red" ? "지도·상담 전 확인할 보호정보가 있습니다." : (signalLevel === "yellow" ? "확인할 지원정보가 있습니다." : "별도 확인사항이 없습니다."),
+        educationSupport,
+        healthProtection,
+        crisisProtection,
+      },
+    };
+  }).filter((student) => student.id && student.name);
+
+  const studentIds = new Set(students.map((student) => student.id));
+  const studentById = new Map(students.map((student) => [String(student.id), student]));
+  const studentByNo = new Map(students.map((student) => [String(student.studentNo), student]));
+  const studentByNameClass = new Map(students.map((student) => [`${String(student.name).trim()}|${classNumberSafe(student.className)}`, student]));
+  const outingRows = outingMatrixToObjectRows(sheetMatrices["02_학사외출_일자별"] || []);
+  const dormOutings = outingRows
+    .map((row, index) => {
+      const enteredId = String(valueByHeader(row, "학생ID", "학생 ID") || "").trim();
+      const enteredNo = String(valueByHeader(row, "학번", "학생학번") || "").replace(/\.0$/, "").trim();
+      const enteredName = String(valueByHeader(row, "성명", "이름", "학생명") || "").trim();
+      const enteredClass = classNumberSafe(valueByHeader(row, "반", "학급", "학급반"));
+      const master = studentById.get(enteredId) || studentByNo.get(enteredNo) || studentByNameClass.get(`${enteredName}|${enteredClass}`) || null;
+      // 표준화 이전 자료는 학생ID가 없거나 반 표기가 달라 마스터 매칭이 실패할 수 있습니다.
+      // 외출 원자료의 학번·성명이 있으면 기록 자체는 보존하고 화면에 표시합니다.
+      if (!master && !enteredNo && !enteredName) return nul
+
+---
+
+=== resources/app/electron/google-data.cjs :: parseGoogleSheetData @ 11810 ===
+eoul',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(instant);
+      const p=Object.fromEntries(parts.map(part=>[part.type,part.value]));
+      if(p.year&&p.month&&p.day)return p.year+'-'+p.month+'-'+p.day;
+    }
+  }
+  const match = text.match(/(\d{4})[.\-/년]\s*(\d{1,2})[.\-/월]\s*(\d{1,2})/);
+  if (match) return `${match[1]}-${match[2].padStart(2, "0")}-${match[3].padStart(2, "0")}`;
+  const parsedText = new Date(text);
+  if (!Number.isNaN(parsedText.getTime()) && /GMT|UTC|^[A-Za-z]{3}/.test(text))
+    return `${parsedText.getUTCFullYear()}-${String(parsedText.getUTCMonth() + 1).padStart(2, "0")}-${String(parsedText.getUTCDate()).padStart(2, "0")}`;
+  const compact=text.replace(/\D/g,'');
+  if(/^20\d{6}$/.test(compact))return compact.slice(0,4)+'-'+compact.slice(4,6)+'-'+compact.slice(6,8);
+  const monthDay=text.match(/(?:^|\D)(\d{1,2})\s*(?:월|[.\-/])\s*(\d{1,2})(?:\s*일)?(?:\D|$)/);
+  if(monthDay)return '2026-'+monthDay[1].padStart(2,'0')+'-'+monthDay[2].padStart(2,'0');
+  return text;
+}
+
+function localTime(value) {
+  if (value === "" || value == null) return "";
+  if (value instanceof Date && !Number.isNaN(value.getTime()))
+    return `${String(value.getHours()).padStart(2, "0")}:${String(value.getMinutes()).padStart(2, "0")}`;
+  if (typeof value === "number") {
+    const totalMinutes = Math.round((value % 1) * 24 * 60);
+    return `${String(Math.floor(totalMinutes / 60) % 24).padStart(2, "0")}:${String(totalMinutes % 60).padStart(2, "0")}`;
+  }
+  const text = String(value).trim();
+  if (/^0\.\d+$/.test(text)) return localTime(Number(text));
+  const match = text.match(/(\d{1,2}):(\d{2})/);
+  return match ? `${match[1].padStart(2, "0")}:${match[2]}` : text;
+}
+
+function classNumberSafe(value) { return String(value || "").replace(/[^0-9]/g, ""); }
+
+function parseGoogleSheetData(sheetMatrices) {
+  const rowsFrom = (name) => matrixToObjectRows(sheetMatrices[name] || []);
+  const masters = rowsFrom("02_학생마스터").filter(
+    (row) => String(row["활성여부"] || "Y").trim() !== "N",
+  );
+  const contactSourceRows = rowsFrom("04_학생연락식별정보");
+  const contacts = new Map(
+    contactSourceRows
+      .filter((row) => String(row["현재사용여부"] || "Y").trim() !== "N")
+      .map((row) => [String(row["학생ID"] || "").trim(), row]),
+  );
+  const dormRows = rowsFrom("20_학사생마스터");
+  const currentDorm = new Map(
+    dormRows
+      .filter(
+        (row) =>
+          String(row["현재여부"] || "").trim() === "Y" ||
+          String(row["학사상태"] || "").trim() === "재사",
+      )
+      .map((row) => [String(row["학생ID"] || "").trim(), row]),
+  );
+  const careerRows = (rowsFrom("05_대학적성데이터").length ? rowsFrom("05_대학적성데이터") : rowsFrom("05_진로희망이력")).filter(row => String(row["현재여부"] || "Y").trim() !== "N");
+  const careerProfiles = new Map(careerRows.map(row => {
+    const id=String(row["학생ID"] || "").trim();
+    const career=String(row["대학적성데이터"] || row["진로희망분야"] || row["진로희망"] || "").trim();
+    const major=String(row["희망학과"] || row["희망전공"] || "").trim();
+    const track=String(row["희망계열"] || row["계열"] || "").trim();
+    const interest=String(row["흥미"] || row["흥미유형"] || row["관심분야"] || "").trim();
+    const aptitude=String(row["적성"] || row["적성유형"] || row["강점"] || "").trim();
+    return [id,{career,major,track,interest,aptitude}];
+  }));
+  const careers = new Map([...careerProfiles].map(([id,p]) => [id, [p.career,p.major].filter(Boolean).join(" · ")]));
+
+  // 학생 지원·보호 신호 원본. 목록 화면에는 민감 상세를 직접 노출하지 않고,
+  // 학생이 선택된 경우에만 renderer가 신호등과 의도적 확인 UI를 표시합니다.
+  const educationSupportByStudent = new Map(rowsFrom("47_교육비지원")
+    .filter(row => String(row["학생ID"] || "").trim() && String(row["신호등반영"] || "").trim().toUpperCase() === "Y")
+    .map(row => [String(row["학생ID"] || "").trim(), {
+      selected: String(row["선정여부"] || "").trim(),
+      studentQualification: String(row["학생자격"] || "").trim(),
+      householdQualification: String(row["가구자격"] || "").trim(),
+      incomePercent: String(row["중위소득(%)"] || "").trim(),
+      baseDate: localDate(row["기준일"]),
+    }]));
+  const healthProtectionByStudent = new Map(rowsFrom("48_요보호학생")
+    .filter(row => String(row["학생ID"] || "").trim() && String(row["신호등반영"] || "").trim().toUpperCase() === "Y")
+    .map(row => [String(row["학생ID"] || "").trim(), {
+      diagnosis: String(row["진단및증상"] || "").trim(),
+      caution: String(row["주의사항"] || "").trim(),
+      category: String(row["분류"] || "보건/요보호").trim(),
+    }]));
+  const crisisProtectionByStudent = new Map(rowsFrom("49_위기학생관리")
+    .filter(row => String(row["학생ID"] || "").trim()
+      && String(row["신호등반영"] || "").trim().toUpperCase() === "Y"
+      && String(row["매칭상태"] || "").trim() === "정상매칭")
+    .map(row => [String(row["학생ID"] || "").trim(), {
+      result: String(row["검사결과"] || "").trim(),
+      status: String(row["관리상태"] || "").trim(),
+      schoolCounsel: String(row["학교상담"] || "").trim(),
+      externalLink: String(row["외부기관연계"] || "").trim(),
+    }]));
+
+  const students = masters.map((row) => {
+    const id = String(row["학생ID"] || "").trim();
+    const contact = contacts.get(id) || {};
+    const dorm = currentDorm.get(id);
+    const grade = String(row["학년"] || "").trim();
+    const classNo = String(row["반"] || "").trim();
+    const number = String(row["번호"] || "").trim();
+    const studentNo = String(row["학번"] || "").replace(/\.0$/, "") ||
+      `${grade}${classNo}${number.padStart(2, "0")}`;
+    const educationSupport = educationSupportByStudent.get(id) || null;
+    const healthProtection = healthProtectionByStudent.get(id) || null;
+    const crisisProtection = crisisProtectionByStudent.get(id) || null;
+    const signalLevel = (healthProtection || crisisProtection) ? "red" : (educationSupport ? "yellow" : "green");
+    return {
+      id,
+      studentNo,
+      className: classNo ? `${classNo}반` : "-",
+      number,
+      name: String(row["사용성명"] || row["성명"] || "").trim(),
+      officialName: String(row["성명"] || "").trim(),
+      displayName: String(row["검색표시명"] || "").trim(),
+      status: String(row["학적상태"] || "재학").trim(),
+      entryDate: localDate(row["학적기준일"] || row["입학일"]),
+      statusDate: localDate(row["학적기준일"]),
+      enrollmentReason: String(row["학적변동사유"] || "").trim(),
+      dorm: dorm ? "학사" : "-",
+      dormRoom: dorm ? String(dorm["호실"] || "").trim() : "",
+      dormStatus: dorm ? String(dorm["학사상태"] || "재사").trim() : "",
+      dormStart: dorm ? localDate(dorm["적용시작일"]) : "",
+      career: careers.get(id) || "-",
+      careerProfile: careerProfiles.get(id) || {career:"",major:"",track:"",interest:"",aptitude:""},
+      group: "-",
+      phone: String(contact["학생연락처"] || "").trim() || "-",
+      email: String(contact["학생이메일"] || contact["이메일"] || contact["이메일주소"] || "").trim() || "-",
+      guardian1Relation: String(contact["보호자1관계"] || "").trim() || "보호자1",
+      guardian1Phone: String(contact["보호자1연락처"] || "").trim() || "-",
+      guardian2Relation: String(contact["보호자2관계"] || "").trim() || "보호자2",
+      guardian2Phone: String(contact["보호자2연락처"] || "").trim() || "-",
+      nfc: String(contact["NFC_ID"] || "").trim() ? "등록" : "-",
+      middleSchool: String(row["출신중학교"] || "").trim(),
+      supportSignal: {
+        level: signalLevel,
+        hasEducationSupport: Boolean(educationSupport),
+        hasHealthProtection: Boolean(healthProtection),
+        hasCrisisProtection: Boolean(crisisProtection),
+        summary: signalLevel === "red" ? "지도·상담 전 확인할 보호정보가 있습니다." : (signalLevel === "yellow" ? "확인할 지원정보가 있습니다." : "별도 확인사항이 없습니다."),
+        educationSupport,
+        healthProtection,
+        crisisProtection,
+      },
+    };
+  }).filter((student) => student.id && student.name);
+
+  const studentIds = new Set(students.map((student) => student.id));
+  const studentById = new Map(students.map((student) => [String(student.id), student]));
+  const studentByNo = new Map(students.map((student) => [String(student.studentNo), student]));
+  const studentByNameClass = new Map(students.map((student) => [`${String(student.name).trim()}|${classNumberSafe(student.className)}`, student]));
+  const outingRows = outingMatrixToObjectRows(sheetMatrices["02_학사외출_일자별"] || []);
+  const dormOutings = outingRows
+    .map((row, index) => {
+      const enteredId = String(valueByHeader(row, "학생ID", "학생 ID") || "").trim();
+      const enteredNo = String(valueByHeader(row, "학번", "학생학번") || "").replace(/\.0$/, "").trim();
+      const enteredName = String(valueByHeader(row, "성명", "이름", "학생명") || "").trim();
+      const enteredClass = classNumberSafe(valueByHeader(row, "반", "학급", "학급반"));
+      const master = studentById.get(enteredId) || studentByNo.get(enteredNo) || studentByNameClass.get(`${enteredName}|${enteredClass}`) || null;
+      // 표준화 이전 자료는 학생ID가 없거나 반 표기가 달라 마스터 매칭이 실패할 수 있습니다.
+      // 외출 원자료의 학번·성명이 있으면 기록 자체는 보존하고 화면에 표시합니다.
+      if (!master && !enteredNo && !enteredName) return nul
+
+---
+
+=== resources/app/electron/google-data.cjs :: parseGoogleSheetData @ 105841 ===
+row["1학년대상"] || "")),
+          showTodayProgram: /^(true|1|yes|y|o)$/i.test(String(row["오늘의프로그램표시"] || "")),
+          programLinked: /^(true|1|yes|y|o)$/i.test(String(row["프로그램연동"] || "")),
+        };
+      }),
+    summary: {
+      masterCount: students.length,
+      dormCount: dormRows.length,
+      dormRosterCount: currentDorm.size,
+      dormOutingCount: dormOutings.length,
+      duplicateCount: students.length - new Set(students.map((student) => student.id)).size,
+      unmatchedCount: outingRows.length - dormOutings.length,
+      rosterStudents: new Set(nightRows.map((row) => String(row["학생ID"] || ""))).size,
+      attended,
+      outsideQr,
+      nightAbsent: 0,
+      officialCount: officialRows.length,
+      afterSchoolCount: afterSchoolAttendance.length,
+      programSessionCount: connectedPrograms.length,
+      programTargetCount: new Set(connectedPrograms.flatMap((program) => program.students.map((student) => student.studentId || student.studentNo)).filter(Boolean)).size,
+      pendingPermission: 0,
+      nfcCount: [...contacts.values()].filter((row) => String(row["NFC_ID"] || "").trim()).length,
+      lateCount: lateRows.length,
+      lateStudents: new Set(lateRows.map((row) => row.studentId)).size,
+      scoreCount: scoreRows.length,
+      scoreStudents: new Set(scoreRows.map((row) => row.studentId)).size,
+      internalScoreCount: internalScoreRows.length,
+      mockScoreCount: mockScoreRows.length,
+      admissionMinimumCount: admissionMinimums.length,
+      admissionCutCount: admissionCuts.length,
+    },
+  };
+}
+
+module.exports = {
+  UEP_SPREADSHEET_ID,
+  UEP_SPREADSHEET_NAME,
+  UEP_SPREADSHEET_URL,
+  SHEET_RANGES,
+  RULE_SHEET_RANGES,
+  UEP_PROCESSING_SPREADSHEET_ID,
+  UEP_INPUT_CENTER_SPREADSHEET_ID,
+  UEP_RULES_SPREADSHEET_ID,
+  matrixToObjectRows,
+  parseGoogleSheetData,
+};
+
+// __UEP_SELECTION_TERM_08082__
+function normalizeSelectionTerm(value){
+  const s=String(value||'').replace(/\s+/g,'').replace(/학년도/g,'').trim();
+  let m=s.match(/([23])(?:학년)?[-_.]?([12])(?:학기)?/);
+  if(!m)m=s.match(/([23])학년([12])학기/);
+  if(m)return `${m[1]}학년 ${m[2]}학기`;
+  return String(value||'').trim();
+}
+
+
+
+
+
+---
+
+=== resources/app/electron/main.cjs :: parseGoogleSheetData( @ 103510 ===
+  if (dormRuleMatrix.length >= 3) {
+      matrices["40_학사외출규칙"] = dormRuleMatrix;
+      console.log(`[UEP] 40_학사외출규칙 단독 조회 성공: ${Math.max(0,dormRuleMatrix.length-3)}건`);
+    } else {
+      console.warn("[UEP] 40_학사외출규칙 단독 조회 결과가 비어 있습니다.");
+    }
+  } catch (dormRuleError) {
+    console.warn("[UEP] 40_학사외출규칙 단독 조회 실패", dormRuleError?.message || dormRuleError);
+  }
+
+  const curriculumSpreadsheetId = "1fevlAWQZqWQkiYl-eGRCdzidBj59Z8NqOxfCrGvwlHI";
+const curriculumReads = [
+  ["__CURRICULUM_09", "'09_수강신청결과'!A1:AG1200"],
+  ["__CURRICULUM_ERRORS", "'05_오류검토'!A11:Z1200"],
+  ["__CURRICULUM_STUDENTS", "'02_학생마스터'!A1:AA1200"]
+];
+for (const [logicalName, range] of curriculumReads) {
+  try {
+    const one = await readSheetBatch(token, curriculumSpreadsheetId, [range]);
+    matrices[logicalName] = one?.[0]?.values || [];
+  } catch (error) {
+    matrices[logicalName] = [];
+    console.warn(`[UEP] 선택과목 원본 조회 실패: ${logicalName}`, error?.message || error);
+  }
+}
+  // 2026. 운호고 1학년 공결 현황 원본 시트를 읽기 전용으로 직접 조회합니다.
+  // 서비스 계정에 열람 권한이 없거나 일부 탭 형식이 달라도 UEP 전체 동기화는 계속됩니다.
+  try {
+    const officialSourceId = "1pzu2eEUYJZW7HG2_-GDq2Ujq7ePwvCHKB9UHS4i9SzM";
+    const officialTabs = ["전체 명렬표","축구부","씨름부","개인학생선수","학사","리더십&스마트폰&두드림","개별","두드림","수련회","챌린지데이"];
+    try {
+      const result=await readSheetBatch(token,officialSourceId,officialTabs.map(tab=>`'${tab.replace(/'/g,"''")}'!A1:AM1200`));
+      officialTabs.forEach((tab,index)=>{matrices[`__OFFICIAL_${tab}`]=result?.[index]?.values||[];});
+    } catch(tabError) {
+      officialTabs.forEach(tab=>{matrices[`__OFFICIAL_${tab}`]=[];});
+      console.warn("[UEP] 공결 원본 묶음 조회 실패",tabError?.message||tabError);
+    }
+  } catch (error) {
+    console.warn("[UEP] 2026. 운호고 1학년 공결 현황 조회 실패", error?.message || error);
+  }
+
+  const data = parseGoogleSheetData(matrices);
+
+  {
+    const sourceMatrix=matrices["__INPUT_CENTER_SOURCE"]||[];
+    const sourceHeaders=(sourceMatrix[2]||[]).map(v=>String(v||'').trim());
+    const sourceRows=sourceMatrix.slice(3).filter(row=>row.some(v=>String(v||'').trim())).map(row=>{const o=Object.fromEntries(sourceHeaders.map((h,i)=>[h,row[i]??'']));return {id:o['입력ID'],batchId:o['배치ID'],source:o['입력경로'],type:o['자료유형'],subtype:o['세부유형'],schoolYear:o['학년도'],semester:o['학기'],studentId:o['학생ID'],studentNo:o['학번'],name:o['성명'],grade:o['학년'],className:o['반'],fileName:o['원본파일명'],storedPath:o['원본보관경로'],title:o['자료제목'],rawText:o['원본텍스트'],normalizedText:o['구조화데이터'],status:o['처리상태'],matchStatus:o['매칭상태'],programId:o['프로그램ID'],programKind:o['프로그램구분'],teacher:o['등록교사'],createdAt:o['등록일시'],note:o['비고'],storageMode:'uep'};});
+    // 입력센터의 단일 원본은 [UEP]입력센터 원본입니다.
+    // 폐기 대상인 60_외부자료입력_정규화는 더 이상 읽거나 병합하지 않습니다.
+    data.externalInputs=sourceRows;
+    // 입력센터 원본은 03 UEP 적용 전까지 공식 보고서로 노출하지 않습니다.
+    // UEP의 보고서 화면은 20/21 정규화 탭만 단일 진실원천(source of truth)으로 사용합니다.
+  }
+  if (!data.students.length) throw new Error("구글시트의 02_학생마스터에서 학생정보를 찾지 못했습니다.");
+  data.connection = {
+    spreadsheetId: UEP_SPREADSHEET_ID,
+    spreadsheetName: UEP_SPREADSHEET_NAME,
+    spreadsheetUrl: UEP_SPREADSHEET_URL,
+    account: auth.account || "",
+    mode: "read-only-live",
+  };
+  liveDataCache = data;
+  liveDataFetchedAt = Date.now();
+  return data;
+}
+
+
+function ymd(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  return `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, "0")}${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function mondayOf(dateValue) {
+  const date = dateValue instanceof Date ? new Date(dateValue) : new Date(dateValue || Date.now());
+  date.setHours(12, 0, 0, 0);
+  const day = date.getDay();
+  date.setDate(date.getDate() - (day === 0 ? 6 : day - 1));
+  return date;
+}
+
+async function fetchJson(url, timeoutMs = 12000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: { "user-agent": "UEP/0.42.7 School Operations" },
+    });
+    if (!response.ok) throw new Error(`공공데이터 연결 실패 (${response.status})`);
+    return await response.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function neisRows(payload, key) {
+  const group = payload?.[key];
+  if (!Array.isArray(group)) return [];
+  const rowBlock = group.find((item) => Array.isArray(item?.row));
+  return rowBlock?.row || [];
+}
+
+function neisResultMessage(payload, key) {
+  const result = payload?.RESULT || payload?.[key]?.[0]?.head?.find?.((item) => item.RESULT)?.RESULT;
+  if (!result) return "";
+  return result.MESSAGE || result.CODE || "";
+}
+
+function neisUrl(dataset, params, apiKey = "") {
+  const url = new URL(`https://open.neis.go.kr/hub/${dataset}`);
+  url.searchParams.set("Type", "json");
+  url.searchParams.set("pIndex", "1");
+  url.searchParams.set("pSize", "100");
+  if (apiKey) url.searchParams.set("KEY", apiKey);
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== "" && value !== null && value !== undefined) url.searchParams.set(key, String(value));
+  });
+  return url.toString();
+}
+
+async function findNeisSchool({ schoolName, officeCode = "", schoolCode = "", apiKey = "" }) {
+  if (officeCode && schoolCode) return { schoolName, officeCode, schoolCode };
+  const payload = await fetchJson(neisUrl("schoolInfo", { SCHUL_NM: schoolName }, apiKey));
+  const rows = neisRows(payload, "schoolInfo");
+  const exact = rows.find((row) => String(row.SCHUL_NM || "").replace(/\s/g, "") === String(schoolName || "").replace(/\s/g, ""));
+  const row = exact || rows[0];
+  if (!row) throw new Error(neisResultMessage(payload, "schoolInfo") || `${schoolName} 학교정보를 찾지 못했습니다.`);
+  return {
+    schoolName: row.SCHUL_NM || schoolName,
+    officeCode: row.ATPT_OFCDC_SC_CODE,
+    schoolCode: row.SD_SCHUL_CODE,
+    officeName: row.ATPT_OFCDC_SC_NM || "",
+    address: row.ORG_RDNMA || row.ORG_RDNZC || "",
+  };
+}
+
+function cleanMealText(value) {
+  return String(value || "")
+    .replace(/<br\s*\/?\s*>/gi, "\n")
+    .replace(/\([^)]*\)/g, (match) => match)
+    .split(/\n+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+async function fetchNeisMeals(school, targetDate, apiKey = "") {
+  const payload = await fetchJson(neisUrl("mealServiceDietInfo", {
+    ATPT_OFCDC_SC_CODE: school.officeCode,
+    SD_SCHUL_CODE: school.schoolCode,
+    MLSV_YMD: ymd(targetDate),
+  }, apiKey));
+  const rows = neisRows(payload, "mealServiceDietInfo");
+  return rows.map((row) => ({
+    date: row.MLSV_YMD || ymd(targetDate),
+    mealType: row.MMEAL_SC_NM || "급식",
+    menu: cleanMealText(row.DDISH_NM),
+    origin: cleanMealText(row.ORPLC_INFO),
+    calories: row.CAL_INFO || "",
+    nutrition: cleanMealText(row.NTR_INFO),
+  }));
+}
+
+function neisDateToLocalDate(value) {
+  const text = String(value || "").replace(/\D/g, "");
+  if (!/^\d{8}$/.test(text)) return null;
+  const date = new Date(Number(text.slice(0,4)), Number(text.slice(4,6))-1, Number(text.slice(6,8)), 12, 0, 0);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function expectedSchoolPeriods(value) {
+  const date = value instanceof Date ? value : neisDateToLocalDate(value);
+  const weekdayNo = date?.getDay();
+  if (weekdayNo === 3) return 5;
+  return [1,2,4,5].includes(weekdayNo) ? 7 : 0;
+}
+
+async function fetchNeisTimetable(school, targetDate, grade, classNo, apiKey = "") {
+  const monday = mondayOf(targetDate);
+  const dates = Array.from({ length: 5 }, (_, index) => {
+    const date = new Date(monday);
+    date.setDate(monday.getDate() + index);
+    return date;
+  });
+  const semester = targetDate.getMonth() + 1 <= 7 ? "1" : "2";
+  const year = targetDate.getFullYear();
+  const normalizeClass = (value) => String(value ?? "").trim().replace(/[^0-9가-힣A-Za-z]/g, "").replace(/^0+/, "");
+  const wantedClass = normalizeClass(classNo);
+  // NEIS가 CLASS_NM을 생략한 요청에서도 첫 반만 반환하는 사례가 있어
+  // 운영 학년의 1~9반을 각각 정식 조회한 뒤 합쳐 원본을 교차검증한다.
+  const classCandidates = Array.from({ length: 9 }, (_, index) => String(index + 1));
+  const requestDay = async (date) => {
+    const dateKey = ymd(date);
+    const common = {
+      ATPT_OFCDC_SC_CODE: school.officeCode,
+      SD_SCHUL_CODE: school.schoolCode,
+      AY: year,
+      SEM: semester,
+      GRADE: grade,
+      pIndex: 1,
+      pSize: 1000,
+    };
+    // NEIS 시간표 API는 환경에 따라 단일일자 필터명이 다르게 적용되는 사례가 있다.
+    // ALL_TI_YMD 방식과 공식 기간(TI_FROM_YMD/TI_TO_YMD) 방식을 동시에 조회하고 합쳐
+    // 기본 5건만 반환되는 잘못된 필터 적용을 방지한다.
+    const dateParamSets = [
+      { mode: "ALL_TI_YMD", params: { ALL_TI_YMD: dateKey } },
+      { mode: "TI_RANGE", params: { TI_FROM_YMD: dateKey, TI_TO_YMD: dateKey } },
+    ];
+    const fetchVariants = async (candidate) => {
+      const variants = await Promise.all(dateParamSets.map(async ({ mode, params }) => {
+        const url = neisUrl("hisTimetable", { ...c
+
+---
+
+=== resources/app/electron/main.cjs :: parseGoogleSheetData @ 545 ===
+const { app, BrowserWindow, ipcMain, dialog, safeStorage, shell, net } = require("electron");
+app.setName("UNHO Education Platform");
+const { spawn } = require("child_process");
+const crypto = require("crypto");
+const http = require("http");
+const os = require("os");
+const path = require("path");
+const fs = require("fs/promises");
+const {
+  UEP_SPREADSHEET_ID,
+  UEP_SPREADSHEET_NAME,
+  UEP_SPREADSHEET_URL,
+  SHEET_RANGES,
+  RULE_SHEET_RANGES,
+  UEP_PROCESSING_SPREADSHEET_ID,
+  UEP_INPUT_CENTER_SPREADSHEET_ID,
+  UEP_RULES_SPREADSHEET_ID,
+  parseGoogleSheetData,
+} = require("./google-data.cjs");
+
+// UEP의 사용자 데이터와 Electron safeStorage 키 저장소를 같은 고정 위치에 둡니다.
+// safeStorage 암호문만 다른 폴더로 복사하면 Chromium OS encryption key(Local State)와 분리되어
+// Windows 재부팅/버전 교체 뒤 decryptString이 실패할 수 있으므로 userData 자체를 앱 시작 전에 고정합니다.
+const originalUserDataRoot = app.getPath("userData");
+const fixedUserDataRoot = path.join(process.env.APPDATA || app.getPath("appData"), "UNHO Education Platform");
+try {
+  if (path.resolve(originalUserDataRoot) !== path.resolve(fixedUserDataRoot)) app.setPath("userData", fixedUserDataRoot);
+} catch {}
+const stableUserDataRoot = () => app.getPath("userData");
+const legacyUserDataRoot = () => originalUserDataRoot;
+const statePath = () => path.join(stableUserDataRoot(), "school-board-state.json");
+const credentialPath = () => path.join(stableUserDataRoot(), "google-service-account.bin");
+const credentialRecoveryPath = () => path.join(stableUserDataRoot(), "google-service-account.recovery.json");
+const googleUserOAuthPath = () => path.join(stableUserDataRoot(), "google-user-oauth.bin");
+const googleUserOAuthRecoveryPath = () => path.join(stableUserDataRoot(), "google-user-oauth.recovery.json");
+// __UEP_GOOGLE_OAUTH_CANONICAL_08073__
+const googleUserOAuthCanonicalRoot = () => path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'UNHO Education Platform');
+const googleUserOAuthCanonicalPath = () => path.join(googleUserOAuthCanonicalRoot(), 'google-user-oauth.bin');
+const googleUserOAuthCanonicalRecoveryPath = () => path.join(googleUserOAuthCanonicalRoot(), 'google-user-oauth.recovery.json');
+const neisApiKeyPath = () => path.join(stableUserDataRoot(), "neis-api-key.bin");
+const schoolReadDevicePath = () => path.join(stableUserDataRoot(), "uep-device-id.txt");
+const schoolReadSessionPath = () => path.join(stableUserDataRoot(), "uep-school-read-session.bin");
+const neisCachePath = () => path.join(stableUserDataRoot(), "neis-dashboard-cache.json");
+
+const comciganCachePath = () => path.join(stableUserDataRoot(), "comcigan-timetable-cache.json");
+async function migrateStableUserFile(fileName) {
+  const target=path.join(stableUserDataRoot(),fileName), legacy=path.join(legacyUserDataRoot(),fileName);
+  try { await fs.access(target); return; } catch {}
+  try { await fs.mkdir(stableUserDataRoot(),{recursive:true}); await fs.copyFile(legacy,target); } catch {}
+}
+async function migrateStableUserData() {
+  // Local State에는 Windows safeStorage가 사용하는 Chromium OS encryption key 정보가 들어 있습니다.
+  // 기존 버전의 userData에서 최초 1회 같이 옮겨야 기존 암호문을 복호화할 가능성이 유지됩니다.
+  for (const fileName of ["Local State","school-board-state.json","google-service-account.bin","google-service-account.recovery.json","google-user-oauth.bin","google-user-oauth.recovery.json","neis-api-key.bin","neis-dashboard-cache.json","comcigan-timetable-cache.json"]) await migrateStableUserFile(fileName);
+}
+let comciganWindow = null;
+let mainWindow = null;
+let shutdownStarted = false;
+
+async function appendShutdownLog(message) {
+  try {
+    const file = path.join(stableUserDataRoot(), "shutdown-diagnostics.log");
+    await fs.mkdir(stableUserDataRoot(), { recursive: true });
+    await fs.appendFile(file, `${new Date().toISOString()} ${message}\n`, "utf8");
+  } catch {}
+}
+function destroyAuxiliaryWindows(reason="shutdown") {
+  try { appendShutdownLog(`destroy-aux:${reason}:comcigan=${Boolean(comciganWindow && !comciganWindow.isDestroyed())}`); } catch {}
+  try {
+    if (comciganWindow && !comciganWindow.isDestroyed()) comciganWindow.destroy();
+  } catch {}
+  comciganWindow = null;
+}
+function beginCleanShutdown(reason="user-close") {
+  if (shutdownStarted) return;
+  shutdownStarted = true;
+  try { appendShutdownLog(`shutdown-start:${reason}:pid=${process.pid}:windows=${BrowserWindow.getAllWindows().length}`); } catch {}
+  destroyAuxiliaryWindows(reason);
+  // Give Electron a short grace period to release renderer/GPU resources. If the
+  // normal quit sequence stalls, force only THIS Electron process to exit.
+  setTimeout(() => {
+    try { appendShutdownLog(`shutdown-force-exit:${reason}:windows=${BrowserWindow.getAllWindows().length}`); } catch {}
+    try { app.exit(0); } catch {}
+  }, 1500).unref?.();
+}
+
+function compactDateKey(date) {
+  return `${date.getFullYear()}${String(date.getMonth()+1).padStart(2,"0")}${String(date.getDate()).padStart(2,"0")}`;
+}
+function parseComciganPeriodStart(label="") {
+  const text=String(label||"");
+  let m=text.match(/(\d{2})-(\d{2})-(\d{2})\s*[~～-]/);
+  if(m) return new Date(2000+Number(m[1]),Number(m[2])-1,Number(m[3]),12,0,0);
+  m=text.match(/(?:\(|^)(\d{1,2})\/(\d{1,2})\s*[~～-]/);
+  if(m){const now=new Date();return new Date(now.getFullYear(),Number(m[1])-1,Number(m[2]),12,0,0);}
+  return null;
+}
+function selectComciganPeriod(periods,targetDate){
+  const target=new Date(`${targetDate}T12:00:00`);
+  const list=Array.isArray(periods)?periods:[];
+  for(const row of list){
+    const id=Array.isArray(row)?Number(row[0]):Number(row?.id||row?.period||0);
+    const label=Array.isArray(row)?row[1]:row?.label||row?.name||"";
+    const start=parseComciganPeriodStart(label);
+    if(!start||!id) continue;
+    const end=new Date(start); end.setDate(end.getDate()+6);
+    if(target>=start&&target<=end) return id;
+  }
+  return Number(Array.isArray(list[0])?list[0][0]:list[0]?.id||1)||1;
+}
+async function ensureComciganWindow(schoolCode){
+  if(comciganWindow && !comciganWindow.isDestroyed()) return comciganWindow;
+  comciganWindow=new BrowserWindow({show:false,width:1280,height:900,webPreferences:{contextIsolation:true,sandbox:true}});
+  comciganWindow.on("closed",()=>{comciganWindow=null;});
+  await comciganWindow.loadURL(`https://timetable.s2h9.dev/?sc=${encodeURIComponent(schoolCode)}`);
+  await new Promise(resolve=>setTimeout(resolve,1800));
+  return comciganWindow;
+}
+async function fetchComciganRaw(schoolCode,period=1){
+  const win=await ensureComciganWindow(schoolCode);
+  const script=`(async()=>{
+  const el=document.getElementById('__next_data__');
+  let token=''; try{token=JSON.parse(el?.textContent||'{}').csrfToken||'';}catch{}
+  if(!token) throw new Error('컴시간 CSRF 토큰을 찾지 못했습니다.');
+  const url='/api/getalltimetable?schoolCode=${String(schoolCode).replace(/[^0-9]/g,'')}&period=${Number(period)||1}&format=json';
+  const r=await fetch(url,{credentials:'include',headers:{'Content-Type':'application/json','x-csrf-token':token}});
+  if(!r.ok) throw new Error('컴시간 HTTP '+r.status);
+  return await r.json();
+})()`;
+  return await win.webContents.executeJavaScript(script,true);
+}
+function normalizeComciganTimetable(raw,targetDate,grade,classNo){
+  const g=String(Number(grade)||1), c=String(Number(classNo)||1);
+  const timetable=raw?.timetable||{};
+  const gradeData=timetable[g]||timetable[Number(g)]||{};
+  const schedule=gradeData[c]||gradeData[Number(c)]||[];
+  const periods=Array.isArray(raw?.periods)?raw.periods:[];
+  const periodId=selectComciganPeriod(periods,targetDate);
+  const periodRow=periods.find(x=>Number(Arr
+
+---
+
+=== resources/app/electron/main.cjs :: parseGoogleSheetData @ 103510 ===
+  if (dormRuleMatrix.length >= 3) {
+      matrices["40_학사외출규칙"] = dormRuleMatrix;
+      console.log(`[UEP] 40_학사외출규칙 단독 조회 성공: ${Math.max(0,dormRuleMatrix.length-3)}건`);
+    } else {
+      console.warn("[UEP] 40_학사외출규칙 단독 조회 결과가 비어 있습니다.");
+    }
+  } catch (dormRuleError) {
+    console.warn("[UEP] 40_학사외출규칙 단독 조회 실패", dormRuleError?.message || dormRuleError);
+  }
+
+  const curriculumSpreadsheetId = "1fevlAWQZqWQkiYl-eGRCdzidBj59Z8NqOxfCrGvwlHI";
+const curriculumReads = [
+  ["__CURRICULUM_09", "'09_수강신청결과'!A1:AG1200"],
+  ["__CURRICULUM_ERRORS", "'05_오류검토'!A11:Z1200"],
+  ["__CURRICULUM_STUDENTS", "'02_학생마스터'!A1:AA1200"]
+];
+for (const [logicalName, range] of curriculumReads) {
+  try {
+    const one = await readSheetBatch(token, curriculumSpreadsheetId, [range]);
+    matrices[logicalName] = one?.[0]?.values || [];
+  } catch (error) {
+    matrices[logicalName] = [];
+    console.warn(`[UEP] 선택과목 원본 조회 실패: ${logicalName}`, error?.message || error);
+  }
+}
+  // 2026. 운호고 1학년 공결 현황 원본 시트를 읽기 전용으로 직접 조회합니다.
+  // 서비스 계정에 열람 권한이 없거나 일부 탭 형식이 달라도 UEP 전체 동기화는 계속됩니다.
+  try {
+    const officialSourceId = "1pzu2eEUYJZW7HG2_-GDq2Ujq7ePwvCHKB9UHS4i9SzM";
+    const officialTabs = ["전체 명렬표","축구부","씨름부","개인학생선수","학사","리더십&스마트폰&두드림","개별","두드림","수련회","챌린지데이"];
+    try {
+      const result=await readSheetBatch(token,officialSourceId,officialTabs.map(tab=>`'${tab.replace(/'/g,"''")}'!A1:AM1200`));
+      officialTabs.forEach((tab,index)=>{matrices[`__OFFICIAL_${tab}`]=result?.[index]?.values||[];});
+    } catch(tabError) {
+      officialTabs.forEach(tab=>{matrices[`__OFFICIAL_${tab}`]=[];});
+      console.warn("[UEP] 공결 원본 묶음 조회 실패",tabError?.message||tabError);
+    }
+  } catch (error) {
+    console.warn("[UEP] 2026. 운호고 1학년 공결 현황 조회 실패", error?.message || error);
+  }
+
+  const data = parseGoogleSheetData(matrices);
+
+  {
+    const sourceMatrix=matrices["__INPUT_CENTER_SOURCE"]||[];
+    const sourceHeaders=(sourceMatrix[2]||[]).map(v=>String(v||'').trim());
+    const sourceRows=sourceMatrix.slice(3).filter(row=>row.some(v=>String(v||'').trim())).map(row=>{const o=Object.fromEntries(sourceHeaders.map((h,i)=>[h,row[i]??'']));return {id:o['입력ID'],batchId:o['배치ID'],source:o['입력경로'],type:o['자료유형'],subtype:o['세부유형'],schoolYear:o['학년도'],semester:o['학기'],studentId:o['학생ID'],studentNo:o['학번'],name:o['성명'],grade:o['학년'],className:o['반'],fileName:o['원본파일명'],storedPath:o['원본보관경로'],title:o['자료제목'],rawText:o['원본텍스트'],normalizedText:o['구조화데이터'],status:o['처리상태'],matchStatus:o['매칭상태'],programId:o['프로그램ID'],programKind:o['프로그램구분'],teacher:o['등록교사'],createdAt:o['등록일시'],note:o['비고'],storageMode:'uep'};});
+    // 입력센터의 단일 원본은 [UEP]입력센터 원본입니다.
+    // 폐기 대상인 60_외부자료입력_정규화는 더 이상 읽거나 병합하지 않습니다.
+    data.externalInputs=sourceRows;
+    // 입력센터 원본은 03 UEP 적용 전까지 공식 보고서로 노출하지 않습니다.
+    // UEP의 보고서 화면은 20/21 정규화 탭만 단일 진실원천(source of truth)으로 사용합니다.
+  }
+  if (!data.students.length) throw new Error("구글시트의 02_학생마스터에서 학생정보를 찾지 못했습니다.");
+  data.connection = {
+    spreadsheetId: UEP_SPREADSHEET_ID,
+    spreadsheetName: UEP_SPREADSHEET_NAME,
+    spreadsheetUrl: UEP_SPREADSHEET_URL,
+    account: auth.account || "",
+    mode: "read-only-live",
+  };
+  liveDataCache = data;
+  liveDataFetchedAt = Date.now();
+  return data;
+}
+
+
+function ymd(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  return `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, "0")}${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function mondayOf(dateValue) {
+  const date = dateValue instanceof Date ? new Date(dateValue) : new Date(dateValue || Date.now());
+  date.setHours(12, 0, 0, 0);
+  const day = date.getDay();
+  date.setDate(date.getDate() - (day === 0 ? 6 : day - 1));
+  return date;
+}
+
+async function fetchJson(url, timeoutMs = 12000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: { "user-agent": "UEP/0.42.7 School Operations" },
+    });
+    if (!response.ok) throw new Error(`공공데이터 연결 실패 (${response.status})`);
+    return await response.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function neisRows(payload, key) {
+  const group = payload?.[key];
+  if (!Array.isArray(group)) return [];
+  const rowBlock = group.find((item) => Array.isArray(item?.row));
+  return rowBlock?.row || [];
+}
+
+function neisResultMessage(payload, key) {
+  const result = payload?.RESULT || payload?.[key]?.[0]?.head?.find?.((item) => item.RESULT)?.RESULT;
+  if (!result) return "";
+  return result.MESSAGE || result.CODE || "";
+}
+
+function neisUrl(dataset, params, apiKey = "") {
+  const url = new URL(`https://open.neis.go.kr/hub/${dataset}`);
+  url.searchParams.set("Type", "json");
+  url.searchParams.set("pIndex", "1");
+  url.searchParams.set("pSize", "100");
+  if (apiKey) url.searchParams.set("KEY", apiKey);
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== "" && value !== null && value !== undefined) url.searchParams.set(key, String(value));
+  });
+  return url.toString();
+}
+
+async function findNeisSchool({ schoolName, officeCode = "", schoolCode = "", apiKey = "" }) {
+  if (officeCode && schoolCode) return { schoolName, officeCode, schoolCode };
+  const payload = await fetchJson(neisUrl("schoolInfo", { SCHUL_NM: schoolName }, apiKey));
+  const rows = neisRows(payload, "schoolInfo");
+  const exact = rows.find((row) => String(row.SCHUL_NM || "").replace(/\s/g, "") === String(schoolName || "").replace(/\s/g, ""));
+  const row = exact || rows[0];
+  if (!row) throw new Error(neisResultMessage(payload, "schoolInfo") || `${schoolName} 학교정보를 찾지 못했습니다.`);
+  return {
+    schoolName: row.SCHUL_NM || schoolName,
+    officeCode: row.ATPT_OFCDC_SC_CODE,
+    schoolCode: row.SD_SCHUL_CODE,
+    officeName: row.ATPT_OFCDC_SC_NM || "",
+    address: row.ORG_RDNMA || row.ORG_RDNZC || "",
+  };
+}
+
+function cleanMealText(value) {
+  return String(value || "")
+    .replace(/<br\s*\/?\s*>/gi, "\n")
+    .replace(/\([^)]*\)/g, (match) => match)
+    .split(/\n+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+async function fetchNeisMeals(school, targetDate, apiKey = "") {
+  const payload = await fetchJson(neisUrl("mealServiceDietInfo", {
+    ATPT_OFCDC_SC_CODE: school.officeCode,
+    SD_SCHUL_CODE: school.schoolCode,
+    MLSV_YMD: ymd(targetDate),
+  }, apiKey));
+  const rows = neisRows(payload, "mealServiceDietInfo");
+  return rows.map((row) => ({
+    date: row.MLSV_YMD || ymd(targetDate),
+    mealType: row.MMEAL_SC_NM || "급식",
+    menu: cleanMealText(row.DDISH_NM),
+    origin: cleanMealText(row.ORPLC_INFO),
+    calories: row.CAL_INFO || "",
+    nutrition: cleanMealText(row.NTR_INFO),
+  }));
+}
+
+function neisDateToLocalDate(value) {
+  const text = String(value || "").replace(/\D/g, "");
+  if (!/^\d{8}$/.test(text)) return null;
+  const date = new Date(Number(text.slice(0,4)), Number(text.slice(4,6))-1, Number(text.slice(6,8)), 12, 0, 0);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function expectedSchoolPeriods(value) {
+  const date = value instanceof Date ? value : neisDateToLocalDate(value);
+  const weekdayNo = date?.getDay();
+  if (weekdayNo === 3) return 5;
+  return [1,2,4,5].includes(weekdayNo) ? 7 : 0;
+}
+
+async function fetchNeisTimetable(school, targetDate, grade, classNo, apiKey = "") {
+  const monday = mondayOf(targetDate);
+  const dates = Array.from({ length: 5 }, (_, index) => {
+    const date = new Date(monday);
+    date.setDate(monday.getDate() + index);
+    return date;
+  });
+  const semester = targetDate.getMonth() + 1 <= 7 ? "1" : "2";
+  const year = targetDate.getFullYear();
+  const normalizeClass = (value) => String(value ?? "").trim().replace(/[^0-9가-힣A-Za-z]/g, "").replace(/^0+/, "");
+  const wantedClass = normalizeClass(classNo);
+  // NEIS가 CLASS_NM을 생략한 요청에서도 첫 반만 반환하는 사례가 있어
+  // 운영 학년의 1~9반을 각각 정식 조회한 뒤 합쳐 원본을 교차검증한다.
+  const classCandidates = Array.from({ length: 9 }, (_, index) => String(index + 1));
+  const requestDay = async (date) => {
+    const dateKey = ymd(date);
+    const common = {
+      ATPT_OFCDC_SC_CODE: school.officeCode,
+      SD_SCHUL_CODE: school.schoolCode,
+      AY: year,
+      SEM: semester,
+      GRADE: grade,
+      pIndex: 1,
+      pSize: 1000,
+    };
+    // NEIS 시간표 API는 환경에 따라 단일일자 필터명이 다르게 적용되는 사례가 있다.
+    // ALL_TI_YMD 방식과 공식 기간(TI_FROM_YMD/TI_TO_YMD) 방식을 동시에 조회하고 합쳐
+    // 기본 5건만 반환되는 잘못된 필터 적용을 방지한다.
+    const dateParamSets = [
+      { mode: "ALL_TI_YMD", params: { ALL_TI_YMD: dateKey } },
+      { mode: "TI_RANGE", params: { TI_FROM_YMD: dateKey, TI_TO_YMD: dateKey } },
+    ];
+    const fetchVariants = async (candidate) => {
+      const variants = await Promise.all(dateParamSets.map(async ({ mode, params }) => {
+        const url = neisUrl("hisTimetable", { ...c
+
+---
+
+=== resources/app/electron/main.cjs :: fetchLiveData({ force @ 96324 ===
+d||'', programName=program?.name||rawProgram;
+    const answers=Array.from({length:6},(_,i)=>String(r[6+i]||'').trim());
+    const content=answers.map((value,i)=>value?`[${sectionLabels[i]}]\n${value}`:'').filter(Boolean).join('\n\n');
+    if(!content)continue;
+    const originalPairs=answers.map((value,i)=>value?{label:rawHeader[6+i]||sectionLabels[i],value}:null).filter(Boolean);
+    const submittedAt=reportDateTimeText(r[0]);
+    const consent=String(r[12]||'').trim();
+    const reportId=`SR-${String(reportNo++).padStart(5,'0')}`;
+    const sourceId=`GF-LEGACY-${reportId}`;
+    const studentKey=studentId||studentNo;
+    if(!studentId&&!(studentNo==='1905'&&name==='박주완'))unmatchedStudents++;
+    const matchStatus=studentId?'정상':(studentNo==='1905'&&name==='박주완'?'학적변동':'확인필요');
+    const logicalKey=`${schoolYear}|${semester}|${studentKey}|${programId}`;
+    const contentHash=crypto.createHash('sha256').update([studentKey,programId,content].map(v=>String(v||'').trim()).join('\n'),'utf8').digest('hex');
+    rows.push([reportId,'선택활동',studentId,studentNo,name,schoolYear,semester,programId,programName,submittedAt,'Y',/동의/.test(consent)?'동의함':consent,content,JSON.stringify(originalPairs),'REPORT_TEXT_V2',String(ri+1),matchStatus,'GOOGLE_FORM',sourceId,'',logicalKey,submittedAt,'정상',contentHash]);
+  }
+  if(unmatchedPrograms)throw new Error(`선택보고서 프로그램 매칭 실패 ${unmatchedPrograms}건이 있어 자동 복구를 중단했습니다.`);
+  await clearSheetValues(token,UEP_PROCESSING_SPREADSHEET_ID,`'${target}'!A3:X5000`);
+  await updateSheetValues(token,UEP_PROCESSING_SPREADSHEET_ID,`'${target}'!A3:X${rows.length+3}`,[required,...rows]);
+  console.log(`[UEP] 선택보고서 정규화 자동 복구 완료: ${rows.length}건 · 학생확인 ${unmatchedStudents}건`);
+  return {ok:true,repaired:true,count:rows.length,unmatchedStudents};
+}
+
+async function fetchLiveData({ force = false, credentials = null } = {}) {
+  if (!force && liveDataCache && Date.now() - liveDataFetchedAt < 120000) return liveDataCache;
+  // 0.81.40: 관리자 로컬 서비스계정과 담임 School Read API 세션을 동일 읽기 파이프라인으로 연결합니다.
+  const auth = await getReadonlySheetsAuth(credentials);
+  const token = auth.token;
+  const entries = Object.entries(SHEET_RANGES);
+  const matrices = {};
+  // 기본정보 연결시트를 가장 먼저, 작은 묶음으로 읽습니다.
+  // 탭 추가로 URL이 길어지거나 특정 탭이 잠시 실패해도 전체 연결이 끊기지 않도록 합니다.
+  const chunkSize = 12;
+  const chunks = [];
+  for (let offset = 0; offset < entries.length; offset += chunkSize) {
+    chunks.push({ offset, chunk: entries.slice(offset, offset + chunkSize) });
+  }
+  await mapWithConcurrency(chunks, 1, async ({ offset, chunk }) => {
+    try {
+      const valueRanges = await readSheetBatch(token, UEP_SPREADSHEET_ID, chunk.map(([, range]) => range));
+      valueRanges.forEach((item, index) => {
+        const fallbackName = chunk[index]?.[0];
+        matrices[fallbackName] = item.values || [];
+      });
+    } catch (chunkError) {
+      console.warn(`[UEP] 기본정보 묶음 조회 실패(${offset + 1}~${offset + chunk.length}), 개별 재시도`, chunkError?.message || chunkError);
+      await mapWithConcurrency(chunk, 1, async ([logicalName, range]) => {
+        try {
+          const one = await readSheetBatch(token, UEP_SPREADSHEET_ID, [range]);
+          matrices[logicalName] = one?.[0]?.values || [];
+        } catch (sheetError) {
+          matrices[logicalName] = [];
+          console.warn(`[UEP] 기본정보 탭 조회 실패: ${logicalName}`, sheetError?.message || sheetError);
+        }
+      });
+    }
+  });
+  entries.forEach(([name]) => { if (!matrices[name]) matrices[name] = []; });
+
+  // 선택보고서 정규화 탭의 구조가 손상된 경우 구글폼 원본으로 복구한 뒤 읽습니다.
+  // 읽기 전용 담임 세션에서는 정규화 탭 자동복구(쓰기)를 실행하지 않습니다.
+  if(auth.mode!=='school_read_api') await ensureSelectedReportNormalization(token);
+
+  // 학생응답 가공 결과: 현재 실제 존재하는 데이터 처리 탭만 직접 읽습니다.
+  // 선택과목은 응답수집 06_선택과목응답을 별도 읽고 기존 fallback 로직으로 구성합니다.
+  const processingRanges = [
+    ["02_학사외출_일자별", "'02_학사외출_일자별'!A1:AD10000"],
+    ["20_공통보고서_정규화", "'20_공통보고서_정규화'!A1:X5000"],
+    ["21_선택보고서_정규화", "'21_선택보고서_정규화'!A1:X5000"],
+    ["30_야자출결_정규화", "'30_야자출결_정규화'!A1:P70000"],
+    // 학교캘린더는 기본정보 연결시트가 아니라 데이터 처리시트의 직접 이관값만 사용합니다.
+    ["41_학교캘린더", "'41_학교캘린더'!A1:W3000"],
+  ];
+  try {
+    const result = await readSheetBatch(token, UEP_PROCESSING_SPREADSHEET_ID, processingRanges.map(([,range])=>range));
+    processingRanges.forEach(([logicalName],index)=>{matrices[logicalName]=result?.[index]?.values||[];});
+  } catch(error) {
+    // 한 탭의 일시 오류가 보고서·학사외출·선택과목 등 정상 탭까지 모두 비우지 않도록
+    // 묶음 조회 실패 시 각 탭을 독립적으로 재시도합니다. 평상시에는 1회 batchGet으로 quota를 보호합니다.
+    console.warn("[UEP] 처리시트 묶음 조회 실패 - 개별 복구 시도",error?.message||error);
+    await mapWithConcurrency(processingRanges,1,async([logicalName,range])=>{
+      try{const one=await readSheetBatch(token,UEP_PROCESSING_SPREADSHEET_ID,[range]);matrices[logicalName]=one?.[0]?.values||[];}
+      catch(sheetError){matrices[logicalName]=[];console.warn(`[UEP] 처리시트 개별 조회 실패: ${logicalName}`,sheetError?.message||sheetError);}
+    });
+  }
+
+  // 학사외출은 데이터 처리시트의 02_학사외출_일자별만 조회합니다.
+  // 응답 원본이나 기본정보 연결시트, 별도 운영 시트를 직접 참조하지 않습니다.
+
+  // 입력센터 원본은 별도 [UEP] 입력센터 원본 스프레드시트에서 읽습니다.
+  try {
+    const inputResult=await readSheetBatch(token,UEP_INPUT_CENTER_SPREADSHEET_ID,["'02_자료원본'!A1:X10000"]);
+    matrices["__INPUT_CENTER_SOURCE"]=inputResult?.[0]?.values||[];
+  } catch(error) {
+    matrices["__INPUT_CENTER_SOURCE"]=[];
+    console.warn("[UEP] 입력센터 원본 조회 실패",error?.message||error);
+  }
+
+  // 학생이 직접 입력한 희망계열·희망전공은 정규화 자료의 유무와 관계없이 항상 읽습니다.
+  // 선택과목 목록은 처리시트/고교학점제 결과를 우선하되, 진로 보조정보는 원응답의 최신값을 기준으로 합니다.
+  try {
+    const rawSelection = await readSheetBatch(token, "1K-Me8Pm8T2d5fGHoqSPEAu4RXozETUQ-N5pZVxjs8Hw", ["'06_선택과목응답'!A1:U2000"]);
+    matrices["__SELECTION_RESPONSES"] = rawSelection?.[0]?.values || [];
+  } catch (error) {
+    matrices["__SELECTION_RESPONSES"] = [];
+    console.warn("[UEP] 선택과목 응답 조회 실패", error?.message || error);
+  }
+
+  // 규칙 적용 자료: 평상시는 batchGet, 한 탭이라도 실패하면 각 탭을 독립 재조회합니다.
+  // 특히 40_학사외출규칙은 다른 규칙 탭 오류와 무관하게 반드시 복구를 시도합니다.
+  const ruleEntries = Object.entries(RULE_SHEET_RANGES);
+  try {
+    const ruleValueRanges = await readSheetBatch(token, UEP_RULES_SPREADSHEET_ID, ruleEntries.map(([, range]) => range));
+    ruleValueRanges.forEach((item, index) => {
+      const logicalName = ruleEntries[index]?.[0];
+      matrices[logicalName] = item.values || [];
+    });
+    ruleEntries.forEach(([name]) => { if (!matrices[name]) matrices[name] = []; });
+  } catch (error) {
+    console.warn("[UEP] 규칙로그 묶음 조회 실패 - 개별 복구 시도", error?.message || error);
+    await mapWithConcurrency(ruleEntries, 1, async ([logicalName, range]) => {
+      try {
+        const one = await readSheetBatch(token, UEP_RULES_SPREADSHEET_ID, [range]);
+        matrices[logicalName] = one?.[0]?.values || [];
+      } catch (sheetError) {
+        matrices[logicalName] = [];
+        console.warn(`[UEP] 규칙로그 개별 조회 실패: ${logicalName}`, sheetError?.message || sheetError);
+      }
+    });
+  }
+  // v0.76.93: 학사외출 규칙은 화면 운영의 핵심이므로 규칙 묶음 결과와 무관하게 마지막에 단독 재조회합니다.
+  // batchGet의 일부 누락/순서 문제 또는 다른 규칙 탭 오류가 있어도 40_학사외출규칙 원본을 우선합니다.
+  try {
+    const dormRuleResult = await readSheetBatch(
+      token,
+      UEP_RULES_SPREADSHEET_ID,
+      ["'40_학사외출규칙'!A1:X1000"]
+    );
+    const dormRuleMatrix = dormRuleResult?.[0]?.values || [];
+    if (dormRuleMatrix.length >= 3) {
+      matrices["40_학사외출규칙"] = dormRuleMatrix;
+      console.log(`[UEP] 40_학사외출규칙 단독 조회 성공: ${Math.max(0,dormRuleMatrix.length-3)}건`);
+    } else {
+      console.warn("[UEP] 40_학사외출규칙 단독 조회 결과가 비어 있습니다.");
+    }
+  } catch (dormRuleError) {
+    console.warn("[UEP] 40_학사외출규칙 단독 조회 실패", dormRuleError?.message || dormRuleError);
+  }
+
+  const curriculumSpreadsheetId = "1fevlAWQZqWQkiYl-eGRCdzidBj59Z8NqOxfCrGvwlHI";
+const curriculumReads = [
+  ["__CURRICULUM_09", "'09_수강신청결과'!A1:AG1200"],
+  ["__CURRICULUM_ERRORS", "'05_오류검토'!A11:Z1200"],
+  ["__CURRICULUM_STUDENTS", "'02_학생마스터'!A1:AA1200"]
+];
+for (const [logicalName, range] of curriculumReads) {
+  try {
+    const one = await readSheetBatch(token, curriculumSpreadsheetId, [range]);
+    matrices[logicalName] = one?.[0]?.values || [];
+  } catch (error) {
+    matrices[logicalName] = [];
+    console.warn(`[UEP] 선택과목 원본 조회 실패: ${logicalName}`, error?.message || error);
+  }
+}
+  // 2026. 운호고 1학년 공결 현황 원본 시트를 읽기 전용으로 직접 조회합니다.
+  // 서비스 계정에 열람 권한이 없거나 일부 탭 형식이 달라도 UEP 전체 동기화는 계속됩니다.
+  try {
+    const officialSourceId = "1pzu2eEUYJZW7HG2_-GDq2Ujq7ePwvCHKB9UHS4i9SzM";
+    const officialTabs = ["전체 명렬표","축구부","씨름부","개인학생선수","학사","리더십&스마트폰&두드림","개별","두드림","수련회","챌린지데이"];
+    try {
+      const result=await readSheetBatch(token,officialSourceId,officialTabs.map(tab=>`'${tab.replace(/'/g,"''")}'!A1:AM1200`));
+      officialTabs.forEach((tab,index)=>{matrices[`__OFFICIAL_${tab}`]=result?.[index]?.values||[];});
+    } catch(tabError) {
+      officialTabs.forEach(tab=>{matrices[`__OFFICIAL_${tab}`]=[];});
+      cons
+
+---
+
+=== resources/app/electron/main.cjs :: fetchLiveData({ force @ 124852 ===
+d:false,tokenExchangeRequired:false,message:"별도 Google 계정 승인은 사용하지 않습니다. UEP 로그인 이름·이메일로 담임 권한을 적용합니다."};
+});
+ipcMain.handle("google:diagnoseUserOAuth", async () => {
+  const result={authorized:false,account:"",tokenOk:false,sheetsOk:false,reason:"",status:0};
+  try {
+    const saved=await readGoogleUserOAuth();
+    if(!saved){result.reason="Google 계정 연결 정보가 없습니다.";return result;}
+    result.authorized=true;result.account=String(saved.email||"");
+    const token=await getGoogleUserSheetsToken();
+    result.tokenOk=Boolean(token);
+    try {
+      await readSheetBatch(token,UEP_SPREADSHEET_ID,["'01_사용자계정'!A1:B2"]);
+      result.sheetsOk=true;
+    } catch(error) {
+      result.reason=String(error?.message||error||"Google 시트 조회 실패");
+      const match=result.reason.match(/\((\d{3})\)/);result.status=match?Number(match[1]):0;
+    }
+    return result;
+  } catch(error) {result.reason=String(error?.message||error||"Google OAuth 진단 실패");return result;}
+});ipcMain.handle("google:disconnectUser", async () => {
+  try{return await disconnectGoogleUser();}catch(error){return {ok:false,reason:error?.message||String(error)};}
+});
+  ipcMain.handle("google:selectCredential", async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const selected = await dialog.showOpenDialog(win, {
+      title: "Google 서비스 계정 JSON 선택",
+      properties: ["openFile"],
+      filters: [{ name: "Google 서비스 계정", extensions: ["json"] }],
+    });
+    if (selected.canceled || !selected.filePaths[0]) return { ok: false, canceled: true };
+    try {
+      const credentials = JSON.parse(await fs.readFile(selected.filePaths[0], "utf8"));
+      if (!validateServiceAccount(credentials)) return { ok: false, reason: "Google 서비스 계정 JSON 형식이 아닙니다." };
+      const data = await fetchLiveData({ force: true, credentials });
+      await saveEncrypted(credentialPath(), credentials);
+      return {
+        ok: true,
+        account: credentials.client_email,
+        sourceName: UEP_SPREADSHEET_NAME,
+        preview: data.summary,
+      };
+    } catch (error) {
+      liveDataCache = null;
+      liveDataFetchedAt = 0;
+      return { ok: false, reason: `${error.message || "구글시트 연결 실패"} 서비스 계정 이메일에 UEP 구글시트 보기 권한이 있는지 확인하세요.` };
+    }
+  });
+  ipcMain.handle("google:previewReadonlySync", async () => {
+    try {
+      const data = await fetchLiveData({ force: true });
+      return { ok: true, syncedAt: data.syncedAt, preview: data.summary, nightPreview: data.summary, sourceName: data.sourceName };
+    } catch (error) {
+      liveDataCache = null;
+      liveDataFetchedAt = 0;
+      return { ok: false, reason: error.message || "UEP 구글시트 새로고침 실패" };
+    }
+  });
+  ipcMain.handle("google:readReadonlyCache", async () => {
+    try { return { ok: true, data: await fetchLiveData() }; }
+    catch (error) { return { ok: false, reason: error.message || "UEP 구글시트를 읽지 못했습니다." }; }
+  });
+  
+
+function inputCenterNatureToStoredType(nature=""){
+  const n=String(nature||"");
+  if(n==="보고서")return "보고서·탐구보고서";
+  if(n==="신청")return "프로그램 신청서";
+  if(n==="만족도조사")return "만족도·설문조사";
+  if(n==="출결·명단")return "출결·참여명단";
+  return n||"기타";
+}
+function inputCenterProgramIdRaw(id=""){return String(id||"").replace(/^(common|selected)-/,'');}
+function inputCenterSemester(value="",submittedAt=""){
+  const t=String(value||""); if(/(^|[^0-9])1([^0-9]|$)|1학기/.test(t))return "1학기"; if(/(^|[^0-9])2([^0-9]|$)|2학기/.test(t))return "2학기";
+  const m=String(submittedAt||"").match(/\d{4}[-/.](\d{1,2})/);return m&&Number(m[1])<=7?"1학기":"2학기";
+}
+async function classifyInputCenterBatch(payload={}){
+  try{
+    const account=await readEncrypted(credentialPath());if(!validateServiceAccount(account))throw new Error('Google 서비스 계정 인증정보가 필요합니다.');
+    const batchId=String(payload.batchId||'').trim();if(!batchId)throw new Error('입력 배치를 선택해 주세요.');
+    const token=await getSheetsToken(account);const result=await readSheetBatch(token,UEP_INPUT_CENTER_SPREADSHEET_ID,["'02_자료원본'!A3:X10000"]);const rows=(result?.[0]?.values||[]).slice(1);
+    let count=0;const storedType=inputCenterNatureToStoredType(payload.nature);const pid=String(payload.programId||'');const pk=String(payload.programKind||'');const note=pid?`ROUTE:PROGRAM_REPORT:${pid}`:'';const writes=[];
+    for(let i=0;i<rows.length;i++)if(String(rows[i]?.[1]||'')===batchId){const sheetRow=i+4;const current=Array.from({length:24},(_,j)=>rows[i]?.[j]??'');current[3]=storedType;current[4]=payload.nature==='보고서'?'보고서 제출':payload.nature;let meta={};try{meta=JSON.parse(String(current[16]||''));}catch{}current[6]=inputCenterSemester(payload.programSemester||'',meta.submittedAt||'');current[17]='검수완료';current[19]=pid;current[20]=pk;current[23]=note||current[23]||'';writes.push({range:`'02_자료원본'!A${sheetRow}:X${sheetRow}`,values:[current]});count++;}
+    await batchUpdateSheetValues(token,UEP_INPUT_CENTER_SPREADSHEET_ID,writes);
+    liveDataCache=null;liveDataFetchedAt=0;return {ok:true,count,batchId};
+  }catch(error){return {ok:false,reason:error?.message||String(error)};}
+}
+async function normalizeInputCenterBatch(payload={}){
+  try{
+    const account=await readEncrypted(credentialPath());if(!validateServiceAccount(account))throw new Error('Google 서비스 계정 인증정보가 필요합니다.');
+    const records=Array.isArray(payload.records)?payload.records:[];if(!records.length)throw new Error('정규화할 자료가 없습니다.');
+    if(String(payload.nature||'')!=='보고서')throw new Error('현재 정규화 자동적용은 보고서부터 지원합니다. 신청·만족도·명단은 다음 라우팅 단계에서 연결합니다.');
+    const kind=String(payload.programKind||'')==='selected'?'selected':'common';
+    const targetSheet=kind==='selected'?'21_선택보고서_정규화':'20_공통보고서_정규화';
+    const token=await getSheetsToken(account);
+    // REPORT_TEXT_V2 표준 스키마 A:X. 원본유형/원본ID로 출처를 구분하므로 입력센터 자료도 기존 데이터 바로 다음 행에 연속 저장합니다.
+    const DATA_START_ROW=4, INPUT_END_ROW=5000;
+    const existingResult=await readSheetBatch(token,UEP_PROCESSING_SPREADSHEET_ID,[`'${targetSheet}'!A3:X${INPUT_END_ROW}`]);
+    const matrix=existingResult?.[0]?.values||[];
+    const existing=matrix.slice(1).map((row,index)=>({row, sheetRow:index+4})).filter(x=>(x.row||[]).some(v=>String(v??'').trim()));
+    const prefix=kind==='selected'?'ISR':'ICR';
+    let maxInputId=0;for(const item of existing){const id=String(item.row?.[0]||'');if(!id.startsWith(prefix+'-'))continue;const n=Number(id.match(/(\d+)$/)?.[1]||0);if(n>maxInputId)maxInputId=n;}
+    const programId=inputCenterProgramIdRaw(payload.programId||records[0]?.programId||'');
+    const programName=String(payload.programName||'');
+    if(!programId)throw new Error('보고서는 연결 프로그램ID가 필요합니다. 02 검수·분류에서 프로그램을 확정해 주세요.');
+    const hashText=value=>crypto.createHash('sha256').update(String(value||''),'utf8').digest('hex');
+    const canonicalExistingHash=row=>{
+      const declared=String(row?.[23]||'').trim();if(declared)return declared;
+      const normalized=String(row?.[12]||'').trim();
+      return hashText([row?.[2]||row?.[3]||'',row?.[7]||'',normalized].map(v=>String(v||'').trim()).join('\n'));
+    };
+    const prepared=[];let next=maxInputId+1;
+    for(const rec of records){
+      let meta={};try{meta=JSON.parse(String(rec.normalizedText||''));}catch{}
+      const submittedAt=String(meta.submittedAt||rec.createdAt||'');
+      const pairs=inputCenterReportPairs(meta);
+      const reviewedContent=String(rec.reviewText||'').trim();
+      const normalizedContent=reviewedContent||inputCenterReportText(meta)||String(rec.rawText||'').trim();
+      if(!normalizedContent)continue;
+      const signature=(Array.isArray(meta.fields)?meta.fields:[]).find(f=>/서명|동의/.test(String(f.label||'')))?.value||'';
+      const semester=inputCenterSemester(payload.programSemester||'',submittedAt);
+      const studentKey=String(rec.studentId||rec.studentNo||'').trim();
+      const logicalKey=`${rec.schoolYear||'2026'}|${semester}|${studentKey}|${programId}`;
+      const sourceType='INPUT_CENTER';
+      const sourceId=String(rec.id||'').trim()||`INPUT-${hashText(`${rec.batchId||''}|${studentKey}|${submittedAt}`).slice(0,20)}`;
+      const sourceBatchId=String(rec.batchId||payload.batchId||'').trim();
+      const sourceModifiedAt=String(rec.createdAt||submittedAt||new Date().toISOString());
+      const contentHash=hashText([studentKey,programId,normalizedContent].map(v=>String(v||'').trim()).join('\n'));
+      const row=[
+        `${prefix}-${String(next++).padStart(5,'0')}`,kind==='selected'?'선택활동':'공통활동',rec.studentId||'',rec.studentNo||'',rec.name||'',rec.schoolYear||'2026',semester,
+        programId,programName||meta.programName||'',submittedAt,'Y',/^(O|Y|동의|예|동의함)$/i.test(String(signature).trim())?'동의함':'',
+        normalizedContent,JSON.stringify(pairs),'REPORT_TEXT_V2',rec.id||'',rec.studentId?'정상':'확인필요',sourceType,sourceId,sourceBatchId,logicalKey,sourceModifiedAt,'정상',contentHash
+      ];
+
+
+---
+
+=== resources/app/electron/main.cjs :: fetchLiveData({ force @ 125411 ===
+   await readSheetBatch(token,UEP_SPREADSHEET_ID,["'01_사용자계정'!A1:B2"]);
+      result.sheetsOk=true;
+    } catch(error) {
+      result.reason=String(error?.message||error||"Google 시트 조회 실패");
+      const match=result.reason.match(/\((\d{3})\)/);result.status=match?Number(match[1]):0;
+    }
+    return result;
+  } catch(error) {result.reason=String(error?.message||error||"Google OAuth 진단 실패");return result;}
+});ipcMain.handle("google:disconnectUser", async () => {
+  try{return await disconnectGoogleUser();}catch(error){return {ok:false,reason:error?.message||String(error)};}
+});
+  ipcMain.handle("google:selectCredential", async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const selected = await dialog.showOpenDialog(win, {
+      title: "Google 서비스 계정 JSON 선택",
+      properties: ["openFile"],
+      filters: [{ name: "Google 서비스 계정", extensions: ["json"] }],
+    });
+    if (selected.canceled || !selected.filePaths[0]) return { ok: false, canceled: true };
+    try {
+      const credentials = JSON.parse(await fs.readFile(selected.filePaths[0], "utf8"));
+      if (!validateServiceAccount(credentials)) return { ok: false, reason: "Google 서비스 계정 JSON 형식이 아닙니다." };
+      const data = await fetchLiveData({ force: true, credentials });
+      await saveEncrypted(credentialPath(), credentials);
+      return {
+        ok: true,
+        account: credentials.client_email,
+        sourceName: UEP_SPREADSHEET_NAME,
+        preview: data.summary,
+      };
+    } catch (error) {
+      liveDataCache = null;
+      liveDataFetchedAt = 0;
+      return { ok: false, reason: `${error.message || "구글시트 연결 실패"} 서비스 계정 이메일에 UEP 구글시트 보기 권한이 있는지 확인하세요.` };
+    }
+  });
+  ipcMain.handle("google:previewReadonlySync", async () => {
+    try {
+      const data = await fetchLiveData({ force: true });
+      return { ok: true, syncedAt: data.syncedAt, preview: data.summary, nightPreview: data.summary, sourceName: data.sourceName };
+    } catch (error) {
+      liveDataCache = null;
+      liveDataFetchedAt = 0;
+      return { ok: false, reason: error.message || "UEP 구글시트 새로고침 실패" };
+    }
+  });
+  ipcMain.handle("google:readReadonlyCache", async () => {
+    try { return { ok: true, data: await fetchLiveData() }; }
+    catch (error) { return { ok: false, reason: error.message || "UEP 구글시트를 읽지 못했습니다." }; }
+  });
+  
+
+function inputCenterNatureToStoredType(nature=""){
+  const n=String(nature||"");
+  if(n==="보고서")return "보고서·탐구보고서";
+  if(n==="신청")return "프로그램 신청서";
+  if(n==="만족도조사")return "만족도·설문조사";
+  if(n==="출결·명단")return "출결·참여명단";
+  return n||"기타";
+}
+function inputCenterProgramIdRaw(id=""){return String(id||"").replace(/^(common|selected)-/,'');}
+function inputCenterSemester(value="",submittedAt=""){
+  const t=String(value||""); if(/(^|[^0-9])1([^0-9]|$)|1학기/.test(t))return "1학기"; if(/(^|[^0-9])2([^0-9]|$)|2학기/.test(t))return "2학기";
+  const m=String(submittedAt||"").match(/\d{4}[-/.](\d{1,2})/);return m&&Number(m[1])<=7?"1학기":"2학기";
+}
+async function classifyInputCenterBatch(payload={}){
+  try{
+    const account=await readEncrypted(credentialPath());if(!validateServiceAccount(account))throw new Error('Google 서비스 계정 인증정보가 필요합니다.');
+    const batchId=String(payload.batchId||'').trim();if(!batchId)throw new Error('입력 배치를 선택해 주세요.');
+    const token=await getSheetsToken(account);const result=await readSheetBatch(token,UEP_INPUT_CENTER_SPREADSHEET_ID,["'02_자료원본'!A3:X10000"]);const rows=(result?.[0]?.values||[]).slice(1);
+    let count=0;const storedType=inputCenterNatureToStoredType(payload.nature);const pid=String(payload.programId||'');const pk=String(payload.programKind||'');const note=pid?`ROUTE:PROGRAM_REPORT:${pid}`:'';const writes=[];
+    for(let i=0;i<rows.length;i++)if(String(rows[i]?.[1]||'')===batchId){const sheetRow=i+4;const current=Array.from({length:24},(_,j)=>rows[i]?.[j]??'');current[3]=storedType;current[4]=payload.nature==='보고서'?'보고서 제출':payload.nature;let meta={};try{meta=JSON.parse(String(current[16]||''));}catch{}current[6]=inputCenterSemester(payload.programSemester||'',meta.submittedAt||'');current[17]='검수완료';current[19]=pid;current[20]=pk;current[23]=note||current[23]||'';writes.push({range:`'02_자료원본'!A${sheetRow}:X${sheetRow}`,values:[current]});count++;}
+    await batchUpdateSheetValues(token,UEP_INPUT_CENTER_SPREADSHEET_ID,writes);
+    liveDataCache=null;liveDataFetchedAt=0;return {ok:true,count,batchId};
+  }catch(error){return {ok:false,reason:error?.message||String(error)};}
+}
+async function normalizeInputCenterBatch(payload={}){
+  try{
+    const account=await readEncrypted(credentialPath());if(!validateServiceAccount(account))throw new Error('Google 서비스 계정 인증정보가 필요합니다.');
+    const records=Array.isArray(payload.records)?payload.records:[];if(!records.length)throw new Error('정규화할 자료가 없습니다.');
+    if(String(payload.nature||'')!=='보고서')throw new Error('현재 정규화 자동적용은 보고서부터 지원합니다. 신청·만족도·명단은 다음 라우팅 단계에서 연결합니다.');
+    const kind=String(payload.programKind||'')==='selected'?'selected':'common';
+    const targetSheet=kind==='selected'?'21_선택보고서_정규화':'20_공통보고서_정규화';
+    const token=await getSheetsToken(account);
+    // REPORT_TEXT_V2 표준 스키마 A:X. 원본유형/원본ID로 출처를 구분하므로 입력센터 자료도 기존 데이터 바로 다음 행에 연속 저장합니다.
+    const DATA_START_ROW=4, INPUT_END_ROW=5000;
+    const existingResult=await readSheetBatch(token,UEP_PROCESSING_SPREADSHEET_ID,[`'${targetSheet}'!A3:X${INPUT_END_ROW}`]);
+    const matrix=existingResult?.[0]?.values||[];
+    const existing=matrix.slice(1).map((row,index)=>({row, sheetRow:index+4})).filter(x=>(x.row||[]).some(v=>String(v??'').trim()));
+    const prefix=kind==='selected'?'ISR':'ICR';
+    let maxInputId=0;for(const item of existing){const id=String(item.row?.[0]||'');if(!id.startsWith(prefix+'-'))continue;const n=Number(id.match(/(\d+)$/)?.[1]||0);if(n>maxInputId)maxInputId=n;}
+    const programId=inputCenterProgramIdRaw(payload.programId||records[0]?.programId||'');
+    const programName=String(payload.programName||'');
+    if(!programId)throw new Error('보고서는 연결 프로그램ID가 필요합니다. 02 검수·분류에서 프로그램을 확정해 주세요.');
+    const hashText=value=>crypto.createHash('sha256').update(String(value||''),'utf8').digest('hex');
+    const canonicalExistingHash=row=>{
+      const declared=String(row?.[23]||'').trim();if(declared)return declared;
+      const normalized=String(row?.[12]||'').trim();
+      return hashText([row?.[2]||row?.[3]||'',row?.[7]||'',normalized].map(v=>String(v||'').trim()).join('\n'));
+    };
+    const prepared=[];let next=maxInputId+1;
+    for(const rec of records){
+      let meta={};try{meta=JSON.parse(String(rec.normalizedText||''));}catch{}
+      const submittedAt=String(meta.submittedAt||rec.createdAt||'');
+      const pairs=inputCenterReportPairs(meta);
+      const reviewedContent=String(rec.reviewText||'').trim();
+      const normalizedContent=reviewedContent||inputCenterReportText(meta)||String(rec.rawText||'').trim();
+      if(!normalizedContent)continue;
+      const signature=(Array.isArray(meta.fields)?meta.fields:[]).find(f=>/서명|동의/.test(String(f.label||'')))?.value||'';
+      const semester=inputCenterSemester(payload.programSemester||'',submittedAt);
+      const studentKey=String(rec.studentId||rec.studentNo||'').trim();
+      const logicalKey=`${rec.schoolYear||'2026'}|${semester}|${studentKey}|${programId}`;
+      const sourceType='INPUT_CENTER';
+      const sourceId=String(rec.id||'').trim()||`INPUT-${hashText(`${rec.batchId||''}|${studentKey}|${submittedAt}`).slice(0,20)}`;
+      const sourceBatchId=String(rec.batchId||payload.batchId||'').trim();
+      const sourceModifiedAt=String(rec.createdAt||submittedAt||new Date().toISOString());
+      const contentHash=hashText([studentKey,programId,normalizedContent].map(v=>String(v||'').trim()).join('\n'));
+      const row=[
+        `${prefix}-${String(next++).padStart(5,'0')}`,kind==='selected'?'선택활동':'공통활동',rec.studentId||'',rec.studentNo||'',rec.name||'',rec.schoolYear||'2026',semester,
+        programId,programName||meta.programName||'',submittedAt,'Y',/^(O|Y|동의|예|동의함)$/i.test(String(signature).trim())?'동의함':'',
+        normalizedContent,JSON.stringify(pairs),'REPORT_TEXT_V2',rec.id||'',rec.studentId?'정상':'확인필요',sourceType,sourceId,sourceBatchId,logicalKey,sourceModifiedAt,'정상',contentHash
+      ];
+      prepared.push({rec,row,sourceType,sourceId,logicalKey,contentHash,submittedAt});
+    }
+    if(!prepared.length)throw new Error('정규화할 보고서 본문을 찾지 못했습니다. 02 검수내용을 확인해 주세요.');
+    let newCount=0,duplicateCount=0,updateCount=0;const actions=[];
+    for(const p of prepared){
+      const sameSource=existing.find(item=>String(item.row?.[17]||'')===p.sourceType&&String(item.row?.[18]||'')===p.sourceId);
+      if(sameSource){
+        const old=sameSource.row;
+        if(String(old?.[22]||'정상')!=='삭제됨'&&canonicalExistingHash(old)===p.contentHash){duplicateCo
+
+---
+
