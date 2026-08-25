@@ -1,0 +1,2227 @@
+
+===== GYOMUON sensitive-start 860-930 =====
+860:     const scope=document.getElementById('admissionScope')?.value||'individual';
+861:     if(scope==='university')return null;
+862:     const id=document.getElementById('admissionStudent')?.value||studentFocusContext?.studentId||'';
+863:     return studentForSignalId(id);
+864:   }
+865:   if(page==='attendance'){
+866:     if(attendanceMode==='statistics'&&attendanceStatStudentFilter&&attendanceStatStudentFilter!=='all'){
+867:       const students=readonlyCache?.students||[];
+868:       return students.find(s=>attendanceStudentKey(s)===attendanceStatStudentFilter)||null;
+869:     }
+870:     if(studentFocusContext?.studentId)return studentForSignalId(studentFocusContext.studentId);
+871:     return null;
+872:   }
+873:   if(page==='records'){
+874:     if(recordQueryMode==='student'&&recordStudentId)return studentForSignalId(recordStudentId);
+875:     if(studentFocusContext?.studentId)return studentForSignalId(studentFocusContext.studentId);
+876:     return null;
+877:   }
+878:   if(page==='programs'&&studentFocusContext?.studentId)return studentForSignalId(studentFocusContext.studentId);
+879:   return null;
+880: }
+881: function canRevealStudentProtection(){
+882:   const role=currentRoleId();
+883:   if(role==="admin"||role==="grade_head"||role==="grade_manager"||role==="homeroom")return true;
+884:   // __UEP_08159_HOMEROOM_SENSITIVE_GATE__
+885:   const scope=typeof currentTeacherAccessScope==='function'?currentTeacherAccessScope():null;
+886:   return Boolean(scope?.teacher&&scope?.classNo);
+887: }
+888: const UEP_SENSITIVE_SECURITY_KEY='uep_sensitive_security_v1';
+889: let uepSensitiveUnlockedUntil=0;
+890: async function sensitiveHash(value){
+891:   const bytes=new TextEncoder().encode(`UEP:SENSITIVE:${String(value||'')}`);
+892:   const digest=await crypto.subtle.digest('SHA-256',bytes);
+893:   return Array.from(new Uint8Array(digest)).map(b=>b.toString(16).padStart(2,'0')).join('');
+894: }
+895: function sensitiveSecurityConfig(){
+896:   try{return JSON.parse(localStorage.getItem(UEP_SENSITIVE_SECURITY_KEY)||'{}')||{};}catch{return {};}
+897: }
+898: function sensitivePasswordConfigured(){return !!sensitiveSecurityConfig().passwordHash;}
+899: function sensitiveSessionOpen(){return Date.now()<uepSensitiveUnlockedUntil;}
+900: function lockSensitiveSession(){uepSensitiveUnlockedUntil=0;}
+901: function closeSensitivePasswordModal(result=null){
+902:   const layer=document.getElementById('sensitivePasswordLayer');
+903:   if(!layer)return;
+904:   const resolver=layer._resolver;
+905:   layer.remove();
+906:   if(typeof resolver==='function')resolver(result);
+907: }
+908: function sensitivePasswordModal({mode='unlock',configured=sensitivePasswordConfigured()}={}){
+909:   return new Promise(resolve=>{
+910:     document.getElementById('sensitivePasswordLayer')?.remove();
+911:     const change=mode==='set'&&configured;
+912:     const layer=document.createElement('div');
+913:     layer.id='sensitivePasswordLayer';
+914:     layer.className='issue-layer sensitive-password-layer';
+915:     layer._resolver=resolve;
+916:     layer.innerHTML=`<div class="issue-dialog sensitive-password-dialog">
+917:       <header><div><small>PRIVACY · SECURITY</small><h3>🔒 ${mode==='unlock'?'민감정보 열람 인증':(change?'민감정보 비밀번호 변경':'민감정보 비밀번호 설정')}</h3><p>${mode==='unlock'?'상세정보를 확인하려면 비밀번호를 입력하세요.':'비밀번호 원문은 저장하지 않고 해시값만 이 PC에 보관합니다.'}</p></div><button type="button" data-sensitive-modal-close>×</button></header>
+918:       <div class="sensitive-password-form">
+919:         ${change?'<label>현재 비밀번호<input type="password" autocomplete="current-password" data-sensitive-current></label>':''}
+920:         <label>${mode==='unlock'?'비밀번호':'새 비밀번호'}<input type="password" autocomplete="${mode==='unlock'?'current-password':'new-password'}" data-sensitive-first></label>
+921:         ${mode==='set'?'<label>새 비밀번호 확인<input type="password" autocomplete="new-password" data-sensitive-second></label>':''}
+922:         <p class="sensitive-password-error" data-sensitive-error></p>
+923:       </div>
+924:       <div class="modal-actions"><button type="button" class="btn secondary" data-sensitive-modal-close>취소</button><button type="button" class="btn primary" data-sensitive-modal-submit>${mode==='unlock'?'인증':'저장'}</button></div>
+925:     </div>`;
+926:     document.body.appendChild(layer);
+927:     const error=msg=>{const el=layer.querySelector('[data-sensitive-error]');if(el)el.textContent=msg||'';};
+928:     const cancel=()=>closeSensitivePasswordModal(null);
+929:     layer.querySelectorAll('[data-sensitive-modal-close]').forEach(b=>b.onclick=cancel);
+930:     layer.onclick=e=>{if(e.target===layer)cancel();};
+===== MAIN notice:save 2256-2326 =====
+2256:       "관리자여부":payload.admin!=null?(payload.admin?"Y":"N"):String(matrix[rowIndex]?.[idx("관리자여부")]||"N"),
+2257:       "담당학년":String(payload.grade??matrix[rowIndex]?.[idx("담당학년")]??"1").trim(),
+2258:       "담당반":String(payload.classNo??matrix[rowIndex]?.[idx("담당반")]??"").trim(),
+2259:       "조회범위":String(payload.viewScope??matrix[rowIndex]?.[idx("조회범위")]??"").trim(),
+2260:       "수정범위":String(payload.editScope??matrix[rowIndex]?.[idx("수정범위")]??"").trim(),
+2261:       "사용여부":payload.active!=null?(payload.active?"Y":"N"):String(matrix[rowIndex]?.[idx("사용여부")]||"Y")
+2262:     };
+2263:     const row=Array.from({length:headers.length},(_,i)=>matrix[rowIndex]?.[i]??"");
+2264:     for (const [name,value] of Object.entries(updates)) { const col=idx(name); if(col>=0) row[col]=value; }
+2265:     await updateSheetValues(token,UEP_SPREADSHEET_ID,`'01_사용자계정'!A${rowIndex+1}:${columnLetter(headers.length-1)}${rowIndex+1}`,[row]);
+2266:     liveDataCache=null; liveDataFetchedAt=0;
+2267:     return {ok:true,id};
+2268:   } catch(error) { return {ok:false,reason:error?.message||"사용자 권한 저장 실패"}; }
+2269: });
+2270: 
+2271: ipcMain.handle("notice:save", async (_event, payload = {}) => {
+2272:   try {
+2273:     const account = await readEncrypted(credentialPath());
+2274:     if (!validateServiceAccount(account)) throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+2275:     const token = await getSheetsToken(account);
+2276:     const nowIso = new Date().toISOString();
+2277:     const id = String(payload.id || `NTC-${nowIso.replace(/[-:.TZ]/g, "").slice(0,14)}`);
+2278:     const matrix = await readNoticeSheetMatrix(token, "40_공지마감", "A1:AZ2000");
+2279:     const header = findHeaderRowByRequired(matrix,["공지ID","제목","상태"]);
+2280:     if(!header) throw new Error("40_공지마감 헤더를 찾지 못했습니다.");
+2281:     const headers=header.headers.slice(), idCol=headers.indexOf("공지ID");
+2282:     if(!payload.id){
+2283:       const idx=name=>headers.indexOf(name), same=matrix.find((r,i)=>i>header.index&&String(r?.[idx("제목")]||"").trim()===String(payload.title||"").trim()&&String(r?.[idx("내용")]||"").trim()===String(payload.content||"").trim()&&String(r?.[idx("대상반")]||"전체").trim()===String(payload.targetClass||"전체").trim()&&String(r?.[idx("게시일")]||"").slice(0,10)===String(payload.postDate||"").slice(0,10)&&!["삭제","종료"].includes(String(r?.[idx("상태")]||"게시")));
+2284:       if(same)return {ok:true,id:String(same[idCol]||id),duplicate:true};
+2285:     }
+2286:     // 기존 시트에 마감유형 컬럼이 아직 없으면 데이터 손상 없이 마지막 열에 자동 추가한다.
+2287:     if(headers.indexOf("마감유형")<0){
+2288:       const col=headers.length;
+2289:       await updateSheetValues(token,UEP_SPREADSHEET_ID,`'40_공지마감'!${columnLetter(col)}${header.index+1}:${columnLetter(col)}${header.index+1}`,[["마감유형"]]);
+2290:       headers.push("마감유형");
+2291:     }
+2292:     const row=noticePayloadRow(payload,id,nowIso,headers);
+2293:     const endCol=columnLetter(headers.length-1);
+2294:     if (payload.id) {
+2295:       const rowIndex = matrix.findIndex((r,i)=>i>header.index && String(r?.[idCol]||"")===id);
+2296:       if (rowIndex < 0) throw new Error("수정할 공지를 40_공지마감에서 찾지 못했습니다.");
+2297:       await updateSheetValues(token, UEP_SPREADSHEET_ID, `'40_공지마감'!A${rowIndex+1}:${endCol}${rowIndex+1}`, [row]);
+2298:     } else {
+2299:       await appendSheetValues(token, UEP_SPREADSHEET_ID, `'40_공지마감'!A:${endCol}`, [row]);
+2300:     }
+2301:     liveDataCache = null; liveDataFetchedAt = 0;
+2302:     return { ok: true, id };
+2303:   } catch(error) { return {ok:false,reason:error?.message||"공지 저장 실패"}; }
+2304: });
+2305: ipcMain.handle("notice:delete", async (_event, id = "") => {
+2306:   try {
+2307:     const account=await readEncrypted(credentialPath()); if(!validateServiceAccount(account)) throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+2308:     const token=await getSheetsToken(account), matrix=await readNoticeSheetMatrix(token,"40_공지마감","A1:V2000");
+2309:     const header=findHeaderRowByRequired(matrix,["공지ID","상태"]); if(!header) throw new Error("40_공지마감 헤더를 찾지 못했습니다.");
+2310:     const h=header.index, headers=header.headers, idCol=headers.indexOf("공지ID"), statusCol=headers.indexOf("상태"), modifiedCol=headers.indexOf("수정일시");
+2311:     const rowIndex=matrix.findIndex((r,i)=>i>h&&String(r?.[idCol]||"")===String(id)); if(rowIndex<0) throw new Error("삭제할 공지를 찾지 못했습니다.");
+2312:     if(statusCol>=0) await updateSheetValues(token,UEP_SPREADSHEET_ID,`'40_공지마감'!${columnLetter(statusCol)}${rowIndex+1}:${columnLetter(statusCol)}${rowIndex+1}` ,[["삭제"]]);
+2313:     if(modifiedCol>=0) await updateSheetValues(token,UEP_SPREADSHEET_ID,`'40_공지마감'!${columnLetter(modifiedCol)}${rowIndex+1}:${columnLetter(modifiedCol)}${rowIndex+1}` ,[[new Date().toISOString()]]);
+2314:     liveDataCache=null;liveDataFetchedAt=0;return {ok:true,id};
+2315:   } catch(error){return {ok:false,reason:error?.message||"공지 삭제 실패"};}
+2316: });
+2317: ipcMain.handle("notice:receiptSave", async (_event, payload={}) => {
+2318:   try {
+2319:     const auth=await resolveGoogleReadAuth().catch(()=>null);
+2320:     if(auth?.mode==='school_read_api'){
+2321:       // __UEP_08164_NOTICE_RECEIPT_SCHOOL_READ__
+2322:       const result=await schoolReadApiRequest(auth,{action:'notice-receipt-save',noticeId:String(payload.noticeId||'').trim(),teacher:String(payload.teacher||'').trim(),userId:String(payload.userId||'').trim(),confirmedAt:new Date().toISOString()}).catch(error=>({ok:false,reason:error?.message||'School Read 공지확인 저장 실패'}));
+2323:       if(result?.ok)return result;
+2324:       return {ok:false,reason:result?.reason||result?.message||'School Read 공지확인 저장 기능이 아직 배포되지 않았습니다.',requiresSchoolReadWrite:true};
+2325:     }
+2326:     const account=await readEncrypted(credentialPath()); if(!validateServiceAccount(account)) throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+===== MAIN lunchDuty:save 2205-2275 =====
+2205: ipcMain.handle("inputCenter:readAsset", async (_event,filePath="") => readInputCenterAsset(filePath));
+2206: ipcMain.handle("inputCenter:openAsset", async (_event,filePath="") => openInputCenterAsset(filePath));
+2207: ipcMain.handle("inputCenter:ocrBatch", async (_event,payload={}) => ocrInputCenterBatch(payload));
+2208: ipcMain.handle("student:contactSave", async (_event, payload={}) => saveStudentContact(payload));
+2209: ipcMain.handle("program:operationSave", async (_event, payload={}) => saveProgramOperation(payload));
+2210: ipcMain.handle("attendance:officialSave", async (_event, payload={}) => saveOfficialAttendance(payload));
+2211: ipcMain.handle("attendance:officialDelete", async (_event, id="") => deleteOfficialAttendance(id));
+2212: ipcMain.handle("attendance:lateSave", async (_event, payload={}) => saveLateAttendance(payload));
+2213: ipcMain.handle("attendance:lateDelete", async (_event, id="") => deleteLateAttendance(id));
+2214: ipcMain.handle("counsel:save", async (_event, payload={}) => saveCounselRecord(payload));
+2215: ipcMain.handle("studentGuidance:save", async (_event, payload={}) => saveStudentGuidanceRecord(payload));
+2216:   ipcMain.handle("dormOuting:save", async (_event, payload={}) => saveDormOuting(payload));
+2217: ipcMain.handle("dormRule:save", async (_event, payload={}) => saveDormRule(payload));
+2218: ipcMain.handle("dormRule:delete", async (_event, id="") => deleteDormRule(id));
+2219: ipcMain.handle("nightDuty:save", async (_event, payload={}) => saveNightSupervisor(payload));
+2220: ipcMain.handle("lunchDuty:save", async (_event, payload={}) => saveLunchDuty(payload));
+2221: 
+2222: async function readNoticeSheetMatrix(token, sheetName, range) {
+2223:   const result = await readSheetBatch(token, UEP_SPREADSHEET_ID, [`'${sheetName}'!${range}`]);
+2224:   return result?.[0]?.values || [];
+2225: }
+2226: function noticePayloadRow(payload={}, id, nowIso, headerNames=[]) {
+2227:   const now = new Date(nowIso);
+2228:   const values={
+2229:     "공지ID":id,"학년도":String(payload.schoolYear||now.getFullYear()),"구분":String(payload.type||"공지"),
+2230:     "제목":String(payload.title||"").trim(),"내용":String(payload.content||"").trim(),
+2231:     "대상학년":String(payload.targetGrade||"1"),"대상반":String(payload.targetClass||"전체"),
+2232:     "게시일":String(payload.postDate||nowIso.slice(0,10)),"마감일시":String(payload.deadline||""),
+2233:     "확인필요":payload.confirmRequired===false?"N":"Y","제출필요":payload.submitRequired?"Y":"N",
+2234:     "담당부서":String(payload.department||"1학년부"),"담당자":String(payload.author||""),"상태":String(payload.status||"게시"),
+2235:     "수정일시":nowIso,"수정자":String(payload.author||"UEP"),"비고":String(payload.note||"UEP 화면 입력"),
+2236:     "공지성격":String(payload.noticeKind||payload.type||"일반공지"),"종례전달":payload.homeroomNotice?"Y":"N",
+2237:     "중요":payload.important?"Y":"N","상단알림":payload.topAlert?"Y":"N","게시종료일":String(payload.endDate||""),
+2238:     "마감유형":String(payload.deadlineType||"")
+2239:   };
+2240:   if(Array.isArray(headerNames)&&headerNames.length)return headerNames.map(name=>values[name]??"");
+2241:   return Object.values(values).slice(0,22);
+2242: }
+2243: ipcMain.handle("userAccount:update", async (_event, payload = {}) => {
+2244:   try {
+2245:     const account = await readEncrypted(credentialPath());
+2246:     if (!validateServiceAccount(account)) throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+2247:     const token = await getSheetsToken(account);
+2248:     const matrix = await readNoticeSheetMatrix(token, "01_사용자계정", "A1:Z500");
+2249:     const header = findHeaderRowByRequired(matrix,["사용자ID","이메일","성명","역할","사용여부"]);
+2250:     if(!header) throw new Error("01_사용자계정 헤더를 찾지 못했습니다.");
+2251:     const headers=header.headers, idx=name=>headers.indexOf(name), id=String(payload.id||"").trim();
+2252:     const rowIndex=matrix.findIndex((row,i)=>i>header.index&&String(row?.[idx("사용자ID")]||"").trim()===id);
+2253:     if(rowIndex<0) throw new Error("수정할 사용자를 찾지 못했습니다.");
+2254:     const updates={
+2255:       "역할":String(payload.role??matrix[rowIndex]?.[idx("역할")]??"").trim(),
+2256:       "관리자여부":payload.admin!=null?(payload.admin?"Y":"N"):String(matrix[rowIndex]?.[idx("관리자여부")]||"N"),
+2257:       "담당학년":String(payload.grade??matrix[rowIndex]?.[idx("담당학년")]??"1").trim(),
+2258:       "담당반":String(payload.classNo??matrix[rowIndex]?.[idx("담당반")]??"").trim(),
+2259:       "조회범위":String(payload.viewScope??matrix[rowIndex]?.[idx("조회범위")]??"").trim(),
+2260:       "수정범위":String(payload.editScope??matrix[rowIndex]?.[idx("수정범위")]??"").trim(),
+2261:       "사용여부":payload.active!=null?(payload.active?"Y":"N"):String(matrix[rowIndex]?.[idx("사용여부")]||"Y")
+2262:     };
+2263:     const row=Array.from({length:headers.length},(_,i)=>matrix[rowIndex]?.[i]??"");
+2264:     for (const [name,value] of Object.entries(updates)) { const col=idx(name); if(col>=0) row[col]=value; }
+2265:     await updateSheetValues(token,UEP_SPREADSHEET_ID,`'01_사용자계정'!A${rowIndex+1}:${columnLetter(headers.length-1)}${rowIndex+1}`,[row]);
+2266:     liveDataCache=null; liveDataFetchedAt=0;
+2267:     return {ok:true,id};
+2268:   } catch(error) { return {ok:false,reason:error?.message||"사용자 권한 저장 실패"}; }
+2269: });
+2270: 
+2271: ipcMain.handle("notice:save", async (_event, payload = {}) => {
+2272:   try {
+2273:     const account = await readEncrypted(credentialPath());
+2274:     if (!validateServiceAccount(account)) throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+2275:     const token = await getSheetsToken(account);
+===== MAIN userAccount:update 2228-2298 =====
+2228:   const values={
+2229:     "공지ID":id,"학년도":String(payload.schoolYear||now.getFullYear()),"구분":String(payload.type||"공지"),
+2230:     "제목":String(payload.title||"").trim(),"내용":String(payload.content||"").trim(),
+2231:     "대상학년":String(payload.targetGrade||"1"),"대상반":String(payload.targetClass||"전체"),
+2232:     "게시일":String(payload.postDate||nowIso.slice(0,10)),"마감일시":String(payload.deadline||""),
+2233:     "확인필요":payload.confirmRequired===false?"N":"Y","제출필요":payload.submitRequired?"Y":"N",
+2234:     "담당부서":String(payload.department||"1학년부"),"담당자":String(payload.author||""),"상태":String(payload.status||"게시"),
+2235:     "수정일시":nowIso,"수정자":String(payload.author||"UEP"),"비고":String(payload.note||"UEP 화면 입력"),
+2236:     "공지성격":String(payload.noticeKind||payload.type||"일반공지"),"종례전달":payload.homeroomNotice?"Y":"N",
+2237:     "중요":payload.important?"Y":"N","상단알림":payload.topAlert?"Y":"N","게시종료일":String(payload.endDate||""),
+2238:     "마감유형":String(payload.deadlineType||"")
+2239:   };
+2240:   if(Array.isArray(headerNames)&&headerNames.length)return headerNames.map(name=>values[name]??"");
+2241:   return Object.values(values).slice(0,22);
+2242: }
+2243: ipcMain.handle("userAccount:update", async (_event, payload = {}) => {
+2244:   try {
+2245:     const account = await readEncrypted(credentialPath());
+2246:     if (!validateServiceAccount(account)) throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+2247:     const token = await getSheetsToken(account);
+2248:     const matrix = await readNoticeSheetMatrix(token, "01_사용자계정", "A1:Z500");
+2249:     const header = findHeaderRowByRequired(matrix,["사용자ID","이메일","성명","역할","사용여부"]);
+2250:     if(!header) throw new Error("01_사용자계정 헤더를 찾지 못했습니다.");
+2251:     const headers=header.headers, idx=name=>headers.indexOf(name), id=String(payload.id||"").trim();
+2252:     const rowIndex=matrix.findIndex((row,i)=>i>header.index&&String(row?.[idx("사용자ID")]||"").trim()===id);
+2253:     if(rowIndex<0) throw new Error("수정할 사용자를 찾지 못했습니다.");
+2254:     const updates={
+2255:       "역할":String(payload.role??matrix[rowIndex]?.[idx("역할")]??"").trim(),
+2256:       "관리자여부":payload.admin!=null?(payload.admin?"Y":"N"):String(matrix[rowIndex]?.[idx("관리자여부")]||"N"),
+2257:       "담당학년":String(payload.grade??matrix[rowIndex]?.[idx("담당학년")]??"1").trim(),
+2258:       "담당반":String(payload.classNo??matrix[rowIndex]?.[idx("담당반")]??"").trim(),
+2259:       "조회범위":String(payload.viewScope??matrix[rowIndex]?.[idx("조회범위")]??"").trim(),
+2260:       "수정범위":String(payload.editScope??matrix[rowIndex]?.[idx("수정범위")]??"").trim(),
+2261:       "사용여부":payload.active!=null?(payload.active?"Y":"N"):String(matrix[rowIndex]?.[idx("사용여부")]||"Y")
+2262:     };
+2263:     const row=Array.from({length:headers.length},(_,i)=>matrix[rowIndex]?.[i]??"");
+2264:     for (const [name,value] of Object.entries(updates)) { const col=idx(name); if(col>=0) row[col]=value; }
+2265:     await updateSheetValues(token,UEP_SPREADSHEET_ID,`'01_사용자계정'!A${rowIndex+1}:${columnLetter(headers.length-1)}${rowIndex+1}`,[row]);
+2266:     liveDataCache=null; liveDataFetchedAt=0;
+2267:     return {ok:true,id};
+2268:   } catch(error) { return {ok:false,reason:error?.message||"사용자 권한 저장 실패"}; }
+2269: });
+2270: 
+2271: ipcMain.handle("notice:save", async (_event, payload = {}) => {
+2272:   try {
+2273:     const account = await readEncrypted(credentialPath());
+2274:     if (!validateServiceAccount(account)) throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+2275:     const token = await getSheetsToken(account);
+2276:     const nowIso = new Date().toISOString();
+2277:     const id = String(payload.id || `NTC-${nowIso.replace(/[-:.TZ]/g, "").slice(0,14)}`);
+2278:     const matrix = await readNoticeSheetMatrix(token, "40_공지마감", "A1:AZ2000");
+2279:     const header = findHeaderRowByRequired(matrix,["공지ID","제목","상태"]);
+2280:     if(!header) throw new Error("40_공지마감 헤더를 찾지 못했습니다.");
+2281:     const headers=header.headers.slice(), idCol=headers.indexOf("공지ID");
+2282:     if(!payload.id){
+2283:       const idx=name=>headers.indexOf(name), same=matrix.find((r,i)=>i>header.index&&String(r?.[idx("제목")]||"").trim()===String(payload.title||"").trim()&&String(r?.[idx("내용")]||"").trim()===String(payload.content||"").trim()&&String(r?.[idx("대상반")]||"전체").trim()===String(payload.targetClass||"전체").trim()&&String(r?.[idx("게시일")]||"").slice(0,10)===String(payload.postDate||"").slice(0,10)&&!["삭제","종료"].includes(String(r?.[idx("상태")]||"게시")));
+2284:       if(same)return {ok:true,id:String(same[idCol]||id),duplicate:true};
+2285:     }
+2286:     // 기존 시트에 마감유형 컬럼이 아직 없으면 데이터 손상 없이 마지막 열에 자동 추가한다.
+2287:     if(headers.indexOf("마감유형")<0){
+2288:       const col=headers.length;
+2289:       await updateSheetValues(token,UEP_SPREADSHEET_ID,`'40_공지마감'!${columnLetter(col)}${header.index+1}:${columnLetter(col)}${header.index+1}`,[["마감유형"]]);
+2290:       headers.push("마감유형");
+2291:     }
+2292:     const row=noticePayloadRow(payload,id,nowIso,headers);
+2293:     const endCol=columnLetter(headers.length-1);
+2294:     if (payload.id) {
+2295:       const rowIndex = matrix.findIndex((r,i)=>i>header.index && String(r?.[idCol]||"")===id);
+2296:       if (rowIndex < 0) throw new Error("수정할 공지를 40_공지마감에서 찾지 못했습니다.");
+2297:       await updateSheetValues(token, UEP_SPREADSHEET_ID, `'40_공지마감'!A${rowIndex+1}:${endCol}${rowIndex+1}`, [row]);
+2298:     } else {
+===== MAIN student:contactSave 2193-2263 =====
+2193:     const verifiedIds=new Set(actions.map(a=>String(a.rec?.id||'')).filter(Boolean));const statusWrites=[];
+2194:     for(let i=0;i<src.length;i++)if(verifiedIds.has(String(src[i]?.[0]||'')))statusWrites.push({range:`'02_자료원본'!R${i+4}:R${i+4}`,values:[['정규화완료']]});
+2195:     await batchUpdateSheetValues(token,UEP_INPUT_CENTER_SPREADSHEET_ID,statusWrites);
+2196:     liveDataCache=null;liveDataFetchedAt=0;return {ok:true,targetSheet,programName,newCount,duplicateCount,updateCount,errorCount:0,count:newCount+updateCount,verifiedCount:actions.length};
+2197:   }catch(error){return {ok:false,reason:error?.message||String(error)};}
+2198: }
+2199: 
+2200: ipcMain.handle("inputCenter:selectFiles", async (event) => selectInputCenterFiles(event));
+2201: ipcMain.handle("inputCenter:save", async (_event,payload={}) => saveInputCenterRecords(payload));
+2202: ipcMain.handle("inputCenter:classifyBatch", async (_event,payload={}) => classifyInputCenterBatch(payload));
+2203: ipcMain.handle("inputCenter:normalizeBatch", async (_event,payload={}) => normalizeInputCenterBatch(payload));
+2204: ipcMain.handle("inputCenter:openFolder", async () => openInputCenterFolder());
+2205: ipcMain.handle("inputCenter:readAsset", async (_event,filePath="") => readInputCenterAsset(filePath));
+2206: ipcMain.handle("inputCenter:openAsset", async (_event,filePath="") => openInputCenterAsset(filePath));
+2207: ipcMain.handle("inputCenter:ocrBatch", async (_event,payload={}) => ocrInputCenterBatch(payload));
+2208: ipcMain.handle("student:contactSave", async (_event, payload={}) => saveStudentContact(payload));
+2209: ipcMain.handle("program:operationSave", async (_event, payload={}) => saveProgramOperation(payload));
+2210: ipcMain.handle("attendance:officialSave", async (_event, payload={}) => saveOfficialAttendance(payload));
+2211: ipcMain.handle("attendance:officialDelete", async (_event, id="") => deleteOfficialAttendance(id));
+2212: ipcMain.handle("attendance:lateSave", async (_event, payload={}) => saveLateAttendance(payload));
+2213: ipcMain.handle("attendance:lateDelete", async (_event, id="") => deleteLateAttendance(id));
+2214: ipcMain.handle("counsel:save", async (_event, payload={}) => saveCounselRecord(payload));
+2215: ipcMain.handle("studentGuidance:save", async (_event, payload={}) => saveStudentGuidanceRecord(payload));
+2216:   ipcMain.handle("dormOuting:save", async (_event, payload={}) => saveDormOuting(payload));
+2217: ipcMain.handle("dormRule:save", async (_event, payload={}) => saveDormRule(payload));
+2218: ipcMain.handle("dormRule:delete", async (_event, id="") => deleteDormRule(id));
+2219: ipcMain.handle("nightDuty:save", async (_event, payload={}) => saveNightSupervisor(payload));
+2220: ipcMain.handle("lunchDuty:save", async (_event, payload={}) => saveLunchDuty(payload));
+2221: 
+2222: async function readNoticeSheetMatrix(token, sheetName, range) {
+2223:   const result = await readSheetBatch(token, UEP_SPREADSHEET_ID, [`'${sheetName}'!${range}`]);
+2224:   return result?.[0]?.values || [];
+2225: }
+2226: function noticePayloadRow(payload={}, id, nowIso, headerNames=[]) {
+2227:   const now = new Date(nowIso);
+2228:   const values={
+2229:     "공지ID":id,"학년도":String(payload.schoolYear||now.getFullYear()),"구분":String(payload.type||"공지"),
+2230:     "제목":String(payload.title||"").trim(),"내용":String(payload.content||"").trim(),
+2231:     "대상학년":String(payload.targetGrade||"1"),"대상반":String(payload.targetClass||"전체"),
+2232:     "게시일":String(payload.postDate||nowIso.slice(0,10)),"마감일시":String(payload.deadline||""),
+2233:     "확인필요":payload.confirmRequired===false?"N":"Y","제출필요":payload.submitRequired?"Y":"N",
+2234:     "담당부서":String(payload.department||"1학년부"),"담당자":String(payload.author||""),"상태":String(payload.status||"게시"),
+2235:     "수정일시":nowIso,"수정자":String(payload.author||"UEP"),"비고":String(payload.note||"UEP 화면 입력"),
+2236:     "공지성격":String(payload.noticeKind||payload.type||"일반공지"),"종례전달":payload.homeroomNotice?"Y":"N",
+2237:     "중요":payload.important?"Y":"N","상단알림":payload.topAlert?"Y":"N","게시종료일":String(payload.endDate||""),
+2238:     "마감유형":String(payload.deadlineType||"")
+2239:   };
+2240:   if(Array.isArray(headerNames)&&headerNames.length)return headerNames.map(name=>values[name]??"");
+2241:   return Object.values(values).slice(0,22);
+2242: }
+2243: ipcMain.handle("userAccount:update", async (_event, payload = {}) => {
+2244:   try {
+2245:     const account = await readEncrypted(credentialPath());
+2246:     if (!validateServiceAccount(account)) throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+2247:     const token = await getSheetsToken(account);
+2248:     const matrix = await readNoticeSheetMatrix(token, "01_사용자계정", "A1:Z500");
+2249:     const header = findHeaderRowByRequired(matrix,["사용자ID","이메일","성명","역할","사용여부"]);
+2250:     if(!header) throw new Error("01_사용자계정 헤더를 찾지 못했습니다.");
+2251:     const headers=header.headers, idx=name=>headers.indexOf(name), id=String(payload.id||"").trim();
+2252:     const rowIndex=matrix.findIndex((row,i)=>i>header.index&&String(row?.[idx("사용자ID")]||"").trim()===id);
+2253:     if(rowIndex<0) throw new Error("수정할 사용자를 찾지 못했습니다.");
+2254:     const updates={
+2255:       "역할":String(payload.role??matrix[rowIndex]?.[idx("역할")]??"").trim(),
+2256:       "관리자여부":payload.admin!=null?(payload.admin?"Y":"N"):String(matrix[rowIndex]?.[idx("관리자여부")]||"N"),
+2257:       "담당학년":String(payload.grade??matrix[rowIndex]?.[idx("담당학년")]??"1").trim(),
+2258:       "담당반":String(payload.classNo??matrix[rowIndex]?.[idx("담당반")]??"").trim(),
+2259:       "조회범위":String(payload.viewScope??matrix[rowIndex]?.[idx("조회범위")]??"").trim(),
+2260:       "수정범위":String(payload.editScope??matrix[rowIndex]?.[idx("수정범위")]??"").trim(),
+2261:       "사용여부":payload.active!=null?(payload.active?"Y":"N"):String(matrix[rowIndex]?.[idx("사용여부")]||"Y")
+2262:     };
+2263:     const row=Array.from({length:headers.length},(_,i)=>matrix[rowIndex]?.[i]??"");
+===== MAIN function write 240-310 =====
+240:     value && value.type === "service_account" &&
+241:     typeof value.client_email === "string" &&
+242:     typeof value.private_key === "string" &&
+243:     value.private_key.startsWith("-----BEGIN PRIVATE KEY-----") &&
+244:     value.token_uri === "https://oauth2.googleapis.com/token"
+245:   );
+246: }
+247: 
+248: function recoveryKey(salt) {
+249:   // safeStorage가 Windows/Chromium 키 문제로 복호화에 실패할 때만 사용하는 로컬 복구키입니다.
+250:   // 동일 Windows 사용자/PC에서 재부팅 후에도 안정적으로 재생성됩니다.
+251:   const identity = `${os.hostname()}|${os.userInfo().username}|UEP-CREDENTIAL-RECOVERY-v1`;
+252:   return crypto.scryptSync(identity, salt, 32);
+253: }
+254: 
+255: async function writeCredentialRecovery(value) {
+256:   const salt = crypto.randomBytes(16), iv = crypto.randomBytes(12);
+257:   const key = recoveryKey(salt);
+258:   const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+259:   const encrypted = Buffer.concat([cipher.update(JSON.stringify(value), "utf8"), cipher.final()]);
+260:   const payload = {
+261:     version: 1, algorithm: "aes-256-gcm",
+262:     salt: salt.toString("base64"), iv: iv.toString("base64"),
+263:     tag: cipher.getAuthTag().toString("base64"), data: encrypted.toString("base64")
+264:   };
+265:   await fs.mkdir(path.dirname(credentialRecoveryPath()), { recursive: true });
+266:   await fs.writeFile(credentialRecoveryPath(), JSON.stringify(payload), "utf8");
+267: }
+268: 
+269: async function readCredentialRecovery() {
+270:   const payload = JSON.parse(await fs.readFile(credentialRecoveryPath(), "utf8"));
+271:   if (!payload || payload.version !== 1 || payload.algorithm !== "aes-256-gcm") throw new Error("invalid recovery credential");
+272:   const salt=Buffer.from(payload.salt,"base64"), iv=Buffer.from(payload.iv,"base64"), tag=Buffer.from(payload.tag,"base64"), data=Buffer.from(payload.data,"base64");
+273:   const decipher = crypto.createDecipheriv("aes-256-gcm", recoveryKey(salt), iv);
+274:   decipher.setAuthTag(tag);
+275:   return JSON.parse(Buffer.concat([decipher.update(data), decipher.final()]).toString("utf8"));
+276: }
+277: 
+278: async function saveEncrypted(filePath, value) {
+279:   await fs.mkdir(path.dirname(filePath), { recursive: true });
+280:   if (safeStorage.isEncryptionAvailable()) {
+281:     await fs.writeFile(filePath, safeStorage.encryptString(JSON.stringify(value)));
+282:   } else {
+283:     // 인증정보는 아래 복구 저장소가 있으므로, 다른 보안값은 기존처럼 실패시킵니다.
+284:     if (path.resolve(filePath) !== path.resolve(credentialPath())) throw new Error("Windows 보안 저장소를 사용할 수 없습니다.");
+285:   }
+286:   if (path.resolve(filePath) === path.resolve(credentialPath())) await writeCredentialRecovery(value);
+287: }
+288: 
+289: // __UEP_GOOGLE_MISSING_CREDENTIAL_08069__
+290: async function readEncrypted(filePath) {
+291:   let encrypted = null;
+292:   try { encrypted = await fs.readFile(filePath); } catch (readError) {
+293:     if (path.resolve(filePath) === path.resolve(credentialPath())) {
+294:       try { return await readCredentialRecovery(); } catch {}
+295:     }
+296:     if (path.resolve(filePath) === path.resolve(credentialPath()) && (readError?.code === "ENOENT" || /no such file/i.test(String(readError?.message||"")))) {
+297:       const friendly = new Error("담임 배포 PC의 Google 시트 연결 승인이 아직 준비되지 않았습니다.");
+298:       friendly.code = "UEP_GOOGLE_CREDENTIAL_MISSING";
+299:       friendly.setupRequired = true;
+300:       throw friendly;
+301:     }
+302:     throw readError;
+303:   }
+304:   if (safeStorage.isEncryptionAvailable()) {
+305:     try { return JSON.parse(safeStorage.decryptString(encrypted)); } catch {}
+306:   }
+307:   // 일부 구버전/수동 이관 파일이 평문 JSON인 경우 현재 형식으로 재저장합니다.
+308:   try {
+309:     const legacy = JSON.parse(encrypted.toString("utf8"));
+310:     if (legacy && typeof legacy === "object") { await saveEncrypted(filePath, legacy); return legacy; }
+===== MAIN function write 407-477 =====
+407:   const identity=`${os.hostname()}|${os.userInfo().username}|UEP-GOOGLE-USER-OAUTH-v1`;
+408:   return crypto.scryptSync(identity,salt,32);
+409: }
+410: function encodeGoogleUserOAuthRecovery(value){
+411:   const salt=crypto.randomBytes(16),iv=crypto.randomBytes(12),key=googleUserOAuthRecoveryKey(salt);
+412:   const cipher=crypto.createCipheriv('aes-256-gcm',key,iv);
+413:   const encrypted=Buffer.concat([cipher.update(JSON.stringify(value),'utf8'),cipher.final()]);
+414:   return {version:1,algorithm:'aes-256-gcm',salt:salt.toString('base64'),iv:iv.toString('base64'),tag:cipher.getAuthTag().toString('base64'),data:encrypted.toString('base64')};
+415: }
+416: function decodeGoogleUserOAuthRecovery(payload){
+417:   if(!payload||payload.version!==1||payload.algorithm!=='aes-256-gcm')throw new Error('invalid OAuth recovery token');
+418:   const salt=Buffer.from(payload.salt,'base64'),iv=Buffer.from(payload.iv,'base64'),tag=Buffer.from(payload.tag,'base64'),data=Buffer.from(payload.data,'base64');
+419:   const decipher=crypto.createDecipheriv('aes-256-gcm',googleUserOAuthRecoveryKey(salt),iv);decipher.setAuthTag(tag);
+420:   return JSON.parse(Buffer.concat([decipher.update(data),decipher.final()]).toString('utf8'));
+421: }
+422: async function writeGoogleUserOAuthRecovery(value){
+423:   const payload=encodeGoogleUserOAuthRecovery(value);
+424:   for(const target of [googleUserOAuthRecoveryPath(),googleUserOAuthCanonicalRecoveryPath()]){
+425:     await fs.mkdir(path.dirname(target),{recursive:true});
+426:     await fs.writeFile(target,JSON.stringify(payload),'utf8');
+427:   }
+428: }
+429: async function readGoogleUserOAuthRecovery(){
+430:   for(const target of [googleUserOAuthCanonicalRecoveryPath(),googleUserOAuthRecoveryPath()]){
+431:     try{return decodeGoogleUserOAuthRecovery(JSON.parse(await fs.readFile(target,'utf8')));}catch{}
+432:   }
+433:   throw new Error('OAuth recovery token not found');
+434: }
+435: async function saveGoogleUserOAuth(value){
+436:   let primarySaved=false;
+437:   if(safeStorage.isEncryptionAvailable()){
+438:     const encrypted=safeStorage.encryptString(JSON.stringify(value));
+439:     for(const target of [googleUserOAuthCanonicalPath(),googleUserOAuthPath()]){
+440:       try{await fs.mkdir(path.dirname(target),{recursive:true});await fs.writeFile(target,encrypted);primarySaved=true;}catch{}
+441:     }
+442:   }
+443:   await writeGoogleUserOAuthRecovery(value);
+444:   return {primarySaved,recoverySaved:true,canonical:true};
+445: }
+446: async function readGoogleUserOAuth(){
+447:   for(const target of [googleUserOAuthCanonicalPath(),googleUserOAuthPath()]){
+448:     try{
+449:       const encrypted=await fs.readFile(target);
+450:       if(safeStorage.isEncryptionAvailable()){
+451:         try{const value=JSON.parse(safeStorage.decryptString(encrypted));if(value&&typeof value==='object'){await saveGoogleUserOAuth(value);return value;}}catch{}
+452:       }
+453:       try{const legacy=JSON.parse(encrypted.toString('utf8'));if(legacy&&typeof legacy==='object'){await saveGoogleUserOAuth(legacy);return legacy;}}catch{}
+454:     }catch{}
+455:   }
+456:   try{
+457:     const recovered=await readGoogleUserOAuthRecovery();
+458:     if(recovered&&typeof recovered==='object'){await saveGoogleUserOAuth(recovered);return recovered;}
+459:   }catch{}
+460:   return null;
+461: }
+462: async function googleUserInfo(accessToken){
+463:   const response=await net.fetch('https://openidconnect.googleapis.com/v1/userinfo',{headers:{authorization:`Bearer ${accessToken}`}});
+464:   if(!response.ok) throw googleOAuthError(`Google 사용자 확인 실패 (${response.status})`,'UEP_GOOGLE_OAUTH_USERINFO_FAILED');
+465:   return await response.json();
+466: }
+467: async function refreshGoogleUserOAuth(saved){
+468:   if(!saved?.refresh_token) throw googleOAuthError("Google 계정 연결을 다시 승인해 주세요.","UEP_GOOGLE_USER_AUTH_REQUIRED");
+469:   const clientId=await loadGoogleOAuthClientId();
+470:   if(String(saved.client_id||'').trim() && String(saved.client_id).trim()!==clientId){
+471:     await disconnectGoogleUser();
+472:     throw googleOAuthError('Google 연결 설정이 갱신되었습니다. Google 계정 연결을 한 번만 다시 승인해 주세요.','UEP_GOOGLE_USER_AUTH_REQUIRED');
+473:   }
+474:   const body=new URLSearchParams({client_id:clientId,refresh_token:String(saved.refresh_token),grant_type:'refresh_token'});
+475:   const response=await net.fetch('https://oauth2.googleapis.com/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:body.toString()});
+476:   if(!response.ok){
+477:     let payload={},detail='',errCode='';
+===== MAIN function write 1840-1910 =====
+1840:       recoveredPeriods: day.recoveredPeriods || [],
+1841:       exactRowCount: day.rawRowCount || 0,
+1842:       gradeWideRowCount: day.gradeWideRowCount || 0,
+1843:       gradeMatchedRowCount: day.gradeMatchedRowCount || 0,
+1844:       error: day.error || "",
+1845:     };
+1846:   });
+1847:   return { year, semester, monday: ymd(monday), days, diagnostics, queryMode: "ALL_TI_YMD + TI_FROM_YMD/TI_TO_YMD 이중조회 · 1~9반 교차검증" };
+1848: }
+1849: 
+1850: async function readNeisCache() {
+1851:   try { return JSON.parse(await fs.readFile(neisCachePath(), "utf8")); }
+1852:   catch { return null; }
+1853: }
+1854: 
+1855: async function writeNeisCache(value) {
+1856:   await fs.mkdir(path.dirname(neisCachePath()), { recursive: true });
+1857:   await fs.writeFile(neisCachePath(), JSON.stringify(value, null, 2), "utf8");
+1858: }
+1859: 
+1860: async function fetchNeisDashboard(options = {}) {
+1861:   const targetDate = options.date ? new Date(`${options.date}T12:00:00`) : new Date();
+1862:   try {
+1863:     let apiKey = "";
+1864:     if (options.useApiKey) {
+1865:       const saved = await readEncrypted(neisApiKeyPath());
+1866:       apiKey = String(saved?.key || "").trim();
+1867:       if (!apiKey) throw new Error("NEIS 인증키가 등록되지 않았습니다.");
+1868:     }
+1869:     const school = await findNeisSchool({
+1870:       schoolName: options.schoolName || "운호고등학교",
+1871:       officeCode: options.officeCode || "",
+1872:       schoolCode: options.schoolCode || "",
+1873:       apiKey,
+1874:     });
+1875:     const mealsPromise = fetchNeisMeals(school, targetDate, apiKey);
+1876:     let timetableSource = "NEIS";
+1877:     let timetable;
+1878:     try {
+1879:       const comcigan = await fetchComciganTimetable({ ...options, date: targetDate, comciganSchoolCode: options.comciganSchoolCode || "69092" });
+1880:       timetable = comcigan.timetable;
+1881:       timetableSource = comcigan.offline ? "컴시간 저장자료" : "컴시간 웹";
+1882:     } catch (comciganError) {
+1883:       timetable = await fetchNeisTimetable(school, targetDate, options.grade || "1", options.classNo || "1", apiKey);
+1884:       timetableSource = "NEIS 대체";
+1885:       timetable.comciganError = comciganError?.message || String(comciganError);
+1886:     }
+1887:     const meals = await mealsPromise;
+1888:     const data = {
+1889:       ok: true,
+1890:       source: `급식 NEIS · 시간표 ${timetableSource}`,
+1891:       fetchedAt: new Date().toISOString(),
+1892:       offline: false,
+1893:       school,
+1894:       date: ymd(targetDate),
+1895:       grade: String(options.grade || "1"),
+1896:       classNo: String(options.classNo || "1"),
+1897:       meals,
+1898:       timetable,
+1899:       apiKeyUsed: Boolean(apiKey),
+1900:       diagnosticUrl: String(timetable?.days?.[0]?.exactUrl || "").replace(/([?&]KEY=)[^&]+/i,"$1***"),
+1901:       rawDiagnostic: Object.fromEntries((timetable?.days||[]).map(day=>[day.date, day.rawResponse || {}])),
+1902:     };
+1903:     await writeNeisCache(data);
+1904:     return data;
+1905:   } catch (error) {
+1906:     const cached = await readNeisCache();
+1907:     if (cached?.ok) {
+1908:       return { ...cached, offline: true, staleReason: error.message || "실시간 연결 실패" };
+1909:     }
+1910:     throw error;
+===== MAIN function write 1904-1974 =====
+1904:     return data;
+1905:   } catch (error) {
+1906:     const cached = await readNeisCache();
+1907:     if (cached?.ok) {
+1908:       return { ...cached, offline: true, staleReason: error.message || "실시간 연결 실패" };
+1909:     }
+1910:     throw error;
+1911:   }
+1912: }
+1913: 
+1914: async function readState() {
+1915:   try { return JSON.parse(await fs.readFile(statePath(), "utf8")); }
+1916:   catch { return null; }
+1917: }
+1918: let stateWriteChain = Promise.resolve();
+1919: async function writeStateNow(value) {
+1920:   const target = statePath();
+1921:   const dir = path.dirname(target);
+1922:   await fs.mkdir(dir, { recursive: true });
+1923: 
+1924:   // Each save gets its own temporary file. A fixed ".tmp" name can be
+1925:   // removed by a concurrent save, producing ENOENT during copy/rename.
+1926:   const temp = path.join(dir, `school-board-state.${process.pid}.${Date.now()}.${crypto.randomBytes(4).toString("hex")}.tmp`);
+1927:   const payload = JSON.stringify(value, null, 2);
+1928:   try {
+1929:     await fs.writeFile(temp, payload, "utf8");
+1930:     try {
+1931:       await fs.rename(temp, target);
+1932:     } catch (renameError) {
+1933:       // Windows may reject replacement by rename when the destination exists.
+1934:       // Fall back to a direct write; this keeps user data available instead
+1935:       // of failing the entire state:save IPC call.
+1936:       await fs.writeFile(target, payload, "utf8");
+1937:       try { await fs.unlink(temp); } catch {}
+1938:     }
+1939:   } finally {
+1940:     try { await fs.unlink(temp); } catch {}
+1941:   }
+1942:   return { ok: true, savedAt: new Date().toISOString() };
+1943: }
+1944: function writeState(value) {
+1945:   // Serialize renderer saves so rapid UI updates cannot race each other.
+1946:   const task = stateWriteChain.then(() => writeStateNow(value));
+1947:   stateWriteChain = task.catch(() => {});
+1948:   return task;
+1949: }
+1950: 
+1951: function createWindow() {
+1952:   const win = new BrowserWindow({
+1953:     width: 1500, height: 960, minWidth: 1050, minHeight: 700,
+1954:     backgroundColor: "#f4f8fd", title: "UNHO Education Platform (UEP)", frame: false,
+1955:     icon: path.join(__dirname, "..", "assets", "unho-uep-icon.png"),
+1956:     webPreferences: { preload: path.join(__dirname, "preload.cjs"), contextIsolation: true, nodeIntegration: false },
+1957:   });
+1958:   mainWindow = win;
+1959:   win.setMenuBarVisibility(false);
+1960:   win.on("close", () => {
+1961:     // A hidden Comcigan BrowserWindow used to keep Electron alive after the main
+1962:     // UI disappeared. Destroy auxiliary windows before the last visible window closes.
+1963:     destroyAuxiliaryWindows("main-window-close");
+1964:   });
+1965:   win.on("closed", () => {
+1966:     mainWindow = null;
+1967:     beginCleanShutdown("main-window-closed");
+1968:   });
+1969:   win.loadFile(path.join(__dirname, "..", "index.html"));
+1970: }
+1971: 
+1972: app.whenReady().then(async () => {
+1973:   await migrateStableUserData();
+1974:   ipcMain.handle("uep:schoolReadLogin", async (_event,payload={}) => { try{return await loginSchoolReadUser(payload);}catch(error){return {ok:false,code:error?.code||'UEP_SCHOOL_READ_ERROR',message:error?.message||String(error)};} });
+===== MAIN function write 1929-1999 =====
+1929:     await fs.writeFile(temp, payload, "utf8");
+1930:     try {
+1931:       await fs.rename(temp, target);
+1932:     } catch (renameError) {
+1933:       // Windows may reject replacement by rename when the destination exists.
+1934:       // Fall back to a direct write; this keeps user data available instead
+1935:       // of failing the entire state:save IPC call.
+1936:       await fs.writeFile(target, payload, "utf8");
+1937:       try { await fs.unlink(temp); } catch {}
+1938:     }
+1939:   } finally {
+1940:     try { await fs.unlink(temp); } catch {}
+1941:   }
+1942:   return { ok: true, savedAt: new Date().toISOString() };
+1943: }
+1944: function writeState(value) {
+1945:   // Serialize renderer saves so rapid UI updates cannot race each other.
+1946:   const task = stateWriteChain.then(() => writeStateNow(value));
+1947:   stateWriteChain = task.catch(() => {});
+1948:   return task;
+1949: }
+1950: 
+1951: function createWindow() {
+1952:   const win = new BrowserWindow({
+1953:     width: 1500, height: 960, minWidth: 1050, minHeight: 700,
+1954:     backgroundColor: "#f4f8fd", title: "UNHO Education Platform (UEP)", frame: false,
+1955:     icon: path.join(__dirname, "..", "assets", "unho-uep-icon.png"),
+1956:     webPreferences: { preload: path.join(__dirname, "preload.cjs"), contextIsolation: true, nodeIntegration: false },
+1957:   });
+1958:   mainWindow = win;
+1959:   win.setMenuBarVisibility(false);
+1960:   win.on("close", () => {
+1961:     // A hidden Comcigan BrowserWindow used to keep Electron alive after the main
+1962:     // UI disappeared. Destroy auxiliary windows before the last visible window closes.
+1963:     destroyAuxiliaryWindows("main-window-close");
+1964:   });
+1965:   win.on("closed", () => {
+1966:     mainWindow = null;
+1967:     beginCleanShutdown("main-window-closed");
+1968:   });
+1969:   win.loadFile(path.join(__dirname, "..", "index.html"));
+1970: }
+1971: 
+1972: app.whenReady().then(async () => {
+1973:   await migrateStableUserData();
+1974:   ipcMain.handle("uep:schoolReadLogin", async (_event,payload={}) => { try{return await loginSchoolReadUser(payload);}catch(error){return {ok:false,code:error?.code||'UEP_SCHOOL_READ_ERROR',message:error?.message||String(error)};} });
+1975: ipcMain.handle("uep:schoolReadSessionStatus", async (_event,payload={}) => { try{return await schoolReadSessionStatus(payload);}catch(error){return {ok:false,authenticated:false,code:error?.code||'UEP_SCHOOL_READ_ERROR',reason:error?.message||String(error),mode:'school_read_api'};} });
+1976: ipcMain.handle("uep:schoolReadLogout", async () => { try{return await clearSchoolReadSession();}catch(error){return {ok:false,reason:error?.message||String(error)};} });
+1977: ipcMain.handle("state:load", async () => readState());
+1978:   ipcMain.handle("state:save", async (_event, value) => writeState(value));
+1979:   ipcMain.handle("program:selectPhotos", async (event, programId) => {
+1980:     const win = BrowserWindow.fromWebContents(event.sender);
+1981:     const selected = await dialog.showOpenDialog(win, {title:"프로그램 사진 등록",properties:["openFile","multiSelections"],filters:[{name:"사진",extensions:["jpg","jpeg","png","webp","heic"]}]});
+1982:     if (selected.canceled || !selected.filePaths.length) return {ok:false,canceled:true,files:[]};
+1983:     const target = programEvidencePath(programId); await fs.mkdir(target,{recursive:true});
+1984:     const files=[];
+1985:     for (const source of selected.filePaths) {
+1986:       const ext=path.extname(source); const base=path.basename(source,ext).replace(/[^a-zA-Z0-9가-힣_-]/g,"_");
+1987:       let destination=path.join(target,`${Date.now()}-${base}${ext}`); await fs.copyFile(source,destination);
+1988:       files.push({name:path.basename(source),path:destination,addedAt:new Date().toISOString()});
+1989:     }
+1990:     return {ok:true,files,folder:target};
+1991:   });
+1992:   ipcMain.handle("program:openEvidenceFolder", async (_event, programId) => {const target=programEvidencePath(programId);await fs.mkdir(target,{recursive:true});return {ok:!(await shell.openPath(target)),folder:target};});
+1993:   ipcMain.handle("google:credentialStatus", async () => {
+1994:   try {
+1995:     const credentials = await resolveSchoolServiceAccount();
+1996:     if (validateServiceAccount(credentials)) return {ok:true,encryption:safeStorage.isEncryptionAvailable(),local:false,mode:"service_account",account:credentials.client_email||"",userOAuth:false,autoConnected:true,loginIdentityGateway:true,approvalRequired:false,tokenExchangeRequired:false};
+1997:   } catch (error) {}
+1998:   return {ok:true,local:true,mode:"login_identity",account:"",userOAuth:false,autoConnected:true,loginIdentityGateway:true,approvalRequired:false,tokenExchangeRequired:false,reason:"UEP 로그인 이름·이메일로 교사·담임을 식별합니다."};
+1999: });
+===== MAIN batchUpdate 660-730 =====
+660:     body: JSON.stringify({ majorDimension: "ROWS", values }),
+661:   });
+662:   if (!response.ok) {
+663:     let detail=""; try{ detail=(await response.json())?.error?.message||""; }catch{}
+664:     if ((response.status===429 || response.status>=500) && attempt<4) {
+665:       const retryAfter=Number(response.headers.get("retry-after")||0);
+666:       const waitMs=retryAfter>0?retryAfter*1000:1000*Math.pow(2,attempt);
+667:       await new Promise(resolve=>setTimeout(resolve,waitMs));
+668:       return updateSheetValues(token,spreadsheetId,range,values,attempt+1);
+669:     }
+670:     throw new Error(`구글시트 저장 실패 (${response.status})${detail?`: ${detail}`:""}`);
+671:   }
+672:   return response.json();
+673: }
+674: 
+675: async function batchUpdateSheetValues(token, spreadsheetId, data, attempt=0) {
+676:   const items=(Array.isArray(data)?data:[]).filter(x=>x&&x.range&&Array.isArray(x.values));
+677:   if(!items.length)return {totalUpdatedRows:0};
+678:   const url=new URL(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchUpdate`);
+679:   const response=await fetch(url,{
+680:     method:"POST",
+681:     headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"},
+682:     body:JSON.stringify({valueInputOption:"USER_ENTERED",data:items.map(x=>({range:x.range,majorDimension:"ROWS",values:x.values}))}),
+683:   });
+684:   if(!response.ok){
+685:     let detail="";try{detail=(await response.json())?.error?.message||"";}catch{}
+686:     if((response.status===429||response.status>=500)&&attempt<4){
+687:       const retryAfter=Number(response.headers.get("retry-after")||0);
+688:       const waitMs=retryAfter>0?retryAfter*1000:1000*Math.pow(2,attempt);
+689:       await new Promise(resolve=>setTimeout(resolve,waitMs));
+690:       return batchUpdateSheetValues(token,spreadsheetId,items,attempt+1);
+691:     }
+692:     throw new Error(`구글시트 일괄 저장 실패 (${response.status})${detail?`: ${detail}`:""}`);
+693:   }
+694:   return response.json();
+695: }
+696: 
+697: 
+698: function columnLetter(index) {
+699:   let n=Number(index)+1, out="";
+700:   while(n>0){ const r=(n-1)%26; out=String.fromCharCode(65+r)+out; n=Math.floor((n-1)/26); }
+701:   return out;
+702: }
+703: function normalizeSheetHeader(value){return String(value??"").replace(/\r?\n/g," ").replace(/\s+/g," ").trim();}
+704: function findHeaderRowByRequired(matrix,required){
+705:   const wanted=required.map(x=>String(x));
+706:   const limit=Math.min(Array.isArray(matrix)?matrix.length:0,12);
+707:   for(let i=0;i<limit;i+=1){
+708:     const row=(matrix[i]||[]).map(normalizeSheetHeader);
+709:     if(wanted.every(name=>row.includes(name))) return {index:i,headers:row};
+710:   }
+711:   return null;
+712: }
+713: async function saveStudentContact(payload={}) {
+714:   const allowed={phone:["학생연락처"],email:["학생이메일","이메일","이메일주소"],guardian1Phone:["보호자1연락처"],guardian2Phone:["보호자2연락처"]};
+715:   const field=String(payload.field||"");
+716:   if(!allowed[field]) throw new Error("수정할 수 없는 학생정보 항목입니다.");
+717:   const role=String(payload.role||"");
+718:   if(!["admin","homeroom"].includes(role)) throw new Error("학생 연락정보 수정 권한이 없습니다.");
+719:   const account=await readEncrypted(credentialPath());
+720:   if(!validateServiceAccount(account)) throw new Error("저장된 Google 서비스 계정 인증정보가 올바르지 않습니다.");
+721:   const token=await getSheetsToken(account);
+722:   const range="'04_학생연락식별정보'!A1:Z1000";
+723:   const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,[range]);
+724:   const matrix=result?.[0]?.values||[];
+725:   const header=findHeaderRowByRequired(matrix,["학생ID"]);
+726:   if(!header) throw new Error("04_학생연락식별정보의 헤더에서 학생ID를 찾지 못했습니다.");
+727:   const studentId=String(payload.studentId||"").trim();
+728:   if(!studentId) throw new Error("학생ID가 없어 저장할 수 없습니다.");
+729:   const idCol=header.headers.indexOf("학생ID");
+730:   let fieldCol=-1;
+===== MAIN batchUpdate 663-733 =====
+663:     let detail=""; try{ detail=(await response.json())?.error?.message||""; }catch{}
+664:     if ((response.status===429 || response.status>=500) && attempt<4) {
+665:       const retryAfter=Number(response.headers.get("retry-after")||0);
+666:       const waitMs=retryAfter>0?retryAfter*1000:1000*Math.pow(2,attempt);
+667:       await new Promise(resolve=>setTimeout(resolve,waitMs));
+668:       return updateSheetValues(token,spreadsheetId,range,values,attempt+1);
+669:     }
+670:     throw new Error(`구글시트 저장 실패 (${response.status})${detail?`: ${detail}`:""}`);
+671:   }
+672:   return response.json();
+673: }
+674: 
+675: async function batchUpdateSheetValues(token, spreadsheetId, data, attempt=0) {
+676:   const items=(Array.isArray(data)?data:[]).filter(x=>x&&x.range&&Array.isArray(x.values));
+677:   if(!items.length)return {totalUpdatedRows:0};
+678:   const url=new URL(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchUpdate`);
+679:   const response=await fetch(url,{
+680:     method:"POST",
+681:     headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"},
+682:     body:JSON.stringify({valueInputOption:"USER_ENTERED",data:items.map(x=>({range:x.range,majorDimension:"ROWS",values:x.values}))}),
+683:   });
+684:   if(!response.ok){
+685:     let detail="";try{detail=(await response.json())?.error?.message||"";}catch{}
+686:     if((response.status===429||response.status>=500)&&attempt<4){
+687:       const retryAfter=Number(response.headers.get("retry-after")||0);
+688:       const waitMs=retryAfter>0?retryAfter*1000:1000*Math.pow(2,attempt);
+689:       await new Promise(resolve=>setTimeout(resolve,waitMs));
+690:       return batchUpdateSheetValues(token,spreadsheetId,items,attempt+1);
+691:     }
+692:     throw new Error(`구글시트 일괄 저장 실패 (${response.status})${detail?`: ${detail}`:""}`);
+693:   }
+694:   return response.json();
+695: }
+696: 
+697: 
+698: function columnLetter(index) {
+699:   let n=Number(index)+1, out="";
+700:   while(n>0){ const r=(n-1)%26; out=String.fromCharCode(65+r)+out; n=Math.floor((n-1)/26); }
+701:   return out;
+702: }
+703: function normalizeSheetHeader(value){return String(value??"").replace(/\r?\n/g," ").replace(/\s+/g," ").trim();}
+704: function findHeaderRowByRequired(matrix,required){
+705:   const wanted=required.map(x=>String(x));
+706:   const limit=Math.min(Array.isArray(matrix)?matrix.length:0,12);
+707:   for(let i=0;i<limit;i+=1){
+708:     const row=(matrix[i]||[]).map(normalizeSheetHeader);
+709:     if(wanted.every(name=>row.includes(name))) return {index:i,headers:row};
+710:   }
+711:   return null;
+712: }
+713: async function saveStudentContact(payload={}) {
+714:   const allowed={phone:["학생연락처"],email:["학생이메일","이메일","이메일주소"],guardian1Phone:["보호자1연락처"],guardian2Phone:["보호자2연락처"]};
+715:   const field=String(payload.field||"");
+716:   if(!allowed[field]) throw new Error("수정할 수 없는 학생정보 항목입니다.");
+717:   const role=String(payload.role||"");
+718:   if(!["admin","homeroom"].includes(role)) throw new Error("학생 연락정보 수정 권한이 없습니다.");
+719:   const account=await readEncrypted(credentialPath());
+720:   if(!validateServiceAccount(account)) throw new Error("저장된 Google 서비스 계정 인증정보가 올바르지 않습니다.");
+721:   const token=await getSheetsToken(account);
+722:   const range="'04_학생연락식별정보'!A1:Z1000";
+723:   const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,[range]);
+724:   const matrix=result?.[0]?.values||[];
+725:   const header=findHeaderRowByRequired(matrix,["학생ID"]);
+726:   if(!header) throw new Error("04_학생연락식별정보의 헤더에서 학생ID를 찾지 못했습니다.");
+727:   const studentId=String(payload.studentId||"").trim();
+728:   if(!studentId) throw new Error("학생ID가 없어 저장할 수 없습니다.");
+729:   const idCol=header.headers.indexOf("학생ID");
+730:   let fieldCol=-1;
+731:   for(const name of allowed[field]){ const idx=header.headers.indexOf(name); if(idx>=0){fieldCol=idx;break;} }
+732:   if(fieldCol<0) throw new Error(`04_학생연락식별정보에 ${allowed[field][0]} 열이 없습니다.`);
+733:   let dataRow=-1;
+===== MAIN batchUpdate 675-745 =====
+675: async function batchUpdateSheetValues(token, spreadsheetId, data, attempt=0) {
+676:   const items=(Array.isArray(data)?data:[]).filter(x=>x&&x.range&&Array.isArray(x.values));
+677:   if(!items.length)return {totalUpdatedRows:0};
+678:   const url=new URL(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchUpdate`);
+679:   const response=await fetch(url,{
+680:     method:"POST",
+681:     headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"},
+682:     body:JSON.stringify({valueInputOption:"USER_ENTERED",data:items.map(x=>({range:x.range,majorDimension:"ROWS",values:x.values}))}),
+683:   });
+684:   if(!response.ok){
+685:     let detail="";try{detail=(await response.json())?.error?.message||"";}catch{}
+686:     if((response.status===429||response.status>=500)&&attempt<4){
+687:       const retryAfter=Number(response.headers.get("retry-after")||0);
+688:       const waitMs=retryAfter>0?retryAfter*1000:1000*Math.pow(2,attempt);
+689:       await new Promise(resolve=>setTimeout(resolve,waitMs));
+690:       return batchUpdateSheetValues(token,spreadsheetId,items,attempt+1);
+691:     }
+692:     throw new Error(`구글시트 일괄 저장 실패 (${response.status})${detail?`: ${detail}`:""}`);
+693:   }
+694:   return response.json();
+695: }
+696: 
+697: 
+698: function columnLetter(index) {
+699:   let n=Number(index)+1, out="";
+700:   while(n>0){ const r=(n-1)%26; out=String.fromCharCode(65+r)+out; n=Math.floor((n-1)/26); }
+701:   return out;
+702: }
+703: function normalizeSheetHeader(value){return String(value??"").replace(/\r?\n/g," ").replace(/\s+/g," ").trim();}
+704: function findHeaderRowByRequired(matrix,required){
+705:   const wanted=required.map(x=>String(x));
+706:   const limit=Math.min(Array.isArray(matrix)?matrix.length:0,12);
+707:   for(let i=0;i<limit;i+=1){
+708:     const row=(matrix[i]||[]).map(normalizeSheetHeader);
+709:     if(wanted.every(name=>row.includes(name))) return {index:i,headers:row};
+710:   }
+711:   return null;
+712: }
+713: async function saveStudentContact(payload={}) {
+714:   const allowed={phone:["학생연락처"],email:["학생이메일","이메일","이메일주소"],guardian1Phone:["보호자1연락처"],guardian2Phone:["보호자2연락처"]};
+715:   const field=String(payload.field||"");
+716:   if(!allowed[field]) throw new Error("수정할 수 없는 학생정보 항목입니다.");
+717:   const role=String(payload.role||"");
+718:   if(!["admin","homeroom"].includes(role)) throw new Error("학생 연락정보 수정 권한이 없습니다.");
+719:   const account=await readEncrypted(credentialPath());
+720:   if(!validateServiceAccount(account)) throw new Error("저장된 Google 서비스 계정 인증정보가 올바르지 않습니다.");
+721:   const token=await getSheetsToken(account);
+722:   const range="'04_학생연락식별정보'!A1:Z1000";
+723:   const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,[range]);
+724:   const matrix=result?.[0]?.values||[];
+725:   const header=findHeaderRowByRequired(matrix,["학생ID"]);
+726:   if(!header) throw new Error("04_학생연락식별정보의 헤더에서 학생ID를 찾지 못했습니다.");
+727:   const studentId=String(payload.studentId||"").trim();
+728:   if(!studentId) throw new Error("학생ID가 없어 저장할 수 없습니다.");
+729:   const idCol=header.headers.indexOf("학생ID");
+730:   let fieldCol=-1;
+731:   for(const name of allowed[field]){ const idx=header.headers.indexOf(name); if(idx>=0){fieldCol=idx;break;} }
+732:   if(fieldCol<0) throw new Error(`04_학생연락식별정보에 ${allowed[field][0]} 열이 없습니다.`);
+733:   let dataRow=-1;
+734:   for(let r=header.index+1;r<matrix.length;r+=1){ if(String(matrix[r]?.[idCol]||"").trim()===studentId){dataRow=r;break;} }
+735:   const value=String(payload.value??"").trim();
+736:   if(dataRow<0){
+737:     const row=Array(Math.max(header.headers.length,fieldCol+1)).fill("");
+738:     row[idCol]=studentId; row[fieldCol]=value;
+739:     const useCol=header.headers.indexOf("현재사용여부"); if(useCol>=0)row[useCol]="Y";
+740:     await appendSheetValues(token,UEP_SPREADSHEET_ID,"'04_학생연락식별정보'!A:Z",[row]);
+741:   }else{
+742:     const sheetRow=dataRow+1;
+743:     const col=columnLetter(fieldCol);
+744:     await updateSheetValues(token,UEP_SPREADSHEET_ID,`'04_학생연락식별정보'!${col}${sheetRow}:${col}${sheetRow}`,[[value]]);
+745:   }
+===== MAIN batchUpdate 2069-2139 =====
+2069:   if(n==="출결·명단")return "출결·참여명단";
+2070:   return n||"기타";
+2071: }
+2072: function inputCenterProgramIdRaw(id=""){return String(id||"").replace(/^(common|selected)-/,'');}
+2073: function inputCenterSemester(value="",submittedAt=""){
+2074:   const t=String(value||""); if(/(^|[^0-9])1([^0-9]|$)|1학기/.test(t))return "1학기"; if(/(^|[^0-9])2([^0-9]|$)|2학기/.test(t))return "2학기";
+2075:   const m=String(submittedAt||"").match(/\d{4}[-/.](\d{1,2})/);return m&&Number(m[1])<=7?"1학기":"2학기";
+2076: }
+2077: async function classifyInputCenterBatch(payload={}){
+2078:   try{
+2079:     const account=await readEncrypted(credentialPath());if(!validateServiceAccount(account))throw new Error('Google 서비스 계정 인증정보가 필요합니다.');
+2080:     const batchId=String(payload.batchId||'').trim();if(!batchId)throw new Error('입력 배치를 선택해 주세요.');
+2081:     const token=await getSheetsToken(account);const result=await readSheetBatch(token,UEP_INPUT_CENTER_SPREADSHEET_ID,["'02_자료원본'!A3:X10000"]);const rows=(result?.[0]?.values||[]).slice(1);
+2082:     let count=0;const storedType=inputCenterNatureToStoredType(payload.nature);const pid=String(payload.programId||'');const pk=String(payload.programKind||'');const note=pid?`ROUTE:PROGRAM_REPORT:${pid}`:'';const writes=[];
+2083:     for(let i=0;i<rows.length;i++)if(String(rows[i]?.[1]||'')===batchId){const sheetRow=i+4;const current=Array.from({length:24},(_,j)=>rows[i]?.[j]??'');current[3]=storedType;current[4]=payload.nature==='보고서'?'보고서 제출':payload.nature;let meta={};try{meta=JSON.parse(String(current[16]||''));}catch{}current[6]=inputCenterSemester(payload.programSemester||'',meta.submittedAt||'');current[17]='검수완료';current[19]=pid;current[20]=pk;current[23]=note||current[23]||'';writes.push({range:`'02_자료원본'!A${sheetRow}:X${sheetRow}`,values:[current]});count++;}
+2084:     await batchUpdateSheetValues(token,UEP_INPUT_CENTER_SPREADSHEET_ID,writes);
+2085:     liveDataCache=null;liveDataFetchedAt=0;return {ok:true,count,batchId};
+2086:   }catch(error){return {ok:false,reason:error?.message||String(error)};}
+2087: }
+2088: async function normalizeInputCenterBatch(payload={}){
+2089:   try{
+2090:     const account=await readEncrypted(credentialPath());if(!validateServiceAccount(account))throw new Error('Google 서비스 계정 인증정보가 필요합니다.');
+2091:     const records=Array.isArray(payload.records)?payload.records:[];if(!records.length)throw new Error('정규화할 자료가 없습니다.');
+2092:     if(String(payload.nature||'')!=='보고서')throw new Error('현재 정규화 자동적용은 보고서부터 지원합니다. 신청·만족도·명단은 다음 라우팅 단계에서 연결합니다.');
+2093:     const kind=String(payload.programKind||'')==='selected'?'selected':'common';
+2094:     const targetSheet=kind==='selected'?'21_선택보고서_정규화':'20_공통보고서_정규화';
+2095:     const token=await getSheetsToken(account);
+2096:     // REPORT_TEXT_V2 표준 스키마 A:X. 원본유형/원본ID로 출처를 구분하므로 입력센터 자료도 기존 데이터 바로 다음 행에 연속 저장합니다.
+2097:     const DATA_START_ROW=4, INPUT_END_ROW=5000;
+2098:     const existingResult=await readSheetBatch(token,UEP_PROCESSING_SPREADSHEET_ID,[`'${targetSheet}'!A3:X${INPUT_END_ROW}`]);
+2099:     const matrix=existingResult?.[0]?.values||[];
+2100:     const existing=matrix.slice(1).map((row,index)=>({row, sheetRow:index+4})).filter(x=>(x.row||[]).some(v=>String(v??'').trim()));
+2101:     const prefix=kind==='selected'?'ISR':'ICR';
+2102:     let maxInputId=0;for(const item of existing){const id=String(item.row?.[0]||'');if(!id.startsWith(prefix+'-'))continue;const n=Number(id.match(/(\d+)$/)?.[1]||0);if(n>maxInputId)maxInputId=n;}
+2103:     const programId=inputCenterProgramIdRaw(payload.programId||records[0]?.programId||'');
+2104:     const programName=String(payload.programName||'');
+2105:     if(!programId)throw new Error('보고서는 연결 프로그램ID가 필요합니다. 02 검수·분류에서 프로그램을 확정해 주세요.');
+2106:     const hashText=value=>crypto.createHash('sha256').update(String(value||''),'utf8').digest('hex');
+2107:     const canonicalExistingHash=row=>{
+2108:       const declared=String(row?.[23]||'').trim();if(declared)return declared;
+2109:       const normalized=String(row?.[12]||'').trim();
+2110:       return hashText([row?.[2]||row?.[3]||'',row?.[7]||'',normalized].map(v=>String(v||'').trim()).join('\n'));
+2111:     };
+2112:     const prepared=[];let next=maxInputId+1;
+2113:     for(const rec of records){
+2114:       let meta={};try{meta=JSON.parse(String(rec.normalizedText||''));}catch{}
+2115:       const submittedAt=String(meta.submittedAt||rec.createdAt||'');
+2116:       const pairs=inputCenterReportPairs(meta);
+2117:       const reviewedContent=String(rec.reviewText||'').trim();
+2118:       const normalizedContent=reviewedContent||inputCenterReportText(meta)||String(rec.rawText||'').trim();
+2119:       if(!normalizedContent)continue;
+2120:       const signature=(Array.isArray(meta.fields)?meta.fields:[]).find(f=>/서명|동의/.test(String(f.label||'')))?.value||'';
+2121:       const semester=inputCenterSemester(payload.programSemester||'',submittedAt);
+2122:       const studentKey=String(rec.studentId||rec.studentNo||'').trim();
+2123:       const logicalKey=`${rec.schoolYear||'2026'}|${semester}|${studentKey}|${programId}`;
+2124:       const sourceType='INPUT_CENTER';
+2125:       const sourceId=String(rec.id||'').trim()||`INPUT-${hashText(`${rec.batchId||''}|${studentKey}|${submittedAt}`).slice(0,20)}`;
+2126:       const sourceBatchId=String(rec.batchId||payload.batchId||'').trim();
+2127:       const sourceModifiedAt=String(rec.createdAt||submittedAt||new Date().toISOString());
+2128:       const contentHash=hashText([studentKey,programId,normalizedContent].map(v=>String(v||'').trim()).join('\n'));
+2129:       const row=[
+2130:         `${prefix}-${String(next++).padStart(5,'0')}`,kind==='selected'?'선택활동':'공통활동',rec.studentId||'',rec.studentNo||'',rec.name||'',rec.schoolYear||'2026',semester,
+2131:         programId,programName||meta.programName||'',submittedAt,'Y',/^(O|Y|동의|예|동의함)$/i.test(String(signature).trim())?'동의함':'',
+2132:         normalizedContent,JSON.stringify(pairs),'REPORT_TEXT_V2',rec.id||'',rec.studentId?'정상':'확인필요',sourceType,sourceId,sourceBatchId,logicalKey,sourceModifiedAt,'정상',contentHash
+2133:       ];
+2134:       prepared.push({rec,row,sourceType,sourceId,logicalKey,contentHash,submittedAt});
+2135:     }
+2136:     if(!prepared.length)throw new Error('정규화할 보고서 본문을 찾지 못했습니다. 02 검수내용을 확인해 주세요.');
+2137:     let newCount=0,duplicateCount=0,updateCount=0;const actions=[];
+2138:     for(const p of prepared){
+2139:       const sameSource=existing.find(item=>String(item.row?.[17]||'')===p.sourceType&&String(item.row?.[18]||'')===p.sourceId);
+===== MAIN batchUpdate 2138-2208 =====
+2138:     for(const p of prepared){
+2139:       const sameSource=existing.find(item=>String(item.row?.[17]||'')===p.sourceType&&String(item.row?.[18]||'')===p.sourceId);
+2140:       if(sameSource){
+2141:         const old=sameSource.row;
+2142:         if(String(old?.[22]||'정상')!=='삭제됨'&&canonicalExistingHash(old)===p.contentHash){duplicateCount++;actions.push({type:'duplicate',row:p.row,rec:p.rec});continue;}
+2143:         p.row[0]=old?.[0]||p.row[0];updateCount++;actions.push({type:'update',row:p.row,rec:p.rec,sheetRow:sameSource.sheetRow});continue;
+2144:       }
+2145:       const sameContent=existing.find(item=>{
+2146:         const r=item.row;if(String(r?.[22]||'정상')==='삭제됨')return false;
+2147:         return String(r?.[20]||'')===p.logicalKey&&canonicalExistingHash(r)===p.contentHash;
+2148:       });
+2149:       if(sameContent){duplicateCount++;actions.push({type:'duplicate',row:p.row,rec:p.rec});continue;}
+2150:       newCount++;actions.push({type:'new',row:p.row,rec:p.rec});
+2151:     }
+2152:     if(!payload.confirmed)return {ok:true,requiresConfirmation:true,targetSheet,programName,newCount,duplicateCount,updateCount,errorCount:0};
+2153:     // 기존 입력센터 제출 갱신도 한 번의 batchUpdate로 처리하여 Write quota를 소모하지 않습니다.
+2154:     const reportUpdates=actions.filter(a=>a.type==='update').map(a=>({range:`'${targetSheet}'!A${a.sheetRow}:X${a.sheetRow}`,values:[a.row]}));
+2155:     await batchUpdateSheetValues(token,UEP_PROCESSING_SPREADSHEET_ID,reportUpdates);
+2156:     // 신규 입력센터 정규화는 출처별 물리 구역을 나누지 않고 실제 마지막 데이터 행 바로 다음에 연속 저장합니다.
+2157:     const lastUsed=existing.length?Math.max(...existing.map(item=>item.sheetRow)):DATA_START_ROW-1;
+2158:     const news=actions.filter(a=>a.type==='new');
+2159:     if(news.length){
+2160:       const start=Math.max(DATA_START_ROW,lastUsed+1),end=start+news.length-1;
+2161:       if(end>INPUT_END_ROW)throw new Error(`보고서 정규화 시트의 저장 가능 행을 초과했습니다. (${DATA_START_ROW}~${INPUT_END_ROW}행)`);
+2162:       await updateSheetValues(token,UEP_PROCESSING_SPREADSHEET_ID,`'${targetSheet}'!A${start}:X${end}`,news.map(a=>a.row));
+2163:     }
+2164:     // 입력센터 원본에서 삭제된 자료는 정규화 원장에서 상태만 '삭제됨'으로 남겨 이력을 보존합니다.
+2165:     const srcResult=await readSheetBatch(token,UEP_INPUT_CENTER_SPREADSHEET_ID,["'02_자료원본'!A3:X10000"]);
+2166:     const src=(srcResult?.[0]?.values||[]).slice(1);const liveSourceIds=new Set(src.map(r=>String(r?.[0]||'')).filter(Boolean));
+2167:     const deleteWrites=[];
+2168:     for(const item of existing){
+2169:       const row=item.row;if(String(row?.[17]||'')!=='INPUT_CENTER')continue;
+2170:       const sid=String(row?.[18]||'');if(!sid||liveSourceIds.has(sid)||String(row?.[22]||'')==='삭제됨')continue;
+2171:       deleteWrites.push({range:`'${targetSheet}'!W${item.sheetRow}:W${item.sheetRow}`,values:[['삭제됨']]});
+2172:     }
+2173:     await batchUpdateSheetValues(token,UEP_PROCESSING_SPREADSHEET_ID,deleteWrites);
+2174: 
+2175:     // v0.80.45: 쓰기 응답만 믿지 않고 목적지 원장을 다시 읽어 실제 저장을 검증합니다.
+2176:     // 같은 원본ID가 있거나, 동일 논리키+내용해시가 실제로 존재해야만 해당 원본을 완료 처리합니다.
+2177:     const verifyResult=await readSheetBatch(token,UEP_PROCESSING_SPREADSHEET_ID,[`'${targetSheet}'!A3:X${INPUT_END_ROW}`]);
+2178:     const verifyRows=(verifyResult?.[0]?.values||[]).slice(1).filter(row=>(row||[]).some(v=>String(v??'').trim()));
+2179:     const actionVerified=a=>verifyRows.some(r=>{
+2180:       if(String(r?.[22]||'정상')==='삭제됨')return false;
+2181:       const sameSource=String(r?.[17]||'')===String(a.row?.[17]||'')&&String(r?.[18]||'')===String(a.row?.[18]||'');
+2182:       const sameLogicalContent=String(r?.[20]||'')===String(a.row?.[20]||'')&&canonicalExistingHash(r)===String(a.row?.[23]||'');
+2183:       return sameSource||sameLogicalContent;
+2184:     });
+2185:     const unverified=actions.filter(a=>!actionVerified(a));
+2186:     if(unverified.length){
+2187:       const sample=unverified.slice(0,5).map(a=>String(a.row?.[18]||a.rec?.id||'원본ID없음')).join(', ');
+2188:       throw new Error(`정규화 목적지 저장 검증 실패 ${unverified.length}건${sample?` (${sample}${unverified.length>5?', …':''})`:''}. 입력센터 원본은 완료 처리하지 않았습니다.`);
+2189:     }
+2190: 
+2191:     // 실제 목적지에 존재하는 준비건만 원본 처리상태를 완료합니다.
+2192:     // 본문이 없어 prepared에서 제외된 원본까지 완료되는 기존 문제도 함께 차단합니다.
+2193:     const verifiedIds=new Set(actions.map(a=>String(a.rec?.id||'')).filter(Boolean));const statusWrites=[];
+2194:     for(let i=0;i<src.length;i++)if(verifiedIds.has(String(src[i]?.[0]||'')))statusWrites.push({range:`'02_자료원본'!R${i+4}:R${i+4}`,values:[['정규화완료']]});
+2195:     await batchUpdateSheetValues(token,UEP_INPUT_CENTER_SPREADSHEET_ID,statusWrites);
+2196:     liveDataCache=null;liveDataFetchedAt=0;return {ok:true,targetSheet,programName,newCount,duplicateCount,updateCount,errorCount:0,count:newCount+updateCount,verifiedCount:actions.length};
+2197:   }catch(error){return {ok:false,reason:error?.message||String(error)};}
+2198: }
+2199: 
+2200: ipcMain.handle("inputCenter:selectFiles", async (event) => selectInputCenterFiles(event));
+2201: ipcMain.handle("inputCenter:save", async (_event,payload={}) => saveInputCenterRecords(payload));
+2202: ipcMain.handle("inputCenter:classifyBatch", async (_event,payload={}) => classifyInputCenterBatch(payload));
+2203: ipcMain.handle("inputCenter:normalizeBatch", async (_event,payload={}) => normalizeInputCenterBatch(payload));
+2204: ipcMain.handle("inputCenter:openFolder", async () => openInputCenterFolder());
+2205: ipcMain.handle("inputCenter:readAsset", async (_event,filePath="") => readInputCenterAsset(filePath));
+2206: ipcMain.handle("inputCenter:openAsset", async (_event,filePath="") => openInputCenterAsset(filePath));
+2207: ipcMain.handle("inputCenter:ocrBatch", async (_event,payload={}) => ocrInputCenterBatch(payload));
+2208: ipcMain.handle("student:contactSave", async (_event, payload={}) => saveStudentContact(payload));
+===== MAIN appendSheet 725-795 =====
+725:   const header=findHeaderRowByRequired(matrix,["학생ID"]);
+726:   if(!header) throw new Error("04_학생연락식별정보의 헤더에서 학생ID를 찾지 못했습니다.");
+727:   const studentId=String(payload.studentId||"").trim();
+728:   if(!studentId) throw new Error("학생ID가 없어 저장할 수 없습니다.");
+729:   const idCol=header.headers.indexOf("학생ID");
+730:   let fieldCol=-1;
+731:   for(const name of allowed[field]){ const idx=header.headers.indexOf(name); if(idx>=0){fieldCol=idx;break;} }
+732:   if(fieldCol<0) throw new Error(`04_학생연락식별정보에 ${allowed[field][0]} 열이 없습니다.`);
+733:   let dataRow=-1;
+734:   for(let r=header.index+1;r<matrix.length;r+=1){ if(String(matrix[r]?.[idCol]||"").trim()===studentId){dataRow=r;break;} }
+735:   const value=String(payload.value??"").trim();
+736:   if(dataRow<0){
+737:     const row=Array(Math.max(header.headers.length,fieldCol+1)).fill("");
+738:     row[idCol]=studentId; row[fieldCol]=value;
+739:     const useCol=header.headers.indexOf("현재사용여부"); if(useCol>=0)row[useCol]="Y";
+740:     await appendSheetValues(token,UEP_SPREADSHEET_ID,"'04_학생연락식별정보'!A:Z",[row]);
+741:   }else{
+742:     const sheetRow=dataRow+1;
+743:     const col=columnLetter(fieldCol);
+744:     await updateSheetValues(token,UEP_SPREADSHEET_ID,`'04_학생연락식별정보'!${col}${sheetRow}:${col}${sheetRow}`,[[value]]);
+745:   }
+746:   liveDataCache=null; liveDataFetchedAt=0;
+747:   const data=await fetchLiveData({force:true});
+748:   return {ok:true,data};
+749: }
+750: 
+751: 
+752: async function saveProgramOperation(payload={}) {
+753:   if (String(payload.role||"") !== "admin") throw new Error("프로그램 운영정보 양방향 수정은 관리자만 가능합니다.");
+754:   const account = await readEncrypted(credentialPath());
+755:   if (!validateServiceAccount(account)) throw new Error("저장된 Google 서비스 계정 인증정보가 올바르지 않습니다.");
+756:   const token = await getSheetsToken(account);
+757:   const source = String(payload.source||"");
+758:   const programId = String(payload.programId||"").trim();
+759:   const sessionId = String(payload.sessionId||"").trim();
+760:   const date = String(payload.date||"").trim();
+761:   const endDate = String(payload.endDate||"").trim();
+762:   const time = String(payload.time||"").trim();
+763:   const startTime = String(payload.startTime||"").trim();
+764:   const endTime = String(payload.endTime||"").trim();
+765:   const place = String(payload.place||"").trim();
+766:   const teacher = String(payload.teacher||"").trim();
+767:   const title = String(payload.title||"").trim();
+768:   const recordTitle = String(payload.recordTitle||"").trim();
+769:   const department = String(payload.department||"").trim();
+770:   const subject = String(payload.subject||"").trim();
+771:   const reportRequired = payload.reportRequired === undefined ? undefined : (payload.reportRequired ? "Y" : "N");
+772:   const reportToAuthority = payload.reportToAuthority === undefined ? undefined : (payload.reportToAuthority ? "Y" : "N");
+773:   const reportAgency = String(payload.reportAgency||"").trim();
+774:   const reportAfterDays = payload.reportAfterDays === undefined ? undefined : String(payload.reportAfterDays ?? "").trim();
+775:   const reportDeadline = String(payload.reportDeadline||"").trim();
+776:   const photoRequired = payload.photoRequired === undefined ? undefined : (payload.photoRequired ? "Y" : "N");
+777:   const memo = String(payload.memo||"").trim();
+778:   const activityType = String(payload.activityType||"").trim();
+779:   const afterType = String(payload.afterType||"").trim();
+780:   const weekdays = String(payload.weekdays||"").trim();
+781:   const operationPeriod = String(payload.operationPeriod||"").trim();
+782:   const targetGrade = String(payload.targetGrade||"").trim();
+783:   const nightLinked = payload.nightLinked === undefined ? undefined : (payload.nightLinked ? "Y" : "N");
+784:   const attendanceMethod = String(payload.attendanceMethod||"").trim();
+785:   const status = String(payload.status||"").trim();
+786:   const commonReportFormUrl = payload.commonReportFormUrl === undefined ? undefined : String(payload.commonReportFormUrl||"").trim();
+787:   const reportFormSettingKey = source.includes("09_공통활동마스터") ? "COMMON_ACTIVITY_REPORT_FORM_URL" : source.includes("10_선택활동마스터") ? "SELECTED_ACTIVITY_REPORT_FORM_URL" : "";
+788:   const clocks = time.match(/\d{1,2}:\d{2}/g) || [];
+789:   const specs = source.includes("12_차시일정")
+790:     ? {sheet:"12_차시일정", keyNames:["차시ID"], keyValue:sessionId, fields:{date:["실제수업일","운영일자","예정일"], start:["시작시각"], end:["종료시각"], place:["장소"], teacher:["담당교사"]}}
+791:     : source.includes("11_방과후학교")
+792:       ? {sheet:"11_방과후학교", keyNames:["방과후ID","프로그램ID"], keyValue:programId, fields:{title:["프로그램명"], operationPeriod:["운영기간구분"], subject:["교과"], department:["담당부서"], afterType:["방과후유형"], teacher:["담당교사"], date:["운영시작일"], endDate:["운영종료일"], weekdays:["요일"], startTime:["시작시간"], endTime:["종료시간"], place:["장소"], targetGrade:["대상학년"], nightLinked:["야자연계여부"], attendanceMethod:["출석관리방식"], status:["운영상태"], memo:["학생안내"]}}
+793:       : source.includes("10_선택활동마스터")
+794:         ? {sheet:"10_선택활동마스터", keyNames:["프로그램ID"], keyValue:programId, fields:{date:["운영시작일"], time:["운영시간"], place:["장소"], teacher:["담당교사"], title:["프로그램명"], recordTitle:["생활기록부표기명"], department:["운영부서"], subject:["교과"], reportRequired:["보고서사용"], reportToAuthority:["기관보고여부"], reportAgency:["보고대상기관"], reportAfterDays:["보고기한일수"], reportDeadline:["학생보고서마감일"], photoRequired:["사진증빙사용"], memo:["학생안내"], activityType:["프로그램유형"]}}
+795:         : source.includes("09_공통활동마스터")
+===== MAIN appendSheet 907-977 =====
+907:   const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,[range]);
+908:   const matrix=result?.[0]?.values||[];
+909:   const rows=matrix.slice(1);
+910:   let id=String(payload.id||"").trim();
+911:   let sheetRow=-1;
+912:   if(id){
+913:     const pos=rows.findIndex(row=>String(row?.[0]||"").trim()===id);
+914:     if(pos>=0) sheetRow=pos+4;
+915:   }else{
+916:     let max=0;
+917:     rows.forEach(row=>{const m=String(row?.[0]||"").match(/^ATT-2026-(\\d+)$/);if(m)max=Math.max(max,Number(m[1]));});
+918:     id=`ATT-2026-${String(max+1).padStart(4,"0")}`;
+919:   }
+920:   const values=officialAttendanceRow(payload,id);
+921:   if(sheetRow>0) await updateSheetValues(token,UEP_SPREADSHEET_ID,`'30_공결기록'!A${sheetRow}:Z${sheetRow}`,values);
+922:   else await appendSheetValues(token,UEP_SPREADSHEET_ID,"'30_공결기록'!A:Z",values);
+923:   liveDataCache=null; liveDataFetchedAt=0;
+924:   const data=await fetchLiveData({force:true});
+925:   return {ok:true,id,data};
+926: }
+927: 
+928: async function deleteOfficialAttendance(id="") {
+929:   const key=String(id||"").trim();
+930:   if(!key) throw new Error("삭제할 공결 ID가 없습니다.");
+931:   const account=await readEncrypted(credentialPath());
+932:   if(!validateServiceAccount(account)) throw new Error("저장된 Google 서비스 계정 인증정보가 올바르지 않습니다.");
+933:   const token=await getSheetsToken(account);
+934:   const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,["'30_공결기록'!A3:Z3000"]);
+935:   const rows=(result?.[0]?.values||[]).slice(1);
+936:   const pos=rows.findIndex(row=>String(row?.[0]||"").trim()===key);
+937:   if(pos<0) throw new Error("삭제할 공결 기록을 찾지 못했습니다.");
+938:   const sheetRow=pos+4;
+939:   await clearSheetValues(token,UEP_SPREADSHEET_ID,`'30_공결기록'!A${sheetRow}:Z${sheetRow}`);
+940:   liveDataCache=null; liveDataFetchedAt=0;
+941:   const data=await fetchLiveData({force:true});
+942:   return {ok:true,data};
+943: }
+944: 
+945: function lateAttendanceRow(payload={}, id=""){
+946:   const now=new Date().toISOString();
+947:   return [[id,String(payload.studentId||""),String(payload.studentNo||""),String(payload.name||""),String(payload.grade||"1"),String(payload.className||payload.classNo||""),String(payload.date||""),String(payload.time||""),String(payload.reason||""),String(payload.minutes||0),String(payload.cumulativeCount||""),String(payload.cumulativeMinutes||""),String(payload.guidance||"일반"),now,String(payload.editor||"UEP"),String(payload.note||"")]];
+948: }
+949: async function saveLateAttendance(payload={}){
+950:   const account=await readEncrypted(credentialPath()); if(!validateServiceAccount(account)) throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+951:   const token=await getSheetsToken(account); const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,["'31_지각기록'!A3:P3000"]); const matrix=result?.[0]?.values||[], rows=matrix.slice(1);
+952:   let id=String(payload.id||"").trim(), sheetRow=-1;
+953:   if(id){const pos=rows.findIndex(r=>String(r?.[0]||"").trim()===id); if(pos>=0)sheetRow=pos+4;}
+954:   else {let max=0;rows.forEach(r=>{const mm=String(r?.[0]||"").match(/^LATE-2026-(\d+)$/);if(mm)max=Math.max(max,Number(mm[1]));});id=`LATE-2026-${String(max+1).padStart(5,"0")}`;}
+955:   const values=lateAttendanceRow(payload,id);
+956:   if(sheetRow>0)await updateSheetValues(token,UEP_SPREADSHEET_ID,`'31_지각기록'!A${sheetRow}:P${sheetRow}`,values); else await appendSheetValues(token,UEP_SPREADSHEET_ID,"'31_지각기록'!A:P",values);
+957:   liveDataCache=null;liveDataFetchedAt=0;return {ok:true,id,data:await fetchLiveData({force:true})};
+958: }
+959: async function deleteLateAttendance(id=""){
+960:   const key=String(id||"").trim(); if(!key)throw new Error("삭제할 지각 ID가 없습니다.");
+961:   const account=await readEncrypted(credentialPath()); if(!validateServiceAccount(account)) throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+962:   const token=await getSheetsToken(account); const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,["'31_지각기록'!A3:P3000"]); const rows=(result?.[0]?.values||[]).slice(1);
+963:   const pos=rows.findIndex(r=>String(r?.[0]||"").trim()===key); if(pos<0)throw new Error("삭제할 지각 기록을 찾지 못했습니다.");
+964:   await clearSheetValues(token,UEP_SPREADSHEET_ID,`'31_지각기록'!A${pos+4}:P${pos+4}`);liveDataCache=null;liveDataFetchedAt=0;return {ok:true,data:await fetchLiveData({force:true})};
+965: }
+966: 
+967: function dormRulePriority(category=""){
+968:   return ({exception:50,closure:40,exam:30,vacation:25,base:20,period:10})[String(category||"")]||5;
+969: }
+970: function dormRuleRow(payload={},id,nowIso){
+971:   return [[
+972:     id,
+973:     String(payload.category||""),
+974:     String(payload.name||""),
+975:     String(payload.start||""),
+976:     String(payload.end||""),
+977:     String(payload.days||"전체"),
+===== MAIN appendSheet 941-1011 =====
+941:   const data=await fetchLiveData({force:true});
+942:   return {ok:true,data};
+943: }
+944: 
+945: function lateAttendanceRow(payload={}, id=""){
+946:   const now=new Date().toISOString();
+947:   return [[id,String(payload.studentId||""),String(payload.studentNo||""),String(payload.name||""),String(payload.grade||"1"),String(payload.className||payload.classNo||""),String(payload.date||""),String(payload.time||""),String(payload.reason||""),String(payload.minutes||0),String(payload.cumulativeCount||""),String(payload.cumulativeMinutes||""),String(payload.guidance||"일반"),now,String(payload.editor||"UEP"),String(payload.note||"")]];
+948: }
+949: async function saveLateAttendance(payload={}){
+950:   const account=await readEncrypted(credentialPath()); if(!validateServiceAccount(account)) throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+951:   const token=await getSheetsToken(account); const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,["'31_지각기록'!A3:P3000"]); const matrix=result?.[0]?.values||[], rows=matrix.slice(1);
+952:   let id=String(payload.id||"").trim(), sheetRow=-1;
+953:   if(id){const pos=rows.findIndex(r=>String(r?.[0]||"").trim()===id); if(pos>=0)sheetRow=pos+4;}
+954:   else {let max=0;rows.forEach(r=>{const mm=String(r?.[0]||"").match(/^LATE-2026-(\d+)$/);if(mm)max=Math.max(max,Number(mm[1]));});id=`LATE-2026-${String(max+1).padStart(5,"0")}`;}
+955:   const values=lateAttendanceRow(payload,id);
+956:   if(sheetRow>0)await updateSheetValues(token,UEP_SPREADSHEET_ID,`'31_지각기록'!A${sheetRow}:P${sheetRow}`,values); else await appendSheetValues(token,UEP_SPREADSHEET_ID,"'31_지각기록'!A:P",values);
+957:   liveDataCache=null;liveDataFetchedAt=0;return {ok:true,id,data:await fetchLiveData({force:true})};
+958: }
+959: async function deleteLateAttendance(id=""){
+960:   const key=String(id||"").trim(); if(!key)throw new Error("삭제할 지각 ID가 없습니다.");
+961:   const account=await readEncrypted(credentialPath()); if(!validateServiceAccount(account)) throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+962:   const token=await getSheetsToken(account); const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,["'31_지각기록'!A3:P3000"]); const rows=(result?.[0]?.values||[]).slice(1);
+963:   const pos=rows.findIndex(r=>String(r?.[0]||"").trim()===key); if(pos<0)throw new Error("삭제할 지각 기록을 찾지 못했습니다.");
+964:   await clearSheetValues(token,UEP_SPREADSHEET_ID,`'31_지각기록'!A${pos+4}:P${pos+4}`);liveDataCache=null;liveDataFetchedAt=0;return {ok:true,data:await fetchLiveData({force:true})};
+965: }
+966: 
+967: function dormRulePriority(category=""){
+968:   return ({exception:50,closure:40,exam:30,vacation:25,base:20,period:10})[String(category||"")]||5;
+969: }
+970: function dormRuleRow(payload={},id,nowIso){
+971:   return [[
+972:     id,
+973:     String(payload.category||""),
+974:     String(payload.name||""),
+975:     String(payload.start||""),
+976:     String(payload.end||""),
+977:     String(payload.days||"전체"),
+978:     String(payload.effect||""),
+979:     String(payload.entryTime||""),
+980:     String(payload.exitTime||""),
+981:     String(payload.lateEntry||""),
+982:     String(payload.earlyExit||""),
+983:     String(payload.reason||""),
+984:     Number(payload.priority||dormRulePriority(payload.category)),
+985:     payload.active===false?"N":"Y",
+986:     String(payload.note||""),
+987:     nowIso,
+988:     String(payload.writer||"UEP"),
+989:     String(payload.source||"UEP 규칙센터"),
+990:     String(payload.operationState||""),
+991:     String(payload.actualExit||""),
+992:     String(payload.actualReentry||""),
+993:     payload.priorNightAcademyHome?"Y":"N",
+994:     payload.formRequired?"Y":"N",
+995:     payload.individualOutingAllowed?"Y":"N"
+996:   ]];
+997: }
+998: function dormRuleDateValue(value){
+999:   if(value===null||value===undefined||value==='')return '';
+1000:   const raw=String(value).trim();
+1001:   if(/^\d+(?:\.\d+)?$/.test(raw)){
+1002:     const serial=Number(raw);
+1003:     if(Number.isFinite(serial)&&serial>20000&&serial<100000){
+1004:       const d=new Date(Date.UTC(1899,11,30)+Math.round(serial*86400000));
+1005:       if(!Number.isNaN(d.getTime())){
+1006:         const y=d.getUTCFullYear(),mo=String(d.getUTCMonth()+1).padStart(2,'0'),day=String(d.getUTCDate()).padStart(2,'0');
+1007:         const hh=String(d.getUTCHours()).padStart(2,'0'),mm=String(d.getUTCMinutes()).padStart(2,'0');
+1008:         return `${y}-${mo}-${day}T${hh}:${mm}`;
+1009:       }
+1010:     }
+1011:   }
+===== MAIN appendSheet 1026-1096 =====
+1026:     individualOutingAllowed:/^(Y|YES|TRUE|1)$/i.test(String(row[23]||''))
+1027:   };
+1028: }
+1029: async function saveDormRule(payload={}){
+1030:   const account=await readEncrypted(credentialPath());
+1031:   if(!validateServiceAccount(account)) throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+1032:   const token=await getSheetsToken(account), now=new Date().toISOString();
+1033:   const id=String(payload.id||`DORM-RULE-${crypto.randomUUID()}`).trim();
+1034:   const range="'40_학사외출규칙'!A3:X1000";
+1035:   const result=await readSheetBatch(token,UEP_RULES_SPREADSHEET_ID,[range]);
+1036:   const matrix=result?.[0]?.values||[];
+1037:   const rows=matrix.slice(1);
+1038:   const pos=rows.findIndex(row=>String(row?.[0]||"").trim()===id);
+1039:   const row=dormRuleRow(payload,id,now);
+1040:   if(pos>=0) await updateSheetValues(token,UEP_RULES_SPREADSHEET_ID,`'40_학사외출규칙'!A${pos+4}:X${pos+4}`,row);
+1041:   else await appendSheetValues(token,UEP_RULES_SPREADSHEET_ID,"'40_학사외출규칙'!A:X",row);
+1042:   liveDataCache=null;liveDataFetchedAt=0;
+1043:   const record={...payload,id,priority:Number(payload.priority||dormRulePriority(payload.category)),active:payload.active!==false,modifiedAt:now,writer:String(payload.writer||"UEP"),source:String(payload.source||"UEP 규칙센터")};
+1044:   return {ok:true,id,record};
+1045: }
+1046: async function deleteDormRule(id=""){
+1047:   const key=String(id||"").trim(); if(!key) throw new Error("삭제할 학사외출 규칙 ID가 없습니다.");
+1048:   const account=await readEncrypted(credentialPath());
+1049:   if(!validateServiceAccount(account)) throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+1050:   const token=await getSheetsToken(account), range="'40_학사외출규칙'!A3:X1000";
+1051:   const result=await readSheetBatch(token,UEP_RULES_SPREADSHEET_ID,[range]);
+1052:   const rows=(result?.[0]?.values||[]).slice(1);
+1053:   const pos=rows.findIndex(row=>String(row?.[0]||"").trim()===key);
+1054:   if(pos<0) throw new Error("삭제할 학사외출 규칙을 시트에서 찾지 못했습니다.");
+1055:   await clearSheetValues(token,UEP_RULES_SPREADSHEET_ID,`'40_학사외출규칙'!A${pos+4}:X${pos+4}`);
+1056:   liveDataCache=null;liveDataFetchedAt=0;
+1057:   return {ok:true,id:key};
+1058: }
+1059: 
+1060: async function saveCounselRecord(payload={}){
+1061:   const account=await readEncrypted(credentialPath()); if(!validateServiceAccount(account))throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+1062:   const token=await getSheetsToken(account), now=new Date().toISOString(), id=String(payload.id||`CNS-${crypto.randomUUID()}`);
+1063:   const row=[[id,String(payload.studentId||""),String(payload.studentNo||""),String(payload.name||""),String(payload.grade||"1"),String(payload.className||""),String(payload.createdAt||now),String(payload.area||""),String(payload.type||"학생 상담"),String(payload.memo||""),String(payload.action||""),String(payload.nextDate||""),String(payload.status||"진행중"),String(payload.group||""),String(payload.stage||""),String(payload.discoveryReason||""),String(payload.writer||""),now]];
+1064:   const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,["'45_학생상담기록'!A3:R5000"]); const rows=(result?.[0]?.values||[]).slice(1); const pos=rows.findIndex(r=>String(r?.[0]||"")===id);
+1065:   if(pos>=0)await updateSheetValues(token,UEP_SPREADSHEET_ID,`'45_학생상담기록'!A${pos+4}:R${pos+4}`,row); else await appendSheetValues(token,UEP_SPREADSHEET_ID,"'45_학생상담기록'!A:R",row);
+1066:   liveDataCache=null;liveDataFetchedAt=0;
+1067:   return {ok:true,id,record:{id,studentId:String(payload.studentId||""),studentNo:String(payload.studentNo||""),name:String(payload.name||""),grade:String(payload.grade||"1"),className:String(payload.className||""),createdAt:String(payload.createdAt||now),area:String(payload.area||""),type:String(payload.type||"학생 상담"),memo:String(payload.memo||""),action:String(payload.action||""),nextDate:String(payload.nextDate||""),status:String(payload.status||"진행중"),group:String(payload.group||""),stage:String(payload.stage||""),discoveryReason:String(payload.discoveryReason||""),writer:String(payload.writer||""),modifiedAt:now}};
+1068: }
+1069: 
+1070: 
+1071: async function saveDormOuting(payload={}){
+1072:   const allowedRoles=new Set(['admin','grade_head','grade_manager','homeroom']);
+1073:   if(payload.role&&!allowedRoles.has(String(payload.role)))throw new Error('학사외출 교사등록 권한이 없습니다.');
+1074:   const date=String(payload.date||'').slice(0,10),category=String(payload.category||'외출'),studentNo=String(payload.studentNo||'').replace(/\D/g,''),name=String(payload.name||'').trim();
+1075:   if(!date||!studentNo||!name)throw new Error('학생·학번·날짜 정보를 확인해 주세요.');
+1076:   const home=/퇴소|귀가/.test(category),outTime=String(payload.outTime||''),returnTime=String(payload.returnTime||'');
+1077:   if(!outTime)throw new Error('외출·귀가 시간을 입력해 주세요.');
+1078:   if(!home&&!returnTime)throw new Error('복귀 예정시간을 입력해 주세요.');
+1079:   const account=await resolveSchoolServiceAccount();if(!validateServiceAccount(account))throw new Error('학교 공용 Google 쓰기 연결을 찾지 못했습니다.');
+1080:   const token=await getSheetsToken(account),now=new Date().toISOString(),id=String(payload.id||`OUT-TEACHER-${crypto.randomUUID()}`),grade=String(payload.grade||studentNo.slice(0,1)||'1'),className=String(payload.className||studentNo.slice(1,2)||''),number=String(payload.number||studentNo.slice(-2)).replace(/^0/,'');
+1081:   const existing=await readSheetBatch(token,UEP_SPREADSHEET_ID,["'02_학사외출_일자별'!A3:AD5000"]),matrix=existing?.[0]?.values||[],headers=(matrix[0]||[]).map(x=>String(x||'').trim()),col=(...names)=>names.map(n=>headers.indexOf(n)).find(i=>i>=0);
+1082:   const dcol=col('외출일자','신청일자','운영일','일자','날짜'),ncol=col('학번','학생학번'),idcol=col('학생ID','학생 ID'),ccol=col('외출구분','신청구분','구분'),tcol=col('외출시간','출발예정시간','출발시간');
+1083:   const duplicate=matrix.slice(1).some(r=>String(r[dcol]||'').slice(0,10)===date&&((ncol>=0&&String(r[ncol]||'').replace(/\.0$/,'')===studentNo)||(idcol>=0&&String(r[idcol]||'')===String(payload.studentId||'')))&&String(r[ccol]||'')===category&&String(r[tcol]||'')===outTime);
+1084:   if(duplicate)throw new Error('같은 학생의 동일한 학사외출 기록이 이미 있습니다.');
+1085:   const row=[[id,'',date,String(payload.studentId||''),grade,className,number,name,'교사등록',category,home?'귀가형':'복귀형',outTime,home?'':returnTime,home?returnTime:'',String(payload.reason||''),String(payload.destination||''),String(payload.guardian||''),String(payload.note||''),String(payload.status||'확인'),now,now,'UEP반영',now,String(payload.writer||''),'','','Y','교사 직접등록','담임·관리자 직접 확인',now]];
+1086:   await appendSheetValues(token,UEP_SPREADSHEET_ID,"'02_학사외출_일자별'!A:AD",row);
+1087:   liveDataCache=null;liveDataFetchedAt=0;const data=await fetchLiveData({force:true});return {ok:true,id,data,record:{id,studentId:String(payload.studentId||''),studentNo,name,date,className,number,category,outTime,returnTime,reason:String(payload.reason||''),destination:String(payload.destination||''),note:String(payload.note||''),confirmed:String(payload.writer||''),status:'확인'}};
+1088: }async function saveStudentGuidanceRecord(payload={}){
+1089:   const account=await readEncrypted(credentialPath()); if(!validateServiceAccount(account))throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+1090:   const token=await getSheetsToken(account), now=new Date().toISOString(), id=String(payload.id||`GUIDE-${crypto.randomUUID()}`);
+1091:   const row=[[id,String(payload.studentId||""),String(payload.studentNo||""),String(payload.name||""),String(payload.grade||"1"),String(payload.className||""),String(payload.number||""),String(payload.guidanceDate||now.slice(0,10)),String(payload.memo||""),String(payload.writer||""),String(payload.createdAt||now),now,String(payload.status||"기록"),String(payload.note||"")]];
+1092:   const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,["'46_학생지도기록'!A3:N5000"]); const rows=(result?.[0]?.values||[]).slice(1); const pos=rows.findIndex(r=>String(r?.[0]||"")===id);
+1093:   if(pos>=0)await updateSheetValues(token,UEP_SPREADSHEET_ID,`'46_학생지도기록'!A${pos+4}:N${pos+4}`,row); else await appendSheetValues(token,UEP_SPREADSHEET_ID,"'46_학생지도기록'!A:N",row);
+1094:   liveDataCache=null;liveDataFetchedAt=0;
+1095:   return {ok:true,id,record:{id,studentId:String(payload.studentId||""),studentNo:String(payload.studentNo||""),name:String(payload.name||""),grade:String(payload.grade||"1"),className:String(payload.className||""),number:String(payload.number||""),guidanceDate:String(payload.guidanceDate||now.slice(0,10)),memo:String(payload.memo||""),writer:String(payload.writer||""),createdAt:String(payload.createdAt||now),modifiedAt:now,status:String(payload.status||"기록"),note:String(payload.note||"")}};
+1096: }
+===== MAIN appendSheet 1050-1120 =====
+1050:   const token=await getSheetsToken(account), range="'40_학사외출규칙'!A3:X1000";
+1051:   const result=await readSheetBatch(token,UEP_RULES_SPREADSHEET_ID,[range]);
+1052:   const rows=(result?.[0]?.values||[]).slice(1);
+1053:   const pos=rows.findIndex(row=>String(row?.[0]||"").trim()===key);
+1054:   if(pos<0) throw new Error("삭제할 학사외출 규칙을 시트에서 찾지 못했습니다.");
+1055:   await clearSheetValues(token,UEP_RULES_SPREADSHEET_ID,`'40_학사외출규칙'!A${pos+4}:X${pos+4}`);
+1056:   liveDataCache=null;liveDataFetchedAt=0;
+1057:   return {ok:true,id:key};
+1058: }
+1059: 
+1060: async function saveCounselRecord(payload={}){
+1061:   const account=await readEncrypted(credentialPath()); if(!validateServiceAccount(account))throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+1062:   const token=await getSheetsToken(account), now=new Date().toISOString(), id=String(payload.id||`CNS-${crypto.randomUUID()}`);
+1063:   const row=[[id,String(payload.studentId||""),String(payload.studentNo||""),String(payload.name||""),String(payload.grade||"1"),String(payload.className||""),String(payload.createdAt||now),String(payload.area||""),String(payload.type||"학생 상담"),String(payload.memo||""),String(payload.action||""),String(payload.nextDate||""),String(payload.status||"진행중"),String(payload.group||""),String(payload.stage||""),String(payload.discoveryReason||""),String(payload.writer||""),now]];
+1064:   const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,["'45_학생상담기록'!A3:R5000"]); const rows=(result?.[0]?.values||[]).slice(1); const pos=rows.findIndex(r=>String(r?.[0]||"")===id);
+1065:   if(pos>=0)await updateSheetValues(token,UEP_SPREADSHEET_ID,`'45_학생상담기록'!A${pos+4}:R${pos+4}`,row); else await appendSheetValues(token,UEP_SPREADSHEET_ID,"'45_학생상담기록'!A:R",row);
+1066:   liveDataCache=null;liveDataFetchedAt=0;
+1067:   return {ok:true,id,record:{id,studentId:String(payload.studentId||""),studentNo:String(payload.studentNo||""),name:String(payload.name||""),grade:String(payload.grade||"1"),className:String(payload.className||""),createdAt:String(payload.createdAt||now),area:String(payload.area||""),type:String(payload.type||"학생 상담"),memo:String(payload.memo||""),action:String(payload.action||""),nextDate:String(payload.nextDate||""),status:String(payload.status||"진행중"),group:String(payload.group||""),stage:String(payload.stage||""),discoveryReason:String(payload.discoveryReason||""),writer:String(payload.writer||""),modifiedAt:now}};
+1068: }
+1069: 
+1070: 
+1071: async function saveDormOuting(payload={}){
+1072:   const allowedRoles=new Set(['admin','grade_head','grade_manager','homeroom']);
+1073:   if(payload.role&&!allowedRoles.has(String(payload.role)))throw new Error('학사외출 교사등록 권한이 없습니다.');
+1074:   const date=String(payload.date||'').slice(0,10),category=String(payload.category||'외출'),studentNo=String(payload.studentNo||'').replace(/\D/g,''),name=String(payload.name||'').trim();
+1075:   if(!date||!studentNo||!name)throw new Error('학생·학번·날짜 정보를 확인해 주세요.');
+1076:   const home=/퇴소|귀가/.test(category),outTime=String(payload.outTime||''),returnTime=String(payload.returnTime||'');
+1077:   if(!outTime)throw new Error('외출·귀가 시간을 입력해 주세요.');
+1078:   if(!home&&!returnTime)throw new Error('복귀 예정시간을 입력해 주세요.');
+1079:   const account=await resolveSchoolServiceAccount();if(!validateServiceAccount(account))throw new Error('학교 공용 Google 쓰기 연결을 찾지 못했습니다.');
+1080:   const token=await getSheetsToken(account),now=new Date().toISOString(),id=String(payload.id||`OUT-TEACHER-${crypto.randomUUID()}`),grade=String(payload.grade||studentNo.slice(0,1)||'1'),className=String(payload.className||studentNo.slice(1,2)||''),number=String(payload.number||studentNo.slice(-2)).replace(/^0/,'');
+1081:   const existing=await readSheetBatch(token,UEP_SPREADSHEET_ID,["'02_학사외출_일자별'!A3:AD5000"]),matrix=existing?.[0]?.values||[],headers=(matrix[0]||[]).map(x=>String(x||'').trim()),col=(...names)=>names.map(n=>headers.indexOf(n)).find(i=>i>=0);
+1082:   const dcol=col('외출일자','신청일자','운영일','일자','날짜'),ncol=col('학번','학생학번'),idcol=col('학생ID','학생 ID'),ccol=col('외출구분','신청구분','구분'),tcol=col('외출시간','출발예정시간','출발시간');
+1083:   const duplicate=matrix.slice(1).some(r=>String(r[dcol]||'').slice(0,10)===date&&((ncol>=0&&String(r[ncol]||'').replace(/\.0$/,'')===studentNo)||(idcol>=0&&String(r[idcol]||'')===String(payload.studentId||'')))&&String(r[ccol]||'')===category&&String(r[tcol]||'')===outTime);
+1084:   if(duplicate)throw new Error('같은 학생의 동일한 학사외출 기록이 이미 있습니다.');
+1085:   const row=[[id,'',date,String(payload.studentId||''),grade,className,number,name,'교사등록',category,home?'귀가형':'복귀형',outTime,home?'':returnTime,home?returnTime:'',String(payload.reason||''),String(payload.destination||''),String(payload.guardian||''),String(payload.note||''),String(payload.status||'확인'),now,now,'UEP반영',now,String(payload.writer||''),'','','Y','교사 직접등록','담임·관리자 직접 확인',now]];
+1086:   await appendSheetValues(token,UEP_SPREADSHEET_ID,"'02_학사외출_일자별'!A:AD",row);
+1087:   liveDataCache=null;liveDataFetchedAt=0;const data=await fetchLiveData({force:true});return {ok:true,id,data,record:{id,studentId:String(payload.studentId||''),studentNo,name,date,className,number,category,outTime,returnTime,reason:String(payload.reason||''),destination:String(payload.destination||''),note:String(payload.note||''),confirmed:String(payload.writer||''),status:'확인'}};
+1088: }async function saveStudentGuidanceRecord(payload={}){
+1089:   const account=await readEncrypted(credentialPath()); if(!validateServiceAccount(account))throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+1090:   const token=await getSheetsToken(account), now=new Date().toISOString(), id=String(payload.id||`GUIDE-${crypto.randomUUID()}`);
+1091:   const row=[[id,String(payload.studentId||""),String(payload.studentNo||""),String(payload.name||""),String(payload.grade||"1"),String(payload.className||""),String(payload.number||""),String(payload.guidanceDate||now.slice(0,10)),String(payload.memo||""),String(payload.writer||""),String(payload.createdAt||now),now,String(payload.status||"기록"),String(payload.note||"")]];
+1092:   const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,["'46_학생지도기록'!A3:N5000"]); const rows=(result?.[0]?.values||[]).slice(1); const pos=rows.findIndex(r=>String(r?.[0]||"")===id);
+1093:   if(pos>=0)await updateSheetValues(token,UEP_SPREADSHEET_ID,`'46_학생지도기록'!A${pos+4}:N${pos+4}`,row); else await appendSheetValues(token,UEP_SPREADSHEET_ID,"'46_학생지도기록'!A:N",row);
+1094:   liveDataCache=null;liveDataFetchedAt=0;
+1095:   return {ok:true,id,record:{id,studentId:String(payload.studentId||""),studentNo:String(payload.studentNo||""),name:String(payload.name||""),grade:String(payload.grade||"1"),className:String(payload.className||""),number:String(payload.number||""),guidanceDate:String(payload.guidanceDate||now.slice(0,10)),memo:String(payload.memo||""),writer:String(payload.writer||""),createdAt:String(payload.createdAt||now),modifiedAt:now,status:String(payload.status||"기록"),note:String(payload.note||"")}};
+1096: }
+1097: 
+1098: 
+1099: async function saveNightSupervisor(payload={}) {
+1100:   const allowedRoles=new Set(['admin','grade_head','grade_manager','homeroom','subject']);
+1101:   if(payload.role&&!allowedRoles.has(String(payload.role))) throw new Error('야자감독 수정 권한이 없습니다.');
+1102:   const id=String(payload.id||'').trim(), date=String(payload.date||'').slice(0,10), teacher=String(payload.teacher||'').trim();
+1103:   if(!teacher) throw new Error('변경할 감독교사가 없습니다.');
+1104:   const account=await readEncrypted(credentialPath());
+1105:   if(!validateServiceAccount(account)) throw new Error('Google 서비스 계정 인증정보가 필요합니다.');
+1106:   const token=await getSheetsToken(account);
+1107:   const range="'43_야자감독계획'!A3:J1000";
+1108:   const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,[range]);
+1109:   const matrix=result?.[0]?.values||[];
+1110:   const headers=(matrix[0]||[]).map(v=>String(v||'').trim());
+1111:   const idCol=headers.indexOf('기록ID'), dateCol=headers.indexOf('운영일'), teacherCol=headers.indexOf('감독교사');
+1112:   if(teacherCol<0) throw new Error('43_야자감독계획의 감독교사 열을 찾지 못했습니다.');
+1113:   const rows=matrix.slice(1);
+1114:   const pos=rows.findIndex(row=> (id&&String(row?.[idCol]||'').trim()===id) || (!id&&String(row?.[dateCol]||'').slice(0,10)===date));
+1115:   if(pos<0) throw new Error('수정할 야자감독 일정을 찾지 못했습니다.');
+1116:   const sheetRow=pos+4;
+1117:   const colLetter=String.fromCharCode(65+teacherCol);
+1118:   await updateSheetValues(token,UEP_SPREADSHEET_ID,`'43_야자감독계획'!${colLetter}${sheetRow}:${colLetter}${sheetRow}`,[[teacher]]);
+1119:   liveDataCache=null; liveDataFetchedAt=0;
+1120:   const data=await fetchLiveData({force:true});
+===== MAIN updateSheet 639-709 =====
+639:   const response = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
+640:   if (!response.ok) {
+641:     let detail = "";
+642:     try { detail = (await response.json())?.error?.message || ""; } catch {}
+643:     if ((response.status === 429 || response.status >= 500) && attempt < 3) {
+644:       const retryAfter = Number(response.headers.get("retry-after") || 0);
+645:       const waitMs = retryAfter > 0 ? retryAfter * 1000 : 900 * Math.pow(2, attempt);
+646:       await new Promise(resolve => setTimeout(resolve, waitMs));
+647:       return readSheetBatch(token, spreadsheetId, ranges, attempt + 1);
+648:     }
+649:     throw new Error(`UEP 구글시트 읽기 실패 (${response.status})${detail ? `: ${detail}` : ""}`);
+650:   }
+651:   return (await response.json()).valueRanges || [];
+652: }
+653: 
+654: async function updateSheetValues(token, spreadsheetId, range, values, attempt=0) {
+655:   const url = new URL(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`);
+656:   url.searchParams.set("valueInputOption", "USER_ENTERED");
+657:   const response = await fetch(url, {
+658:     method: "PUT",
+659:     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+660:     body: JSON.stringify({ majorDimension: "ROWS", values }),
+661:   });
+662:   if (!response.ok) {
+663:     let detail=""; try{ detail=(await response.json())?.error?.message||""; }catch{}
+664:     if ((response.status===429 || response.status>=500) && attempt<4) {
+665:       const retryAfter=Number(response.headers.get("retry-after")||0);
+666:       const waitMs=retryAfter>0?retryAfter*1000:1000*Math.pow(2,attempt);
+667:       await new Promise(resolve=>setTimeout(resolve,waitMs));
+668:       return updateSheetValues(token,spreadsheetId,range,values,attempt+1);
+669:     }
+670:     throw new Error(`구글시트 저장 실패 (${response.status})${detail?`: ${detail}`:""}`);
+671:   }
+672:   return response.json();
+673: }
+674: 
+675: async function batchUpdateSheetValues(token, spreadsheetId, data, attempt=0) {
+676:   const items=(Array.isArray(data)?data:[]).filter(x=>x&&x.range&&Array.isArray(x.values));
+677:   if(!items.length)return {totalUpdatedRows:0};
+678:   const url=new URL(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchUpdate`);
+679:   const response=await fetch(url,{
+680:     method:"POST",
+681:     headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"},
+682:     body:JSON.stringify({valueInputOption:"USER_ENTERED",data:items.map(x=>({range:x.range,majorDimension:"ROWS",values:x.values}))}),
+683:   });
+684:   if(!response.ok){
+685:     let detail="";try{detail=(await response.json())?.error?.message||"";}catch{}
+686:     if((response.status===429||response.status>=500)&&attempt<4){
+687:       const retryAfter=Number(response.headers.get("retry-after")||0);
+688:       const waitMs=retryAfter>0?retryAfter*1000:1000*Math.pow(2,attempt);
+689:       await new Promise(resolve=>setTimeout(resolve,waitMs));
+690:       return batchUpdateSheetValues(token,spreadsheetId,items,attempt+1);
+691:     }
+692:     throw new Error(`구글시트 일괄 저장 실패 (${response.status})${detail?`: ${detail}`:""}`);
+693:   }
+694:   return response.json();
+695: }
+696: 
+697: 
+698: function columnLetter(index) {
+699:   let n=Number(index)+1, out="";
+700:   while(n>0){ const r=(n-1)%26; out=String.fromCharCode(65+r)+out; n=Math.floor((n-1)/26); }
+701:   return out;
+702: }
+703: function normalizeSheetHeader(value){return String(value??"").replace(/\r?\n/g," ").replace(/\s+/g," ").trim();}
+704: function findHeaderRowByRequired(matrix,required){
+705:   const wanted=required.map(x=>String(x));
+706:   const limit=Math.min(Array.isArray(matrix)?matrix.length:0,12);
+707:   for(let i=0;i<limit;i+=1){
+708:     const row=(matrix[i]||[]).map(normalizeSheetHeader);
+709:     if(wanted.every(name=>row.includes(name))) return {index:i,headers:row};
+===== MAIN updateSheet 653-723 =====
+653: 
+654: async function updateSheetValues(token, spreadsheetId, range, values, attempt=0) {
+655:   const url = new URL(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`);
+656:   url.searchParams.set("valueInputOption", "USER_ENTERED");
+657:   const response = await fetch(url, {
+658:     method: "PUT",
+659:     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+660:     body: JSON.stringify({ majorDimension: "ROWS", values }),
+661:   });
+662:   if (!response.ok) {
+663:     let detail=""; try{ detail=(await response.json())?.error?.message||""; }catch{}
+664:     if ((response.status===429 || response.status>=500) && attempt<4) {
+665:       const retryAfter=Number(response.headers.get("retry-after")||0);
+666:       const waitMs=retryAfter>0?retryAfter*1000:1000*Math.pow(2,attempt);
+667:       await new Promise(resolve=>setTimeout(resolve,waitMs));
+668:       return updateSheetValues(token,spreadsheetId,range,values,attempt+1);
+669:     }
+670:     throw new Error(`구글시트 저장 실패 (${response.status})${detail?`: ${detail}`:""}`);
+671:   }
+672:   return response.json();
+673: }
+674: 
+675: async function batchUpdateSheetValues(token, spreadsheetId, data, attempt=0) {
+676:   const items=(Array.isArray(data)?data:[]).filter(x=>x&&x.range&&Array.isArray(x.values));
+677:   if(!items.length)return {totalUpdatedRows:0};
+678:   const url=new URL(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchUpdate`);
+679:   const response=await fetch(url,{
+680:     method:"POST",
+681:     headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"},
+682:     body:JSON.stringify({valueInputOption:"USER_ENTERED",data:items.map(x=>({range:x.range,majorDimension:"ROWS",values:x.values}))}),
+683:   });
+684:   if(!response.ok){
+685:     let detail="";try{detail=(await response.json())?.error?.message||"";}catch{}
+686:     if((response.status===429||response.status>=500)&&attempt<4){
+687:       const retryAfter=Number(response.headers.get("retry-after")||0);
+688:       const waitMs=retryAfter>0?retryAfter*1000:1000*Math.pow(2,attempt);
+689:       await new Promise(resolve=>setTimeout(resolve,waitMs));
+690:       return batchUpdateSheetValues(token,spreadsheetId,items,attempt+1);
+691:     }
+692:     throw new Error(`구글시트 일괄 저장 실패 (${response.status})${detail?`: ${detail}`:""}`);
+693:   }
+694:   return response.json();
+695: }
+696: 
+697: 
+698: function columnLetter(index) {
+699:   let n=Number(index)+1, out="";
+700:   while(n>0){ const r=(n-1)%26; out=String.fromCharCode(65+r)+out; n=Math.floor((n-1)/26); }
+701:   return out;
+702: }
+703: function normalizeSheetHeader(value){return String(value??"").replace(/\r?\n/g," ").replace(/\s+/g," ").trim();}
+704: function findHeaderRowByRequired(matrix,required){
+705:   const wanted=required.map(x=>String(x));
+706:   const limit=Math.min(Array.isArray(matrix)?matrix.length:0,12);
+707:   for(let i=0;i<limit;i+=1){
+708:     const row=(matrix[i]||[]).map(normalizeSheetHeader);
+709:     if(wanted.every(name=>row.includes(name))) return {index:i,headers:row};
+710:   }
+711:   return null;
+712: }
+713: async function saveStudentContact(payload={}) {
+714:   const allowed={phone:["학생연락처"],email:["학생이메일","이메일","이메일주소"],guardian1Phone:["보호자1연락처"],guardian2Phone:["보호자2연락처"]};
+715:   const field=String(payload.field||"");
+716:   if(!allowed[field]) throw new Error("수정할 수 없는 학생정보 항목입니다.");
+717:   const role=String(payload.role||"");
+718:   if(!["admin","homeroom"].includes(role)) throw new Error("학생 연락정보 수정 권한이 없습니다.");
+719:   const account=await readEncrypted(credentialPath());
+720:   if(!validateServiceAccount(account)) throw new Error("저장된 Google 서비스 계정 인증정보가 올바르지 않습니다.");
+721:   const token=await getSheetsToken(account);
+722:   const range="'04_학생연락식별정보'!A1:Z1000";
+723:   const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,[range]);
+===== MAIN updateSheet 660-730 =====
+660:     body: JSON.stringify({ majorDimension: "ROWS", values }),
+661:   });
+662:   if (!response.ok) {
+663:     let detail=""; try{ detail=(await response.json())?.error?.message||""; }catch{}
+664:     if ((response.status===429 || response.status>=500) && attempt<4) {
+665:       const retryAfter=Number(response.headers.get("retry-after")||0);
+666:       const waitMs=retryAfter>0?retryAfter*1000:1000*Math.pow(2,attempt);
+667:       await new Promise(resolve=>setTimeout(resolve,waitMs));
+668:       return updateSheetValues(token,spreadsheetId,range,values,attempt+1);
+669:     }
+670:     throw new Error(`구글시트 저장 실패 (${response.status})${detail?`: ${detail}`:""}`);
+671:   }
+672:   return response.json();
+673: }
+674: 
+675: async function batchUpdateSheetValues(token, spreadsheetId, data, attempt=0) {
+676:   const items=(Array.isArray(data)?data:[]).filter(x=>x&&x.range&&Array.isArray(x.values));
+677:   if(!items.length)return {totalUpdatedRows:0};
+678:   const url=new URL(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchUpdate`);
+679:   const response=await fetch(url,{
+680:     method:"POST",
+681:     headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"},
+682:     body:JSON.stringify({valueInputOption:"USER_ENTERED",data:items.map(x=>({range:x.range,majorDimension:"ROWS",values:x.values}))}),
+683:   });
+684:   if(!response.ok){
+685:     let detail="";try{detail=(await response.json())?.error?.message||"";}catch{}
+686:     if((response.status===429||response.status>=500)&&attempt<4){
+687:       const retryAfter=Number(response.headers.get("retry-after")||0);
+688:       const waitMs=retryAfter>0?retryAfter*1000:1000*Math.pow(2,attempt);
+689:       await new Promise(resolve=>setTimeout(resolve,waitMs));
+690:       return batchUpdateSheetValues(token,spreadsheetId,items,attempt+1);
+691:     }
+692:     throw new Error(`구글시트 일괄 저장 실패 (${response.status})${detail?`: ${detail}`:""}`);
+693:   }
+694:   return response.json();
+695: }
+696: 
+697: 
+698: function columnLetter(index) {
+699:   let n=Number(index)+1, out="";
+700:   while(n>0){ const r=(n-1)%26; out=String.fromCharCode(65+r)+out; n=Math.floor((n-1)/26); }
+701:   return out;
+702: }
+703: function normalizeSheetHeader(value){return String(value??"").replace(/\r?\n/g," ").replace(/\s+/g," ").trim();}
+704: function findHeaderRowByRequired(matrix,required){
+705:   const wanted=required.map(x=>String(x));
+706:   const limit=Math.min(Array.isArray(matrix)?matrix.length:0,12);
+707:   for(let i=0;i<limit;i+=1){
+708:     const row=(matrix[i]||[]).map(normalizeSheetHeader);
+709:     if(wanted.every(name=>row.includes(name))) return {index:i,headers:row};
+710:   }
+711:   return null;
+712: }
+713: async function saveStudentContact(payload={}) {
+714:   const allowed={phone:["학생연락처"],email:["학생이메일","이메일","이메일주소"],guardian1Phone:["보호자1연락처"],guardian2Phone:["보호자2연락처"]};
+715:   const field=String(payload.field||"");
+716:   if(!allowed[field]) throw new Error("수정할 수 없는 학생정보 항목입니다.");
+717:   const role=String(payload.role||"");
+718:   if(!["admin","homeroom"].includes(role)) throw new Error("학생 연락정보 수정 권한이 없습니다.");
+719:   const account=await readEncrypted(credentialPath());
+720:   if(!validateServiceAccount(account)) throw new Error("저장된 Google 서비스 계정 인증정보가 올바르지 않습니다.");
+721:   const token=await getSheetsToken(account);
+722:   const range="'04_학생연락식별정보'!A1:Z1000";
+723:   const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,[range]);
+724:   const matrix=result?.[0]?.values||[];
+725:   const header=findHeaderRowByRequired(matrix,["학생ID"]);
+726:   if(!header) throw new Error("04_학생연락식별정보의 헤더에서 학생ID를 찾지 못했습니다.");
+727:   const studentId=String(payload.studentId||"").trim();
+728:   if(!studentId) throw new Error("학생ID가 없어 저장할 수 없습니다.");
+729:   const idCol=header.headers.indexOf("학생ID");
+730:   let fieldCol=-1;
+===== MAIN updateSheet 675-745 =====
+675: async function batchUpdateSheetValues(token, spreadsheetId, data, attempt=0) {
+676:   const items=(Array.isArray(data)?data:[]).filter(x=>x&&x.range&&Array.isArray(x.values));
+677:   if(!items.length)return {totalUpdatedRows:0};
+678:   const url=new URL(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchUpdate`);
+679:   const response=await fetch(url,{
+680:     method:"POST",
+681:     headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"},
+682:     body:JSON.stringify({valueInputOption:"USER_ENTERED",data:items.map(x=>({range:x.range,majorDimension:"ROWS",values:x.values}))}),
+683:   });
+684:   if(!response.ok){
+685:     let detail="";try{detail=(await response.json())?.error?.message||"";}catch{}
+686:     if((response.status===429||response.status>=500)&&attempt<4){
+687:       const retryAfter=Number(response.headers.get("retry-after")||0);
+688:       const waitMs=retryAfter>0?retryAfter*1000:1000*Math.pow(2,attempt);
+689:       await new Promise(resolve=>setTimeout(resolve,waitMs));
+690:       return batchUpdateSheetValues(token,spreadsheetId,items,attempt+1);
+691:     }
+692:     throw new Error(`구글시트 일괄 저장 실패 (${response.status})${detail?`: ${detail}`:""}`);
+693:   }
+694:   return response.json();
+695: }
+696: 
+697: 
+698: function columnLetter(index) {
+699:   let n=Number(index)+1, out="";
+700:   while(n>0){ const r=(n-1)%26; out=String.fromCharCode(65+r)+out; n=Math.floor((n-1)/26); }
+701:   return out;
+702: }
+703: function normalizeSheetHeader(value){return String(value??"").replace(/\r?\n/g," ").replace(/\s+/g," ").trim();}
+704: function findHeaderRowByRequired(matrix,required){
+705:   const wanted=required.map(x=>String(x));
+706:   const limit=Math.min(Array.isArray(matrix)?matrix.length:0,12);
+707:   for(let i=0;i<limit;i+=1){
+708:     const row=(matrix[i]||[]).map(normalizeSheetHeader);
+709:     if(wanted.every(name=>row.includes(name))) return {index:i,headers:row};
+710:   }
+711:   return null;
+712: }
+713: async function saveStudentContact(payload={}) {
+714:   const allowed={phone:["학생연락처"],email:["학생이메일","이메일","이메일주소"],guardian1Phone:["보호자1연락처"],guardian2Phone:["보호자2연락처"]};
+715:   const field=String(payload.field||"");
+716:   if(!allowed[field]) throw new Error("수정할 수 없는 학생정보 항목입니다.");
+717:   const role=String(payload.role||"");
+718:   if(!["admin","homeroom"].includes(role)) throw new Error("학생 연락정보 수정 권한이 없습니다.");
+719:   const account=await readEncrypted(credentialPath());
+720:   if(!validateServiceAccount(account)) throw new Error("저장된 Google 서비스 계정 인증정보가 올바르지 않습니다.");
+721:   const token=await getSheetsToken(account);
+722:   const range="'04_학생연락식별정보'!A1:Z1000";
+723:   const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,[range]);
+724:   const matrix=result?.[0]?.values||[];
+725:   const header=findHeaderRowByRequired(matrix,["학생ID"]);
+726:   if(!header) throw new Error("04_학생연락식별정보의 헤더에서 학생ID를 찾지 못했습니다.");
+727:   const studentId=String(payload.studentId||"").trim();
+728:   if(!studentId) throw new Error("학생ID가 없어 저장할 수 없습니다.");
+729:   const idCol=header.headers.indexOf("학생ID");
+730:   let fieldCol=-1;
+731:   for(const name of allowed[field]){ const idx=header.headers.indexOf(name); if(idx>=0){fieldCol=idx;break;} }
+732:   if(fieldCol<0) throw new Error(`04_학생연락식별정보에 ${allowed[field][0]} 열이 없습니다.`);
+733:   let dataRow=-1;
+734:   for(let r=header.index+1;r<matrix.length;r+=1){ if(String(matrix[r]?.[idCol]||"").trim()===studentId){dataRow=r;break;} }
+735:   const value=String(payload.value??"").trim();
+736:   if(dataRow<0){
+737:     const row=Array(Math.max(header.headers.length,fieldCol+1)).fill("");
+738:     row[idCol]=studentId; row[fieldCol]=value;
+739:     const useCol=header.headers.indexOf("현재사용여부"); if(useCol>=0)row[useCol]="Y";
+740:     await appendSheetValues(token,UEP_SPREADSHEET_ID,"'04_학생연락식별정보'!A:Z",[row]);
+741:   }else{
+742:     const sheetRow=dataRow+1;
+743:     const col=columnLetter(fieldCol);
+744:     await updateSheetValues(token,UEP_SPREADSHEET_ID,`'04_학생연락식별정보'!${col}${sheetRow}:${col}${sheetRow}`,[[value]]);
+745:   }
+===== MAIN updateSheet 729-799 =====
+729:   const idCol=header.headers.indexOf("학생ID");
+730:   let fieldCol=-1;
+731:   for(const name of allowed[field]){ const idx=header.headers.indexOf(name); if(idx>=0){fieldCol=idx;break;} }
+732:   if(fieldCol<0) throw new Error(`04_학생연락식별정보에 ${allowed[field][0]} 열이 없습니다.`);
+733:   let dataRow=-1;
+734:   for(let r=header.index+1;r<matrix.length;r+=1){ if(String(matrix[r]?.[idCol]||"").trim()===studentId){dataRow=r;break;} }
+735:   const value=String(payload.value??"").trim();
+736:   if(dataRow<0){
+737:     const row=Array(Math.max(header.headers.length,fieldCol+1)).fill("");
+738:     row[idCol]=studentId; row[fieldCol]=value;
+739:     const useCol=header.headers.indexOf("현재사용여부"); if(useCol>=0)row[useCol]="Y";
+740:     await appendSheetValues(token,UEP_SPREADSHEET_ID,"'04_학생연락식별정보'!A:Z",[row]);
+741:   }else{
+742:     const sheetRow=dataRow+1;
+743:     const col=columnLetter(fieldCol);
+744:     await updateSheetValues(token,UEP_SPREADSHEET_ID,`'04_학생연락식별정보'!${col}${sheetRow}:${col}${sheetRow}`,[[value]]);
+745:   }
+746:   liveDataCache=null; liveDataFetchedAt=0;
+747:   const data=await fetchLiveData({force:true});
+748:   return {ok:true,data};
+749: }
+750: 
+751: 
+752: async function saveProgramOperation(payload={}) {
+753:   if (String(payload.role||"") !== "admin") throw new Error("프로그램 운영정보 양방향 수정은 관리자만 가능합니다.");
+754:   const account = await readEncrypted(credentialPath());
+755:   if (!validateServiceAccount(account)) throw new Error("저장된 Google 서비스 계정 인증정보가 올바르지 않습니다.");
+756:   const token = await getSheetsToken(account);
+757:   const source = String(payload.source||"");
+758:   const programId = String(payload.programId||"").trim();
+759:   const sessionId = String(payload.sessionId||"").trim();
+760:   const date = String(payload.date||"").trim();
+761:   const endDate = String(payload.endDate||"").trim();
+762:   const time = String(payload.time||"").trim();
+763:   const startTime = String(payload.startTime||"").trim();
+764:   const endTime = String(payload.endTime||"").trim();
+765:   const place = String(payload.place||"").trim();
+766:   const teacher = String(payload.teacher||"").trim();
+767:   const title = String(payload.title||"").trim();
+768:   const recordTitle = String(payload.recordTitle||"").trim();
+769:   const department = String(payload.department||"").trim();
+770:   const subject = String(payload.subject||"").trim();
+771:   const reportRequired = payload.reportRequired === undefined ? undefined : (payload.reportRequired ? "Y" : "N");
+772:   const reportToAuthority = payload.reportToAuthority === undefined ? undefined : (payload.reportToAuthority ? "Y" : "N");
+773:   const reportAgency = String(payload.reportAgency||"").trim();
+774:   const reportAfterDays = payload.reportAfterDays === undefined ? undefined : String(payload.reportAfterDays ?? "").trim();
+775:   const reportDeadline = String(payload.reportDeadline||"").trim();
+776:   const photoRequired = payload.photoRequired === undefined ? undefined : (payload.photoRequired ? "Y" : "N");
+777:   const memo = String(payload.memo||"").trim();
+778:   const activityType = String(payload.activityType||"").trim();
+779:   const afterType = String(payload.afterType||"").trim();
+780:   const weekdays = String(payload.weekdays||"").trim();
+781:   const operationPeriod = String(payload.operationPeriod||"").trim();
+782:   const targetGrade = String(payload.targetGrade||"").trim();
+783:   const nightLinked = payload.nightLinked === undefined ? undefined : (payload.nightLinked ? "Y" : "N");
+784:   const attendanceMethod = String(payload.attendanceMethod||"").trim();
+785:   const status = String(payload.status||"").trim();
+786:   const commonReportFormUrl = payload.commonReportFormUrl === undefined ? undefined : String(payload.commonReportFormUrl||"").trim();
+787:   const reportFormSettingKey = source.includes("09_공통활동마스터") ? "COMMON_ACTIVITY_REPORT_FORM_URL" : source.includes("10_선택활동마스터") ? "SELECTED_ACTIVITY_REPORT_FORM_URL" : "";
+788:   const clocks = time.match(/\d{1,2}:\d{2}/g) || [];
+789:   const specs = source.includes("12_차시일정")
+790:     ? {sheet:"12_차시일정", keyNames:["차시ID"], keyValue:sessionId, fields:{date:["실제수업일","운영일자","예정일"], start:["시작시각"], end:["종료시각"], place:["장소"], teacher:["담당교사"]}}
+791:     : source.includes("11_방과후학교")
+792:       ? {sheet:"11_방과후학교", keyNames:["방과후ID","프로그램ID"], keyValue:programId, fields:{title:["프로그램명"], operationPeriod:["운영기간구분"], subject:["교과"], department:["담당부서"], afterType:["방과후유형"], teacher:["담당교사"], date:["운영시작일"], endDate:["운영종료일"], weekdays:["요일"], startTime:["시작시간"], endTime:["종료시간"], place:["장소"], targetGrade:["대상학년"], nightLinked:["야자연계여부"], attendanceMethod:["출석관리방식"], status:["운영상태"], memo:["학생안내"]}}
+793:       : source.includes("10_선택활동마스터")
+794:         ? {sheet:"10_선택활동마스터", keyNames:["프로그램ID"], keyValue:programId, fields:{date:["운영시작일"], time:["운영시간"], place:["장소"], teacher:["담당교사"], title:["프로그램명"], recordTitle:["생활기록부표기명"], department:["운영부서"], subject:["교과"], reportRequired:["보고서사용"], reportToAuthority:["기관보고여부"], reportAgency:["보고대상기관"], reportAfterDays:["보고기한일수"], reportDeadline:["학생보고서마감일"], photoRequired:["사진증빙사용"], memo:["학생안내"], activityType:["프로그램유형"]}}
+795:         : source.includes("09_공통활동마스터")
+796:           ? {sheet:"09_공통활동마스터", keyNames:["활동ID"], keyValue:programId, fields:{title:["활동명"], activityType:["활동영역"], date:["운영시작일"], endDate:["운영종료일"], time:["운영시간"], place:["장소"], teacher:["담당교사"], department:["운영부서"], subject:["교과"], reportRequired:["보고서사용"], reportDeadline:["학생보고서마감일"], memo:["학생안내"]}}
+797:           : null;
+798:   if (!specs || !specs.keyValue) throw new Error("양방향 저장 가능한 프로그램 원본을 확인하지 못했습니다.");
+799:   const range = `'${specs.sheet}'!A1:AZ2000`;
+===== MAIN credentialPath 17-87 =====
+17:   UEP_RULES_SPREADSHEET_ID,
+18:   parseGoogleSheetData,
+19: } = require("./google-data.cjs");
+20: 
+21: // UEP의 사용자 데이터와 Electron safeStorage 키 저장소를 같은 고정 위치에 둡니다.
+22: // safeStorage 암호문만 다른 폴더로 복사하면 Chromium OS encryption key(Local State)와 분리되어
+23: // Windows 재부팅/버전 교체 뒤 decryptString이 실패할 수 있으므로 userData 자체를 앱 시작 전에 고정합니다.
+24: const originalUserDataRoot = app.getPath("userData");
+25: const fixedUserDataRoot = path.join(process.env.APPDATA || app.getPath("appData"), "UNHO Education Platform");
+26: try {
+27:   if (path.resolve(originalUserDataRoot) !== path.resolve(fixedUserDataRoot)) app.setPath("userData", fixedUserDataRoot);
+28: } catch {}
+29: const stableUserDataRoot = () => app.getPath("userData");
+30: const legacyUserDataRoot = () => originalUserDataRoot;
+31: const statePath = () => path.join(stableUserDataRoot(), "school-board-state.json");
+32: const credentialPath = () => path.join(stableUserDataRoot(), "google-service-account.bin");
+33: const credentialRecoveryPath = () => path.join(stableUserDataRoot(), "google-service-account.recovery.json");
+34: const googleUserOAuthPath = () => path.join(stableUserDataRoot(), "google-user-oauth.bin");
+35: const googleUserOAuthRecoveryPath = () => path.join(stableUserDataRoot(), "google-user-oauth.recovery.json");
+36: // __UEP_GOOGLE_OAUTH_CANONICAL_08073__
+37: const googleUserOAuthCanonicalRoot = () => path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'UNHO Education Platform');
+38: const googleUserOAuthCanonicalPath = () => path.join(googleUserOAuthCanonicalRoot(), 'google-user-oauth.bin');
+39: const googleUserOAuthCanonicalRecoveryPath = () => path.join(googleUserOAuthCanonicalRoot(), 'google-user-oauth.recovery.json');
+40: const neisApiKeyPath = () => path.join(stableUserDataRoot(), "neis-api-key.bin");
+41: const schoolReadDevicePath = () => path.join(stableUserDataRoot(), "uep-device-id.txt");
+42: const schoolReadSessionPath = () => path.join(stableUserDataRoot(), "uep-school-read-session.bin");
+43: const neisCachePath = () => path.join(stableUserDataRoot(), "neis-dashboard-cache.json");
+44: 
+45: const comciganCachePath = () => path.join(stableUserDataRoot(), "comcigan-timetable-cache.json");
+46: async function migrateStableUserFile(fileName) {
+47:   const target=path.join(stableUserDataRoot(),fileName), legacy=path.join(legacyUserDataRoot(),fileName);
+48:   try { await fs.access(target); return; } catch {}
+49:   try { await fs.mkdir(stableUserDataRoot(),{recursive:true}); await fs.copyFile(legacy,target); } catch {}
+50: }
+51: async function migrateStableUserData() {
+52:   // Local State에는 Windows safeStorage가 사용하는 Chromium OS encryption key 정보가 들어 있습니다.
+53:   // 기존 버전의 userData에서 최초 1회 같이 옮겨야 기존 암호문을 복호화할 가능성이 유지됩니다.
+54:   for (const fileName of ["Local State","school-board-state.json","google-service-account.bin","google-service-account.recovery.json","google-user-oauth.bin","google-user-oauth.recovery.json","neis-api-key.bin","neis-dashboard-cache.json","comcigan-timetable-cache.json"]) await migrateStableUserFile(fileName);
+55: }
+56: let comciganWindow = null;
+57: let mainWindow = null;
+58: let shutdownStarted = false;
+59: 
+60: async function appendShutdownLog(message) {
+61:   try {
+62:     const file = path.join(stableUserDataRoot(), "shutdown-diagnostics.log");
+63:     await fs.mkdir(stableUserDataRoot(), { recursive: true });
+64:     await fs.appendFile(file, `${new Date().toISOString()} ${message}\n`, "utf8");
+65:   } catch {}
+66: }
+67: function destroyAuxiliaryWindows(reason="shutdown") {
+68:   try { appendShutdownLog(`destroy-aux:${reason}:comcigan=${Boolean(comciganWindow && !comciganWindow.isDestroyed())}`); } catch {}
+69:   try {
+70:     if (comciganWindow && !comciganWindow.isDestroyed()) comciganWindow.destroy();
+71:   } catch {}
+72:   comciganWindow = null;
+73: }
+74: function beginCleanShutdown(reason="user-close") {
+75:   if (shutdownStarted) return;
+76:   shutdownStarted = true;
+77:   try { appendShutdownLog(`shutdown-start:${reason}:pid=${process.pid}:windows=${BrowserWindow.getAllWindows().length}`); } catch {}
+78:   destroyAuxiliaryWindows(reason);
+79:   // Give Electron a short grace period to release renderer/GPU resources. If the
+80:   // normal quit sequence stalls, force only THIS Electron process to exit.
+81:   setTimeout(() => {
+82:     try { appendShutdownLog(`shutdown-force-exit:${reason}:windows=${BrowserWindow.getAllWindows().length}`); } catch {}
+83:     try { app.exit(0); } catch {}
+84:   }, 1500).unref?.();
+85: }
+86: 
+87: function compactDateKey(date) {
+===== MAIN credentialPath 269-339 =====
+269: async function readCredentialRecovery() {
+270:   const payload = JSON.parse(await fs.readFile(credentialRecoveryPath(), "utf8"));
+271:   if (!payload || payload.version !== 1 || payload.algorithm !== "aes-256-gcm") throw new Error("invalid recovery credential");
+272:   const salt=Buffer.from(payload.salt,"base64"), iv=Buffer.from(payload.iv,"base64"), tag=Buffer.from(payload.tag,"base64"), data=Buffer.from(payload.data,"base64");
+273:   const decipher = crypto.createDecipheriv("aes-256-gcm", recoveryKey(salt), iv);
+274:   decipher.setAuthTag(tag);
+275:   return JSON.parse(Buffer.concat([decipher.update(data), decipher.final()]).toString("utf8"));
+276: }
+277: 
+278: async function saveEncrypted(filePath, value) {
+279:   await fs.mkdir(path.dirname(filePath), { recursive: true });
+280:   if (safeStorage.isEncryptionAvailable()) {
+281:     await fs.writeFile(filePath, safeStorage.encryptString(JSON.stringify(value)));
+282:   } else {
+283:     // 인증정보는 아래 복구 저장소가 있으므로, 다른 보안값은 기존처럼 실패시킵니다.
+284:     if (path.resolve(filePath) !== path.resolve(credentialPath())) throw new Error("Windows 보안 저장소를 사용할 수 없습니다.");
+285:   }
+286:   if (path.resolve(filePath) === path.resolve(credentialPath())) await writeCredentialRecovery(value);
+287: }
+288: 
+289: // __UEP_GOOGLE_MISSING_CREDENTIAL_08069__
+290: async function readEncrypted(filePath) {
+291:   let encrypted = null;
+292:   try { encrypted = await fs.readFile(filePath); } catch (readError) {
+293:     if (path.resolve(filePath) === path.resolve(credentialPath())) {
+294:       try { return await readCredentialRecovery(); } catch {}
+295:     }
+296:     if (path.resolve(filePath) === path.resolve(credentialPath()) && (readError?.code === "ENOENT" || /no such file/i.test(String(readError?.message||"")))) {
+297:       const friendly = new Error("담임 배포 PC의 Google 시트 연결 승인이 아직 준비되지 않았습니다.");
+298:       friendly.code = "UEP_GOOGLE_CREDENTIAL_MISSING";
+299:       friendly.setupRequired = true;
+300:       throw friendly;
+301:     }
+302:     throw readError;
+303:   }
+304:   if (safeStorage.isEncryptionAvailable()) {
+305:     try { return JSON.parse(safeStorage.decryptString(encrypted)); } catch {}
+306:   }
+307:   // 일부 구버전/수동 이관 파일이 평문 JSON인 경우 현재 형식으로 재저장합니다.
+308:   try {
+309:     const legacy = JSON.parse(encrypted.toString("utf8"));
+310:     if (legacy && typeof legacy === "object") { await saveEncrypted(filePath, legacy); return legacy; }
+311:   } catch {}
+312:   // Google 서비스 계정은 safeStorage가 깨져도 동일 PC/사용자용 AES-GCM 복구본으로 자동 복원합니다.
+313:   if (path.resolve(filePath) === path.resolve(credentialPath())) {
+314:     try {
+315:       const recovered = await readCredentialRecovery();
+316:       if (validateServiceAccount(recovered)) {
+317:         try { if (safeStorage.isEncryptionAvailable()) await fs.writeFile(filePath, safeStorage.encryptString(JSON.stringify(recovered))); } catch {}
+318:         return recovered;
+319:       }
+320:     } catch {}
+321:   }
+322:   const backup = `${filePath}.unreadable-${Date.now()}.bak`;
+323:   try { await fs.rename(filePath, backup); } catch {}
+324:   const error = new Error("저장된 보안 인증정보를 복호화할 수 없습니다. 서비스 계정 JSON을 다시 등록해 주세요.");
+325:   error.code = "UEP_SAFE_STORAGE_DECRYPT_FAILED";
+326:   throw error;
+327: }
+328: 
+329: 
+330: // __UEP_SCHOOL_READ_API_PRIMARY_08120__
+331: // __UEP_SCHOOL_READ_ENDPOINT_FALLBACK_08121__
+332: const UEP_SCHOOL_READ_API_FALLBACK='https://script.google.com/macros/s/AKfycbyLEEam4L2sX653pii69TC3_84wTyfAed_UL8HRY6PBG467im1LmZJ0CIpSKSOj4r6-0w/exec';
+333: let schoolReadPolicyCache={url:'',expiresAt:0};
+334: function schoolReadError(message,code='UEP_SCHOOL_READ_ERROR'){const e=new Error(message);e.code=code;return e;}
+335: async function loadSchoolReadApiUrl(){
+336:   if(schoolReadPolicyCache.url&&schoolReadPolicyCache.expiresAt>Date.now())return schoolReadPolicyCache.url;
+337:   let response;
+338:   try{response=await net.fetch(UEP_UPDATE_POLICY_URL,{cache:'no-store'});}catch(error){throw schoolReadError('UEP School Read API 설정을 확인하지 못했습니다.','UEP_SCHOOL_READ_POLICY_UNAVAILABLE');}
+339:   if(!response.ok)throw schoolReadError('UEP School Read API 설정 조회 실패 ('+response.status+')','UEP_SCHOOL_READ_POLICY_UNAVAILABLE');
+===== MAIN credentialPath 271-341 =====
+271:   if (!payload || payload.version !== 1 || payload.algorithm !== "aes-256-gcm") throw new Error("invalid recovery credential");
+272:   const salt=Buffer.from(payload.salt,"base64"), iv=Buffer.from(payload.iv,"base64"), tag=Buffer.from(payload.tag,"base64"), data=Buffer.from(payload.data,"base64");
+273:   const decipher = crypto.createDecipheriv("aes-256-gcm", recoveryKey(salt), iv);
+274:   decipher.setAuthTag(tag);
+275:   return JSON.parse(Buffer.concat([decipher.update(data), decipher.final()]).toString("utf8"));
+276: }
+277: 
+278: async function saveEncrypted(filePath, value) {
+279:   await fs.mkdir(path.dirname(filePath), { recursive: true });
+280:   if (safeStorage.isEncryptionAvailable()) {
+281:     await fs.writeFile(filePath, safeStorage.encryptString(JSON.stringify(value)));
+282:   } else {
+283:     // 인증정보는 아래 복구 저장소가 있으므로, 다른 보안값은 기존처럼 실패시킵니다.
+284:     if (path.resolve(filePath) !== path.resolve(credentialPath())) throw new Error("Windows 보안 저장소를 사용할 수 없습니다.");
+285:   }
+286:   if (path.resolve(filePath) === path.resolve(credentialPath())) await writeCredentialRecovery(value);
+287: }
+288: 
+289: // __UEP_GOOGLE_MISSING_CREDENTIAL_08069__
+290: async function readEncrypted(filePath) {
+291:   let encrypted = null;
+292:   try { encrypted = await fs.readFile(filePath); } catch (readError) {
+293:     if (path.resolve(filePath) === path.resolve(credentialPath())) {
+294:       try { return await readCredentialRecovery(); } catch {}
+295:     }
+296:     if (path.resolve(filePath) === path.resolve(credentialPath()) && (readError?.code === "ENOENT" || /no such file/i.test(String(readError?.message||"")))) {
+297:       const friendly = new Error("담임 배포 PC의 Google 시트 연결 승인이 아직 준비되지 않았습니다.");
+298:       friendly.code = "UEP_GOOGLE_CREDENTIAL_MISSING";
+299:       friendly.setupRequired = true;
+300:       throw friendly;
+301:     }
+302:     throw readError;
+303:   }
+304:   if (safeStorage.isEncryptionAvailable()) {
+305:     try { return JSON.parse(safeStorage.decryptString(encrypted)); } catch {}
+306:   }
+307:   // 일부 구버전/수동 이관 파일이 평문 JSON인 경우 현재 형식으로 재저장합니다.
+308:   try {
+309:     const legacy = JSON.parse(encrypted.toString("utf8"));
+310:     if (legacy && typeof legacy === "object") { await saveEncrypted(filePath, legacy); return legacy; }
+311:   } catch {}
+312:   // Google 서비스 계정은 safeStorage가 깨져도 동일 PC/사용자용 AES-GCM 복구본으로 자동 복원합니다.
+313:   if (path.resolve(filePath) === path.resolve(credentialPath())) {
+314:     try {
+315:       const recovered = await readCredentialRecovery();
+316:       if (validateServiceAccount(recovered)) {
+317:         try { if (safeStorage.isEncryptionAvailable()) await fs.writeFile(filePath, safeStorage.encryptString(JSON.stringify(recovered))); } catch {}
+318:         return recovered;
+319:       }
+320:     } catch {}
+321:   }
+322:   const backup = `${filePath}.unreadable-${Date.now()}.bak`;
+323:   try { await fs.rename(filePath, backup); } catch {}
+324:   const error = new Error("저장된 보안 인증정보를 복호화할 수 없습니다. 서비스 계정 JSON을 다시 등록해 주세요.");
+325:   error.code = "UEP_SAFE_STORAGE_DECRYPT_FAILED";
+326:   throw error;
+327: }
+328: 
+329: 
+330: // __UEP_SCHOOL_READ_API_PRIMARY_08120__
+331: // __UEP_SCHOOL_READ_ENDPOINT_FALLBACK_08121__
+332: const UEP_SCHOOL_READ_API_FALLBACK='https://script.google.com/macros/s/AKfycbyLEEam4L2sX653pii69TC3_84wTyfAed_UL8HRY6PBG467im1LmZJ0CIpSKSOj4r6-0w/exec';
+333: let schoolReadPolicyCache={url:'',expiresAt:0};
+334: function schoolReadError(message,code='UEP_SCHOOL_READ_ERROR'){const e=new Error(message);e.code=code;return e;}
+335: async function loadSchoolReadApiUrl(){
+336:   if(schoolReadPolicyCache.url&&schoolReadPolicyCache.expiresAt>Date.now())return schoolReadPolicyCache.url;
+337:   let response;
+338:   try{response=await net.fetch(UEP_UPDATE_POLICY_URL,{cache:'no-store'});}catch(error){throw schoolReadError('UEP School Read API 설정을 확인하지 못했습니다.','UEP_SCHOOL_READ_POLICY_UNAVAILABLE');}
+339:   if(!response.ok)throw schoolReadError('UEP School Read API 설정 조회 실패 ('+response.status+')','UEP_SCHOOL_READ_POLICY_UNAVAILABLE');
+340:   const policy=await response.json();
+341:   const url=String(policy?.schoolReadApiUrl||UEP_SCHOOL_READ_API_FALLBACK||'').trim();
+===== MAIN credentialPath 278-348 =====
+278: async function saveEncrypted(filePath, value) {
+279:   await fs.mkdir(path.dirname(filePath), { recursive: true });
+280:   if (safeStorage.isEncryptionAvailable()) {
+281:     await fs.writeFile(filePath, safeStorage.encryptString(JSON.stringify(value)));
+282:   } else {
+283:     // 인증정보는 아래 복구 저장소가 있으므로, 다른 보안값은 기존처럼 실패시킵니다.
+284:     if (path.resolve(filePath) !== path.resolve(credentialPath())) throw new Error("Windows 보안 저장소를 사용할 수 없습니다.");
+285:   }
+286:   if (path.resolve(filePath) === path.resolve(credentialPath())) await writeCredentialRecovery(value);
+287: }
+288: 
+289: // __UEP_GOOGLE_MISSING_CREDENTIAL_08069__
+290: async function readEncrypted(filePath) {
+291:   let encrypted = null;
+292:   try { encrypted = await fs.readFile(filePath); } catch (readError) {
+293:     if (path.resolve(filePath) === path.resolve(credentialPath())) {
+294:       try { return await readCredentialRecovery(); } catch {}
+295:     }
+296:     if (path.resolve(filePath) === path.resolve(credentialPath()) && (readError?.code === "ENOENT" || /no such file/i.test(String(readError?.message||"")))) {
+297:       const friendly = new Error("담임 배포 PC의 Google 시트 연결 승인이 아직 준비되지 않았습니다.");
+298:       friendly.code = "UEP_GOOGLE_CREDENTIAL_MISSING";
+299:       friendly.setupRequired = true;
+300:       throw friendly;
+301:     }
+302:     throw readError;
+303:   }
+304:   if (safeStorage.isEncryptionAvailable()) {
+305:     try { return JSON.parse(safeStorage.decryptString(encrypted)); } catch {}
+306:   }
+307:   // 일부 구버전/수동 이관 파일이 평문 JSON인 경우 현재 형식으로 재저장합니다.
+308:   try {
+309:     const legacy = JSON.parse(encrypted.toString("utf8"));
+310:     if (legacy && typeof legacy === "object") { await saveEncrypted(filePath, legacy); return legacy; }
+311:   } catch {}
+312:   // Google 서비스 계정은 safeStorage가 깨져도 동일 PC/사용자용 AES-GCM 복구본으로 자동 복원합니다.
+313:   if (path.resolve(filePath) === path.resolve(credentialPath())) {
+314:     try {
+315:       const recovered = await readCredentialRecovery();
+316:       if (validateServiceAccount(recovered)) {
+317:         try { if (safeStorage.isEncryptionAvailable()) await fs.writeFile(filePath, safeStorage.encryptString(JSON.stringify(recovered))); } catch {}
+318:         return recovered;
+319:       }
+320:     } catch {}
+321:   }
+322:   const backup = `${filePath}.unreadable-${Date.now()}.bak`;
+323:   try { await fs.rename(filePath, backup); } catch {}
+324:   const error = new Error("저장된 보안 인증정보를 복호화할 수 없습니다. 서비스 계정 JSON을 다시 등록해 주세요.");
+325:   error.code = "UEP_SAFE_STORAGE_DECRYPT_FAILED";
+326:   throw error;
+327: }
+328: 
+329: 
+330: // __UEP_SCHOOL_READ_API_PRIMARY_08120__
+331: // __UEP_SCHOOL_READ_ENDPOINT_FALLBACK_08121__
+332: const UEP_SCHOOL_READ_API_FALLBACK='https://script.google.com/macros/s/AKfycbyLEEam4L2sX653pii69TC3_84wTyfAed_UL8HRY6PBG467im1LmZJ0CIpSKSOj4r6-0w/exec';
+333: let schoolReadPolicyCache={url:'',expiresAt:0};
+334: function schoolReadError(message,code='UEP_SCHOOL_READ_ERROR'){const e=new Error(message);e.code=code;return e;}
+335: async function loadSchoolReadApiUrl(){
+336:   if(schoolReadPolicyCache.url&&schoolReadPolicyCache.expiresAt>Date.now())return schoolReadPolicyCache.url;
+337:   let response;
+338:   try{response=await net.fetch(UEP_UPDATE_POLICY_URL,{cache:'no-store'});}catch(error){throw schoolReadError('UEP School Read API 설정을 확인하지 못했습니다.','UEP_SCHOOL_READ_POLICY_UNAVAILABLE');}
+339:   if(!response.ok)throw schoolReadError('UEP School Read API 설정 조회 실패 ('+response.status+')','UEP_SCHOOL_READ_POLICY_UNAVAILABLE');
+340:   const policy=await response.json();
+341:   const url=String(policy?.schoolReadApiUrl||UEP_SCHOOL_READ_API_FALLBACK||'').trim();
+342:   if(!/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec(?:\?.*)?$/i.test(url))throw schoolReadError('UEP School Read API 배포 URL이 아직 등록되지 않았습니다.','UEP_SCHOOL_READ_NOT_CONFIGURED');
+343:   schoolReadPolicyCache={url,expiresAt:Date.now()+10*60*1000};
+344:   return url;
+345: }
+346: async function getOrCreateSchoolReadDeviceId(){
+347:   try{const saved=String(await fs.readFile(schoolReadDevicePath(),'utf8')).trim();if(saved)return saved;}catch{}
+348:   const id='UEP-'+crypto.randomUUID();
+===== MAIN credentialPath 281-351 =====
+281:     await fs.writeFile(filePath, safeStorage.encryptString(JSON.stringify(value)));
+282:   } else {
+283:     // 인증정보는 아래 복구 저장소가 있으므로, 다른 보안값은 기존처럼 실패시킵니다.
+284:     if (path.resolve(filePath) !== path.resolve(credentialPath())) throw new Error("Windows 보안 저장소를 사용할 수 없습니다.");
+285:   }
+286:   if (path.resolve(filePath) === path.resolve(credentialPath())) await writeCredentialRecovery(value);
+287: }
+288: 
+289: // __UEP_GOOGLE_MISSING_CREDENTIAL_08069__
+290: async function readEncrypted(filePath) {
+291:   let encrypted = null;
+292:   try { encrypted = await fs.readFile(filePath); } catch (readError) {
+293:     if (path.resolve(filePath) === path.resolve(credentialPath())) {
+294:       try { return await readCredentialRecovery(); } catch {}
+295:     }
+296:     if (path.resolve(filePath) === path.resolve(credentialPath()) && (readError?.code === "ENOENT" || /no such file/i.test(String(readError?.message||"")))) {
+297:       const friendly = new Error("담임 배포 PC의 Google 시트 연결 승인이 아직 준비되지 않았습니다.");
+298:       friendly.code = "UEP_GOOGLE_CREDENTIAL_MISSING";
+299:       friendly.setupRequired = true;
+300:       throw friendly;
+301:     }
+302:     throw readError;
+303:   }
+304:   if (safeStorage.isEncryptionAvailable()) {
+305:     try { return JSON.parse(safeStorage.decryptString(encrypted)); } catch {}
+306:   }
+307:   // 일부 구버전/수동 이관 파일이 평문 JSON인 경우 현재 형식으로 재저장합니다.
+308:   try {
+309:     const legacy = JSON.parse(encrypted.toString("utf8"));
+310:     if (legacy && typeof legacy === "object") { await saveEncrypted(filePath, legacy); return legacy; }
+311:   } catch {}
+312:   // Google 서비스 계정은 safeStorage가 깨져도 동일 PC/사용자용 AES-GCM 복구본으로 자동 복원합니다.
+313:   if (path.resolve(filePath) === path.resolve(credentialPath())) {
+314:     try {
+315:       const recovered = await readCredentialRecovery();
+316:       if (validateServiceAccount(recovered)) {
+317:         try { if (safeStorage.isEncryptionAvailable()) await fs.writeFile(filePath, safeStorage.encryptString(JSON.stringify(recovered))); } catch {}
+318:         return recovered;
+319:       }
+320:     } catch {}
+321:   }
+322:   const backup = `${filePath}.unreadable-${Date.now()}.bak`;
+323:   try { await fs.rename(filePath, backup); } catch {}
+324:   const error = new Error("저장된 보안 인증정보를 복호화할 수 없습니다. 서비스 계정 JSON을 다시 등록해 주세요.");
+325:   error.code = "UEP_SAFE_STORAGE_DECRYPT_FAILED";
+326:   throw error;
+327: }
+328: 
+329: 
+330: // __UEP_SCHOOL_READ_API_PRIMARY_08120__
+331: // __UEP_SCHOOL_READ_ENDPOINT_FALLBACK_08121__
+332: const UEP_SCHOOL_READ_API_FALLBACK='https://script.google.com/macros/s/AKfycbyLEEam4L2sX653pii69TC3_84wTyfAed_UL8HRY6PBG467im1LmZJ0CIpSKSOj4r6-0w/exec';
+333: let schoolReadPolicyCache={url:'',expiresAt:0};
+334: function schoolReadError(message,code='UEP_SCHOOL_READ_ERROR'){const e=new Error(message);e.code=code;return e;}
+335: async function loadSchoolReadApiUrl(){
+336:   if(schoolReadPolicyCache.url&&schoolReadPolicyCache.expiresAt>Date.now())return schoolReadPolicyCache.url;
+337:   let response;
+338:   try{response=await net.fetch(UEP_UPDATE_POLICY_URL,{cache:'no-store'});}catch(error){throw schoolReadError('UEP School Read API 설정을 확인하지 못했습니다.','UEP_SCHOOL_READ_POLICY_UNAVAILABLE');}
+339:   if(!response.ok)throw schoolReadError('UEP School Read API 설정 조회 실패 ('+response.status+')','UEP_SCHOOL_READ_POLICY_UNAVAILABLE');
+340:   const policy=await response.json();
+341:   const url=String(policy?.schoolReadApiUrl||UEP_SCHOOL_READ_API_FALLBACK||'').trim();
+342:   if(!/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec(?:\?.*)?$/i.test(url))throw schoolReadError('UEP School Read API 배포 URL이 아직 등록되지 않았습니다.','UEP_SCHOOL_READ_NOT_CONFIGURED');
+343:   schoolReadPolicyCache={url,expiresAt:Date.now()+10*60*1000};
+344:   return url;
+345: }
+346: async function getOrCreateSchoolReadDeviceId(){
+347:   try{const saved=String(await fs.readFile(schoolReadDevicePath(),'utf8')).trim();if(saved)return saved;}catch{}
+348:   const id='UEP-'+crypto.randomUUID();
+349:   await fs.mkdir(path.dirname(schoolReadDevicePath()),{recursive:true});
+350:   await fs.writeFile(schoolReadDevicePath(),id,'utf8');
+351:   return id;
+===== PRELOAD all 1-65 =====
+1: const { contextBridge, ipcRenderer } = require("electron");
+2: 
+3: contextBridge.exposeInMainWorld("schoolBoard", {
+4:   loadState: () => ipcRenderer.invoke("state:load"),
+5:   saveState: (state) => ipcRenderer.invoke("state:save", state),
+6:   minimize: () => ipcRenderer.invoke("window:minimize"),
+7:   maximize: () => ipcRenderer.invoke("window:maximize"),
+8:   close: () => ipcRenderer.invoke("window:close"),
+9:   setAlwaysOnTop: (value) => ipcRenderer.invoke("window:alwaysOnTop", value),
+10:   toggleCompact: () => ipcRenderer.invoke("window:compact"),
+11:   openChrome: (url) => ipcRenderer.invoke("external:openChrome", url),
+12:   selectExecutable: () => ipcRenderer.invoke("external:selectExecutable"),
+13:   launchExecutable: (filePath) => ipcRenderer.invoke("external:launchExecutable", filePath),
+14:   schoolReadLogin: (payload) => ipcRenderer.invoke("uep:schoolReadLogin", payload),
+15:   schoolReadSessionStatus: (payload) => ipcRenderer.invoke("uep:schoolReadSessionStatus", payload||{}),
+16:   schoolReadLogout: () => ipcRenderer.invoke("uep:schoolReadLogout"),
+17:   googleCredentialStatus: () => ipcRenderer.invoke("google:credentialStatus"),
+18:   authorizeGoogleUser: (payload) => ipcRenderer.invoke("google:authorizeUser", payload || {}),
+19:   disconnectGoogleUser: () => ipcRenderer.invoke("google:disconnectUser"),
+20:   selectGoogleCredential: () => ipcRenderer.invoke("google:selectCredential"),
+21:   previewReadonlySync: () => ipcRenderer.invoke("google:previewReadonlySync"),
+22:   readReadonlyCache: () => ipcRenderer.invoke("google:readReadonlyCache"),
+23:   syncSchoolCalendar: (payload) => ipcRenderer.invoke("calendar:syncSchool", typeof payload==="string"?{date:payload}:payload||{}),
+24:   savePersonalCalendar: (payload) => ipcRenderer.invoke("calendar:savePersonal", payload),
+25:   saveNotice: (payload) => ipcRenderer.invoke("notice:save", payload),
+26:   deleteNotice: (id) => ipcRenderer.invoke("notice:delete", id),
+27:   saveNoticeReceipt: (payload) => ipcRenderer.invoke("notice:receiptSave", payload),
+28:   updateUserAccount: (payload) => ipcRenderer.invoke("userAccount:update", payload),
+29:   saveStudentContact: (payload) => ipcRenderer.invoke("student:contactSave", payload),
+30:   saveProgramOperation: (payload) => ipcRenderer.invoke("program:operationSave", payload),
+31:   saveOfficialAttendance: (payload) => ipcRenderer.invoke("attendance:officialSave", payload),
+32:   deleteOfficialAttendance: (id) => ipcRenderer.invoke("attendance:officialDelete", id),
+33:   saveLateAttendance: (payload) => ipcRenderer.invoke("attendance:lateSave", payload),
+34:   deleteLateAttendance: (id) => ipcRenderer.invoke("attendance:lateDelete", id),
+35:   saveCounselRecord: (payload) => ipcRenderer.invoke("counsel:save", payload),
+36:   saveStudentGuidanceRecord: (payload) => ipcRenderer.invoke("studentGuidance:save", payload),
+37:   saveDormOuting: (payload) => ipcRenderer.invoke("dormOuting:save", payload),
+38:   saveDormRule: (payload) => ipcRenderer.invoke("dormRule:save", payload),
+39:   deleteDormRule: (id) => ipcRenderer.invoke("dormRule:delete", id),
+40:   saveNightSupervisor: (payload) => ipcRenderer.invoke("nightDuty:save", payload),
+41:   saveLunchDuty: (payload) => ipcRenderer.invoke("lunchDuty:save", payload),
+42:   updateCalendar: (payload) => ipcRenderer.invoke("calendar:update", payload),
+43:   loadNeisDashboard: (options) => ipcRenderer.invoke("neis:loadDashboard", options),
+44:   testComcigan: (options) => ipcRenderer.invoke("comcigan:test", options),
+45:   clearNeisCache: () => ipcRenderer.invoke("neis:clearCache"),
+46:   saveNeisApiKey: (key) => ipcRenderer.invoke("neis:saveApiKey", key),
+47:   neisApiKeyStatus: () => ipcRenderer.invoke("neis:apiKeyStatus"),
+48:   selectInputFiles: () => ipcRenderer.invoke("inputCenter:selectFiles"),
+49:   saveInputRecords: (payload) => ipcRenderer.invoke("inputCenter:save", payload),
+50:   classifyInputBatch: (payload) => ipcRenderer.invoke("inputCenter:classifyBatch", payload),
+51:   normalizeInputBatch: (payload) => ipcRenderer.invoke("inputCenter:normalizeBatch", payload),
+52:   openInputFolder: () => ipcRenderer.invoke("inputCenter:openFolder"),
+53:   readInputAsset: (filePath) => ipcRenderer.invoke("inputCenter:readAsset", filePath),
+54:   openInputAsset: (filePath) => ipcRenderer.invoke("inputCenter:openAsset", filePath),
+55:   runInputOCR: (payload) => ipcRenderer.invoke("inputCenter:ocrBatch", payload),
+56:   selectProgramPhotos: (programId) => ipcRenderer.invoke("program:selectPhotos", programId),
+57:   openProgramEvidenceFolder: (programId) => ipcRenderer.invoke("program:openEvidenceFolder", programId),
+58:   checkUpdate: (url, currentVersion) => ipcRenderer.invoke("app:checkUpdate", { url, currentVersion }),
+59:   applyUpdate: (payload) => ipcRenderer.invoke("app:applyUpdate", payload),
+60:   aiStatus: () => ipcRenderer.invoke("ai:status"),
+61:   generateRecordAI: (payload) => ipcRenderer.invoke("ai:generateRecord", payload),
+62:   inspectNeisRecordbook: () => ipcRenderer.invoke("recordbook:inspectNeisExcel"),
+63:   platform: process.platform,
+64: });
+65: 
