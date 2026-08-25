@@ -1,0 +1,678 @@
+
+===== GYOMUON sensitive 930-990 =====
+930:     layer.onclick=e=>{if(e.target===layer)cancel();};
+931:     layer.querySelector('[data-sensitive-modal-submit]').onclick=()=>{
+932:       const current=layer.querySelector('[data-sensitive-current]')?.value||'';
+933:       const first=layer.querySelector('[data-sensitive-first]')?.value||'';
+934:       const second=layer.querySelector('[data-sensitive-second]')?.value||'';
+935:       if(!first)return error('비밀번호를 입력해 주세요.');
+936:       if(mode==='set'&&first.length<4)return error('비밀번호는 4자 이상으로 설정해 주세요.');
+937:       if(mode==='set'&&first!==second)return error('새 비밀번호 확인이 일치하지 않습니다.');
+938:       closeSensitivePasswordModal({current,first});
+939:     };
+940:     const passwordInputs=[...layer.querySelectorAll('input[type="password"]')];
+941:     passwordInputs.forEach(input=>{
+942:       input.readOnly=false;input.disabled=false;input.inputMode='numeric';input.autocomplete='off';
+943:       ['keydown','keypress','keyup','beforeinput','input','paste'].forEach(type=>input.addEventListener(type,event=>event.stopImmediatePropagation()));
+944:     });
+945:     setTimeout(()=>layer.querySelector('[data-sensitive-current],[data-sensitive-first]')?.focus(),0);
+946:   });
+947: }
+948: function canConfigureSensitivePassword(){
+949:   // __UEP_08160_SENSITIVE_CONFIG_ROLE__
+950:   const role=String(currentRoleId?.()||'');
+951:   return role==='admin'||role==='grade_head';
+952: }
+953: async function setSensitivePasswordFlow(){
+954:   if(!canConfigureSensitivePassword())return toast('관리자·학년부장만 민감정보 비밀번호를 설정·변경할 수 있습니다.');
+955:   const configured=sensitivePasswordConfigured();
+956:   const result=await sensitivePasswordModal({mode:'set',configured});
+957:   if(!result)return;
+958:   if(configured&&await sensitiveHash(result.current)!==sensitiveSecurityConfig().passwordHash){
+959:     return toast('현재 비밀번호가 일치하지 않습니다.');
+960:   }
+961:   const passwordHash=await sensitiveHash(result.first);
+962:   localStorage.setItem(UEP_SENSITIVE_SECURITY_KEY,JSON.stringify({passwordHash,updatedAt:new Date().toISOString()}));
+963:   lockSensitiveSession();
+964:   toast('민감정보 열람 비밀번호를 저장했습니다.');
+965:   if(state.activePage==='settings')render('settings');
+966: }
+967: async function unlockSensitiveInfo(){
+968:   if(sensitiveSessionOpen())return true;
+969:   if(!sensitivePasswordConfigured()){
+970:     toast('설정 → 사용자·보안에서 먼저 비밀번호를 설정해 주세요.');
+971:     return false;
+972:   }
+973:   const result=await sensitivePasswordModal({mode:'unlock',configured:true});
+974:   if(!result)return false;
+975:   if(await sensitiveHash(result.first)!==sensitiveSecurityConfig().passwordHash){
+976:     toast('비밀번호가 일치하지 않습니다.');
+977:     return false;
+978:   }
+979:   uepSensitiveUnlockedUntil=Date.now()+10*60*1000;
+980:   return true;
+981: }
+982: window.addEventListener('beforeunload',lockSensitiveSession);
+983: // 0.81.42: 재렌더링과 Electron 인라인 이벤트 제한에 영향받지 않는 보안 버튼 처리
+984: document.addEventListener('click',async event=>{
+985:   const sensitiveSet=event.target.closest?.('[data-sensitive-password-set]');
+986:   if(sensitiveSet){event.preventDefault();event.stopImmediatePropagation();await setSensitivePasswordFlow();return;}
+987:   const sensitiveLock=event.target.closest?.('[data-sensitive-lock]');
+988:   if(sensitiveLock){event.preventDefault();event.stopImmediatePropagation();lockSensitiveSession();toast('민감정보를 잠갔습니다.');if(state.activePage==='settings')render('settings');return;}
+989:   const subjectSet=event.target.closest?.('[data-subject-confidential-password-set],[data-uep134-pin-btn]');
+990:   if(subjectSet&&!subjectSet.disabled){event.preventDefault();event.stopImmediatePropagation();await setSubjectConfidentialPassword();return;}
+===== GYOMUON subject 4155-4225 =====
+4155: }
+4156: 
+4157: const UEP_SUBJECT_CONFIDENTIAL_PIN_KEY='uep_subject_confidential_pin_hash_v3';
+4158: const UEP_SUBJECT_CONFIDENTIAL_SESSION_KEY='uep_subject_confidential_unlocked_v3';
+4159: function subjectConfidentialAllowed(){
+4160:   const role=String(currentRoleId?.()||'');
+4161:   return ['admin','grade_head'].includes(role)||['관리자','학년부장'].includes(String(currentRoleDisplay?.()||''));
+4162: }
+4163: function subjectConfidentialSharedHash(){
+4164:   const rows=Array.isArray(readonlyCache?.settings)?readonlyCache.settings:[];
+4165:   const hit=rows.find(r=>String(r?.key||r?.settingKey||r?.['설정키']||'').trim()==='SUBJECT_CONFIDENTIAL_PIN_HASH');
+4166:   return String(hit?.value||hit?.settingValue||hit?.['설정값']||'').trim();
+4167: }
+4168: function subjectConfidentialPasswordHash(){return subjectConfidentialSharedHash()||String(localStorage.getItem(UEP_SUBJECT_CONFIDENTIAL_PIN_KEY)||'');}
+4169: function subjectConfidentialPasswordConfigured(){return !!subjectConfidentialPasswordHash();}
+4170: async function subjectConfidentialDigest(value){const bytes=new TextEncoder().encode(String(value||''));const hash=await crypto.subtle.digest('SHA-256',bytes);return [...new Uint8Array(hash)].map(x=>x.toString(16).padStart(2,'0')).join('');}
+4171: async function setSubjectConfidentialPassword(){
+4172:   // 0.81.46: Electron에서 차단될 수 있는 prompt 대신 검증된 보안 전용 모달을 사용합니다.
+4173:   if(!subjectConfidentialAllowed()){toast('관리자·학년부장 권한에서 설정할 수 있습니다.');return false;}
+4174:   const configured=subjectConfidentialPasswordConfigured();
+4175:   const result=await sensitivePasswordModal({mode:'set',configured});
+4176:   if(!result)return false;
+4177:   if(configured&&await subjectConfidentialDigest(result.current)!==subjectConfidentialPasswordHash()){
+4178:     toast('현재 선택과목 비밀번호가 일치하지 않습니다.');return false;
+4179:   }
+4180:   localStorage.setItem(UEP_SUBJECT_CONFIDENTIAL_PIN_KEY,await subjectConfidentialDigest(result.first));
+4181:   lockSubjectConfidential();
+4182:   toast('선택과목 신청현황 비밀번호를 저장했습니다.');
+4183:   if(state.activePage==='settings')render('settings');
+4184:   return true;
+4185: }
+4186: function lockSubjectConfidential(){sessionStorage.removeItem(UEP_SUBJECT_CONFIDENTIAL_SESSION_KEY);}
+4187: async function unlockSubjectConfidential(){
+4188:   // __UEP_08159_HOMEROOM_SUBJECT_GATE__
+4189:   const scope=typeof currentTeacherAccessScope==='function'?currentTeacherAccessScope():null;
+4190:   const role=String(currentRoleId?.()||'');
+4191:   const homeroomAllowed=role==='homeroom'||Boolean(scope?.teacher&&scope?.classNo);
+4192:   if(!subjectConfidentialAllowed()&&!homeroomAllowed){toast('담임·학년부장·관리자는 비밀번호 인증 후 과목별 신청현황을 열람할 수 있습니다.');return false;}
+4193:   if(sessionStorage.getItem(UEP_SUBJECT_CONFIDENTIAL_SESSION_KEY)==='1')return true;
+4194:   if(!subjectConfidentialPasswordConfigured()){toast(subjectConfidentialAllowed()?'설정 → 사용자·보안에서 선택과목 대외비 비밀번호를 먼저 설정해 주세요.':'관리자가 아직 선택과목 열람 비밀번호를 공용 설정하지 않았습니다.');return false;}
+4195:   const result=await sensitivePasswordModal({mode:'unlock',configured:true});
+4196:   if(!result)return false;
+4197:   if(await subjectConfidentialDigest(result.first)!==subjectConfidentialPasswordHash()){toast('선택과목 대외비 비밀번호가 일치하지 않습니다.');return false;}
+4198:   sessionStorage.setItem(UEP_SUBJECT_CONFIDENTIAL_SESSION_KEY,'1');
+4199:   return true;
+4200: }
+4201: function settingsView() {
+4202:   const connected = Boolean(readonlyCache?.students?.length && !googleConnectionError);
+4203:   const credentialReady = Boolean(googleConnectionStatus?.ok);
+4204:   const googleStatus = connected ? ["구글시트 연결됨", ""] : googleConnectionError ? ["권한·연결 오류", "error"] : credentialReady ? ["권한 확인 필요", "warn"] : ["인증 필요", "warn"];
+4205:   const connectionRows = [
+4206:     ["학생정보", readonlyCache?.students?.length], ["학사생", readonlyCache?.dormStudents?.length], ["학사외출", readonlyCache?.dormOutings?.length],
+4207:     ["성적", readonlyCache?.scoreRecords?.length], ["수능최저", readonlyCache?.admissionMinimums?.length], ["대학입결", readonlyCache?.admissionCuts?.length],
+4208:   ];
+4209:   const neisStatus = neisData?.ok ? (neisData.offline ? ["저장자료 표시", "warn"] : ["실시간 연결됨", ""]) : neisLoading ? ["불러오는 중", "warn"] : ["연결 확인", "error"];
+4210:   const profile=currentUserProfile(), access=currentTeacherAccessScope();
+4211: 
+4212:   const header=(title,desc,badge)=>`${settingsTabsMarkup()}<section class="settings-section-head"><div><small>UEP SETTINGS</small><h2>${title}</h2><p>${desc}</p></div><span>${badge}</span></section>`;
+4213: 
+4214:   if(settingsPanel==="security") return `<div class="module-page settings-v064 settings-final">
+4215:     ${header("사용자·보안","계정 승인과 역할, 민감정보 보호를 관리합니다.","관리자·학년부장")}
+4216:     <article class="setting-card sensitive-security-settings"><div><small>PRIVACY · SECURITY</small><h3>🔒 민감정보 보안</h3><p>교육비지원 · 요보호학생 · 위기학생 상세정보의 열람 비밀번호를 관리합니다.</p><p class="settings-help">상세정보는 1차 블라인드 후 비밀번호 인증을 거쳐 확인하며 인증은 10분 동안 유지됩니다.</p></div><div class="sensitive-security-status"><b>${sensitivePasswordConfigured()?'비밀번호 설정됨':'비밀번호 설정 필요'}</b><button type="button" class="btn primary" data-sensitive-password-set>${sensitivePasswordConfigured()?'비밀번호 변경':'비밀번호 설정'}</button><button type="button" class="btn secondary" data-sensitive-lock>즉시 잠금</button></div></article>
+4217:     <article class="setting-card subject-confidential-security-settings"><div><small>CONFIDENTIAL · CURRICULUM</small><h3>🔐 선택과목 대외비 보안</h3><p>과목별 신청현황 전용 비밀번호를 민감정보 비밀번호와 별도로 관리합니다.</p><p class="settings-help">관리자·학년부장만 설정 및 열람할 수 있으며 담임은 비활성화됩니다.</p></div><div class="sensitive-security-status"><b>${subjectConfidentialPasswordConfigured()?'비밀번호 설정됨':'비밀번호 설정 필요'}</b><button type="button" class="btn primary" data-subject-confidential-password-set ${subjectConfidentialAllowed()?'':'disabled'}>${subjectConfidentialPasswordConfigured()?'비밀번호 변경':'비밀번호 설정'}</button><button type="button" class="btn secondary" data-subject-confidential-lock ${subjectConfidentialAllowed()?'':'disabled'}>즉시 잠금</button></div></article>
+4218:     <article class="setting-card role-settings-card"><div class="connection-title"><div><h3>사용자·권한 프로필</h3><p>현재 로그인 사용자의 역할과 담당 범위를 확인합니다.</p></div><span class="state">${escapeHtml(currentRoleDisplay())}</span></div><div class="user-profile-summary"><div><small>사용자</small><b>${escapeHtml(profile.name||"미설정")}</b></div><div><small>부서</small><b>${escapeHtml(profile.department||"미설정")}</b></div><div><small>조회 범위</small><b>${escapeHtml(access.label)}</b></div></div><p class="safe-note">담임은 학년 자료를 조회할 수 있고 타반 연락정보는 기본 마스킹합니다. 성적·응답·정규화 원천자료는 UEP에서 직접 수정하지 않습니다.</p></article>
+4219:     <article class="setting-card access-control-card"><div class="connection-title"><div><h3>사용자·권한 승인</h3><p>01_사용자계정의 사용여부·역할·담당학년·담임반을 기준으로 로그인과 조회범위를 제어합니다.</p></div><span class="state connected">계정표 승인</span></div><div class="connection-actions"><button class="btn primary" type="button" data-access-control>권한 승인 제어판</button></div><p class="safe-note">신규 사용자 등록은 표준 구글시트에서 관리하고 UEP에서는 승인상태와 역할을 조정합니다.</p></article>
+4220:   </div>`;
+4221: 
+4222:   if(settingsPanel==="operations") return `<div class="module-page settings-v064 settings-final">
+4223:     ${header("알림·운영","실제 운영 중 필요한 알림과 오류 신고만 관리합니다.","운영 설정")}
+4224:     <article class="setting-card mail-alert-settings"><h3>메일 알림</h3><p>필요한 운영 알림만 선택합니다. 발송 기준 시각은 일과운영시간과 연동합니다.</p><div class="mail-alert-grid">${[["dormOuting","학사외출"],["afternoonStudy","오후자습 현황"],["night1","야자1 현황"],["night2","야자2 현황"],["nightException","야간 이상상황"],["nightSummary","야간 종료 종합"]].map(([key,label])=>`<label><input type="checkbox" data-mail-alert="${key}" ${state.settings.mailAlerts?.[key]?"checked":""}> ${label}</label>`).join("")}</div><small>※ 실제 자동메일 발송은 연결된 UEP 데이터처리 메일 트리거가 이 설정값을 읽도록 연동됩니다.</small></article>
+4225:     <article class="setting-card issue-admin-card"><div class="connection-title"><div><h3>오류 신고 관리</h3><p>사용자가 저장한 오류 신고를 확인하고 처리 상태와 수정 버전을 기록합니다.</p></div><span class="state">${(state.issueReports||[]).filter(r=>r.status!=='fixed').length}건 처리 중</span></div><div class="connection-actions"><button class="btn secondary" data-open-issue-report>새 신고 작성</button><button class="btn primary" data-open-issue-manager>신고 관리</button></div><p class="safe-note">현재는 PC 로컬 저장 방식이며 중앙 수집은 관리자 서버 또는 관리 시트 연결 단계에서 확장합니다.</p></article>
+===== GYOMUON meal 7664-7714 =====
+7664:     }catch(error){toast(error?.message||'야자감독 변경 실패'); if(submit){submit.disabled=false;submit.textContent='시트에 저장';}}
+7665:   };
+7666: }
+7667: function renderDutyCalendarDrawer(type){
+7668:   const isLunch=type==='lunch';
+7669:   $("#drawerKicker").textContent=isLunch?'LUNCH DUTY · 42':'NIGHT DUTY · 43';
+7670:   $("#drawerTitle").textContent=isLunch?'월간 급식지도':'월간 야자감독';
+7671:   $("#drawerBody").innerHTML=dutyCalendarMarkup(type);
+7672:   $("#drawer").classList.add('duty-calendar-expanded');
+7673:   $("#drawer").classList.remove('hidden');$("#drawerBackdrop").classList.remove('hidden');
+7674:   bindDutyCalendarNavigation(type); if(type==='night')bindNightDutyEditor(); else bindLunchDutyEditor();
+7675: }
+7676: function openTodayLunchSupervisorDrawer(){
+7677:   const key=dateKey(today);
+7678:   const rows=(readonlyCache?.lunchDuties||[]).filter(row=>String(row.date||'').slice(0,10)===key);
+7679:   $("#drawerKicker").textContent='TODAY LUNCH DUTY';$("#drawerTitle").textContent='오늘의 급식지도';
+7680:   const body=rows.length?rows.map(row=>`<div class="today-duty-person ${String(row.teacher||'').trim()===currentLoginTeacherName()?'mine':''}"><strong>${escapeHtml(row.teacher||'-')}</strong><span>${escapeHtml(row.dutyType||'급식실')}</span><small>${escapeHtml([row.start,row.end].filter(Boolean).join('~'))}</small></div>`).join(''):`<div class="night-supervisor-empty"><i>◇</i><b>오늘 급식지도 일정이 없습니다</b><span>42_급식지도계획의 오늘 날짜가 비어 있습니다.</span></div>`;
+7681:   $("#drawerBody").innerHTML=`<div class="today-duty-list"><time>${escapeHtml(key)}</time>${body}</div><div class="drawer-actions"><button class="btn primary" data-reference="lunch-supervisor">빠른열기 · 급식지도 전체 보기</button></div>`;
+7682:   $("#drawer").classList.remove('hidden');$("#drawerBackdrop").classList.remove('hidden');
+7683:   $("#drawerBody [data-reference='lunch-supervisor']")?.addEventListener("click",()=>openReferenceDrawer("lunch-supervisor"));
+7684: }
+7685: 
+7686: function openLunchDutyEditor(){
+7687:   const key=dateKey(today);
+7688:   const saved=state.settings?.lunchDutyOverrides?.[key]||{};
+7689:   $("#drawerKicker").textContent="TODAY DUTY";
+7690:   $("#drawerTitle").textContent="점심 급식지도 등록";
+7691:   $("#drawerBody").innerHTML=`<form class="duty-editor-form" id="lunchDutyForm"><label>일자<input type="date" id="lunchDutyDate" value="${escapeHtml(key)}"></label><label>담당 여부<select id="lunchDutyEnabled"><option value="1" ${saved.enabled!==false?"selected":""}>담당 있음</option><option value="0" ${saved.enabled===false?"selected":""}>담당 없음</option></select></label><label>시간<input id="lunchDutyTime" value="${escapeHtml(saved.time||"12:20~13:10")}" placeholder="12:20~13:10"></label><label>장소·구역<input id="lunchDutyPlace" value="${escapeHtml(saved.place||"")}" placeholder="1학년 급식실"></label><label>함께 근무<input id="lunchDutyPartners" value="${escapeHtml(saved.partners||"")}" placeholder="교사 이름"></label><div class="modal-actions"><button type="button" class="btn secondary" data-close-drawer>취소</button><button class="btn primary">저장</button></div></form><p class="drawer-note">대시보드 시계 아래 급식지도 배지에 오늘 기준으로 표시됩니다.</p>`;
+7692:   $("#drawer").classList.remove("hidden");$("#drawerBackdrop").classList.remove("hidden");
+7693:   $("[data-close-drawer]")?.addEventListener("click",closeDrawer);
+7694:   $("#lunchDutyForm").onsubmit=async event=>{event.preventDefault();const date=$("#lunchDutyDate").value||key;state.settings.lunchDutyOverrides=state.settings.lunchDutyOverrides||{};state.settings.lunchDutyOverrides[date]={enabled:$("#lunchDutyEnabled").value==="1",time:$("#lunchDutyTime").value.trim(),place:$("#lunchDutyPlace").value.trim(),partners:$("#lunchDutyPartners").value.trim()};await save();closeDrawer();render("dashboard");toast("급식지도 일정을 저장했습니다.");};
+7695: }
+7696: function openTodayNightSupervisorDrawer(){
+7697:   const key=dateKey(today);
+7698:   const rows=(readonlyCache?.nightSupervisors||[]).filter(row=>String(row.date||'').slice(0,10)===key);
+7699:   $("#drawerKicker").textContent="TODAY NIGHT STUDY";$("#drawerTitle").textContent="오늘의 야자감독";
+7700:   const body=rows.length?rows.map(row=>`<div class="today-duty-person ${String(row.teacher||'').trim()===currentLoginTeacherName()?'mine':''}"><strong>${escapeHtml(row.teacher||'-')}</strong><span>${escapeHtml(row.place||'면학관 2~3층')}</span><small>${escapeHtml([row.start,row.end].filter(Boolean).join('~'))}</small></div>`).join(''):`<div class="night-supervisor-empty"><i>◇</i><b>오늘 야자감독이 없습니다</b><span>43_야자감독계획의 오늘 날짜가 비어 있습니다.</span></div>`;
+7701:   $("#drawerBody").innerHTML=`<div class="today-duty-list"><time>${escapeHtml(key)}</time>${body}</div><div class="drawer-actions"><button class="btn primary" data-reference="night-supervisor">빠른열기 · 야자감독 전체 보기</button></div>`;
+7702:   $("#drawer").classList.remove("hidden");$("#drawerBackdrop").classList.remove("hidden");
+7703:   $("#drawerBody [data-reference='night-supervisor']")?.addEventListener("click",()=>openReferenceDrawer("night-supervisor"));
+7704: }
+7705: 
+7706: function dashboardDutyBadgesMarkup(){
+7707:   const lunch=dashboardDutyStatus("lunch");
+7708:   const night=dashboardDutyStatus("night");
+7709:   const badge=(kind,title,status,icon,reference)=>`<button class="uep-duty-badge ${status.state}" data-reference="${reference}" data-duty-kind="${kind}" data-quick-kind="lookup" title="${title} 상세 확인"><i>${icon}</i><span>${title}</span><b>${status.label}</b>${status.detail?`<small>${escapeHtml(status.detail)}</small>`:""}</button>`;
+7710:   return `<div class="uep-duty-badges">${badge("lunch","급식지도",lunch,"♨","lunch-supervisor-today")}${badge("night","야자감독",night,"◷","night-supervisor-today")}${dashboardStudentStatusCompactMarkup()}</div>`;
+7711: }
+7712: 
+7713: function timetableClassColorKey(room){
+7714:   const match=String(room||"").match(/(?:^|\b)([123])-?(\d{1,2})(?:\b|$)/);
+===== GYOMUON meal 7666-7716 =====
+7666: }
+7667: function renderDutyCalendarDrawer(type){
+7668:   const isLunch=type==='lunch';
+7669:   $("#drawerKicker").textContent=isLunch?'LUNCH DUTY · 42':'NIGHT DUTY · 43';
+7670:   $("#drawerTitle").textContent=isLunch?'월간 급식지도':'월간 야자감독';
+7671:   $("#drawerBody").innerHTML=dutyCalendarMarkup(type);
+7672:   $("#drawer").classList.add('duty-calendar-expanded');
+7673:   $("#drawer").classList.remove('hidden');$("#drawerBackdrop").classList.remove('hidden');
+7674:   bindDutyCalendarNavigation(type); if(type==='night')bindNightDutyEditor(); else bindLunchDutyEditor();
+7675: }
+7676: function openTodayLunchSupervisorDrawer(){
+7677:   const key=dateKey(today);
+7678:   const rows=(readonlyCache?.lunchDuties||[]).filter(row=>String(row.date||'').slice(0,10)===key);
+7679:   $("#drawerKicker").textContent='TODAY LUNCH DUTY';$("#drawerTitle").textContent='오늘의 급식지도';
+7680:   const body=rows.length?rows.map(row=>`<div class="today-duty-person ${String(row.teacher||'').trim()===currentLoginTeacherName()?'mine':''}"><strong>${escapeHtml(row.teacher||'-')}</strong><span>${escapeHtml(row.dutyType||'급식실')}</span><small>${escapeHtml([row.start,row.end].filter(Boolean).join('~'))}</small></div>`).join(''):`<div class="night-supervisor-empty"><i>◇</i><b>오늘 급식지도 일정이 없습니다</b><span>42_급식지도계획의 오늘 날짜가 비어 있습니다.</span></div>`;
+7681:   $("#drawerBody").innerHTML=`<div class="today-duty-list"><time>${escapeHtml(key)}</time>${body}</div><div class="drawer-actions"><button class="btn primary" data-reference="lunch-supervisor">빠른열기 · 급식지도 전체 보기</button></div>`;
+7682:   $("#drawer").classList.remove('hidden');$("#drawerBackdrop").classList.remove('hidden');
+7683:   $("#drawerBody [data-reference='lunch-supervisor']")?.addEventListener("click",()=>openReferenceDrawer("lunch-supervisor"));
+7684: }
+7685: 
+7686: function openLunchDutyEditor(){
+7687:   const key=dateKey(today);
+7688:   const saved=state.settings?.lunchDutyOverrides?.[key]||{};
+7689:   $("#drawerKicker").textContent="TODAY DUTY";
+7690:   $("#drawerTitle").textContent="점심 급식지도 등록";
+7691:   $("#drawerBody").innerHTML=`<form class="duty-editor-form" id="lunchDutyForm"><label>일자<input type="date" id="lunchDutyDate" value="${escapeHtml(key)}"></label><label>담당 여부<select id="lunchDutyEnabled"><option value="1" ${saved.enabled!==false?"selected":""}>담당 있음</option><option value="0" ${saved.enabled===false?"selected":""}>담당 없음</option></select></label><label>시간<input id="lunchDutyTime" value="${escapeHtml(saved.time||"12:20~13:10")}" placeholder="12:20~13:10"></label><label>장소·구역<input id="lunchDutyPlace" value="${escapeHtml(saved.place||"")}" placeholder="1학년 급식실"></label><label>함께 근무<input id="lunchDutyPartners" value="${escapeHtml(saved.partners||"")}" placeholder="교사 이름"></label><div class="modal-actions"><button type="button" class="btn secondary" data-close-drawer>취소</button><button class="btn primary">저장</button></div></form><p class="drawer-note">대시보드 시계 아래 급식지도 배지에 오늘 기준으로 표시됩니다.</p>`;
+7692:   $("#drawer").classList.remove("hidden");$("#drawerBackdrop").classList.remove("hidden");
+7693:   $("[data-close-drawer]")?.addEventListener("click",closeDrawer);
+7694:   $("#lunchDutyForm").onsubmit=async event=>{event.preventDefault();const date=$("#lunchDutyDate").value||key;state.settings.lunchDutyOverrides=state.settings.lunchDutyOverrides||{};state.settings.lunchDutyOverrides[date]={enabled:$("#lunchDutyEnabled").value==="1",time:$("#lunchDutyTime").value.trim(),place:$("#lunchDutyPlace").value.trim(),partners:$("#lunchDutyPartners").value.trim()};await save();closeDrawer();render("dashboard");toast("급식지도 일정을 저장했습니다.");};
+7695: }
+7696: function openTodayNightSupervisorDrawer(){
+7697:   const key=dateKey(today);
+7698:   const rows=(readonlyCache?.nightSupervisors||[]).filter(row=>String(row.date||'').slice(0,10)===key);
+7699:   $("#drawerKicker").textContent="TODAY NIGHT STUDY";$("#drawerTitle").textContent="오늘의 야자감독";
+7700:   const body=rows.length?rows.map(row=>`<div class="today-duty-person ${String(row.teacher||'').trim()===currentLoginTeacherName()?'mine':''}"><strong>${escapeHtml(row.teacher||'-')}</strong><span>${escapeHtml(row.place||'면학관 2~3층')}</span><small>${escapeHtml([row.start,row.end].filter(Boolean).join('~'))}</small></div>`).join(''):`<div class="night-supervisor-empty"><i>◇</i><b>오늘 야자감독이 없습니다</b><span>43_야자감독계획의 오늘 날짜가 비어 있습니다.</span></div>`;
+7701:   $("#drawerBody").innerHTML=`<div class="today-duty-list"><time>${escapeHtml(key)}</time>${body}</div><div class="drawer-actions"><button class="btn primary" data-reference="night-supervisor">빠른열기 · 야자감독 전체 보기</button></div>`;
+7702:   $("#drawer").classList.remove("hidden");$("#drawerBackdrop").classList.remove("hidden");
+7703:   $("#drawerBody [data-reference='night-supervisor']")?.addEventListener("click",()=>openReferenceDrawer("night-supervisor"));
+7704: }
+7705: 
+7706: function dashboardDutyBadgesMarkup(){
+7707:   const lunch=dashboardDutyStatus("lunch");
+7708:   const night=dashboardDutyStatus("night");
+7709:   const badge=(kind,title,status,icon,reference)=>`<button class="uep-duty-badge ${status.state}" data-reference="${reference}" data-duty-kind="${kind}" data-quick-kind="lookup" title="${title} 상세 확인"><i>${icon}</i><span>${title}</span><b>${status.label}</b>${status.detail?`<small>${escapeHtml(status.detail)}</small>`:""}</button>`;
+7710:   return `<div class="uep-duty-badges">${badge("lunch","급식지도",lunch,"♨","lunch-supervisor-today")}${badge("night","야자감독",night,"◷","night-supervisor-today")}${dashboardStudentStatusCompactMarkup()}</div>`;
+7711: }
+7712: 
+7713: function timetableClassColorKey(room){
+7714:   const match=String(room||"").match(/(?:^|\b)([123])-?(\d{1,2})(?:\b|$)/);
+7715:   if(!match)return "";
+7716:   return `${match[1]}-${Number(match[2])}`;
+===== GYOMUON settings 4201-4381 =====
+4201: function settingsView() {
+4202:   const connected = Boolean(readonlyCache?.students?.length && !googleConnectionError);
+4203:   const credentialReady = Boolean(googleConnectionStatus?.ok);
+4204:   const googleStatus = connected ? ["구글시트 연결됨", ""] : googleConnectionError ? ["권한·연결 오류", "error"] : credentialReady ? ["권한 확인 필요", "warn"] : ["인증 필요", "warn"];
+4205:   const connectionRows = [
+4206:     ["학생정보", readonlyCache?.students?.length], ["학사생", readonlyCache?.dormStudents?.length], ["학사외출", readonlyCache?.dormOutings?.length],
+4207:     ["성적", readonlyCache?.scoreRecords?.length], ["수능최저", readonlyCache?.admissionMinimums?.length], ["대학입결", readonlyCache?.admissionCuts?.length],
+4208:   ];
+4209:   const neisStatus = neisData?.ok ? (neisData.offline ? ["저장자료 표시", "warn"] : ["실시간 연결됨", ""]) : neisLoading ? ["불러오는 중", "warn"] : ["연결 확인", "error"];
+4210:   const profile=currentUserProfile(), access=currentTeacherAccessScope();
+4211: 
+4212:   const header=(title,desc,badge)=>`${settingsTabsMarkup()}<section class="settings-section-head"><div><small>UEP SETTINGS</small><h2>${title}</h2><p>${desc}</p></div><span>${badge}</span></section>`;
+4213: 
+4214:   if(settingsPanel==="security") return `<div class="module-page settings-v064 settings-final">
+4215:     ${header("사용자·보안","계정 승인과 역할, 민감정보 보호를 관리합니다.","관리자·학년부장")}
+4216:     <article class="setting-card sensitive-security-settings"><div><small>PRIVACY · SECURITY</small><h3>🔒 민감정보 보안</h3><p>교육비지원 · 요보호학생 · 위기학생 상세정보의 열람 비밀번호를 관리합니다.</p><p class="settings-help">상세정보는 1차 블라인드 후 비밀번호 인증을 거쳐 확인하며 인증은 10분 동안 유지됩니다.</p></div><div class="sensitive-security-status"><b>${sensitivePasswordConfigured()?'비밀번호 설정됨':'비밀번호 설정 필요'}</b><button type="button" class="btn primary" data-sensitive-password-set>${sensitivePasswordConfigured()?'비밀번호 변경':'비밀번호 설정'}</button><button type="button" class="btn secondary" data-sensitive-lock>즉시 잠금</button></div></article>
+4217:     <article class="setting-card subject-confidential-security-settings"><div><small>CONFIDENTIAL · CURRICULUM</small><h3>🔐 선택과목 대외비 보안</h3><p>과목별 신청현황 전용 비밀번호를 민감정보 비밀번호와 별도로 관리합니다.</p><p class="settings-help">관리자·학년부장만 설정 및 열람할 수 있으며 담임은 비활성화됩니다.</p></div><div class="sensitive-security-status"><b>${subjectConfidentialPasswordConfigured()?'비밀번호 설정됨':'비밀번호 설정 필요'}</b><button type="button" class="btn primary" data-subject-confidential-password-set ${subjectConfidentialAllowed()?'':'disabled'}>${subjectConfidentialPasswordConfigured()?'비밀번호 변경':'비밀번호 설정'}</button><button type="button" class="btn secondary" data-subject-confidential-lock ${subjectConfidentialAllowed()?'':'disabled'}>즉시 잠금</button></div></article>
+4218:     <article class="setting-card role-settings-card"><div class="connection-title"><div><h3>사용자·권한 프로필</h3><p>현재 로그인 사용자의 역할과 담당 범위를 확인합니다.</p></div><span class="state">${escapeHtml(currentRoleDisplay())}</span></div><div class="user-profile-summary"><div><small>사용자</small><b>${escapeHtml(profile.name||"미설정")}</b></div><div><small>부서</small><b>${escapeHtml(profile.department||"미설정")}</b></div><div><small>조회 범위</small><b>${escapeHtml(access.label)}</b></div></div><p class="safe-note">담임은 학년 자료를 조회할 수 있고 타반 연락정보는 기본 마스킹합니다. 성적·응답·정규화 원천자료는 UEP에서 직접 수정하지 않습니다.</p></article>
+4219:     <article class="setting-card access-control-card"><div class="connection-title"><div><h3>사용자·권한 승인</h3><p>01_사용자계정의 사용여부·역할·담당학년·담임반을 기준으로 로그인과 조회범위를 제어합니다.</p></div><span class="state connected">계정표 승인</span></div><div class="connection-actions"><button class="btn primary" type="button" data-access-control>권한 승인 제어판</button></div><p class="safe-note">신규 사용자 등록은 표준 구글시트에서 관리하고 UEP에서는 승인상태와 역할을 조정합니다.</p></article>
+4220:   </div>`;
+4221: 
+4222:   if(settingsPanel==="operations") return `<div class="module-page settings-v064 settings-final">
+4223:     ${header("알림·운영","실제 운영 중 필요한 알림과 오류 신고만 관리합니다.","운영 설정")}
+4224:     <article class="setting-card mail-alert-settings"><h3>메일 알림</h3><p>필요한 운영 알림만 선택합니다. 발송 기준 시각은 일과운영시간과 연동합니다.</p><div class="mail-alert-grid">${[["dormOuting","학사외출"],["afternoonStudy","오후자습 현황"],["night1","야자1 현황"],["night2","야자2 현황"],["nightException","야간 이상상황"],["nightSummary","야간 종료 종합"]].map(([key,label])=>`<label><input type="checkbox" data-mail-alert="${key}" ${state.settings.mailAlerts?.[key]?"checked":""}> ${label}</label>`).join("")}</div><small>※ 실제 자동메일 발송은 연결된 UEP 데이터처리 메일 트리거가 이 설정값을 읽도록 연동됩니다.</small></article>
+4225:     <article class="setting-card issue-admin-card"><div class="connection-title"><div><h3>오류 신고 관리</h3><p>사용자가 저장한 오류 신고를 확인하고 처리 상태와 수정 버전을 기록합니다.</p></div><span class="state">${(state.issueReports||[]).filter(r=>r.status!=='fixed').length}건 처리 중</span></div><div class="connection-actions"><button class="btn secondary" data-open-issue-report>새 신고 작성</button><button class="btn primary" data-open-issue-manager>신고 관리</button></div><p class="safe-note">현재는 PC 로컬 저장 방식이며 중앙 수집은 관리자 서버 또는 관리 시트 연결 단계에서 확장합니다.</p></article>
+4226:   </div>`;
+4227: 
+4228:   if(settingsPanel==="system") return `<div class="module-page settings-v064 settings-final">
+4229:     ${header("시스템 관리","연결상태·배포 준비·업데이트처럼 평소에는 건드리지 않는 관리 도구입니다.","관리자 점검")}
+4230:     <article class="setting-card health-check-card"><div class="connection-title"><div><h3>연결 진단</h3><p>필수 탭과 주요 데이터가 정상적으로 읽히는지 한 번에 확인합니다.</p></div><span class="state ${googleConnectionError?'error':'connected'}">${googleConnectionError?'확인 필요':'정상'}</span></div><div class="health-list">${connectionHealthRows().map(row=>`<div><span>${row.ok?'✓':'!'}</span><b>${row.name}</b><small>${row.ok?'인식':'확인 필요'}</small></div>`).join('')}</div>${googleConnectionError?`<div class="connection-error-detail"><b>최근 오류</b><span>${escapeHtml(googleConnectionError)}</span></div>`:''}<div class="connection-actions"><button class="btn primary" data-run-health-check>다시 진단</button></div></article>
+4231:     <article class="setting-card"><h3>조회 연결 상태</h3><p>UEP 기준 구글시트에 실제 자료가 있는 항목을 확인합니다.</p>${connectionRows.map(([label,count]) => `<div class="setting-row"><span><b>${label}</b><small>${Number(count || 0).toLocaleString()}건 인식</small></span><span>${count ? "연결" : "자료 확인"}</span></div>`).join("")}</article>
+4232:     <article class="setting-card release-readiness-card"><div class="connection-title"><div><h3>배포 준비 점검</h3><p>교사용 배포 전에 필수 연결·계정·권한·업데이트·API 보호 상태를 확인합니다.</p></div><span class="state ${releaseReadinessRows().every(row=>row.ok)?'connected':'warn'}">${releaseReadinessRows().every(row=>row.ok)?'배포 준비':'확인 필요'}</span></div><div class="health-list release-health-list">${releaseReadinessRows().map(row=>`<div><span>${row.ok?'✓':'!'}</span><b>${escapeHtml(row.name)}</b><small>${escapeHtml(row.note)}</small></div>`).join('')}</div><div class="connection-actions"><button class="btn primary" type="button" data-access-control>권한 점검</button><button class="btn secondary" data-run-health-check>연결 다시 진단</button></div><p class="safe-note">자동 설치·롤백은 현재 비활성화되어 있습니다.</p></article>
+4233:     <article class="setting-card update-settings-card"><div class="connection-title"><div><h3>UEP 업데이트</h3><p>현재 버전 ${APP_VERSION} · 담임 배포판부터는 앱 내부 업데이트 채널을 사용합니다.</p></div><span class="state connected">업데이트 확인 작동</span></div><form id="updateSettingsForm" class="update-settings-form"><input id="updateManifestUrl" type="url" value="${escapeHtml(state.settings.updateManifestUrl||'')}" placeholder="https://.../uep-update.json"><button class="btn secondary" type="submit">주소 저장</button><button class="btn primary" type="button" data-check-update>업데이트 확인</button></form><div class="update-roadmap"><span class="done">① 동일 빌드</span><span class="done">② 버전 확인</span><span class="done">③ 업데이트 채널</span><span class="done">④ 앱 내부 적용·롤백</span></div><div id="updateCheckResult" class="update-check-result"><small>새 버전 확인 → 무결성 검증 → 앱 내부 적용 → 실패 시 이전판 복구 방식입니다.</small></div></article>
+4234:     <article class="setting-card"><div class="connection-title"><div><h3>UEP 정보</h3><p>UNHO Education Platform · Connect Data. Grow Students.</p></div><span class="state">v${APP_VERSION}</span></div><div class="setting-row"><span><b>기준 데이터</b><small>표준 구글시트 연결</small></span><span>${escapeHtml(readonlyCache?.sourceName||'연결 확인')}</span></div></article>
+4235:   </div>`;
+4236: 
+4237:   // 01 기본·연결 — 초기 설치와 연결 문제가 있을 때만 사용하는 영역
+4238:   return `<div class="module-page settings-v064 settings-final">
+4239:     ${header("기본·연결","초기 설치와 데이터 연결, NEIS 연동을 관리합니다.","학교 공용")}
+4240:     <article class="setting-card setup-wizard-card"><div><small>UEP SETUP GUIDE</small><h3>초기 설정 마법사</h3><p>처음 설치하거나 학교·계정·연결 정보를 다시 잡을 때만 사용합니다. 기존 설정은 유지됩니다.</p></div><button class="btn primary" type="button" data-setup-wizard>설정 마법사 시작</button></article>
+4241:     <article class="setting-card connection-overview"><div class="connection-title"><div><h3>UEP 구글시트 연결</h3><p>표준 구글시트를 조회하고 허용된 운영정보만 안전하게 양방향 수정합니다.</p></div><span class="state ${googleStatus[1]}">${googleStatus[0]}</span></div><div class="readonly-rule"><b>현재 기준</b><span>${escapeHtml(readonlyCache?.sourceName || "2026_운호고_UEP_DB_v1.0_Dev")} · 학생ID 기준 결합</span></div>${googleConnectionError ? `<div class="connection-error-detail"><b>오류 내용</b><span>${escapeHtml(googleConnectionError)}</span></div>` : ""}<div class="connection-actions"><button class="btn secondary" data-oauth-guide>${credentialReady ? "서비스 계정 JSON 변경" : "서비스 계정 JSON 등록"}</button><button class="btn primary" data-readonly-sync>지금 새로고침</button></div><p class="safe-note">서비스 계정 JSON은 Windows 보안 저장소에 암호화하여 보관합니다.</p></article>
+4242:     <article class="setting-card neis-settings-card"><div class="connection-title"><div><h3>NEIS 급식·시간표</h3><p>학교명으로 학교코드를 찾아 급식과 학급 시간표를 자동 조회합니다.</p></div><span class="state ${neisStatus[1]}">${neisStatus[0]}</span></div><form id="neisSettingsForm" class="neis-settings-form"><label>학교명<input id="neisSchoolName" required value="${escapeHtml(state.settings.neis.schoolName)}"></label><label>학년<select id="neisGrade">${[1,2,3].map((value) => `<option ${String(value) === String(state.settings.neis.grade) ? "selected" : ""}>${value}</option>`).join("")}</select></label><label>반<select id="neisClass">${Array.from({length:9},(_,index)=>index+1).map((value) => `<option ${String(value) === String(state.settings.neis.classNo) ? "selected" : ""}>${value}</option>`).join("")}</select></label><label class="neis-key-label">인증키<input id="neisApiKey" type="password" autocomplete="off" placeholder="${state.settings.neis.apiKeyConfigured?"등록됨 · 변경할 때만 입력":"발급받은 인증키 입력"}"></label><label class="neis-key-toggle"><input id="neisUseApiKey" type="checkbox" ${state.settings.neis.useApiKey?"checked":""}> 인증키 사용</label><button class="btn primary">저장 후 불러오기</button></form>${neisError ? `<div class="connection-error-detail"><b>${neisData?.offline ? "저장자료 안내" : "연결 오류"}</b><span>${escapeHtml(neisError)}</span></div>` : ""}<div class="connection-actions"><button class="btn secondary" data-neis-refresh>NEIS 다시 불러오기</button><button class="btn secondary" data-neis-clear-cache>저장자료 지우기</button></div><p class="safe-note">실시간 연결이 실패하면 마지막 정상 조회자료를 저장자료로 구분해 표시합니다.</p></article>
+4243:   </div>`;
+4244: }
+4245: 
+4246: const helpItems = {
+4247:   start:{title:"처음 시작하기",summary:"자료 연결과 기본 설정",steps:["설정에서 UEP 구글시트와 NEIS 연결 상태를 확인합니다.","사용자 역할과 담당 학년·반을 설정합니다.","대시보드에서 오늘의 업무와 프로그램을 확인합니다."],source:"기본연결시트·데이터처리시트·NEIS"},
+4248:   dashboard:{title:"대시보드",summary:"오늘 필요한 정보 한눈에 보기",steps:["시간·날씨와 개인시간표를 확인합니다.","학교 캘린더에서 월간·주간 일정을 조회합니다.","오늘의 업무·공지와 선택·방과후 프로그램을 확인합니다."],source:"학교캘린더·시간표·프로그램DB"},
+4249:   students:{title:"학생정보",summary:"학생 개인 통합 대시보드",steps:["반과 학생을 선택합니다.","연락정보·성적·활동·선택과목·프로그램 참여를 확인합니다.","보고서 보기는 UEP 내부 미리보기로 열고 필요한 자료만 출력합니다."],source:"기본연결시트·데이터처리시트"},
+4250:   timetable:{title:"시간표",summary:"개인·학급·학생·교사 시간표",steps:["개인시간표에서 자신의 수업을 확인합니다.","학급시간표는 날짜·학년·반을 선택해 NEIS 주간자료를 조회합니다.","원본 누락 진단이 표시되면 자동매칭보다 NEIS 자료 확인을 우선합니다."],source:"NEIS 공개 API·개인시간표DB"},
+4251:   attendance:{title:"출결",summary:"공결·지각·야자출결 통합",steps:["상단에서 공결·지각·야자출결을 선택합니다.","야자출결은 실제 운영일만 이동하며 학사·방과후·야간심화가 우선 표시됩니다.","출결 원본과 정규화 결과가 다르면 원본 응답과 데이터처리시트를 먼저 확인합니다."],source:"구글폼연결시트·데이터처리시트"},
+4252:   scores:{title:"성적",summary:"내신·모의고사 상담자료",steps:["반과 학생, 조회범위를 선택합니다.","내신 변화와 모의고사 등락을 비교합니다.","출력센터에서 A4 상담자료로 출력합니다."],source:"기본연결시트 성적DB"},
+4253:   admissions:{title:"입시",summary:"등급환산·수능최저·입결",steps:["학생의 모의고사 성적을 선택합니다.","대학별 수능최저 충족 가능성을 조회합니다.","환산식과 근거자료를 함께 확인합니다."],source:"수능최저DB·대학입결DB"},
+4254:   records:{title:"생활기록부",summary:"활동 근거부터 최종 기록까지",steps:["활동내역과 SDGs 연계 성장 프로파일을 확인합니다.","자율·진로·종합의견 근거자료를 선택합니다.","규칙 기반 또는 AI 초안을 생성하고 규칙 검토 후 최종 저장합니다."],source:"기본연결시트·보고서 정규화·규칙로그"},
+4255:   programs:{title:"프로그램",summary:"공통·선택·방과후 운영",steps:["공통활동은 자율·진로로 구분해 확인합니다.","선택활동은 명단·출석·보고서·SDGs·사진을 관리합니다.","방과후는 반복일정·결강·보강과 야자출결 영향을 관리합니다."],source:"기본연결시트 프로그램DB"},
+4256:   calendar:{title:"학교 일정",summary:"학년도 일정과 개인 일정",steps:["월간·주간 보기를 전환합니다.","학교·프로그램·개인·미확정 일정을 필터링합니다.","학년도 동기화 후 수정 잠금된 일정은 보존합니다."],source:"학교캘린더"},
+4257:   outputs:{title:"출력센터",summary:"확정자료 선택 출력",steps:["보고서·학생자료·선택과목·출석부·생활기록부·성적 그룹을 선택합니다.","반과 학생 또는 프로그램을 선택합니다.","미리보기 후 PDF·인쇄·Excel을 실행합니다."],source:"확정된 UEP 조회자료"},
+4258:   settings:{title:"설정",summary:"연결·역할·화면·업데이트",steps:["구글시트·NEIS 연결을 관리합니다.","역할과 권한 범위를 확인합니다.","업데이트 정보 주소를 등록하고 새 버전을 확인합니다."],source:"PC 보안저장소·UEP 설정"},
+4259: };
+4260: function helpView() {
+4261:   return `<div class="module-page help-manual-page"><div class="setting-card help-intro"><div><h3>UEP 사용 설명서</h3><p>각 메뉴의 자료 출처와 실제 업무 흐름을 기준으로 설명합니다.</p></div><span>${Object.keys(helpItems).length}개 메뉴</span></div><div class="help-grid">${Object.entries(helpItems).map(([key,item])=>`<article class="help-item"><button class="help-button" data-help="${key}"><span><b>${item.title}</b><small>${item.summary}</small></span><span>${helpOpen===key?"⌃":"⌄"}</span></button>${helpOpen===key?`<div class="help-content"><h4>${item.title}</h4><ol>${item.steps.map(step=>`<li>${step}</li>`).join("")}</ol><p><b>자료 출처:</b> ${item.source}</p><p><b>문제 확인 순서:</b> 원본시트 → 데이터처리시트 → UEP 화면 구현</p></div>`:""}</article>`).join("")}</div></div>`;
+4262: }
+4263: 
+4264: function classNumberOf(student) {
+4265:   return String(student?.className || "").replace(/[^0-9]/g, "");
+4266: }
+4267: function availableClasses() {
+4268:   const found = [...new Set((readonlyCache?.students || []).map(classNumberOf).filter(Boolean))].sort((a,b)=>Number(a)-Number(b));
+4269:   return found.length ? found : Array.from({length:9},(_,i)=>String(i+1));
+4270: }
+4271: function optionStudents(classNo, selectedId = "") {
+4272:   return (readonlyCache?.students || []).filter(s => !classNo || classNumberOf(s) === String(classNo)).map(s => `<option value="${escapeHtml(s.id)}" ${s.id === selectedId ? "selected" : ""}>${escapeHtml(s.studentNo)} ${escapeHtml(s.name)}</option>`).join("");
+4273: }
+4274: 
+4275: function scorePeriodKey(row) {
+4276:   const year = String(row?.schoolYear || today.getFullYear()).replace(/[^0-9]/g, "") || String(today.getFullYear());
+4277:   let semester = String(row?.semester || "").match(/[12]/)?.[0] || "";
+4278:   if (!semester && row?.scoreType === "모의고사") {
+4279:     const month = Number(String(row.exam || "").match(/(\d{1,2})\s*월/)?.[1] || 0);
+4280:     semester = month && month >= 8 ? "2" : "1";
+4281:   }
+4282:   return `${year}-${semester || "1"}`;
+4283: }
+4284: function scorePeriodLabel(key) {
+4285:   if (!key || key === "all") return "전체 누적";
+4286:   const [year, semester] = String(key).split("-");
+4287:   return `${year}학년도 ${semester || "1"}학기`;
+4288: }
+4289: function availableScorePeriods(mode = scoreMode) {
+4290:   const rows = (readonlyCache?.scoreRecords || []).filter(row => mode === "combined" || row.scoreType === (mode === "mock" ? "모의고사" : "내신"));
+4291:   return [...new Set(rows.map(scorePeriodKey).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+4292: }
+4293: function scoreExamOrder(exam) {
+4294:   const order = ["1차고사","2차고사","학기말고사","3월모의고사","6월모의고사","9월모의고사","10월모의고사","11월모의고사","수능"];
+4295:   const index = order.indexOf(exam);
+4296:   return index < 0 ? 999 : index;
+4297: }
+4298: function scoreTrend(row, allRows) {
+4299:   const orders = row.scoreType === "모의고사" ? ["3월모의고사","6월모의고사","9월모의고사","10월모의고사","11월모의고사"] : ["1차고사","2차고사","학기말고사"];
+4300:   const index = orders.indexOf(row.exam);
+4301:   if (index <= 0 || row.level === "" || row.level == null) return { text:"-", cls:"" };
+4302:   const period = scorePeriodKey(row);
+4303:   const previous = allRows.find(x => x.studentId === row.studentId && x.scoreType === row.scoreType && x.subject === row.subject && x.exam === orders[index - 1] && scorePeriodKey(x) === period);
+4304:   if (!previous || previous.level === "" || previous.level == null) return { text:"-", cls:"" };
+4305:   const diff = Number(previous.level) - Number(row.level);
+4306:   if (!Number.isFinite(diff) || diff === 0) return { text:"유지", cls:"" };
+4307:   return diff > 0 ? { text:`▲ ${Math.abs(diff)}등급`, cls:"good" } : { text:`▼ ${Math.abs(diff)}등급`, cls:"bad" };
+4308: }
+4309: function gradeToneClass(value) {
+4310:   const grade = Number(value);
+4311:   return Number.isFinite(grade) && grade >= 1 && grade <= 9 ? `grade-${grade}` : "grade-na";
+4312: }
+4313: function gradeBadgeMarkup(value, suffix = "등급") {
+4314:   if (value === "" || value === null || value === undefined || value === "-") return `<span class="grade-badge grade-na">-</span>`;
+4315:   const number = Number(value);
+4316:   if (!Number.isFinite(number)) return `<span class="grade-badge grade-na">${escapeHtml(String(value))}</span>`;
+4317:   return `<span class="grade-badge ${gradeToneClass(number)}"><b>${scoreDisplay(number,2)}</b><small>${suffix}</small></span>`;
+4318: }
+4319: function mockGradeMiniMarkup(studentId, exam) {
+4320:   const order = ["국어", "수학", "영어", "한국사"];
+4321:   const rows = (readonlyCache?.scoreRecords || []).filter(row => row.studentId === studentId && row.scoreType === "모의고사" && row.exam === exam);
+4322:   if (!rows.length) return `<span class="mock-grade-empty">자료 없음</span>`;
+4323:   const sorted = rows.slice().sort((a,b)=>{
+4324:     const ai=order.indexOf(a.subject), bi=order.indexOf(b.subject);
+4325:     if(ai>=0||bi>=0) return (ai<0?99:ai)-(bi<0?99:bi);
+4326:     return String(a.subject).localeCompare(String(b.subject),"ko");
+4327:   });
+4328:   return `<div class="mock-grade-mini-strip">${sorted.map(row=>`<span><small>${escapeHtml(row.subject)}</small><b class="${gradeToneClass(row.level)}">${escapeHtml(String(row.level || "-"))}</b></span>`).join("")}</div>`;
+4329: }
+4330: function scoreTableMarkup(rows, mode = scoreMode) {
+4331:   const coreOrder = mode === "mock" ? ["국어","수학","영어","한국사"] : ["공통국어1","공통수학1","공통영어1","한국사1","통합사회1","통합과학1","한문","과학탐구실험1","체육1","음악"];
+4332:   const subjects = [...new Set(rows.map(row=>row.subject).filter(Boolean))].sort((a,b)=>{
+4333:     const ai=coreOrder.indexOf(a), bi=coreOrder.indexOf(b);
+4334:     if(ai>=0||bi>=0) return (ai<0?999:ai)-(bi<0?999:bi);
+4335:     return a.localeCompare(b,"ko");
+4336:   });
+4337:   const groups = new Map();
+4338:   rows.forEach(row=>{
+4339:     const period = scorePeriodKey(row);
+4340:     const key=`${row.studentId}|${period}|${row.exam}`;
+4341:     if(!groups.has(key)) groups.set(key,{studentId:row.studentId,studentNo:row.studentNo,name:row.name,period,exam:row.exam,items:new Map()});
+4342:     groups.get(key).items.set(row.subject,row);
+4343:   });
+4344:   const grouped=[...groups.values()].sort((a,b)=>String(a.studentNo).localeCompare(String(b.studentNo)) || a.period.localeCompare(b.period) || scoreExamOrder(a.exam)-scoreExamOrder(b.exam) || String(a.exam).localeCompare(String(b.exam),"ko"));
+4345:   const cell=(row)=>{
+4346:     if(!row) return `<td class="empty-score-cell">-</td>`;
+4347:     const trend=scoreTrend(row,readonlyCache?.scoreRecords||[]);
+4348:     const trendMarkup=trend.text!=="-"?`<em class="trend ${trend.cls}">${trend.text}</em>`:"";
+4349:     if(row.scoreType==="모의고사") return `<td><div class="score-cell-primary">${gradeBadgeMarkup(row.level)}${trendMarkup}</div><small>원점수 ${scoreDisplay(row.rawScore)} · 표준 ${scoreDisplay(row.standardScore)}${row.percentile!==""?` · 백분위 ${scoreDisplay(row.percentile)}`:""}</small></td>`;
+4350:     const gradeValue = row.level === "산출제외" ? (row.achievement || "산출제외") : row.level;
+4351:     return `<td><div class="score-cell-primary">${gradeBadgeMarkup(gradeValue, Number.isFinite(Number(gradeValue))?"등급":"")}${trendMarkup}</div><small>원점수 ${scoreDisplay(row.rawScore)} · 석차 ${escapeHtml(String(row.rank||"-"))}/${escapeHtml(String(row.enrollment||"-"))}${row.achievement?` · ${escapeHtml(row.achievement)}`:""}</small></td>`;
+4352:   };
+4353:   const title = mode === "mock" ? "모의고사 과목별 등급" : "내신 과목별 등급";
+4354:   return `<div class="data-card score-matrix-card"><div class="card-head"><div><strong>${title}</strong></div><small>전체 누적 또는 선택 학기를 표시합니다.</small></div><div class="score-matrix-scroll"><table class="score-matrix-table"><thead><tr><th class="student-col">학생</th><th class="exam-col">학기·시험</th>${subjects.map(subject=>`<th>${escapeHtml(subject)}</th>`).join("")}</tr></thead><tbody>${grouped.map(group=>`<tr><th class="student-col"><b>${escapeHtml(group.studentNo)}</b><small>${escapeHtml(group.name)}</small></th><th class="exam-col"><b>${escapeHtml(scorePeriodLabel(group.period).replace("학년도 ","· "))}</b><small>${escapeHtml(group.exam)}</small></th>${subjects.map(subject=>cell(group.items.get(subject))).join("")}</tr>`).join("")}</tbody></table></div></div>`;
+4355: }
+4356: 
+4357: function scoreDisplay(value, digits = 1) {
+4358:   if (value === "" || value === null || value === undefined || value === "-") return "-";
+4359:   const number = Number(value);
+4360:   if (!Number.isFinite(number)) return escapeHtml(String(value));
+4361:   return Number.isInteger(number) ? String(number) : number.toFixed(digits).replace(/\.0+$/, "");
+4362: }
+4363: function scoreAverage(rows) {
+4364:   const values = rows.filter((row) => row.level !== "" && row.level !== null && row.level !== undefined).map((row) => Number(row.level)).filter(Number.isFinite);
+4365:   return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+4366: }
+4367: function combinedScoreDashboardMarkup(student, rows) {
+4368:   const allRows = readonlyCache?.scoreRecords || [];
+4369:   const scopedRows = Array.isArray(rows) ? rows.filter(row=>row.studentId===student.id) : allRows.filter(row=>row.studentId===student.id);
+4370:   const internal = scopedRows.filter((row) => row.scoreType === "내신");
+4371:   const mock = scopedRows.filter((row) => row.scoreType === "모의고사");
+4372:   const internalPeriods = [...new Set(internal.map(scorePeriodKey))].sort();
+4373:   const latestInternalPeriod = internalPeriods.at(-1) || "";
+4374:   const summaryInternal = scorePeriod === "all" && latestInternalPeriod ? internal.filter(row=>scorePeriodKey(row)===latestInternalPeriod) : internal;
+4375:   const periodLabel = scorePeriodLabel(scorePeriod);
+4376:   const coreInternalOrder = ["공통국어1","공통수학1","공통영어1","한국사1","통합사회1","통합과학1","한문","과학탐구실험1","체육1","음악"];
+4377:   const internalSubjects = [...new Set(summaryInternal.map((row) => row.subject).filter(Boolean))].sort((a, b) => {
+4378:     const ai = coreInternalOrder.indexOf(a), bi = coreInternalOrder.indexOf(b);
+4379:     if (ai >= 0 || bi >= 0) return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi);
+4380:     return a.localeCompare(b, "ko");
+4381:   });
+===== MAIN ready 1962-2022 =====
+1962:     // UI disappeared. Destroy auxiliary windows before the last visible window closes.
+1963:     destroyAuxiliaryWindows("main-window-close");
+1964:   });
+1965:   win.on("closed", () => {
+1966:     mainWindow = null;
+1967:     beginCleanShutdown("main-window-closed");
+1968:   });
+1969:   win.loadFile(path.join(__dirname, "..", "index.html"));
+1970: }
+1971: 
+1972: app.whenReady().then(async () => {
+1973:   await migrateStableUserData();
+1974:   ipcMain.handle("uep:schoolReadLogin", async (_event,payload={}) => { try{return await loginSchoolReadUser(payload);}catch(error){return {ok:false,code:error?.code||'UEP_SCHOOL_READ_ERROR',message:error?.message||String(error)};} });
+1975: ipcMain.handle("uep:schoolReadSessionStatus", async (_event,payload={}) => { try{return await schoolReadSessionStatus(payload);}catch(error){return {ok:false,authenticated:false,code:error?.code||'UEP_SCHOOL_READ_ERROR',reason:error?.message||String(error),mode:'school_read_api'};} });
+1976: ipcMain.handle("uep:schoolReadLogout", async () => { try{return await clearSchoolReadSession();}catch(error){return {ok:false,reason:error?.message||String(error)};} });
+1977: ipcMain.handle("state:load", async () => readState());
+1978:   ipcMain.handle("state:save", async (_event, value) => writeState(value));
+1979:   ipcMain.handle("program:selectPhotos", async (event, programId) => {
+1980:     const win = BrowserWindow.fromWebContents(event.sender);
+1981:     const selected = await dialog.showOpenDialog(win, {title:"프로그램 사진 등록",properties:["openFile","multiSelections"],filters:[{name:"사진",extensions:["jpg","jpeg","png","webp","heic"]}]});
+1982:     if (selected.canceled || !selected.filePaths.length) return {ok:false,canceled:true,files:[]};
+1983:     const target = programEvidencePath(programId); await fs.mkdir(target,{recursive:true});
+1984:     const files=[];
+1985:     for (const source of selected.filePaths) {
+1986:       const ext=path.extname(source); const base=path.basename(source,ext).replace(/[^a-zA-Z0-9가-힣_-]/g,"_");
+1987:       let destination=path.join(target,`${Date.now()}-${base}${ext}`); await fs.copyFile(source,destination);
+1988:       files.push({name:path.basename(source),path:destination,addedAt:new Date().toISOString()});
+1989:     }
+1990:     return {ok:true,files,folder:target};
+1991:   });
+1992:   ipcMain.handle("program:openEvidenceFolder", async (_event, programId) => {const target=programEvidencePath(programId);await fs.mkdir(target,{recursive:true});return {ok:!(await shell.openPath(target)),folder:target};});
+1993:   ipcMain.handle("google:credentialStatus", async () => {
+1994:   try {
+1995:     const credentials = await resolveSchoolServiceAccount();
+1996:     if (validateServiceAccount(credentials)) return {ok:true,encryption:safeStorage.isEncryptionAvailable(),local:false,mode:"service_account",account:credentials.client_email||"",userOAuth:false,autoConnected:true,loginIdentityGateway:true,approvalRequired:false,tokenExchangeRequired:false};
+1997:   } catch (error) {}
+1998:   return {ok:true,local:true,mode:"login_identity",account:"",userOAuth:false,autoConnected:true,loginIdentityGateway:true,approvalRequired:false,tokenExchangeRequired:false,reason:"UEP 로그인 이름·이메일로 교사·담임을 식별합니다."};
+1999: });
+2000: ipcMain.handle("google:authorizeUser", async () => {
+2001:   return {ok:true,skipped:true,mode:"login_identity",autoConnected:true,approvalRequired:false,tokenExchangeRequired:false,message:"별도 Google 계정 승인은 사용하지 않습니다. UEP 로그인 이름·이메일로 담임 권한을 적용합니다."};
+2002: });
+2003: ipcMain.handle("google:diagnoseUserOAuth", async () => {
+2004:   const result={authorized:false,account:"",tokenOk:false,sheetsOk:false,reason:"",status:0};
+2005:   try {
+2006:     const saved=await readGoogleUserOAuth();
+2007:     if(!saved){result.reason="Google 계정 연결 정보가 없습니다.";return result;}
+2008:     result.authorized=true;result.account=String(saved.email||"");
+2009:     const token=await getGoogleUserSheetsToken();
+2010:     result.tokenOk=Boolean(token);
+2011:     try {
+2012:       await readSheetBatch(token,UEP_SPREADSHEET_ID,["'01_사용자계정'!A1:B2"]);
+2013:       result.sheetsOk=true;
+2014:     } catch(error) {
+2015:       result.reason=String(error?.message||error||"Google 시트 조회 실패");
+2016:       const match=result.reason.match(/\((\d{3})\)/);result.status=match?Number(match[1]):0;
+2017:     }
+2018:     return result;
+2019:   } catch(error) {result.reason=String(error?.message||error||"Google OAuth 진단 실패");return result;}
+2020: });ipcMain.handle("google:disconnectUser", async () => {
+2021:   try{return await disconnectGoogleUser();}catch(error){return {ok:false,reason:error?.message||String(error)};}
+2022: });
+===== MAIN ready 2664-2724 =====
+2664:       "$w=New-Object -ComObject WScript.Shell",
+2665:       "$targets=@([Environment]::GetFolderPath('Desktop'),[Environment]::GetFolderPath('StartMenu'))",
+2666:       "foreach($root in $targets){ if(Test-Path $root){ Get-ChildItem $root -Filter 'UEP.lnk' -Recurse -ErrorAction SilentlyContinue | ForEach-Object { $s=$w.CreateShortcut($_.FullName); if(Test-Path '" + launcherExe.replace(/'/g,"''") + "'){ $s.TargetPath='" + launcherExe.replace(/'/g,"''") + "'; $s.WorkingDirectory='" + path.dirname(launcherExe).replace(/'/g,"''") + "' }; $s.IconLocation='" + iconExe.replace(/'/g,"''") + ",0'; $s.Save() } } }",
+2667:       "ie4uinit.exe -show"
+2668:     ].join('; ');
+2669:     cp.execFile('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-Command',ps],{windowsHide:true},()=>{});
+2670:   } catch (e) {
+2671:     console.warn('[UEP] shortcut icon repair skipped', e?.message || e);
+2672:   }
+2673: }
+2674: app.whenReady().then(() => setTimeout(repairUepShortcutIcons08064, 1200));
+2675: 
+2676: 
+2677: 
+2678: 
+2679: 
+2680: // __UEP_NEIS_RECORDBOOK_LOCAL_INSPECT_08102__
+2681: // Read-only local inspection. No Google/Sheets/state write is called from this handler.
+2682: ipcMain.handle("recordbook:inspectNeisExcel", async (event) => {
+2683:   const owner=BrowserWindow.fromWebContents(event.sender);
+2684:   const picked=await dialog.showOpenDialog(owner,{title:"나이스 교과 세특 엑셀 선택",properties:["openFile"],filters:[{name:"나이스 엑셀·CSV",extensions:["xlsx","xls","csv"]}]});
+2685:   if(picked.canceled||!picked.filePaths[0])return {ok:false,canceled:true};
+2686:   const filePath=picked.filePaths[0],ext=path.extname(filePath).toLowerCase();
+2687:   try{
+2688:     if(ext===".csv"){
+2689:       const raw=await fs.readFile(filePath,"utf8");
+2690:       const rows=[];let row=[],cell="",quoted=false;
+2691:       for(let i=0;i<raw.length;i++){const ch=raw[i];if(ch==='"'&&quoted&&raw[i+1]==='"'){cell+='"';i++;continue;}if(ch==='"'){quoted=!quoted;continue;}if(ch===","&&!quoted){row.push(cell);cell="";continue;}if((ch==="\n"||ch==="\r")&&!quoted){if(ch==="\r"&&raw[i+1]==="\n")i++;row.push(cell);if(row.some(v=>String(v).trim()))rows.push(row);row=[];cell="";continue;}cell+=ch;}
+2692:       row.push(cell);if(row.some(v=>String(v).trim()))rows.push(row);
+2693:       return {ok:true,localOnly:true,fileName:path.basename(filePath),sheets:[{name:"CSV",rows}]};
+2694:     }
+2695:     const ps=String.raw`
+2696: $ErrorActionPreference='Stop'
+2697: [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);$OutputEncoding=[Console]::OutputEncoding
+2698: $excel=$null;$books=$null;$book=$null;$result=@()
+2699: try{
+2700:   $excel=New-Object -ComObject Excel.Application;$excel.Visible=$false;$excel.DisplayAlerts=$false
+2701:   $books=$excel.Workbooks;$book=$books.Open($env:UEP_NEIS_FILE,0,$true)
+2702:   $sheetLimit=[Math]::Min(10,$book.Worksheets.Count)
+2703:   for($s=1;$s -le $sheetLimit;$s++){
+2704:     $ws=$book.Worksheets.Item($s);$used=$ws.UsedRange
+2705:     $rowCount=[Math]::Min(5000,[int]$used.Rows.Count);$colCount=[Math]::Min(120,[int]$used.Columns.Count);$rows=@()
+2706:     for($r=1;$r -le $rowCount;$r++){$line=@();for($col=1;$col -le $colCount;$col++){$line+=([string]$used.Cells.Item($r,$col).Text)};if(($line -join '').Trim().Length -gt 0){$rows+=,@($line)}}
+2707:     $result+=@{name=[string]$ws.Name;rows=$rows}
+2708:     [void][Runtime.InteropServices.Marshal]::ReleaseComObject($used);[void][Runtime.InteropServices.Marshal]::ReleaseComObject($ws)
+2709:   }
+2710:   $result|ConvertTo-Json -Depth 8 -Compress
+2711: }finally{
+2712:   if($book){$book.Close($false)};if($excel){$excel.Quit()}
+2713:   if($book){[void][Runtime.InteropServices.Marshal]::ReleaseComObject($book)};if($books){[void][Runtime.InteropServices.Marshal]::ReleaseComObject($books)};if($excel){[void][Runtime.InteropServices.Marshal]::ReleaseComObject($excel)}
+2714:   [GC]::Collect();[GC]::WaitForPendingFinalizers()
+2715: }`;
+2716:     const {execFile}=require("child_process");
+2717:     const stdout=await new Promise((resolve,reject)=>{execFile("powershell.exe",["-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-Command",ps],{windowsHide:true,maxBuffer:64*1024*1024,env:{...process.env,UEP_NEIS_FILE:filePath}},(error,out,err)=>error?reject(new Error(String(err||error.message))):resolve(out));});
+2718:     const sheets=JSON.parse(String(stdout||"[]").replace(/^\uFEFF/,""));
+2719:     return {ok:true,localOnly:true,fileName:path.basename(filePath),sheets:Array.isArray(sheets)?sheets:[sheets]};
+2720:   }catch(error){return {ok:false,localOnly:true,reason:"엑셀을 읽지 못했습니다. Microsoft Excel 설치 여부와 파일 형식을 확인해 주세요. "+String(error?.message||error)};}
+2721: });
+2722: 
+2723: 
+2724: // __UEP_SCHOOL_CONNECTION_RECOVERY_08103__
+===== MAIN receipt 2307-2372 =====
+2307:     const account=await readEncrypted(credentialPath()); if(!validateServiceAccount(account)) throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+2308:     const token=await getSheetsToken(account), matrix=await readNoticeSheetMatrix(token,"40_공지마감","A1:V2000");
+2309:     const header=findHeaderRowByRequired(matrix,["공지ID","상태"]); if(!header) throw new Error("40_공지마감 헤더를 찾지 못했습니다.");
+2310:     const h=header.index, headers=header.headers, idCol=headers.indexOf("공지ID"), statusCol=headers.indexOf("상태"), modifiedCol=headers.indexOf("수정일시");
+2311:     const rowIndex=matrix.findIndex((r,i)=>i>h&&String(r?.[idCol]||"")===String(id)); if(rowIndex<0) throw new Error("삭제할 공지를 찾지 못했습니다.");
+2312:     if(statusCol>=0) await updateSheetValues(token,UEP_SPREADSHEET_ID,`'40_공지마감'!${columnLetter(statusCol)}${rowIndex+1}:${columnLetter(statusCol)}${rowIndex+1}` ,[["삭제"]]);
+2313:     if(modifiedCol>=0) await updateSheetValues(token,UEP_SPREADSHEET_ID,`'40_공지마감'!${columnLetter(modifiedCol)}${rowIndex+1}:${columnLetter(modifiedCol)}${rowIndex+1}` ,[[new Date().toISOString()]]);
+2314:     liveDataCache=null;liveDataFetchedAt=0;return {ok:true,id};
+2315:   } catch(error){return {ok:false,reason:error?.message||"공지 삭제 실패"};}
+2316: });
+2317: ipcMain.handle("notice:receiptSave", async (_event, payload={}) => {
+2318:   try {
+2319:     const auth=await resolveGoogleReadAuth().catch(()=>null);
+2320:     if(auth?.mode==='school_read_api'){
+2321:       // __UEP_08164_NOTICE_RECEIPT_SCHOOL_READ__
+2322:       const result=await schoolReadApiRequest(auth,{action:'notice-receipt-save',noticeId:String(payload.noticeId||'').trim(),teacher:String(payload.teacher||'').trim(),userId:String(payload.userId||'').trim(),confirmedAt:new Date().toISOString()}).catch(error=>({ok:false,reason:error?.message||'School Read 공지확인 저장 실패'}));
+2323:       if(result?.ok)return result;
+2324:       return {ok:false,reason:result?.reason||result?.message||'School Read 공지확인 저장 기능이 아직 배포되지 않았습니다.',requiresSchoolReadWrite:true};
+2325:     }
+2326:     const account=await readEncrypted(credentialPath()); if(!validateServiceAccount(account)) throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+2327:     const token=await getSheetsToken(account), now=new Date().toISOString();
+2328:     const noticeId=String(payload.noticeId||"").trim(), teacher=String(payload.teacher||"").trim(), userId=String(payload.userId||"").trim();
+2329:     if(!noticeId||!teacher) throw new Error("공지ID와 교사명이 필요합니다.");
+2330:     const matrix=await readNoticeSheetMatrix(token,"44_공지확인현황","A1:Q3000");
+2331:     const header=findHeaderRowByRequired(matrix,["기록ID","공지ID","교사명","확인상태","제출상태"]); if(!header) throw new Error("44_공지확인현황 헤더를 찾지 못했습니다.");
+2332:     const h=header.index, headers=header.headers, idx=name=>headers.indexOf(name);
+2333:     const rowIndex=matrix.findIndex((r,i)=>i>h&&String(r?.[idx("공지ID")]||"")===noticeId&&((userId&&String(r?.[idx("사용자ID")]||"")===userId)||String(r?.[idx("교사명")]||"")===teacher));
+2334:     const current=rowIndex>=0?matrix[rowIndex]:[];
+2335:     const confirmed=payload.confirmed!=null?Boolean(payload.confirmed):String(current?.[idx("확인상태")]||"N").toUpperCase()==="Y";
+2336:     const submitted=payload.submitted!=null?Boolean(payload.submitted):String(current?.[idx("제출상태")]||"N").toUpperCase()==="Y";
+2337:     const read=payload.read!=null?Boolean(payload.read):String(current?.[idx("읽음상태")]||"N").toUpperCase()==="Y";
+2338:     const dismissed=payload.dismissed!=null?Boolean(payload.dismissed):String(current?.[idx("공지해제")]||"N").toUpperCase()==="Y";
+2339:     const detailViewed=payload.detailViewed!=null?Boolean(payload.detailViewed):String(current?.[idx("상세열람")]||"N").toUpperCase()==="Y";
+2340:     const sourceType=String(payload.sourceType||current?.[idx("원본유형")]||"직접공지");
+2341:     const recordId=String(current?.[idx("기록ID")]||`NACK-${crypto.randomUUID()}`);
+2342:     const confirmedAt=confirmed?(String(current?.[idx("확인일시")]||"")||now):"";
+2343:     const submittedAt=submitted?(String(current?.[idx("제출일시")]||"")||now):"";
+2344:     const row=[recordId,noticeId,userId,teacher,String(payload.grade||""),String(payload.classNo||""),confirmed?"Y":"N",confirmedAt,submitted?"Y":"N",submittedAt,now,teacher,String(payload.note||"UEP 상태 처리"),sourceType,read?"Y":"N",dismissed?"Y":"N",detailViewed?"Y":"N"];
+2345:     if(rowIndex>=0) await updateSheetValues(token,UEP_SPREADSHEET_ID,`'44_공지확인현황'!A${rowIndex+1}:Q${rowIndex+1}`,[row]);
+2346:     else await appendSheetValues(token,UEP_SPREADSHEET_ID,"'44_공지확인현황'!A:Q",[row]);
+2347:     liveDataCache=null;liveDataFetchedAt=0;return {ok:true,recordId,confirmed,submitted,read,dismissed,detailViewed};
+2348:   } catch(error){return {ok:false,reason:error?.message||"공지 확인상태 저장 실패"};}
+2349: });
+2350: ipcMain.handle("calendar:syncSchool", async () => ({
+2351:     ok:false,
+2352:     reason:"학교일정은 데이터처리시트 41_학교캘린더의 직접 이관값만 사용합니다. 자동 가져오기와 IMPORTRANGE는 비활성화되었습니다."
+2353:   }));
+2354:   ipcMain.handle("calendar:savePersonal", async (_event, payload={}) => {
+2355:     try {
+2356:       const credentials=await readEncrypted(credentialPath()); const token=await getSheetsToken(credentials); await ensureCalendarSchema(token); const existing=await currentCalendarRows(token);
+2357:       const id=`PER-${crypto.randomUUID()}`; const date=String(payload.date||""); const now=new Date().toISOString();
+2358:       const row={"일정ID":id,"학년도":date.slice(0,4),"시작일":date,"종료일":date,"시작시각":String(payload.start||""),"종료시각":String(payload.end||""),"종일":payload.start?"N":"Y","일정명":String(payload.title||""),"상세내용":String(payload.note||""),"일정구분":"개인 일정","대상":String(payload.target||""),"장소":String(payload.place||""),"부서":String(payload.department||""),"담당자":String(payload.manager||""),"상태":String(payload.status||"확정"),"검증상태":"정상","출처":"UEP 개인입력","원본일정ID":"","이관방식":"직접기록","수정일시":now,"비고":String(payload.note||"")};
+2359:       await replaceCalendarRows(token,[...existing.map(calendarObjectToRow),calendarObjectToRow(row)]);
+2360:       liveDataCache=null;liveDataFetchedAt=0; return {ok:true,id};
+2361:     } catch(error){return {ok:false,reason:error?.message||"개인 일정 저장 실패"};}
+2362:   });
+2363: 
+2364:   ipcMain.handle("calendar:update", async (_event, payload={}) => {
+2365:     try {
+2366:       const credentials=await readEncrypted(credentialPath()); const token=await getSheetsToken(credentials); await ensureCalendarSchema(token); const existing=await currentCalendarRows(token);
+2367:       const index=existing.findIndex(row=>String(row["일정ID"]||"")===String(payload.id||""));
+2368:       if(index<0) return {ok:false,reason:"수정할 일정이 데이터처리시트 41_학교캘린더에 없습니다."};
+2369:       const current=existing[index],now=new Date().toISOString(),date=String(payload.date||current["시작일"]||"");
+2370:       existing[index]={...current,"학년도":date.slice(0,4),"시작일":date,"종료일":current["종료일"]||date,"시작시각":String(payload.start||""),"종료시각":String(payload.end||""),"종일":payload.start?"N":"Y","일정명":String(payload.title||""),"상세내용":String(payload.note||""),"대상":String(payload.target||""),"장소":String(payload.place||""),"부서":String(payload.department||""),"담당자":String(payload.manager||""),"상태":String(payload.status||"확정"),"검증상태":"정상","수정일시":now,"비고":String(payload.note||"")};
+2371:       await replaceCalendarRows(token,existing.map(calendarObjectToRow));
+2372:       liveDataCache=null;liveDataFetchedAt=0; return {ok:true,id:payload.id,modifiedAt:now};
+===== PRELOAD tail 1-65 =====
+1: const { contextBridge, ipcRenderer } = require("electron");
+2: 
+3: contextBridge.exposeInMainWorld("schoolBoard", {
+4:   loadState: () => ipcRenderer.invoke("state:load"),
+5:   saveState: (state) => ipcRenderer.invoke("state:save", state),
+6:   minimize: () => ipcRenderer.invoke("window:minimize"),
+7:   maximize: () => ipcRenderer.invoke("window:maximize"),
+8:   close: () => ipcRenderer.invoke("window:close"),
+9:   setAlwaysOnTop: (value) => ipcRenderer.invoke("window:alwaysOnTop", value),
+10:   toggleCompact: () => ipcRenderer.invoke("window:compact"),
+11:   openChrome: (url) => ipcRenderer.invoke("external:openChrome", url),
+12:   selectExecutable: () => ipcRenderer.invoke("external:selectExecutable"),
+13:   launchExecutable: (filePath) => ipcRenderer.invoke("external:launchExecutable", filePath),
+14:   schoolReadLogin: (payload) => ipcRenderer.invoke("uep:schoolReadLogin", payload),
+15:   schoolReadSessionStatus: (payload) => ipcRenderer.invoke("uep:schoolReadSessionStatus", payload||{}),
+16:   schoolReadLogout: () => ipcRenderer.invoke("uep:schoolReadLogout"),
+17:   googleCredentialStatus: () => ipcRenderer.invoke("google:credentialStatus"),
+18:   authorizeGoogleUser: (payload) => ipcRenderer.invoke("google:authorizeUser", payload || {}),
+19:   disconnectGoogleUser: () => ipcRenderer.invoke("google:disconnectUser"),
+20:   selectGoogleCredential: () => ipcRenderer.invoke("google:selectCredential"),
+21:   previewReadonlySync: () => ipcRenderer.invoke("google:previewReadonlySync"),
+22:   readReadonlyCache: () => ipcRenderer.invoke("google:readReadonlyCache"),
+23:   syncSchoolCalendar: (payload) => ipcRenderer.invoke("calendar:syncSchool", typeof payload==="string"?{date:payload}:payload||{}),
+24:   savePersonalCalendar: (payload) => ipcRenderer.invoke("calendar:savePersonal", payload),
+25:   saveNotice: (payload) => ipcRenderer.invoke("notice:save", payload),
+26:   deleteNotice: (id) => ipcRenderer.invoke("notice:delete", id),
+27:   saveNoticeReceipt: (payload) => ipcRenderer.invoke("notice:receiptSave", payload),
+28:   updateUserAccount: (payload) => ipcRenderer.invoke("userAccount:update", payload),
+29:   saveStudentContact: (payload) => ipcRenderer.invoke("student:contactSave", payload),
+30:   saveProgramOperation: (payload) => ipcRenderer.invoke("program:operationSave", payload),
+31:   saveOfficialAttendance: (payload) => ipcRenderer.invoke("attendance:officialSave", payload),
+32:   deleteOfficialAttendance: (id) => ipcRenderer.invoke("attendance:officialDelete", id),
+33:   saveLateAttendance: (payload) => ipcRenderer.invoke("attendance:lateSave", payload),
+34:   deleteLateAttendance: (id) => ipcRenderer.invoke("attendance:lateDelete", id),
+35:   saveCounselRecord: (payload) => ipcRenderer.invoke("counsel:save", payload),
+36:   saveStudentGuidanceRecord: (payload) => ipcRenderer.invoke("studentGuidance:save", payload),
+37:   saveDormOuting: (payload) => ipcRenderer.invoke("dormOuting:save", payload),
+38:   saveDormRule: (payload) => ipcRenderer.invoke("dormRule:save", payload),
+39:   deleteDormRule: (id) => ipcRenderer.invoke("dormRule:delete", id),
+40:   saveNightSupervisor: (payload) => ipcRenderer.invoke("nightDuty:save", payload),
+41:   saveLunchDuty: (payload) => ipcRenderer.invoke("lunchDuty:save", payload),
+42:   updateCalendar: (payload) => ipcRenderer.invoke("calendar:update", payload),
+43:   loadNeisDashboard: (options) => ipcRenderer.invoke("neis:loadDashboard", options),
+44:   testComcigan: (options) => ipcRenderer.invoke("comcigan:test", options),
+45:   clearNeisCache: () => ipcRenderer.invoke("neis:clearCache"),
+46:   saveNeisApiKey: (key) => ipcRenderer.invoke("neis:saveApiKey", key),
+47:   neisApiKeyStatus: () => ipcRenderer.invoke("neis:apiKeyStatus"),
+48:   selectInputFiles: () => ipcRenderer.invoke("inputCenter:selectFiles"),
+49:   saveInputRecords: (payload) => ipcRenderer.invoke("inputCenter:save", payload),
+50:   classifyInputBatch: (payload) => ipcRenderer.invoke("inputCenter:classifyBatch", payload),
+51:   normalizeInputBatch: (payload) => ipcRenderer.invoke("inputCenter:normalizeBatch", payload),
+52:   openInputFolder: () => ipcRenderer.invoke("inputCenter:openFolder"),
+53:   readInputAsset: (filePath) => ipcRenderer.invoke("inputCenter:readAsset", filePath),
+54:   openInputAsset: (filePath) => ipcRenderer.invoke("inputCenter:openAsset", filePath),
+55:   runInputOCR: (payload) => ipcRenderer.invoke("inputCenter:ocrBatch", payload),
+56:   selectProgramPhotos: (programId) => ipcRenderer.invoke("program:selectPhotos", programId),
+57:   openProgramEvidenceFolder: (programId) => ipcRenderer.invoke("program:openEvidenceFolder", programId),
+58:   checkUpdate: (url, currentVersion) => ipcRenderer.invoke("app:checkUpdate", { url, currentVersion }),
+59:   applyUpdate: (payload) => ipcRenderer.invoke("app:applyUpdate", payload),
+60:   aiStatus: () => ipcRenderer.invoke("ai:status"),
+61:   generateRecordAI: (payload) => ipcRenderer.invoke("ai:generateRecord", payload),
+62:   inspectNeisRecordbook: () => ipcRenderer.invoke("recordbook:inspectNeisExcel"),
+63:   platform: process.platform,
+64: });
+65: 
