@@ -1,0 +1,1214 @@
+# UEP 0.81.71 write return contracts
+
+## MAIN saveStudentContact
+line=713
+709:     if(wanted.every(name=>row.includes(name))) return {index:i,headers:row};
+710:   }
+711:   return null;
+712: }
+713: async function saveStudentContact(payload={}) {
+714:   const allowed={phone:["학생연락처"],email:["학생이메일","이메일","이메일주소"],guardian1Phone:["보호자1연락처"],guardian2Phone:["보호자2연락처"]};
+715:   const field=String(payload.field||"");
+716:   if(!allowed[field]) throw new Error("수정할 수 없는 학생정보 항목입니다.");
+717:   const role=String(payload.role||"");
+718:   if(!["admin","homeroom"].includes(role)) throw new Error("학생 연락정보 수정 권한이 없습니다.");
+719:   const account=await readEncrypted(credentialPath());
+720:   if(!validateServiceAccount(account)) throw new Error("저장된 Google 서비스 계정 인증정보가 올바르지 않습니다.");
+721:   const token=await getSheetsToken(account);
+722:   const range="'04_학생연락식별정보'!A1:Z1000";
+723:   const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,[range]);
+724:   const matrix=result?.[0]?.values||[];
+725:   const header=findHeaderRowByRequired(matrix,["학생ID"]);
+726:   if(!header) throw new Error("04_학생연락식별정보의 헤더에서 학생ID를 찾지 못했습니다.");
+727:   const studentId=String(payload.studentId||"").trim();
+728:   if(!studentId) throw new Error("학생ID가 없어 저장할 수 없습니다.");
+729:   const idCol=header.headers.indexOf("학생ID");
+730:   let fieldCol=-1;
+731:   for(const name of allowed[field]){ const idx=header.headers.indexOf(name); if(idx>=0){fieldCol=idx;break;} }
+732:   if(fieldCol<0) throw new Error(`04_학생연락식별정보에 ${allowed[field][0]} 열이 없습니다.`);
+733:   let dataRow=-1;
+734:   for(let r=header.index+1;r<matrix.length;r+=1){ if(String(matrix[r]?.[idCol]||"").trim()===studentId){dataRow=r;break;} }
+735:   const value=String(payload.value??"").trim();
+736:   if(dataRow<0){
+737:     const row=Array(Math.max(header.headers.length,fieldCol+1)).fill("");
+738:     row[idCol]=studentId; row[fieldCol]=value;
+739:     const useCol=header.headers.indexOf("현재사용여부"); if(useCol>=0)row[useCol]="Y";
+740:     await appendSheetValues(token,UEP_SPREADSHEET_ID,"'04_학생연락식별정보'!A:Z",[row]);
+741:   }else{
+742:     const sheetRow=dataRow+1;
+743:     const col=columnLetter(fieldCol);
+744:     await updateSheetValues(token,UEP_SPREADSHEET_ID,`'04_학생연락식별정보'!${col}${sheetRow}:${col}${sheetRow}`,[[value]]);
+745:   }
+746:   liveDataCache=null; liveDataFetchedAt=0;
+747:   const data=await fetchLiveData({force:true});
+748:   return {ok:true,data};
+749: }
+750: 
+751: 
+752: async function saveProgramOperation(payload={}) {
+753:   if (String(payload.role||"") !== "admin") throw new Error("프로그램 운영정보 양방향 수정은 관리자만 가능합니다.");
+754:   const account = await readEncrypted(credentialPath());
+755:   if (!validateServiceAccount(account)) throw new Error("저장된 Google 서비스 계정 인증정보가 올바르지 않습니다.");
+756:   const token = await getSheetsToken(account);
+757:   const source = String(payload.source||"");
+758:   const programId = String(payload.programId||"").trim();
+759:   const sessionId = String(payload.sessionId||"").trim();
+760:   const date = String(payload.date||"").trim();
+761:   const endDate = String(payload.endDate||"").trim();
+762:   const time = String(payload.time||"").trim();
+763:   const startTime = String(payload.startTime||"").trim();
+764:   const endTime = String(payload.endTime||"").trim();
+765:   const place = String(payload.place||"").trim();
+766:   const teacher = String(payload.teacher||"").trim();
+767:   const title = String(payload.title||"").trim();
+768:   const recordTitle = String(payload.recordTitle||"").trim();
+769:   const department = String(payload.department||"").trim();
+770:   const subject = String(payload.subject||"").trim();
+771:   const reportRequired = payload.reportRequired === undefined ? undefined : (payload.reportRequired ? "Y" : "N");
+772:   const reportToAuthority = payload.reportToAuthority === undefined ? undefined : (payload.reportToAuthority ? "Y" : "N");
+773:   const reportAgency = String(payload.reportAgency||"").trim();
+774:   const reportAfterDays = payload.reportAfterDays === undefined ? undefined : String(payload.reportAfterDays ?? "").trim();
+775:   const reportDeadline = String(payload.reportDeadline||"").trim();
+776:   const photoRequired = payload.photoRequired === undefined ? undefined : (payload.photoRequired ? "Y" : "N");
+777:   const memo = String(payload.memo||"").trim();
+778:   const activityType = String(payload.activityType||"").trim();
+779:   const afterType = String(payload.afterType||"").trim();
+780:   const weekdays = String(payload.weekdays||"").trim();
+781:   const operationPeriod = String(payload.operationPeriod||"").trim();
+782:   const targetGrade = String(payload.targetGrade||"").trim();
+783:   const nightLinked = payload.nightLinked === undefined ? undefined : (payload.nightLinked ? "Y" : "N");
+784:   const attendanceMethod = String(payload.attendanceMethod||"").trim();
+785:   const status = String(payload.status||"").trim();
+786:   const commonReportFormUrl = payload.commonReportFormUrl === undefined ? undefined : String(payload.commonReportFormUrl||"").trim();
+787:   const reportFormSettingKey = source.includes("09_공통활동마스터") ? "COMMON_ACTIVITY_REPORT_FORM_URL" : source.includes("10_선택활동마스터") ? "SELECTED_ACTIVITY_REPORT_FORM_URL" : "";
+788:   const clocks = time.match(/\d{1,2}:\d{2}/g) || [];
+789:   const specs = source.includes("12_차시일정")
+790:     ? {sheet:"12_차시일정", keyNames:["차시ID"], keyValue:sessionId, fields:{date:["실제수업일","운영일자","예정일"], start:["시작시각"], end:["종료시각"], place:["장소"], teacher:["담당교사"]}}
+791:     : source.includes("11_방과후학교")
+792:       ? {sheet:"11_방과후학교", keyNames:["방과후ID","프로그램ID"], keyValue:programId, fields:{title:["프로그램명"], operationPeriod:["운영기간구분"], subject:["교과"], department:["담당부서"], afterType:["방과후유형"], teacher:["담당교사"], date:["운영시작일"], endDate:["운영종료일"], weekdays:["요일"], startTime:["시작시간"], endTime:["종료시간"], place:["장소"], targetGrade:["대상학년"], nightLinked:["야자연계여부"], attendanceMethod:["출석관리방식"], status:["운영상태"], memo:["학생안내"]}}
+793:       : source.includes("10_선택활동마스터")
+794:         ? {sheet:"10_선택활동마스터", keyNames:["프로그램ID"], keyValue:programId, fields:{date:["운영시작일"], time:["운영시간"], place:["장소"], teacher:["담당교사"], title:["프로그램명"], recordTitle:["생활기록부표기명"], department:["운영부서"], subject:["교과"], reportRequired:["보고서사용"], reportToAuthority:["기관보고여부"], reportAgency:["보고대상기관"], reportAfterDays:["보고기한일수"], reportDeadline:["학생보고서마감일"], photoRequired:["사진증빙사용"], memo:["학생안내"], activityType:["프로그램유형"]}}
+795:         : source.includes("09_공통활동마스터")
+796:           ? {sheet:"09_공통활동마스터", keyNames:["활동ID"], keyValue:programId, fields:{title:["활동명"], activityType:["활동영역"], date:["운영시작일"], endDate:["운영종료일"], time:["운영시간"], place:["장소"], teacher:["담당교사"], department:["운영부서"], subject:["교과"], reportRequired:["보고서사용"], reportDeadline:["학생보고서마감일"], memo:["학생안내"]}}
+797:           : null;
+798:   if (!specs || !specs.keyValue) throw new Error("양방향 저장 가능한 프로그램 원본을 확인하지 못했습니다.");
+799:   const range = `'${specs.sheet}'!A1:AZ2000`;
+800:   const result = await readSheetBatch(token, UEP_SPREADSHEET_ID, [range]);
+801:   const matrix = result?.[0]?.values || [];
+802:   let header = null;
+803:   for (const keyName of specs.keyNames) { header = findHeaderRowByRequired(matrix,[keyName]); if (header) break; }
+## MAIN saveOfficialAttendance
+line=902
+898:     unit, scope, String(payload.originalType||"공결"), String(payload.sourceTab||"UEP 직접등록"), String(payload.sourceRow||"")
+899:   ]];
+900: }
+901: 
+902: async function saveOfficialAttendance(payload={}) {
+903:   const account=await readEncrypted(credentialPath());
+904:   if(!validateServiceAccount(account)) throw new Error("저장된 Google 서비스 계정 인증정보가 올바르지 않습니다.");
+905:   const token=await getSheetsToken(account);
+906:   const range="'30_공결기록'!A3:Z3000";
+907:   const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,[range]);
+908:   const matrix=result?.[0]?.values||[];
+909:   const rows=matrix.slice(1);
+910:   let id=String(payload.id||"").trim();
+911:   let sheetRow=-1;
+912:   if(id){
+913:     const pos=rows.findIndex(row=>String(row?.[0]||"").trim()===id);
+914:     if(pos>=0) sheetRow=pos+4;
+915:   }else{
+916:     let max=0;
+917:     rows.forEach(row=>{const m=String(row?.[0]||"").match(/^ATT-2026-(\\d+)$/);if(m)max=Math.max(max,Number(m[1]));});
+918:     id=`ATT-2026-${String(max+1).padStart(4,"0")}`;
+919:   }
+920:   const values=officialAttendanceRow(payload,id);
+921:   if(sheetRow>0) await updateSheetValues(token,UEP_SPREADSHEET_ID,`'30_공결기록'!A${sheetRow}:Z${sheetRow}`,values);
+922:   else await appendSheetValues(token,UEP_SPREADSHEET_ID,"'30_공결기록'!A:Z",values);
+923:   liveDataCache=null; liveDataFetchedAt=0;
+924:   const data=await fetchLiveData({force:true});
+925:   return {ok:true,id,data};
+926: }
+927: 
+928: async function deleteOfficialAttendance(id="") {
+929:   const key=String(id||"").trim();
+930:   if(!key) throw new Error("삭제할 공결 ID가 없습니다.");
+931:   const account=await readEncrypted(credentialPath());
+932:   if(!validateServiceAccount(account)) throw new Error("저장된 Google 서비스 계정 인증정보가 올바르지 않습니다.");
+933:   const token=await getSheetsToken(account);
+934:   const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,["'30_공결기록'!A3:Z3000"]);
+935:   const rows=(result?.[0]?.values||[]).slice(1);
+936:   const pos=rows.findIndex(row=>String(row?.[0]||"").trim()===key);
+937:   if(pos<0) throw new Error("삭제할 공결 기록을 찾지 못했습니다.");
+938:   const sheetRow=pos+4;
+939:   await clearSheetValues(token,UEP_SPREADSHEET_ID,`'30_공결기록'!A${sheetRow}:Z${sheetRow}`);
+940:   liveDataCache=null; liveDataFetchedAt=0;
+941:   const data=await fetchLiveData({force:true});
+942:   return {ok:true,data};
+943: }
+944: 
+945: function lateAttendanceRow(payload={}, id=""){
+946:   const now=new Date().toISOString();
+947:   return [[id,String(payload.studentId||""),String(payload.studentNo||""),String(payload.name||""),String(payload.grade||"1"),String(payload.className||payload.classNo||""),String(payload.date||""),String(payload.time||""),String(payload.reason||""),String(payload.minutes||0),String(payload.cumulativeCount||""),String(payload.cumulativeMinutes||""),String(payload.guidance||"일반"),now,String(payload.editor||"UEP"),String(payload.note||"")]];
+948: }
+949: async function saveLateAttendance(payload={}){
+950:   const account=await readEncrypted(credentialPath()); if(!validateServiceAccount(account)) throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+951:   const token=await getSheetsToken(account); const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,["'31_지각기록'!A3:P3000"]); const matrix=result?.[0]?.values||[], rows=matrix.slice(1);
+952:   let id=String(payload.id||"").trim(), sheetRow=-1;
+953:   if(id){const pos=rows.findIndex(r=>String(r?.[0]||"").trim()===id); if(pos>=0)sheetRow=pos+4;}
+954:   else {let max=0;rows.forEach(r=>{const mm=String(r?.[0]||"").match(/^LATE-2026-(\d+)$/);if(mm)max=Math.max(max,Number(mm[1]));});id=`LATE-2026-${String(max+1).padStart(5,"0")}`;}
+955:   const values=lateAttendanceRow(payload,id);
+956:   if(sheetRow>0)await updateSheetValues(token,UEP_SPREADSHEET_ID,`'31_지각기록'!A${sheetRow}:P${sheetRow}`,values); else await appendSheetValues(token,UEP_SPREADSHEET_ID,"'31_지각기록'!A:P",values);
+957:   liveDataCache=null;liveDataFetchedAt=0;return {ok:true,id,data:await fetchLiveData({force:true})};
+958: }
+959: async function deleteLateAttendance(id=""){
+960:   const key=String(id||"").trim(); if(!key)throw new Error("삭제할 지각 ID가 없습니다.");
+961:   const account=await readEncrypted(credentialPath()); if(!validateServiceAccount(account)) throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+962:   const token=await getSheetsToken(account); const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,["'31_지각기록'!A3:P3000"]); const rows=(result?.[0]?.values||[]).slice(1);
+963:   const pos=rows.findIndex(r=>String(r?.[0]||"").trim()===key); if(pos<0)throw new Error("삭제할 지각 기록을 찾지 못했습니다.");
+964:   await clearSheetValues(token,UEP_SPREADSHEET_ID,`'31_지각기록'!A${pos+4}:P${pos+4}`);liveDataCache=null;liveDataFetchedAt=0;return {ok:true,data:await fetchLiveData({force:true})};
+965: }
+966: 
+967: function dormRulePriority(category=""){
+968:   return ({exception:50,closure:40,exam:30,vacation:25,base:20,period:10})[String(category||"")]||5;
+969: }
+970: function dormRuleRow(payload={},id,nowIso){
+971:   return [[
+972:     id,
+973:     String(payload.category||""),
+974:     String(payload.name||""),
+975:     String(payload.start||""),
+976:     String(payload.end||""),
+977:     String(payload.days||"전체"),
+978:     String(payload.effect||""),
+979:     String(payload.entryTime||""),
+980:     String(payload.exitTime||""),
+981:     String(payload.lateEntry||""),
+982:     String(payload.earlyExit||""),
+983:     String(payload.reason||""),
+984:     Number(payload.priority||dormRulePriority(payload.category)),
+985:     payload.active===false?"N":"Y",
+986:     String(payload.note||""),
+987:     nowIso,
+988:     String(payload.writer||"UEP"),
+989:     String(payload.source||"UEP 규칙센터"),
+990:     String(payload.operationState||""),
+991:     String(payload.actualExit||""),
+992:     String(payload.actualReentry||""),
+## MAIN deleteOfficialAttendance
+line=928
+924:   const data=await fetchLiveData({force:true});
+925:   return {ok:true,id,data};
+926: }
+927: 
+928: async function deleteOfficialAttendance(id="") {
+929:   const key=String(id||"").trim();
+930:   if(!key) throw new Error("삭제할 공결 ID가 없습니다.");
+931:   const account=await readEncrypted(credentialPath());
+932:   if(!validateServiceAccount(account)) throw new Error("저장된 Google 서비스 계정 인증정보가 올바르지 않습니다.");
+933:   const token=await getSheetsToken(account);
+934:   const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,["'30_공결기록'!A3:Z3000"]);
+935:   const rows=(result?.[0]?.values||[]).slice(1);
+936:   const pos=rows.findIndex(row=>String(row?.[0]||"").trim()===key);
+937:   if(pos<0) throw new Error("삭제할 공결 기록을 찾지 못했습니다.");
+938:   const sheetRow=pos+4;
+939:   await clearSheetValues(token,UEP_SPREADSHEET_ID,`'30_공결기록'!A${sheetRow}:Z${sheetRow}`);
+940:   liveDataCache=null; liveDataFetchedAt=0;
+941:   const data=await fetchLiveData({force:true});
+942:   return {ok:true,data};
+943: }
+944: 
+945: function lateAttendanceRow(payload={}, id=""){
+946:   const now=new Date().toISOString();
+947:   return [[id,String(payload.studentId||""),String(payload.studentNo||""),String(payload.name||""),String(payload.grade||"1"),String(payload.className||payload.classNo||""),String(payload.date||""),String(payload.time||""),String(payload.reason||""),String(payload.minutes||0),String(payload.cumulativeCount||""),String(payload.cumulativeMinutes||""),String(payload.guidance||"일반"),now,String(payload.editor||"UEP"),String(payload.note||"")]];
+948: }
+949: async function saveLateAttendance(payload={}){
+950:   const account=await readEncrypted(credentialPath()); if(!validateServiceAccount(account)) throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+951:   const token=await getSheetsToken(account); const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,["'31_지각기록'!A3:P3000"]); const matrix=result?.[0]?.values||[], rows=matrix.slice(1);
+952:   let id=String(payload.id||"").trim(), sheetRow=-1;
+953:   if(id){const pos=rows.findIndex(r=>String(r?.[0]||"").trim()===id); if(pos>=0)sheetRow=pos+4;}
+954:   else {let max=0;rows.forEach(r=>{const mm=String(r?.[0]||"").match(/^LATE-2026-(\d+)$/);if(mm)max=Math.max(max,Number(mm[1]));});id=`LATE-2026-${String(max+1).padStart(5,"0")}`;}
+955:   const values=lateAttendanceRow(payload,id);
+956:   if(sheetRow>0)await updateSheetValues(token,UEP_SPREADSHEET_ID,`'31_지각기록'!A${sheetRow}:P${sheetRow}`,values); else await appendSheetValues(token,UEP_SPREADSHEET_ID,"'31_지각기록'!A:P",values);
+957:   liveDataCache=null;liveDataFetchedAt=0;return {ok:true,id,data:await fetchLiveData({force:true})};
+958: }
+959: async function deleteLateAttendance(id=""){
+960:   const key=String(id||"").trim(); if(!key)throw new Error("삭제할 지각 ID가 없습니다.");
+961:   const account=await readEncrypted(credentialPath()); if(!validateServiceAccount(account)) throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+962:   const token=await getSheetsToken(account); const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,["'31_지각기록'!A3:P3000"]); const rows=(result?.[0]?.values||[]).slice(1);
+963:   const pos=rows.findIndex(r=>String(r?.[0]||"").trim()===key); if(pos<0)throw new Error("삭제할 지각 기록을 찾지 못했습니다.");
+964:   await clearSheetValues(token,UEP_SPREADSHEET_ID,`'31_지각기록'!A${pos+4}:P${pos+4}`);liveDataCache=null;liveDataFetchedAt=0;return {ok:true,data:await fetchLiveData({force:true})};
+965: }
+966: 
+967: function dormRulePriority(category=""){
+968:   return ({exception:50,closure:40,exam:30,vacation:25,base:20,period:10})[String(category||"")]||5;
+969: }
+970: function dormRuleRow(payload={},id,nowIso){
+971:   return [[
+972:     id,
+973:     String(payload.category||""),
+974:     String(payload.name||""),
+975:     String(payload.start||""),
+976:     String(payload.end||""),
+977:     String(payload.days||"전체"),
+978:     String(payload.effect||""),
+979:     String(payload.entryTime||""),
+980:     String(payload.exitTime||""),
+981:     String(payload.lateEntry||""),
+982:     String(payload.earlyExit||""),
+983:     String(payload.reason||""),
+984:     Number(payload.priority||dormRulePriority(payload.category)),
+985:     payload.active===false?"N":"Y",
+986:     String(payload.note||""),
+987:     nowIso,
+988:     String(payload.writer||"UEP"),
+989:     String(payload.source||"UEP 규칙센터"),
+990:     String(payload.operationState||""),
+991:     String(payload.actualExit||""),
+992:     String(payload.actualReentry||""),
+993:     payload.priorNightAcademyHome?"Y":"N",
+994:     payload.formRequired?"Y":"N",
+995:     payload.individualOutingAllowed?"Y":"N"
+996:   ]];
+997: }
+998: function dormRuleDateValue(value){
+999:   if(value===null||value===undefined||value==='')return '';
+1000:   const raw=String(value).trim();
+1001:   if(/^\d+(?:\.\d+)?$/.test(raw)){
+1002:     const serial=Number(raw);
+1003:     if(Number.isFinite(serial)&&serial>20000&&serial<100000){
+1004:       const d=new Date(Date.UTC(1899,11,30)+Math.round(serial*86400000));
+1005:       if(!Number.isNaN(d.getTime())){
+1006:         const y=d.getUTCFullYear(),mo=String(d.getUTCMonth()+1).padStart(2,'0'),day=String(d.getUTCDate()).padStart(2,'0');
+1007:         const hh=String(d.getUTCHours()).padStart(2,'0'),mm=String(d.getUTCMinutes()).padStart(2,'0');
+1008:         return `${y}-${mo}-${day}T${hh}:${mm}`;
+1009:       }
+1010:     }
+1011:   }
+1012:   const mm=raw.replace(' ','T').match(/^(\d{4})-(\d{1,2})-(\d{1,2})T(\d{1,2}):(\d{2})/);
+1013:   return mm?`${mm[1]}-${String(mm[2]).padStart(2,'0')}-${String(mm[3]).padStart(2,'0')}T${String(mm[4]).padStart(2,'0')}:${mm[5]}`:raw;
+1014: }
+1015: function dormRuleObjectFromRow(row=[]){
+1016:   return {
+1017:     id:String(row[0]||'').trim(),category:String(row[1]||'').trim(),name:String(row[2]||'').trim(),
+1018:     start:dormRuleDateValue(row[3]),end:dormRuleDateValue(row[4]),days:String(row[5]||'전체').trim(),
+## MAIN saveLateAttendance
+line=949
+945: function lateAttendanceRow(payload={}, id=""){
+946:   const now=new Date().toISOString();
+947:   return [[id,String(payload.studentId||""),String(payload.studentNo||""),String(payload.name||""),String(payload.grade||"1"),String(payload.className||payload.classNo||""),String(payload.date||""),String(payload.time||""),String(payload.reason||""),String(payload.minutes||0),String(payload.cumulativeCount||""),String(payload.cumulativeMinutes||""),String(payload.guidance||"일반"),now,String(payload.editor||"UEP"),String(payload.note||"")]];
+948: }
+949: async function saveLateAttendance(payload={}){
+950:   const account=await readEncrypted(credentialPath()); if(!validateServiceAccount(account)) throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+951:   const token=await getSheetsToken(account); const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,["'31_지각기록'!A3:P3000"]); const matrix=result?.[0]?.values||[], rows=matrix.slice(1);
+952:   let id=String(payload.id||"").trim(), sheetRow=-1;
+953:   if(id){const pos=rows.findIndex(r=>String(r?.[0]||"").trim()===id); if(pos>=0)sheetRow=pos+4;}
+954:   else {let max=0;rows.forEach(r=>{const mm=String(r?.[0]||"").match(/^LATE-2026-(\d+)$/);if(mm)max=Math.max(max,Number(mm[1]));});id=`LATE-2026-${String(max+1).padStart(5,"0")}`;}
+955:   const values=lateAttendanceRow(payload,id);
+956:   if(sheetRow>0)await updateSheetValues(token,UEP_SPREADSHEET_ID,`'31_지각기록'!A${sheetRow}:P${sheetRow}`,values); else await appendSheetValues(token,UEP_SPREADSHEET_ID,"'31_지각기록'!A:P",values);
+957:   liveDataCache=null;liveDataFetchedAt=0;return {ok:true,id,data:await fetchLiveData({force:true})};
+958: }
+959: async function deleteLateAttendance(id=""){
+960:   const key=String(id||"").trim(); if(!key)throw new Error("삭제할 지각 ID가 없습니다.");
+961:   const account=await readEncrypted(credentialPath()); if(!validateServiceAccount(account)) throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+962:   const token=await getSheetsToken(account); const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,["'31_지각기록'!A3:P3000"]); const rows=(result?.[0]?.values||[]).slice(1);
+963:   const pos=rows.findIndex(r=>String(r?.[0]||"").trim()===key); if(pos<0)throw new Error("삭제할 지각 기록을 찾지 못했습니다.");
+964:   await clearSheetValues(token,UEP_SPREADSHEET_ID,`'31_지각기록'!A${pos+4}:P${pos+4}`);liveDataCache=null;liveDataFetchedAt=0;return {ok:true,data:await fetchLiveData({force:true})};
+965: }
+966: 
+967: function dormRulePriority(category=""){
+968:   return ({exception:50,closure:40,exam:30,vacation:25,base:20,period:10})[String(category||"")]||5;
+969: }
+970: function dormRuleRow(payload={},id,nowIso){
+971:   return [[
+972:     id,
+973:     String(payload.category||""),
+974:     String(payload.name||""),
+975:     String(payload.start||""),
+976:     String(payload.end||""),
+977:     String(payload.days||"전체"),
+978:     String(payload.effect||""),
+979:     String(payload.entryTime||""),
+980:     String(payload.exitTime||""),
+981:     String(payload.lateEntry||""),
+982:     String(payload.earlyExit||""),
+983:     String(payload.reason||""),
+984:     Number(payload.priority||dormRulePriority(payload.category)),
+985:     payload.active===false?"N":"Y",
+986:     String(payload.note||""),
+987:     nowIso,
+988:     String(payload.writer||"UEP"),
+989:     String(payload.source||"UEP 규칙센터"),
+990:     String(payload.operationState||""),
+991:     String(payload.actualExit||""),
+992:     String(payload.actualReentry||""),
+993:     payload.priorNightAcademyHome?"Y":"N",
+994:     payload.formRequired?"Y":"N",
+995:     payload.individualOutingAllowed?"Y":"N"
+996:   ]];
+997: }
+998: function dormRuleDateValue(value){
+999:   if(value===null||value===undefined||value==='')return '';
+1000:   const raw=String(value).trim();
+1001:   if(/^\d+(?:\.\d+)?$/.test(raw)){
+1002:     const serial=Number(raw);
+1003:     if(Number.isFinite(serial)&&serial>20000&&serial<100000){
+1004:       const d=new Date(Date.UTC(1899,11,30)+Math.round(serial*86400000));
+1005:       if(!Number.isNaN(d.getTime())){
+1006:         const y=d.getUTCFullYear(),mo=String(d.getUTCMonth()+1).padStart(2,'0'),day=String(d.getUTCDate()).padStart(2,'0');
+1007:         const hh=String(d.getUTCHours()).padStart(2,'0'),mm=String(d.getUTCMinutes()).padStart(2,'0');
+1008:         return `${y}-${mo}-${day}T${hh}:${mm}`;
+1009:       }
+1010:     }
+1011:   }
+1012:   const mm=raw.replace(' ','T').match(/^(\d{4})-(\d{1,2})-(\d{1,2})T(\d{1,2}):(\d{2})/);
+1013:   return mm?`${mm[1]}-${String(mm[2]).padStart(2,'0')}-${String(mm[3]).padStart(2,'0')}T${String(mm[4]).padStart(2,'0')}:${mm[5]}`:raw;
+1014: }
+1015: function dormRuleObjectFromRow(row=[]){
+1016:   return {
+1017:     id:String(row[0]||'').trim(),category:String(row[1]||'').trim(),name:String(row[2]||'').trim(),
+1018:     start:dormRuleDateValue(row[3]),end:dormRuleDateValue(row[4]),days:String(row[5]||'전체').trim(),
+1019:     effect:String(row[6]||'').trim(),entryTime:String(row[7]||'').trim(),exitTime:String(row[8]||'').trim(),
+1020:     lateEntry:String(row[9]||'').trim(),earlyExit:String(row[10]||'').trim(),reason:String(row[11]||'').trim(),
+1021:     priority:Number(row[12]||dormRulePriority(row[1])),active:String(row[13]||'Y').trim().toUpperCase()!=='N',
+1022:     note:String(row[14]||'').trim(),modifiedAt:String(row[15]||'').trim(),writer:String(row[16]||'').trim(),source:String(row[17]||'').trim(),
+1023:     operationState:String(row[18]||'').trim(),actualExit:dormRuleDateValue(row[19]),actualReentry:dormRuleDateValue(row[20]),
+1024:     priorNightAcademyHome:/^(Y|YES|TRUE|1)$/i.test(String(row[21]||'')),
+1025:     formRequired:/^(Y|YES|TRUE|1)$/i.test(String(row[22]||'')),
+1026:     individualOutingAllowed:/^(Y|YES|TRUE|1)$/i.test(String(row[23]||''))
+1027:   };
+1028: }
+1029: async function saveDormRule(payload={}){
+1030:   const account=await readEncrypted(credentialPath());
+1031:   if(!validateServiceAccount(account)) throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+1032:   const token=await getSheetsToken(account), now=new Date().toISOString();
+1033:   const id=String(payload.id||`DORM-RULE-${crypto.randomUUID()}`).trim();
+1034:   const range="'40_학사외출규칙'!A3:X1000";
+1035:   const result=await readSheetBatch(token,UEP_RULES_SPREADSHEET_ID,[range]);
+1036:   const matrix=result?.[0]?.values||[];
+1037:   const rows=matrix.slice(1);
+1038:   const pos=rows.findIndex(row=>String(row?.[0]||"").trim()===id);
+1039:   const row=dormRuleRow(payload,id,now);
+## MAIN deleteLateAttendance
+line=959
+955:   const values=lateAttendanceRow(payload,id);
+956:   if(sheetRow>0)await updateSheetValues(token,UEP_SPREADSHEET_ID,`'31_지각기록'!A${sheetRow}:P${sheetRow}`,values); else await appendSheetValues(token,UEP_SPREADSHEET_ID,"'31_지각기록'!A:P",values);
+957:   liveDataCache=null;liveDataFetchedAt=0;return {ok:true,id,data:await fetchLiveData({force:true})};
+958: }
+959: async function deleteLateAttendance(id=""){
+960:   const key=String(id||"").trim(); if(!key)throw new Error("삭제할 지각 ID가 없습니다.");
+961:   const account=await readEncrypted(credentialPath()); if(!validateServiceAccount(account)) throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+962:   const token=await getSheetsToken(account); const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,["'31_지각기록'!A3:P3000"]); const rows=(result?.[0]?.values||[]).slice(1);
+963:   const pos=rows.findIndex(r=>String(r?.[0]||"").trim()===key); if(pos<0)throw new Error("삭제할 지각 기록을 찾지 못했습니다.");
+964:   await clearSheetValues(token,UEP_SPREADSHEET_ID,`'31_지각기록'!A${pos+4}:P${pos+4}`);liveDataCache=null;liveDataFetchedAt=0;return {ok:true,data:await fetchLiveData({force:true})};
+965: }
+966: 
+967: function dormRulePriority(category=""){
+968:   return ({exception:50,closure:40,exam:30,vacation:25,base:20,period:10})[String(category||"")]||5;
+969: }
+970: function dormRuleRow(payload={},id,nowIso){
+971:   return [[
+972:     id,
+973:     String(payload.category||""),
+974:     String(payload.name||""),
+975:     String(payload.start||""),
+976:     String(payload.end||""),
+977:     String(payload.days||"전체"),
+978:     String(payload.effect||""),
+979:     String(payload.entryTime||""),
+980:     String(payload.exitTime||""),
+981:     String(payload.lateEntry||""),
+982:     String(payload.earlyExit||""),
+983:     String(payload.reason||""),
+984:     Number(payload.priority||dormRulePriority(payload.category)),
+985:     payload.active===false?"N":"Y",
+986:     String(payload.note||""),
+987:     nowIso,
+988:     String(payload.writer||"UEP"),
+989:     String(payload.source||"UEP 규칙센터"),
+990:     String(payload.operationState||""),
+991:     String(payload.actualExit||""),
+992:     String(payload.actualReentry||""),
+993:     payload.priorNightAcademyHome?"Y":"N",
+994:     payload.formRequired?"Y":"N",
+995:     payload.individualOutingAllowed?"Y":"N"
+996:   ]];
+997: }
+998: function dormRuleDateValue(value){
+999:   if(value===null||value===undefined||value==='')return '';
+1000:   const raw=String(value).trim();
+1001:   if(/^\d+(?:\.\d+)?$/.test(raw)){
+1002:     const serial=Number(raw);
+1003:     if(Number.isFinite(serial)&&serial>20000&&serial<100000){
+1004:       const d=new Date(Date.UTC(1899,11,30)+Math.round(serial*86400000));
+1005:       if(!Number.isNaN(d.getTime())){
+1006:         const y=d.getUTCFullYear(),mo=String(d.getUTCMonth()+1).padStart(2,'0'),day=String(d.getUTCDate()).padStart(2,'0');
+1007:         const hh=String(d.getUTCHours()).padStart(2,'0'),mm=String(d.getUTCMinutes()).padStart(2,'0');
+1008:         return `${y}-${mo}-${day}T${hh}:${mm}`;
+1009:       }
+1010:     }
+1011:   }
+1012:   const mm=raw.replace(' ','T').match(/^(\d{4})-(\d{1,2})-(\d{1,2})T(\d{1,2}):(\d{2})/);
+1013:   return mm?`${mm[1]}-${String(mm[2]).padStart(2,'0')}-${String(mm[3]).padStart(2,'0')}T${String(mm[4]).padStart(2,'0')}:${mm[5]}`:raw;
+1014: }
+1015: function dormRuleObjectFromRow(row=[]){
+1016:   return {
+1017:     id:String(row[0]||'').trim(),category:String(row[1]||'').trim(),name:String(row[2]||'').trim(),
+1018:     start:dormRuleDateValue(row[3]),end:dormRuleDateValue(row[4]),days:String(row[5]||'전체').trim(),
+1019:     effect:String(row[6]||'').trim(),entryTime:String(row[7]||'').trim(),exitTime:String(row[8]||'').trim(),
+1020:     lateEntry:String(row[9]||'').trim(),earlyExit:String(row[10]||'').trim(),reason:String(row[11]||'').trim(),
+1021:     priority:Number(row[12]||dormRulePriority(row[1])),active:String(row[13]||'Y').trim().toUpperCase()!=='N',
+1022:     note:String(row[14]||'').trim(),modifiedAt:String(row[15]||'').trim(),writer:String(row[16]||'').trim(),source:String(row[17]||'').trim(),
+1023:     operationState:String(row[18]||'').trim(),actualExit:dormRuleDateValue(row[19]),actualReentry:dormRuleDateValue(row[20]),
+1024:     priorNightAcademyHome:/^(Y|YES|TRUE|1)$/i.test(String(row[21]||'')),
+1025:     formRequired:/^(Y|YES|TRUE|1)$/i.test(String(row[22]||'')),
+1026:     individualOutingAllowed:/^(Y|YES|TRUE|1)$/i.test(String(row[23]||''))
+1027:   };
+1028: }
+1029: async function saveDormRule(payload={}){
+1030:   const account=await readEncrypted(credentialPath());
+1031:   if(!validateServiceAccount(account)) throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+1032:   const token=await getSheetsToken(account), now=new Date().toISOString();
+1033:   const id=String(payload.id||`DORM-RULE-${crypto.randomUUID()}`).trim();
+1034:   const range="'40_학사외출규칙'!A3:X1000";
+1035:   const result=await readSheetBatch(token,UEP_RULES_SPREADSHEET_ID,[range]);
+1036:   const matrix=result?.[0]?.values||[];
+1037:   const rows=matrix.slice(1);
+1038:   const pos=rows.findIndex(row=>String(row?.[0]||"").trim()===id);
+1039:   const row=dormRuleRow(payload,id,now);
+1040:   if(pos>=0) await updateSheetValues(token,UEP_RULES_SPREADSHEET_ID,`'40_학사외출규칙'!A${pos+4}:X${pos+4}`,row);
+1041:   else await appendSheetValues(token,UEP_RULES_SPREADSHEET_ID,"'40_학사외출규칙'!A:X",row);
+1042:   liveDataCache=null;liveDataFetchedAt=0;
+1043:   const record={...payload,id,priority:Number(payload.priority||dormRulePriority(payload.category)),active:payload.active!==false,modifiedAt:now,writer:String(payload.writer||"UEP"),source:String(payload.source||"UEP 규칙센터")};
+1044:   return {ok:true,id,record};
+1045: }
+1046: async function deleteDormRule(id=""){
+1047:   const key=String(id||"").trim(); if(!key) throw new Error("삭제할 학사외출 규칙 ID가 없습니다.");
+1048:   const account=await readEncrypted(credentialPath());
+1049:   if(!validateServiceAccount(account)) throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+## MAIN saveDormOuting
+line=1071
+1067:   return {ok:true,id,record:{id,studentId:String(payload.studentId||""),studentNo:String(payload.studentNo||""),name:String(payload.name||""),grade:String(payload.grade||"1"),className:String(payload.className||""),createdAt:String(payload.createdAt||now),area:String(payload.area||""),type:String(payload.type||"학생 상담"),memo:String(payload.memo||""),action:String(payload.action||""),nextDate:String(payload.nextDate||""),status:String(payload.status||"진행중"),group:String(payload.group||""),stage:String(payload.stage||""),discoveryReason:String(payload.discoveryReason||""),writer:String(payload.writer||""),modifiedAt:now}};
+1068: }
+1069: 
+1070: 
+1071: async function saveDormOuting(payload={}){
+1072:   const allowedRoles=new Set(['admin','grade_head','grade_manager','homeroom']);
+1073:   if(payload.role&&!allowedRoles.has(String(payload.role)))throw new Error('학사외출 교사등록 권한이 없습니다.');
+1074:   const date=String(payload.date||'').slice(0,10),category=String(payload.category||'외출'),studentNo=String(payload.studentNo||'').replace(/\D/g,''),name=String(payload.name||'').trim();
+1075:   if(!date||!studentNo||!name)throw new Error('학생·학번·날짜 정보를 확인해 주세요.');
+1076:   const home=/퇴소|귀가/.test(category),outTime=String(payload.outTime||''),returnTime=String(payload.returnTime||'');
+1077:   if(!outTime)throw new Error('외출·귀가 시간을 입력해 주세요.');
+1078:   if(!home&&!returnTime)throw new Error('복귀 예정시간을 입력해 주세요.');
+1079:   const account=await resolveSchoolServiceAccount();if(!validateServiceAccount(account))throw new Error('학교 공용 Google 쓰기 연결을 찾지 못했습니다.');
+1080:   const token=await getSheetsToken(account),now=new Date().toISOString(),id=String(payload.id||`OUT-TEACHER-${crypto.randomUUID()}`),grade=String(payload.grade||studentNo.slice(0,1)||'1'),className=String(payload.className||studentNo.slice(1,2)||''),number=String(payload.number||studentNo.slice(-2)).replace(/^0/,'');
+1081:   const existing=await readSheetBatch(token,UEP_SPREADSHEET_ID,["'02_학사외출_일자별'!A3:AD5000"]),matrix=existing?.[0]?.values||[],headers=(matrix[0]||[]).map(x=>String(x||'').trim()),col=(...names)=>names.map(n=>headers.indexOf(n)).find(i=>i>=0);
+1082:   const dcol=col('외출일자','신청일자','운영일','일자','날짜'),ncol=col('학번','학생학번'),idcol=col('학생ID','학생 ID'),ccol=col('외출구분','신청구분','구분'),tcol=col('외출시간','출발예정시간','출발시간');
+1083:   const duplicate=matrix.slice(1).some(r=>String(r[dcol]||'').slice(0,10)===date&&((ncol>=0&&String(r[ncol]||'').replace(/\.0$/,'')===studentNo)||(idcol>=0&&String(r[idcol]||'')===String(payload.studentId||'')))&&String(r[ccol]||'')===category&&String(r[tcol]||'')===outTime);
+1084:   if(duplicate)throw new Error('같은 학생의 동일한 학사외출 기록이 이미 있습니다.');
+1085:   const row=[[id,'',date,String(payload.studentId||''),grade,className,number,name,'교사등록',category,home?'귀가형':'복귀형',outTime,home?'':returnTime,home?returnTime:'',String(payload.reason||''),String(payload.destination||''),String(payload.guardian||''),String(payload.note||''),String(payload.status||'확인'),now,now,'UEP반영',now,String(payload.writer||''),'','','Y','교사 직접등록','담임·관리자 직접 확인',now]];
+1086:   await appendSheetValues(token,UEP_SPREADSHEET_ID,"'02_학사외출_일자별'!A:AD",row);
+1087:   liveDataCache=null;liveDataFetchedAt=0;const data=await fetchLiveData({force:true});return {ok:true,id,data,record:{id,studentId:String(payload.studentId||''),studentNo,name,date,className,number,category,outTime,returnTime,reason:String(payload.reason||''),destination:String(payload.destination||''),note:String(payload.note||''),confirmed:String(payload.writer||''),status:'확인'}};
+1088: }async function saveStudentGuidanceRecord(payload={}){
+1089:   const account=await readEncrypted(credentialPath()); if(!validateServiceAccount(account))throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+1090:   const token=await getSheetsToken(account), now=new Date().toISOString(), id=String(payload.id||`GUIDE-${crypto.randomUUID()}`);
+1091:   const row=[[id,String(payload.studentId||""),String(payload.studentNo||""),String(payload.name||""),String(payload.grade||"1"),String(payload.className||""),String(payload.number||""),String(payload.guidanceDate||now.slice(0,10)),String(payload.memo||""),String(payload.writer||""),String(payload.createdAt||now),now,String(payload.status||"기록"),String(payload.note||"")]];
+1092:   const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,["'46_학생지도기록'!A3:N5000"]); const rows=(result?.[0]?.values||[]).slice(1); const pos=rows.findIndex(r=>String(r?.[0]||"")===id);
+1093:   if(pos>=0)await updateSheetValues(token,UEP_SPREADSHEET_ID,`'46_학생지도기록'!A${pos+4}:N${pos+4}`,row); else await appendSheetValues(token,UEP_SPREADSHEET_ID,"'46_학생지도기록'!A:N",row);
+1094:   liveDataCache=null;liveDataFetchedAt=0;
+1095:   return {ok:true,id,record:{id,studentId:String(payload.studentId||""),studentNo:String(payload.studentNo||""),name:String(payload.name||""),grade:String(payload.grade||"1"),className:String(payload.className||""),number:String(payload.number||""),guidanceDate:String(payload.guidanceDate||now.slice(0,10)),memo:String(payload.memo||""),writer:String(payload.writer||""),createdAt:String(payload.createdAt||now),modifiedAt:now,status:String(payload.status||"기록"),note:String(payload.note||"")}};
+1096: }
+1097: 
+1098: 
+1099: async function saveNightSupervisor(payload={}) {
+1100:   const allowedRoles=new Set(['admin','grade_head','grade_manager','homeroom','subject']);
+1101:   if(payload.role&&!allowedRoles.has(String(payload.role))) throw new Error('야자감독 수정 권한이 없습니다.');
+1102:   const id=String(payload.id||'').trim(), date=String(payload.date||'').slice(0,10), teacher=String(payload.teacher||'').trim();
+1103:   if(!teacher) throw new Error('변경할 감독교사가 없습니다.');
+1104:   const account=await readEncrypted(credentialPath());
+1105:   if(!validateServiceAccount(account)) throw new Error('Google 서비스 계정 인증정보가 필요합니다.');
+1106:   const token=await getSheetsToken(account);
+1107:   const range="'43_야자감독계획'!A3:J1000";
+1108:   const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,[range]);
+1109:   const matrix=result?.[0]?.values||[];
+1110:   const headers=(matrix[0]||[]).map(v=>String(v||'').trim());
+1111:   const idCol=headers.indexOf('기록ID'), dateCol=headers.indexOf('운영일'), teacherCol=headers.indexOf('감독교사');
+1112:   if(teacherCol<0) throw new Error('43_야자감독계획의 감독교사 열을 찾지 못했습니다.');
+1113:   const rows=matrix.slice(1);
+1114:   const pos=rows.findIndex(row=> (id&&String(row?.[idCol]||'').trim()===id) || (!id&&String(row?.[dateCol]||'').slice(0,10)===date));
+1115:   if(pos<0) throw new Error('수정할 야자감독 일정을 찾지 못했습니다.');
+1116:   const sheetRow=pos+4;
+1117:   const colLetter=String.fromCharCode(65+teacherCol);
+1118:   await updateSheetValues(token,UEP_SPREADSHEET_ID,`'43_야자감독계획'!${colLetter}${sheetRow}:${colLetter}${sheetRow}`,[[teacher]]);
+1119:   liveDataCache=null; liveDataFetchedAt=0;
+1120:   const data=await fetchLiveData({force:true});
+1121:   return {ok:true,data};
+1122: }
+1123: 
+1124: async function saveLunchDuty(payload={}) {
+1125:   const allowedRoles=new Set(['admin','grade_head','grade_manager','homeroom','subject']);
+1126:   if(payload.role&&!allowedRoles.has(String(payload.role))) throw new Error('급식지도 수정 권한이 없습니다.');
+1127:   const id=String(payload.id||'').trim();
+1128:   const date=String(payload.date||'').slice(0,10);
+1129:   const originalTeacher=String(payload.originalTeacher||payload.teacher||'').trim();
+1130:   const teacher=String(payload.teacher||'').trim();
+1131:   const dutyType=String(payload.dutyType||'급식실').trim();
+1132:   if(!teacher) throw new Error('변경할 급식지도 교사가 없습니다.');
+1133:   const account=await readEncrypted(credentialPath());
+1134:   if(!validateServiceAccount(account)) throw new Error('Google 서비스 계정 인증정보가 필요합니다.');
+1135:   const token=await getSheetsToken(account);
+1136:   const range="'42_급식지도계획'!A3:K1000";
+1137:   const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,[range]);
+1138:   const matrix=result?.[0]?.values||[];
+1139:   const headers=(matrix[0]||[]).map(v=>String(v||'').trim());
+1140:   const idCol=headers.findIndex(h=>/기록ID|급식지도ID|^ID$/.test(h));
+1141:   const dateCol=headers.findIndex(h=>/운영일|일자|날짜/.test(h));
+1142:   const teacherCol=headers.findIndex(h=>/담당교사|지도교사|교사/.test(h));
+1143:   const typeCol=headers.findIndex(h=>/담당구분|구역|장소|역할/.test(h));
+1144:   if(teacherCol<0) throw new Error('42_급식지도계획의 담당교사 열을 찾지 못했습니다.');
+1145:   const rows=matrix.slice(1);
+1146:   const pos=rows.findIndex(row=>
+1147:     (id && idCol>=0 && String(row?.[idCol]||'').trim()===id) ||
+1148:     (!id && dateCol>=0 && String(row?.[dateCol]||'').slice(0,10)===date && String(row?.[teacherCol]||'').trim()===originalTeacher)
+1149:   );
+1150:   if(pos<0) throw new Error('수정할 급식지도 일정을 찾지 못했습니다.');
+1151:   const sheetRow=pos+4;
+1152:   const colLetter=(index)=>{let n=index+1,out='';while(n){n--;out=String.fromCharCode(65+n%26)+out;n=Math.floor(n/26)}return out};
+1153:   await updateSheetValues(token,UEP_SPREADSHEET_ID,`'42_급식지도계획'!${colLetter(teacherCol)}${sheetRow}:${colLetter(teacherCol)}${sheetRow}`,[[teacher]]);
+1154:   if(typeCol>=0) await updateSheetValues(token,UEP_SPREADSHEET_ID,`'42_급식지도계획'!${colLetter(typeCol)}${sheetRow}:${colLetter(typeCol)}${sheetRow}`,[[dutyType]]);
+1155:   liveDataCache=null; liveDataFetchedAt=0;
+1156:   const data=await fetchLiveData({force:true});
+1157:   return {ok:true,data};
+1158: }
+1159: 
+1160: 
+1161: const inputCenterRoot=()=>path.join(stableUserDataRoot(),'input-center');
+## MAIN saveNightSupervisor
+line=1099
+1095:   return {ok:true,id,record:{id,studentId:String(payload.studentId||""),studentNo:String(payload.studentNo||""),name:String(payload.name||""),grade:String(payload.grade||"1"),className:String(payload.className||""),number:String(payload.number||""),guidanceDate:String(payload.guidanceDate||now.slice(0,10)),memo:String(payload.memo||""),writer:String(payload.writer||""),createdAt:String(payload.createdAt||now),modifiedAt:now,status:String(payload.status||"기록"),note:String(payload.note||"")}};
+1096: }
+1097: 
+1098: 
+1099: async function saveNightSupervisor(payload={}) {
+1100:   const allowedRoles=new Set(['admin','grade_head','grade_manager','homeroom','subject']);
+1101:   if(payload.role&&!allowedRoles.has(String(payload.role))) throw new Error('야자감독 수정 권한이 없습니다.');
+1102:   const id=String(payload.id||'').trim(), date=String(payload.date||'').slice(0,10), teacher=String(payload.teacher||'').trim();
+1103:   if(!teacher) throw new Error('변경할 감독교사가 없습니다.');
+1104:   const account=await readEncrypted(credentialPath());
+1105:   if(!validateServiceAccount(account)) throw new Error('Google 서비스 계정 인증정보가 필요합니다.');
+1106:   const token=await getSheetsToken(account);
+1107:   const range="'43_야자감독계획'!A3:J1000";
+1108:   const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,[range]);
+1109:   const matrix=result?.[0]?.values||[];
+1110:   const headers=(matrix[0]||[]).map(v=>String(v||'').trim());
+1111:   const idCol=headers.indexOf('기록ID'), dateCol=headers.indexOf('운영일'), teacherCol=headers.indexOf('감독교사');
+1112:   if(teacherCol<0) throw new Error('43_야자감독계획의 감독교사 열을 찾지 못했습니다.');
+1113:   const rows=matrix.slice(1);
+1114:   const pos=rows.findIndex(row=> (id&&String(row?.[idCol]||'').trim()===id) || (!id&&String(row?.[dateCol]||'').slice(0,10)===date));
+1115:   if(pos<0) throw new Error('수정할 야자감독 일정을 찾지 못했습니다.');
+1116:   const sheetRow=pos+4;
+1117:   const colLetter=String.fromCharCode(65+teacherCol);
+1118:   await updateSheetValues(token,UEP_SPREADSHEET_ID,`'43_야자감독계획'!${colLetter}${sheetRow}:${colLetter}${sheetRow}`,[[teacher]]);
+1119:   liveDataCache=null; liveDataFetchedAt=0;
+1120:   const data=await fetchLiveData({force:true});
+1121:   return {ok:true,data};
+1122: }
+1123: 
+1124: async function saveLunchDuty(payload={}) {
+1125:   const allowedRoles=new Set(['admin','grade_head','grade_manager','homeroom','subject']);
+1126:   if(payload.role&&!allowedRoles.has(String(payload.role))) throw new Error('급식지도 수정 권한이 없습니다.');
+1127:   const id=String(payload.id||'').trim();
+1128:   const date=String(payload.date||'').slice(0,10);
+1129:   const originalTeacher=String(payload.originalTeacher||payload.teacher||'').trim();
+1130:   const teacher=String(payload.teacher||'').trim();
+1131:   const dutyType=String(payload.dutyType||'급식실').trim();
+1132:   if(!teacher) throw new Error('변경할 급식지도 교사가 없습니다.');
+1133:   const account=await readEncrypted(credentialPath());
+1134:   if(!validateServiceAccount(account)) throw new Error('Google 서비스 계정 인증정보가 필요합니다.');
+1135:   const token=await getSheetsToken(account);
+1136:   const range="'42_급식지도계획'!A3:K1000";
+1137:   const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,[range]);
+1138:   const matrix=result?.[0]?.values||[];
+1139:   const headers=(matrix[0]||[]).map(v=>String(v||'').trim());
+1140:   const idCol=headers.findIndex(h=>/기록ID|급식지도ID|^ID$/.test(h));
+1141:   const dateCol=headers.findIndex(h=>/운영일|일자|날짜/.test(h));
+1142:   const teacherCol=headers.findIndex(h=>/담당교사|지도교사|교사/.test(h));
+1143:   const typeCol=headers.findIndex(h=>/담당구분|구역|장소|역할/.test(h));
+1144:   if(teacherCol<0) throw new Error('42_급식지도계획의 담당교사 열을 찾지 못했습니다.');
+1145:   const rows=matrix.slice(1);
+1146:   const pos=rows.findIndex(row=>
+1147:     (id && idCol>=0 && String(row?.[idCol]||'').trim()===id) ||
+1148:     (!id && dateCol>=0 && String(row?.[dateCol]||'').slice(0,10)===date && String(row?.[teacherCol]||'').trim()===originalTeacher)
+1149:   );
+1150:   if(pos<0) throw new Error('수정할 급식지도 일정을 찾지 못했습니다.');
+1151:   const sheetRow=pos+4;
+1152:   const colLetter=(index)=>{let n=index+1,out='';while(n){n--;out=String.fromCharCode(65+n%26)+out;n=Math.floor(n/26)}return out};
+1153:   await updateSheetValues(token,UEP_SPREADSHEET_ID,`'42_급식지도계획'!${colLetter(teacherCol)}${sheetRow}:${colLetter(teacherCol)}${sheetRow}`,[[teacher]]);
+1154:   if(typeCol>=0) await updateSheetValues(token,UEP_SPREADSHEET_ID,`'42_급식지도계획'!${colLetter(typeCol)}${sheetRow}:${colLetter(typeCol)}${sheetRow}`,[[dutyType]]);
+1155:   liveDataCache=null; liveDataFetchedAt=0;
+1156:   const data=await fetchLiveData({force:true});
+1157:   return {ok:true,data};
+1158: }
+1159: 
+1160: 
+1161: const inputCenterRoot=()=>path.join(stableUserDataRoot(),'input-center');
+1162: async function selectInputCenterFiles(event){
+1163:   const win=BrowserWindow.fromWebContents(event.sender);
+1164:   const selected=await dialog.showOpenDialog(win,{title:'UEP 입력센터 · 학생 자료 선택',properties:['openFile','multiSelections'],filters:[{name:'학생 자료',extensions:['pdf','jpg','jpeg','png','txt','csv','tsv','json','md','hwp','hwpx','doc','docx','xls','xlsx']},{name:'모든 파일',extensions:['*']}]});
+1165:   if(selected.canceled)return {ok:false,canceled:true};
+1166:   const textExt=new Set(['.txt','.csv','.tsv','.json','.md']);
+1167:   const files=[];
+1168:   for(const filePath of selected.filePaths||[]){try{const stat=await fs.stat(filePath);const ext=path.extname(filePath).toLowerCase();let text='';if(textExt.has(ext)&&stat.size<=5*1024*1024)text=await fs.readFile(filePath,'utf8');
+1169:     if(process.platform==='win32'&&['.xls','.xlsx'].includes(ext)){const ps=String.raw`$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[System.Text.UTF8Encoding]::new(); $OutputEncoding=[Console]::OutputEncoding; $p=${JSON.stringify(filePath)}; $xl=New-Object -ComObject Excel.Application; $xl.Visible=$false; $xl.DisplayAlerts=$false; try{$wb=$xl.Workbooks.Open($p); $out=@(); foreach($ws in $wb.Worksheets){$out += ('__UEP_SHEET__' + [char]9 + [string]$ws.Name); $used=$ws.UsedRange; $vals=$used.Value2; if($vals -is [Array]){for($r=1;$r -le $used.Rows.Count;$r++){$cells=@();for($c=1;$c -le $used.Columns.Count;$c++){$v=$vals[$r,$c];if($null -eq $v){$v=''};$sv=[string]$v;$sv=$sv.Replace(([string][char]13+[char]10),'\n').Replace([string][char]10,'\n').Replace([string][char]13,'\n').Replace([string][char]9,' ');$cells += $sv};$out += ($cells -join [char]9)}}}; $out -join [Environment]::NewLine} finally{if($wb){$wb.Close($false)};$xl.Quit()}`;const r=await runProcess('powershell.exe',['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-Command',ps]);if(r.ok)text=r.stdout.trim();}
+1170:     files.push({path:filePath,name:path.basename(filePath),extension:ext.replace(/^\./,''),size:stat.size,text});}catch{}}
+1171:   return {ok:true,files};
+1172: }
+1173: async function saveInputCenterRecords(payload={}){
+1174:   const storageMode=String(payload.storageMode||'uep');
+1175:   let token=null;
+1176:   if(storageMode==='uep'){
+1177:     const account=await readEncrypted(credentialPath());
+1178:     if(!validateServiceAccount(account))throw new Error('UEP 시트 영구 저장에는 Google 서비스 계정 인증정보가 필요합니다.');
+1179:     token=await getSheetsToken(account);
+1180:     if(!UEP_INPUT_CENTER_SPREADSHEET_ID) throw new Error('[UEP] 입력센터 원본 시트 연결정보가 없습니다.');
+1181:   }
+1182:   const now=new Date().toISOString(),batchId=String(payload.batchId||`IN-${Date.now()}`),year=String(new Date().getFullYear());
+1183:   const folder=path.join(inputCenterRoot(),batchId.replace(/[^a-zA-Z0-9가-힣_-]/g,'_'));await fs.mkdir(folder,{recursive:true});
+1184:   const prepared=[];let index=0;
+1185:   for(const record of Array.isArray(payload.records)?payload.records:[]){
+1186:     index++;let stored='';
+1187:     const pageSources=Array.isArray(record.pages)&&record.pages.length?record.pages.map(p=>String(p.filePath||'')).filter(Boolean):[String(record.filePath||'')].filter(Boolean);
+1188:     const storedPages=[];
+1189:     for(let pi=0;pi<pageSources.length;pi++){
+## MAIN saveLunchDuty
+line=1124
+1120:   const data=await fetchLiveData({force:true});
+1121:   return {ok:true,data};
+1122: }
+1123: 
+1124: async function saveLunchDuty(payload={}) {
+1125:   const allowedRoles=new Set(['admin','grade_head','grade_manager','homeroom','subject']);
+1126:   if(payload.role&&!allowedRoles.has(String(payload.role))) throw new Error('급식지도 수정 권한이 없습니다.');
+1127:   const id=String(payload.id||'').trim();
+1128:   const date=String(payload.date||'').slice(0,10);
+1129:   const originalTeacher=String(payload.originalTeacher||payload.teacher||'').trim();
+1130:   const teacher=String(payload.teacher||'').trim();
+1131:   const dutyType=String(payload.dutyType||'급식실').trim();
+1132:   if(!teacher) throw new Error('변경할 급식지도 교사가 없습니다.');
+1133:   const account=await readEncrypted(credentialPath());
+1134:   if(!validateServiceAccount(account)) throw new Error('Google 서비스 계정 인증정보가 필요합니다.');
+1135:   const token=await getSheetsToken(account);
+1136:   const range="'42_급식지도계획'!A3:K1000";
+1137:   const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,[range]);
+1138:   const matrix=result?.[0]?.values||[];
+1139:   const headers=(matrix[0]||[]).map(v=>String(v||'').trim());
+1140:   const idCol=headers.findIndex(h=>/기록ID|급식지도ID|^ID$/.test(h));
+1141:   const dateCol=headers.findIndex(h=>/운영일|일자|날짜/.test(h));
+1142:   const teacherCol=headers.findIndex(h=>/담당교사|지도교사|교사/.test(h));
+1143:   const typeCol=headers.findIndex(h=>/담당구분|구역|장소|역할/.test(h));
+1144:   if(teacherCol<0) throw new Error('42_급식지도계획의 담당교사 열을 찾지 못했습니다.');
+1145:   const rows=matrix.slice(1);
+1146:   const pos=rows.findIndex(row=>
+1147:     (id && idCol>=0 && String(row?.[idCol]||'').trim()===id) ||
+1148:     (!id && dateCol>=0 && String(row?.[dateCol]||'').slice(0,10)===date && String(row?.[teacherCol]||'').trim()===originalTeacher)
+1149:   );
+1150:   if(pos<0) throw new Error('수정할 급식지도 일정을 찾지 못했습니다.');
+1151:   const sheetRow=pos+4;
+1152:   const colLetter=(index)=>{let n=index+1,out='';while(n){n--;out=String.fromCharCode(65+n%26)+out;n=Math.floor(n/26)}return out};
+1153:   await updateSheetValues(token,UEP_SPREADSHEET_ID,`'42_급식지도계획'!${colLetter(teacherCol)}${sheetRow}:${colLetter(teacherCol)}${sheetRow}`,[[teacher]]);
+1154:   if(typeCol>=0) await updateSheetValues(token,UEP_SPREADSHEET_ID,`'42_급식지도계획'!${colLetter(typeCol)}${sheetRow}:${colLetter(typeCol)}${sheetRow}`,[[dutyType]]);
+1155:   liveDataCache=null; liveDataFetchedAt=0;
+1156:   const data=await fetchLiveData({force:true});
+1157:   return {ok:true,data};
+1158: }
+1159: 
+1160: 
+1161: const inputCenterRoot=()=>path.join(stableUserDataRoot(),'input-center');
+1162: async function selectInputCenterFiles(event){
+1163:   const win=BrowserWindow.fromWebContents(event.sender);
+1164:   const selected=await dialog.showOpenDialog(win,{title:'UEP 입력센터 · 학생 자료 선택',properties:['openFile','multiSelections'],filters:[{name:'학생 자료',extensions:['pdf','jpg','jpeg','png','txt','csv','tsv','json','md','hwp','hwpx','doc','docx','xls','xlsx']},{name:'모든 파일',extensions:['*']}]});
+1165:   if(selected.canceled)return {ok:false,canceled:true};
+1166:   const textExt=new Set(['.txt','.csv','.tsv','.json','.md']);
+1167:   const files=[];
+1168:   for(const filePath of selected.filePaths||[]){try{const stat=await fs.stat(filePath);const ext=path.extname(filePath).toLowerCase();let text='';if(textExt.has(ext)&&stat.size<=5*1024*1024)text=await fs.readFile(filePath,'utf8');
+1169:     if(process.platform==='win32'&&['.xls','.xlsx'].includes(ext)){const ps=String.raw`$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[System.Text.UTF8Encoding]::new(); $OutputEncoding=[Console]::OutputEncoding; $p=${JSON.stringify(filePath)}; $xl=New-Object -ComObject Excel.Application; $xl.Visible=$false; $xl.DisplayAlerts=$false; try{$wb=$xl.Workbooks.Open($p); $out=@(); foreach($ws in $wb.Worksheets){$out += ('__UEP_SHEET__' + [char]9 + [string]$ws.Name); $used=$ws.UsedRange; $vals=$used.Value2; if($vals -is [Array]){for($r=1;$r -le $used.Rows.Count;$r++){$cells=@();for($c=1;$c -le $used.Columns.Count;$c++){$v=$vals[$r,$c];if($null -eq $v){$v=''};$sv=[string]$v;$sv=$sv.Replace(([string][char]13+[char]10),'\n').Replace([string][char]10,'\n').Replace([string][char]13,'\n').Replace([string][char]9,' ');$cells += $sv};$out += ($cells -join [char]9)}}}; $out -join [Environment]::NewLine} finally{if($wb){$wb.Close($false)};$xl.Quit()}`;const r=await runProcess('powershell.exe',['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-Command',ps]);if(r.ok)text=r.stdout.trim();}
+1170:     files.push({path:filePath,name:path.basename(filePath),extension:ext.replace(/^\./,''),size:stat.size,text});}catch{}}
+1171:   return {ok:true,files};
+1172: }
+1173: async function saveInputCenterRecords(payload={}){
+1174:   const storageMode=String(payload.storageMode||'uep');
+1175:   let token=null;
+1176:   if(storageMode==='uep'){
+1177:     const account=await readEncrypted(credentialPath());
+1178:     if(!validateServiceAccount(account))throw new Error('UEP 시트 영구 저장에는 Google 서비스 계정 인증정보가 필요합니다.');
+1179:     token=await getSheetsToken(account);
+1180:     if(!UEP_INPUT_CENTER_SPREADSHEET_ID) throw new Error('[UEP] 입력센터 원본 시트 연결정보가 없습니다.');
+1181:   }
+1182:   const now=new Date().toISOString(),batchId=String(payload.batchId||`IN-${Date.now()}`),year=String(new Date().getFullYear());
+1183:   const folder=path.join(inputCenterRoot(),batchId.replace(/[^a-zA-Z0-9가-힣_-]/g,'_'));await fs.mkdir(folder,{recursive:true});
+1184:   const prepared=[];let index=0;
+1185:   for(const record of Array.isArray(payload.records)?payload.records:[]){
+1186:     index++;let stored='';
+1187:     const pageSources=Array.isArray(record.pages)&&record.pages.length?record.pages.map(p=>String(p.filePath||'')).filter(Boolean):[String(record.filePath||'')].filter(Boolean);
+1188:     const storedPages=[];
+1189:     for(let pi=0;pi<pageSources.length;pi++){
+1190:       const sourcePath=pageSources[pi];
+1191:       try{const safeName=`${String(index).padStart(3,'0')}_p${pi+1}_${path.basename(sourcePath).replace(/[\\/:*?"<>|]/g,'_')}`;const target=path.join(folder,safeName);await fs.copyFile(sourcePath,target);storedPages.push(path.relative(stableUserDataRoot(),target));}catch{}
+1192:     }
+1193:     stored=storedPages.join(' | ');
+1194:     const raw=String(record.text||'').slice(0,45000);const binary=!raw&&Boolean(record.extension);const id=`SRC-${crypto.randomUUID()}`;
+1195:     const programId=String(record.programId||payload.programId||'').trim();
+1196:     const programKind=String(record.programKind||payload.programKind||'').trim();
+1197:     const programName=String(record.programName||payload.programName||'').trim();
+1198:     const reportFields=Array.isArray(record.reportFields)?record.reportFields:[];const routed=programId&&/보고서/.test(String(payload.type||''));
+1199:     const submittedAt=String(record.submittedAt||'').trim();
+1200:     const structured=JSON.stringify({kind:routed?'programReport':'inputSource',programId,programKind,programName,submittedAt,fields:reportFields.map(x=>({label:String(x.label||''),value:String(x.value||'')}))}).slice(0,45000);
+1201:     const note=routed?`ROUTE:PROGRAM_REPORT:${programId}`:(binary?'원본 보관 완료 · 텍스트 후처리 대상':'입력센터 원문 등록');
+1202:     const row=[id,batchId,String(payload.source||'교사 파일'),String(payload.type||'기타'),String(payload.subtype||''),year,String(payload.semester||'2'),String(record.studentId||''),String(record.studentNo||''),String(record.name||''),String(record.grade||''),String(record.className||''),String(record.fileName||''),stored,String(payload.title||record.fileName||''),raw,structured,binary?'텍스트확인필요':'원문등록',String(record.matchStatus||(record.studentNo?'교사확인':'확인필요')),programId,programKind,String(payload.teacher||''),now,note];
+1203:     prepared.push({row,studentId:String(record.studentId||''),studentNo:String(record.studentNo||''),programId,programKind,programName,submittedAt,routed});
+1204:   }
+1205:   let newItems=prepared.slice(),duplicateItems=[],updateItems=[];
+1206:   if(storageMode==='uep'&&prepared.some(x=>x.routed)){
+1207:     const result=await readSheetBatch(token,UEP_INPUT_CENTER_SPREADSHEET_ID,["'02_자료원본'!A3:X10000"]);
+1208:     const matrix=result?.[0]?.values||[];const headers=(matrix[0]||[]).map(v=>String(v||'').trim());const col=(name)=>headers.indexOf(name);
+1209:     const existing=matrix.slice(1).map((r,i)=>{let meta={};try{meta=JSON.parse(String(r[col('구조화데이터')]||''));}catch{}return {sheetRow:i+4,row:r,inputId:String(r[col('입력ID')]||''),studentId:String(r[col('학생ID')]||''),studentNo:String(r[col('학번')]||''),programId:String(r[col('프로그램ID')]||meta.programId||''),submittedAt:String(meta.submittedAt||'').trim()};}).filter(x=>x.programId);
+1210:     newItems=[];
+1211:     for(const item of prepared){
+1212:       if(!item.routed){newItems.push(item);continue;}
+1213:       const same=existing.filter(x=>((item.studentId&&x.studentId===item.studentId)||(!item.studentId&&item.studentNo&&x.studentNo===item.studentNo))&&x.programId===item.programId);
+1214:       const exact=same.find(x=>x.submittedAt===item.submittedAt&&item.submittedAt);
+## Renderer bridge consumers
+### saveOfficialAttendance @ 2433
+2425:   $("#officialCancel").onclick=closeDrawer;
+2426:   $("#officialAttendanceEditor").onsubmit=async event=>{
+2427:     event.preventDefault();
+2428:     const studentNo=$("#officialStudent").value;
+2429:     const student=students.find(item=>String(item.studentNo)===String(studentNo));
+2430:     if(!student)return toast("학생을 선택하세요.");
+2431:     const payload={id:row?.id||"",studentId:student.id,studentNo:student.studentNo,name:student.name,grade:String(student.studentNo||"").slice(0,1),className:classNumberOf(student),date:$("#officialDate").value,attendanceType:$("#officialAttendanceType").value,detailType:$("#officialDetailType").value,startPeriod:$("#officialStartPeriod").value.trim(),endPeriod:$("#officialEndPeriod").value.trim(),reasonText:$("#officialReason").value.trim(),place:$("#officialPlace").value.trim(),evidence:$("#officialEvidence").value,note:$("#officialNote").value.trim(),sourceTab:row?.sourceTab||"UEP 직접등록",sourceRow:row?.sourceRow||""};
+2432:     try{
+2433:       const result=await window.schoolBoard.saveOfficialAttendance(payload);
+2434:       readonlyCache=result?.data||readonlyCache; attendanceViewDate=payload.date; officialClassFilter="all"; officialStudentFilter="all"; closeDrawer(); render("attendance"); toast(row?"공결 기록을 수정했습니다.":"공결 기록을 등록했습니다.");
+2435:     }catch(error){toast(error?.message||"공결 저장에 실패했습니다.");}
+2436:   };
+2437: }
+2438: async function deleteOfficialAttendanceRow(row){
+2439:   if(!row?.id)return;
+2440:   if(!confirm(`${row.date} ${row.studentNo} ${row.name} 공결 기록을 삭제할까요?`))return;
+2441:   try{const result=await window.schoolBoard.deleteOfficialAttendance(row.id);readonlyCache=result?.data||readonlyCache;render("attendance");toast("공결 기록을 삭제했습니다.");}catch(error){toast(error?.message||"공결 삭제에 실패했습니다.");}
+2442: }
+2443: 
+2444: function openLateAttendanceEditor(row=null){
+2445:   if(currentRoleId()!=="admin")return toast("지각 기록 수정은 관리자만 가능합니다.");
+2446:   const students=(readonlyCache?.students||[]).slice().sort((a,b)=>String(a.studentNo||"").localeCompare(String(b.studentNo||"")));
+2447:   const selectedNo=String(row?.studentNo||"");
+2448:   $("#drawerKicker").textContent=row?"LATE ATTENDANCE · EDIT":"LATE ATTENDANCE · NEW";
+2449:   $("#drawerTitle").textContent=row?"지각 기록 수정":"지각 기록 등록";
+2450:   $("#drawerBody").innerHTML=`<form id="lateAttendanceEditor" class="official-attendance-editor">
+2451:     <div class="official-editor-grid two"><label>일자<input type="date" id="lateDate" required value="${escapeHtml(row?.date||attendanceViewDate||dateKey(today))}"></label><label>학생<select id="lateStudent" required><option value="">학생 선택</option>${students.map(st=>`<option value="${escapeHtml(st.studentNo||"")}" ${String(st.studentNo)===selectedNo?"selected":""}>${escapeHtml(st.studentNo||"")} ${escapeHtml(st.name||"")} · ${escapeHtml(classNumberOf(st))}반</option>`).join("")}</select></label>
+---
+### deleteOfficialAttendance @ 2438
+2430:     if(!student)return toast("학생을 선택하세요.");
+2431:     const payload={id:row?.id||"",studentId:student.id,studentNo:student.studentNo,name:student.name,grade:String(student.studentNo||"").slice(0,1),className:classNumberOf(student),date:$("#officialDate").value,attendanceType:$("#officialAttendanceType").value,detailType:$("#officialDetailType").value,startPeriod:$("#officialStartPeriod").value.trim(),endPeriod:$("#officialEndPeriod").value.trim(),reasonText:$("#officialReason").value.trim(),place:$("#officialPlace").value.trim(),evidence:$("#officialEvidence").value,note:$("#officialNote").value.trim(),sourceTab:row?.sourceTab||"UEP 직접등록",sourceRow:row?.sourceRow||""};
+2432:     try{
+2433:       const result=await window.schoolBoard.saveOfficialAttendance(payload);
+2434:       readonlyCache=result?.data||readonlyCache; attendanceViewDate=payload.date; officialClassFilter="all"; officialStudentFilter="all"; closeDrawer(); render("attendance"); toast(row?"공결 기록을 수정했습니다.":"공결 기록을 등록했습니다.");
+2435:     }catch(error){toast(error?.message||"공결 저장에 실패했습니다.");}
+2436:   };
+2437: }
+2438: async function deleteOfficialAttendanceRow(row){
+2439:   if(!row?.id)return;
+2440:   if(!confirm(`${row.date} ${row.studentNo} ${row.name} 공결 기록을 삭제할까요?`))return;
+2441:   try{const result=await window.schoolBoard.deleteOfficialAttendance(row.id);readonlyCache=result?.data||readonlyCache;render("attendance");toast("공결 기록을 삭제했습니다.");}catch(error){toast(error?.message||"공결 삭제에 실패했습니다.");}
+2442: }
+2443: 
+2444: function openLateAttendanceEditor(row=null){
+2445:   if(currentRoleId()!=="admin")return toast("지각 기록 수정은 관리자만 가능합니다.");
+2446:   const students=(readonlyCache?.students||[]).slice().sort((a,b)=>String(a.studentNo||"").localeCompare(String(b.studentNo||"")));
+2447:   const selectedNo=String(row?.studentNo||"");
+2448:   $("#drawerKicker").textContent=row?"LATE ATTENDANCE · EDIT":"LATE ATTENDANCE · NEW";
+2449:   $("#drawerTitle").textContent=row?"지각 기록 수정":"지각 기록 등록";
+2450:   $("#drawerBody").innerHTML=`<form id="lateAttendanceEditor" class="official-attendance-editor">
+2451:     <div class="official-editor-grid two"><label>일자<input type="date" id="lateDate" required value="${escapeHtml(row?.date||attendanceViewDate||dateKey(today))}"></label><label>학생<select id="lateStudent" required><option value="">학생 선택</option>${students.map(st=>`<option value="${escapeHtml(st.studentNo||"")}" ${String(st.studentNo)===selectedNo?"selected":""}>${escapeHtml(st.studentNo||"")} ${escapeHtml(st.name||"")} · ${escapeHtml(classNumberOf(st))}반</option>`).join("")}</select></label>
+2452:     <label>제출시각<input type="time" id="lateTime" value="${escapeHtml(row?.time||"")}"></label><label>지각시간(분)<input type="number" min="0" id="lateMinutes" value="${escapeHtml(row?.minutes||"")}"></label>
+2453:     <label class="span-two">사유<input id="lateReason" required value="${escapeHtml(row?.reason||"")}"></label><label>지도상태<select id="lateGuidance"><option ${row?.guidance==="일반"?"selected":""}>일반</option><option ${String(row?.guidance||"").includes("필요")?"selected":""}>지도필요</option><option ${row?.guidance==="지도완료"?"selected":""}>지도완료</option></select></label><label>비고<input id="lateNote" value="${escapeHtml(row?.note||"")}"></label></div>
+2454:     <div class="official-editor-actions">${row?'<button type="button" class="btn danger" id="lateDelete">삭제</button>':''}<button type="button" class="btn secondary" id="lateCancel">취소</button><button class="btn primary">${row?"수정 저장":"지각 등록"}</button></div></form>`;
+2455:   $("#drawer").classList.remove("hidden");$("#drawerBackdrop").classList.remove("hidden");$("#lateCancel").onclick=closeDrawer;
+2456:   if(row&&$("#lateDelete"))$("#lateDelete").onclick=async()=>{await deleteLateAttendanceRow(row);closeDrawer();};
+---
+### deleteOfficialAttendance @ 2441
+2433:       const result=await window.schoolBoard.saveOfficialAttendance(payload);
+2434:       readonlyCache=result?.data||readonlyCache; attendanceViewDate=payload.date; officialClassFilter="all"; officialStudentFilter="all"; closeDrawer(); render("attendance"); toast(row?"공결 기록을 수정했습니다.":"공결 기록을 등록했습니다.");
+2435:     }catch(error){toast(error?.message||"공결 저장에 실패했습니다.");}
+2436:   };
+2437: }
+2438: async function deleteOfficialAttendanceRow(row){
+2439:   if(!row?.id)return;
+2440:   if(!confirm(`${row.date} ${row.studentNo} ${row.name} 공결 기록을 삭제할까요?`))return;
+2441:   try{const result=await window.schoolBoard.deleteOfficialAttendance(row.id);readonlyCache=result?.data||readonlyCache;render("attendance");toast("공결 기록을 삭제했습니다.");}catch(error){toast(error?.message||"공결 삭제에 실패했습니다.");}
+2442: }
+2443: 
+2444: function openLateAttendanceEditor(row=null){
+2445:   if(currentRoleId()!=="admin")return toast("지각 기록 수정은 관리자만 가능합니다.");
+2446:   const students=(readonlyCache?.students||[]).slice().sort((a,b)=>String(a.studentNo||"").localeCompare(String(b.studentNo||"")));
+2447:   const selectedNo=String(row?.studentNo||"");
+2448:   $("#drawerKicker").textContent=row?"LATE ATTENDANCE · EDIT":"LATE ATTENDANCE · NEW";
+2449:   $("#drawerTitle").textContent=row?"지각 기록 수정":"지각 기록 등록";
+2450:   $("#drawerBody").innerHTML=`<form id="lateAttendanceEditor" class="official-attendance-editor">
+2451:     <div class="official-editor-grid two"><label>일자<input type="date" id="lateDate" required value="${escapeHtml(row?.date||attendanceViewDate||dateKey(today))}"></label><label>학생<select id="lateStudent" required><option value="">학생 선택</option>${students.map(st=>`<option value="${escapeHtml(st.studentNo||"")}" ${String(st.studentNo)===selectedNo?"selected":""}>${escapeHtml(st.studentNo||"")} ${escapeHtml(st.name||"")} · ${escapeHtml(classNumberOf(st))}반</option>`).join("")}</select></label>
+2452:     <label>제출시각<input type="time" id="lateTime" value="${escapeHtml(row?.time||"")}"></label><label>지각시간(분)<input type="number" min="0" id="lateMinutes" value="${escapeHtml(row?.minutes||"")}"></label>
+2453:     <label class="span-two">사유<input id="lateReason" required value="${escapeHtml(row?.reason||"")}"></label><label>지도상태<select id="lateGuidance"><option ${row?.guidance==="일반"?"selected":""}>일반</option><option ${String(row?.guidance||"").includes("필요")?"selected":""}>지도필요</option><option ${row?.guidance==="지도완료"?"selected":""}>지도완료</option></select></label><label>비고<input id="lateNote" value="${escapeHtml(row?.note||"")}"></label></div>
+2454:     <div class="official-editor-actions">${row?'<button type="button" class="btn danger" id="lateDelete">삭제</button>':''}<button type="button" class="btn secondary" id="lateCancel">취소</button><button class="btn primary">${row?"수정 저장":"지각 등록"}</button></div></form>`;
+2455:   $("#drawer").classList.remove("hidden");$("#drawerBackdrop").classList.remove("hidden");$("#lateCancel").onclick=closeDrawer;
+2456:   if(row&&$("#lateDelete"))$("#lateDelete").onclick=async()=>{await deleteLateAttendanceRow(row);closeDrawer();};
+2457:   $("#lateAttendanceEditor").onsubmit=async event=>{event.preventDefault();const student=students.find(st=>String(st.studentNo)===String($("#lateStudent").value));if(!student)return toast("학생을 선택하세요.");
+2458:     const previous=(readonlyCache?.lateAttendance||[]).filter(x=>String(x.studentId)===String(student.id)&&String(x.id)!==String(row?.id||""));
+2459:     const minutes=Number($("#lateMinutes").value||0), cumulativeCount=previous.length+1, cumulativeMinutes=previous.reduce((sum,x)=>sum+Number(x.minutes||0),0)+minutes;
+---
+### deleteLateAttendance @ 2456
+2448:   $("#drawerKicker").textContent=row?"LATE ATTENDANCE · EDIT":"LATE ATTENDANCE · NEW";
+2449:   $("#drawerTitle").textContent=row?"지각 기록 수정":"지각 기록 등록";
+2450:   $("#drawerBody").innerHTML=`<form id="lateAttendanceEditor" class="official-attendance-editor">
+2451:     <div class="official-editor-grid two"><label>일자<input type="date" id="lateDate" required value="${escapeHtml(row?.date||attendanceViewDate||dateKey(today))}"></label><label>학생<select id="lateStudent" required><option value="">학생 선택</option>${students.map(st=>`<option value="${escapeHtml(st.studentNo||"")}" ${String(st.studentNo)===selectedNo?"selected":""}>${escapeHtml(st.studentNo||"")} ${escapeHtml(st.name||"")} · ${escapeHtml(classNumberOf(st))}반</option>`).join("")}</select></label>
+2452:     <label>제출시각<input type="time" id="lateTime" value="${escapeHtml(row?.time||"")}"></label><label>지각시간(분)<input type="number" min="0" id="lateMinutes" value="${escapeHtml(row?.minutes||"")}"></label>
+2453:     <label class="span-two">사유<input id="lateReason" required value="${escapeHtml(row?.reason||"")}"></label><label>지도상태<select id="lateGuidance"><option ${row?.guidance==="일반"?"selected":""}>일반</option><option ${String(row?.guidance||"").includes("필요")?"selected":""}>지도필요</option><option ${row?.guidance==="지도완료"?"selected":""}>지도완료</option></select></label><label>비고<input id="lateNote" value="${escapeHtml(row?.note||"")}"></label></div>
+2454:     <div class="official-editor-actions">${row?'<button type="button" class="btn danger" id="lateDelete">삭제</button>':''}<button type="button" class="btn secondary" id="lateCancel">취소</button><button class="btn primary">${row?"수정 저장":"지각 등록"}</button></div></form>`;
+2455:   $("#drawer").classList.remove("hidden");$("#drawerBackdrop").classList.remove("hidden");$("#lateCancel").onclick=closeDrawer;
+2456:   if(row&&$("#lateDelete"))$("#lateDelete").onclick=async()=>{await deleteLateAttendanceRow(row);closeDrawer();};
+2457:   $("#lateAttendanceEditor").onsubmit=async event=>{event.preventDefault();const student=students.find(st=>String(st.studentNo)===String($("#lateStudent").value));if(!student)return toast("학생을 선택하세요.");
+2458:     const previous=(readonlyCache?.lateAttendance||[]).filter(x=>String(x.studentId)===String(student.id)&&String(x.id)!==String(row?.id||""));
+2459:     const minutes=Number($("#lateMinutes").value||0), cumulativeCount=previous.length+1, cumulativeMinutes=previous.reduce((sum,x)=>sum+Number(x.minutes||0),0)+minutes;
+2460:     const payload={id:row?.id||"",studentId:student.id,studentNo:student.studentNo,name:student.name,grade:String(student.studentNo||"").slice(0,1),className:classNumberOf(student),date:$("#lateDate").value,time:$("#lateTime").value,reason:$("#lateReason").value.trim(),minutes,cumulativeCount,cumulativeMinutes,guidance:$("#lateGuidance").value,note:$("#lateNote").value.trim(),editor:currentLoginTeacherName()};
+2461:     try{const result=await window.schoolBoard.saveLateAttendance(payload);readonlyCache=result?.data||readonlyCache;attendanceViewDate=payload.date;closeDrawer();render("attendance");toast(row?"지각 기록을 수정했습니다.":"지각 기록을 등록했습니다.");}catch(error){toast(error?.message||"지각 저장에 실패했습니다.");}
+2462:   };
+2463: }
+2464: async function deleteLateAttendanceRow(row){
+2465:   if(currentRoleId()!=="admin"||!row?.id)return;
+2466:   if(!confirm(`${row.date} ${row.studentNo} ${row.name} 지각 기록을 삭제할까요?`))return;
+2467:   try{const result=await window.schoolBoard.deleteLateAttendance(row.id);readonlyCache=result?.data||readonlyCache;render("attendance");toast("지각 기록을 삭제했습니다.");}catch(error){toast(error?.message||"지각 삭제에 실패했습니다.");}
+2468: }
+2469: 
+2470: function attendancePersonalStatisticsView(officialRows,lateRows,nightRows) {
+2471:   const students=(readonlyCache?.students||[]).slice().sort((a,b)=>String(a.studentNo||"").localeCompare(String(b.studentNo||"")));
+2472:   if(attendanceStatStudentFilter!=="all"&&!students.some(s=>attendanceStudentKey(s)===attendanceStatStudentFilter))attendanceStatStudentFilter="all";
+2473:   const selectedStudent=attendanceStatStudentFilter==="all"?null:students.find(s=>attendanceStudentKey(s)===attendanceStatStudentFilter);
+2474:   const filterRows=rows=>selectedStudent?rows.filter(row=>attendanceStudentKey(row)===attendanceStudentKey(selectedStudent)):rows;
+---
+### saveLateAttendance @ 2461
+2453:     <label class="span-two">사유<input id="lateReason" required value="${escapeHtml(row?.reason||"")}"></label><label>지도상태<select id="lateGuidance"><option ${row?.guidance==="일반"?"selected":""}>일반</option><option ${String(row?.guidance||"").includes("필요")?"selected":""}>지도필요</option><option ${row?.guidance==="지도완료"?"selected":""}>지도완료</option></select></label><label>비고<input id="lateNote" value="${escapeHtml(row?.note||"")}"></label></div>
+2454:     <div class="official-editor-actions">${row?'<button type="button" class="btn danger" id="lateDelete">삭제</button>':''}<button type="button" class="btn secondary" id="lateCancel">취소</button><button class="btn primary">${row?"수정 저장":"지각 등록"}</button></div></form>`;
+2455:   $("#drawer").classList.remove("hidden");$("#drawerBackdrop").classList.remove("hidden");$("#lateCancel").onclick=closeDrawer;
+2456:   if(row&&$("#lateDelete"))$("#lateDelete").onclick=async()=>{await deleteLateAttendanceRow(row);closeDrawer();};
+2457:   $("#lateAttendanceEditor").onsubmit=async event=>{event.preventDefault();const student=students.find(st=>String(st.studentNo)===String($("#lateStudent").value));if(!student)return toast("학생을 선택하세요.");
+2458:     const previous=(readonlyCache?.lateAttendance||[]).filter(x=>String(x.studentId)===String(student.id)&&String(x.id)!==String(row?.id||""));
+2459:     const minutes=Number($("#lateMinutes").value||0), cumulativeCount=previous.length+1, cumulativeMinutes=previous.reduce((sum,x)=>sum+Number(x.minutes||0),0)+minutes;
+2460:     const payload={id:row?.id||"",studentId:student.id,studentNo:student.studentNo,name:student.name,grade:String(student.studentNo||"").slice(0,1),className:classNumberOf(student),date:$("#lateDate").value,time:$("#lateTime").value,reason:$("#lateReason").value.trim(),minutes,cumulativeCount,cumulativeMinutes,guidance:$("#lateGuidance").value,note:$("#lateNote").value.trim(),editor:currentLoginTeacherName()};
+2461:     try{const result=await window.schoolBoard.saveLateAttendance(payload);readonlyCache=result?.data||readonlyCache;attendanceViewDate=payload.date;closeDrawer();render("attendance");toast(row?"지각 기록을 수정했습니다.":"지각 기록을 등록했습니다.");}catch(error){toast(error?.message||"지각 저장에 실패했습니다.");}
+2462:   };
+2463: }
+2464: async function deleteLateAttendanceRow(row){
+2465:   if(currentRoleId()!=="admin"||!row?.id)return;
+2466:   if(!confirm(`${row.date} ${row.studentNo} ${row.name} 지각 기록을 삭제할까요?`))return;
+2467:   try{const result=await window.schoolBoard.deleteLateAttendance(row.id);readonlyCache=result?.data||readonlyCache;render("attendance");toast("지각 기록을 삭제했습니다.");}catch(error){toast(error?.message||"지각 삭제에 실패했습니다.");}
+2468: }
+2469: 
+2470: function attendancePersonalStatisticsView(officialRows,lateRows,nightRows) {
+2471:   const students=(readonlyCache?.students||[]).slice().sort((a,b)=>String(a.studentNo||"").localeCompare(String(b.studentNo||"")));
+2472:   if(attendanceStatStudentFilter!=="all"&&!students.some(s=>attendanceStudentKey(s)===attendanceStatStudentFilter))attendanceStatStudentFilter="all";
+2473:   const selectedStudent=attendanceStatStudentFilter==="all"?null:students.find(s=>attendanceStudentKey(s)===attendanceStatStudentFilter);
+2474:   const filterRows=rows=>selectedStudent?rows.filter(row=>attendanceStudentKey(row)===attendanceStudentKey(selectedStudent)):rows;
+2475:   const official=filterRows(officialRows).slice().sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+2476:   const late=filterRows(lateRows).slice().sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+2477:   const night=filterRows(nightRows).filter(row=>{
+2478:     const sourceText=`${row.result||""} ${row.type||""} ${row.affiliation||""} ${row.detail||""}`;
+2479:     const dormOnly=/학사/.test(sourceText)&&!/방과후|야간심화|공동교육과정|프로그램|출석|지각/.test(sourceText);
+---
+### deleteLateAttendance @ 2464
+2456:   if(row&&$("#lateDelete"))$("#lateDelete").onclick=async()=>{await deleteLateAttendanceRow(row);closeDrawer();};
+2457:   $("#lateAttendanceEditor").onsubmit=async event=>{event.preventDefault();const student=students.find(st=>String(st.studentNo)===String($("#lateStudent").value));if(!student)return toast("학생을 선택하세요.");
+2458:     const previous=(readonlyCache?.lateAttendance||[]).filter(x=>String(x.studentId)===String(student.id)&&String(x.id)!==String(row?.id||""));
+2459:     const minutes=Number($("#lateMinutes").value||0), cumulativeCount=previous.length+1, cumulativeMinutes=previous.reduce((sum,x)=>sum+Number(x.minutes||0),0)+minutes;
+2460:     const payload={id:row?.id||"",studentId:student.id,studentNo:student.studentNo,name:student.name,grade:String(student.studentNo||"").slice(0,1),className:classNumberOf(student),date:$("#lateDate").value,time:$("#lateTime").value,reason:$("#lateReason").value.trim(),minutes,cumulativeCount,cumulativeMinutes,guidance:$("#lateGuidance").value,note:$("#lateNote").value.trim(),editor:currentLoginTeacherName()};
+2461:     try{const result=await window.schoolBoard.saveLateAttendance(payload);readonlyCache=result?.data||readonlyCache;attendanceViewDate=payload.date;closeDrawer();render("attendance");toast(row?"지각 기록을 수정했습니다.":"지각 기록을 등록했습니다.");}catch(error){toast(error?.message||"지각 저장에 실패했습니다.");}
+2462:   };
+2463: }
+2464: async function deleteLateAttendanceRow(row){
+2465:   if(currentRoleId()!=="admin"||!row?.id)return;
+2466:   if(!confirm(`${row.date} ${row.studentNo} ${row.name} 지각 기록을 삭제할까요?`))return;
+2467:   try{const result=await window.schoolBoard.deleteLateAttendance(row.id);readonlyCache=result?.data||readonlyCache;render("attendance");toast("지각 기록을 삭제했습니다.");}catch(error){toast(error?.message||"지각 삭제에 실패했습니다.");}
+2468: }
+2469: 
+2470: function attendancePersonalStatisticsView(officialRows,lateRows,nightRows) {
+2471:   const students=(readonlyCache?.students||[]).slice().sort((a,b)=>String(a.studentNo||"").localeCompare(String(b.studentNo||"")));
+2472:   if(attendanceStatStudentFilter!=="all"&&!students.some(s=>attendanceStudentKey(s)===attendanceStatStudentFilter))attendanceStatStudentFilter="all";
+2473:   const selectedStudent=attendanceStatStudentFilter==="all"?null:students.find(s=>attendanceStudentKey(s)===attendanceStatStudentFilter);
+2474:   const filterRows=rows=>selectedStudent?rows.filter(row=>attendanceStudentKey(row)===attendanceStudentKey(selectedStudent)):rows;
+2475:   const official=filterRows(officialRows).slice().sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+2476:   const late=filterRows(lateRows).slice().sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+2477:   const night=filterRows(nightRows).filter(row=>{
+2478:     const sourceText=`${row.result||""} ${row.type||""} ${row.affiliation||""} ${row.detail||""}`;
+2479:     const dormOnly=/학사/.test(sourceText)&&!/방과후|야간심화|공동교육과정|프로그램|출석|지각/.test(sourceText);
+2480:     return !dormOnly;
+2481:   }).slice().sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+2482:   const dates=rows=>[...new Set(rows.map(x=>x.date).filter(Boolean))].sort().reverse();
+---
+### deleteLateAttendance @ 2467
+2459:     const minutes=Number($("#lateMinutes").value||0), cumulativeCount=previous.length+1, cumulativeMinutes=previous.reduce((sum,x)=>sum+Number(x.minutes||0),0)+minutes;
+2460:     const payload={id:row?.id||"",studentId:student.id,studentNo:student.studentNo,name:student.name,grade:String(student.studentNo||"").slice(0,1),className:classNumberOf(student),date:$("#lateDate").value,time:$("#lateTime").value,reason:$("#lateReason").value.trim(),minutes,cumulativeCount,cumulativeMinutes,guidance:$("#lateGuidance").value,note:$("#lateNote").value.trim(),editor:currentLoginTeacherName()};
+2461:     try{const result=await window.schoolBoard.saveLateAttendance(payload);readonlyCache=result?.data||readonlyCache;attendanceViewDate=payload.date;closeDrawer();render("attendance");toast(row?"지각 기록을 수정했습니다.":"지각 기록을 등록했습니다.");}catch(error){toast(error?.message||"지각 저장에 실패했습니다.");}
+2462:   };
+2463: }
+2464: async function deleteLateAttendanceRow(row){
+2465:   if(currentRoleId()!=="admin"||!row?.id)return;
+2466:   if(!confirm(`${row.date} ${row.studentNo} ${row.name} 지각 기록을 삭제할까요?`))return;
+2467:   try{const result=await window.schoolBoard.deleteLateAttendance(row.id);readonlyCache=result?.data||readonlyCache;render("attendance");toast("지각 기록을 삭제했습니다.");}catch(error){toast(error?.message||"지각 삭제에 실패했습니다.");}
+2468: }
+2469: 
+2470: function attendancePersonalStatisticsView(officialRows,lateRows,nightRows) {
+2471:   const students=(readonlyCache?.students||[]).slice().sort((a,b)=>String(a.studentNo||"").localeCompare(String(b.studentNo||"")));
+2472:   if(attendanceStatStudentFilter!=="all"&&!students.some(s=>attendanceStudentKey(s)===attendanceStatStudentFilter))attendanceStatStudentFilter="all";
+2473:   const selectedStudent=attendanceStatStudentFilter==="all"?null:students.find(s=>attendanceStudentKey(s)===attendanceStatStudentFilter);
+2474:   const filterRows=rows=>selectedStudent?rows.filter(row=>attendanceStudentKey(row)===attendanceStudentKey(selectedStudent)):rows;
+2475:   const official=filterRows(officialRows).slice().sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+2476:   const late=filterRows(lateRows).slice().sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+2477:   const night=filterRows(nightRows).filter(row=>{
+2478:     const sourceText=`${row.result||""} ${row.type||""} ${row.affiliation||""} ${row.detail||""}`;
+2479:     const dormOnly=/학사/.test(sourceText)&&!/방과후|야간심화|공동교육과정|프로그램|출석|지각/.test(sourceText);
+2480:     return !dormOnly;
+2481:   }).slice().sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+2482:   const dates=rows=>[...new Set(rows.map(x=>x.date).filter(Boolean))].sort().reverse();
+2483:   const classes=[...new Set(students.map(s=>String(classNumberOf(s)||'')).filter(Boolean))].sort((a,b)=>Number(a)-Number(b));
+2484:   if(selectedStudent) attendanceStatClassFilter=String(classNumberOf(selectedStudent)||attendanceStatClassFilter||'all');
+2485:   const scopedStudents=attendanceStatClassFilter==='all'?students:students.filter(s=>String(classNumberOf(s))===String(attendanceStatClassFilter));
+---
+### saveLunchDuty @ 7637
+7629:   $("#drawerBody").innerHTML=`<form class="duty-editor-form" id="lunchDutyAssignmentForm"><label>운영일<input value="${escapeHtml(row.date||'')}" readonly></label><label>현재 담당교사<input value="${escapeHtml(row.teacher||'')}" readonly></label><label>변경 담당교사<select id="lunchDutyTeacher">${nightTeacherOptions(row.teacher||'')}</select></label><label>담당 구분<select id="lunchDutyType"><option value="급식실" ${row.dutyType==='급식실'?'selected':''}>급식실</option><option value="방송" ${/방송/.test(row.dutyType||'')?'selected':''}>방송</option></select></label><div class="modal-actions"><button type="button" class="btn secondary" data-cancel-lunch-edit>취소</button><button class="btn primary">시트에 저장</button></div></form><p class="drawer-note">42_급식지도계획의 해당 행을 직접 수정합니다.</p>`;
+7630:   $("[data-cancel-lunch-edit]")?.addEventListener('click',()=>renderDutyCalendarDrawer('lunch'));
+7631:   $("#lunchDutyAssignmentForm").onsubmit=async event=>{
+7632:     event.preventDefault();
+7633:     const teacher=$("#lunchDutyTeacher").value.trim(), dutyType=$("#lunchDutyType").value.trim();
+7634:     if(!teacher)return toast('변경할 담당교사를 선택하세요.');
+7635:     const submit=event.submitter; if(submit){submit.disabled=true;submit.textContent='저장 중…';}
+7636:     try{
+7637:       if(!window.schoolBoard?.saveLunchDuty) throw new Error('급식지도 저장 기능을 사용할 수 없습니다.');
+7638:       const result=await window.schoolBoard.saveLunchDuty({id:row.id,date:row.date,originalTeacher:row.teacher,teacher,dutyType,role:currentRoleId(),requester:currentLoginTeacherName()});
+7639:       if(!result?.ok)throw new Error(result?.reason||'저장하지 못했습니다.');
+7640:       readonlyCache=result.data||readonlyCache;
+7641:       renderDutyCalendarDrawer('lunch'); render('dashboard'); toast('급식지도 담당을 변경했습니다.');
+7642:     }catch(error){toast(error?.message||'급식지도 변경 실패'); if(submit){submit.disabled=false;submit.textContent='시트에 저장';}}
+7643:   };
+7644: }
+7645: 
+7646: function bindNightDutyEditor(){
+7647:   $("#drawerBody")?.querySelectorAll('[data-night-duty-edit]').forEach(button=>button.addEventListener('click',()=>openNightDutyEditor({
+7648:     id:button.dataset.nightDutyEdit||'', date:button.dataset.nightDutyDate||'', teacher:button.dataset.nightDutyTeacher||''
+7649:   })));
+7650: }
+7651: function nightTeacherOptions(selected=''){
+7652:   const names=[...new Set((SOURCE_REFERENCE_DATA?.extension||[]).map(row=>String(row?.[1]||'').trim()).filter(name=>name&&!/급식소|교장실|행정실|특별실|팩/.test(name)))].sort((a,b)=>a.localeCompare(b,'ko'));
+7653:   if(selected&&!names.includes(selected)) names.unshift(selected);
+7654:   return names.map(name=>`<option value="${escapeHtml(name)}" ${name===selected?'selected':''}>${escapeHtml(name)}</option>`).join('');
+7655: }
+---
+### saveLunchDuty @ 7638
+7630:   $("[data-cancel-lunch-edit]")?.addEventListener('click',()=>renderDutyCalendarDrawer('lunch'));
+7631:   $("#lunchDutyAssignmentForm").onsubmit=async event=>{
+7632:     event.preventDefault();
+7633:     const teacher=$("#lunchDutyTeacher").value.trim(), dutyType=$("#lunchDutyType").value.trim();
+7634:     if(!teacher)return toast('변경할 담당교사를 선택하세요.');
+7635:     const submit=event.submitter; if(submit){submit.disabled=true;submit.textContent='저장 중…';}
+7636:     try{
+7637:       if(!window.schoolBoard?.saveLunchDuty) throw new Error('급식지도 저장 기능을 사용할 수 없습니다.');
+7638:       const result=await window.schoolBoard.saveLunchDuty({id:row.id,date:row.date,originalTeacher:row.teacher,teacher,dutyType,role:currentRoleId(),requester:currentLoginTeacherName()});
+7639:       if(!result?.ok)throw new Error(result?.reason||'저장하지 못했습니다.');
+7640:       readonlyCache=result.data||readonlyCache;
+7641:       renderDutyCalendarDrawer('lunch'); render('dashboard'); toast('급식지도 담당을 변경했습니다.');
+7642:     }catch(error){toast(error?.message||'급식지도 변경 실패'); if(submit){submit.disabled=false;submit.textContent='시트에 저장';}}
+7643:   };
+7644: }
+7645: 
+7646: function bindNightDutyEditor(){
+7647:   $("#drawerBody")?.querySelectorAll('[data-night-duty-edit]').forEach(button=>button.addEventListener('click',()=>openNightDutyEditor({
+7648:     id:button.dataset.nightDutyEdit||'', date:button.dataset.nightDutyDate||'', teacher:button.dataset.nightDutyTeacher||''
+7649:   })));
+7650: }
+7651: function nightTeacherOptions(selected=''){
+7652:   const names=[...new Set((SOURCE_REFERENCE_DATA?.extension||[]).map(row=>String(row?.[1]||'').trim()).filter(name=>name&&!/급식소|교장실|행정실|특별실|팩/.test(name)))].sort((a,b)=>a.localeCompare(b,'ko'));
+7653:   if(selected&&!names.includes(selected)) names.unshift(selected);
+7654:   return names.map(name=>`<option value="${escapeHtml(name)}" ${name===selected?'selected':''}>${escapeHtml(name)}</option>`).join('');
+7655: }
+7656: function openNightDutyEditor(row={}){
+---
+### saveNightSupervisor @ 7667
+7659:   $("#drawerBody").innerHTML=`<form class="duty-editor-form" id="nightDutyEditForm"><label>운영일<input value="${escapeHtml(row.date||'')}" readonly></label><label>현재 감독교사<input value="${escapeHtml(row.teacher||'')}" readonly></label><label>변경 감독교사<select id="nightDutyTeacher">${nightTeacherOptions(row.teacher||'')}</select></label><div class="night-duty-edit-info"><b>16:30~21:30</b><span>면학관 2~3층 · 1학년 1~9반</span></div><div class="modal-actions"><button type="button" class="btn secondary" data-cancel-night-edit>취소</button><button class="btn primary">시트에 저장</button></div></form><p class="drawer-note">43_야자감독계획의 해당 행을 직접 수정합니다.</p>`;
+7660:   $("[data-cancel-night-edit]")?.addEventListener('click',()=>renderDutyCalendarDrawer('night'));
+7661:   $("#nightDutyEditForm").onsubmit=async event=>{
+7662:     event.preventDefault();
+7663:     const teacher=$("#nightDutyTeacher").value.trim();
+7664:     if(!teacher)return toast('변경할 감독교사를 선택하세요.');
+7665:     const submit=event.submitter; if(submit){submit.disabled=true;submit.textContent='저장 중…';}
+7666:     try{
+7667:       const result=await window.schoolBoard.saveNightSupervisor({id:row.id,date:row.date,teacher,role:currentRoleId(),requester:currentLoginTeacherName()});
+7668:       if(!result?.ok)throw new Error(result?.reason||'저장하지 못했습니다.');
+7669:       readonlyCache=result.data||readonlyCache;
+7670:       renderDutyCalendarDrawer('night'); render('dashboard'); toast('야자감독 교사를 변경했습니다.');
+7671:     }catch(error){toast(error?.message||'야자감독 변경 실패'); if(submit){submit.disabled=false;submit.textContent='시트에 저장';}}
+7672:   };
+7673: }
+7674: function renderDutyCalendarDrawer(type){
+7675:   const isLunch=type==='lunch';
+7676:   $("#drawerKicker").textContent=isLunch?'LUNCH DUTY · 42':'NIGHT DUTY · 43';
+7677:   $("#drawerTitle").textContent=isLunch?'월간 급식지도':'월간 야자감독';
+7678:   $("#drawerBody").innerHTML=dutyCalendarMarkup(type);
+7679:   $("#drawer").classList.add('duty-calendar-expanded');
+7680:   $("#drawer").classList.remove('hidden');$("#drawerBackdrop").classList.remove('hidden');
+7681:   bindDutyCalendarNavigation(type); if(type==='night')bindNightDutyEditor(); else bindLunchDutyEditor();
+7682: }
+7683: function openTodayLunchSupervisorDrawer(){
+7684:   const key=dateKey(today);
+7685:   const rows=(readonlyCache?.lunchDuties||[]).filter(row=>String(row.date||'').slice(0,10)===key);
+---
+### saveStudentContact @ 9536
+9528:   if(card==="score") return false;
+9529:   // 연락처·이메일·보호자 연락처는 타반 담임에게 기본 마스킹하고 필요 시 현재 화면에서만 일시 공개한다.
+9530:   return card==="contact"&&(access.isOtherHomeroom||access.isReadOnlyLeadership)&&!studentSensitiveRevealKeys.has(sensitiveRevealKey(student,card));
+9531: }
+9532: function maskedStudentCardMarkup(card,label){
+9533:   return `<button type="button" class="student-sensitive-mask" data-reveal-student-card="${escapeHtml(card)}"><b>＊＊＊＊</b><span>${escapeHtml(label)} · 클릭하여 보기</span><small>보호 정보는 필요할 때만 현재 화면에서 일시적으로 공개됩니다.</small></button>`;
+9534: }
+9535: function studentWithContactOverride(student){return {...student};}
+9536: async function saveStudentContactToSheet(student,field,value,index,label,embedded=false){
+9537:   const access=studentAccessContext(student);
+9538:   if(!access.canEditContact)return toast('이 학생의 연락정보 수정 권한이 없습니다.');
+9539:   const button=document.querySelector('.contact-inline-save'); if(button){button.disabled=true;button.textContent='저장 중…';}
+9540:   try{
+9541:     const result=await window.schoolBoard?.saveStudentContact?.({studentId:student.id,studentNo:student.studentNo,className:student.className,field,value,role:access.role,requester:currentLoginTeacherName()});
+9542:     if(!result?.ok)throw new Error(result?.reason||'시트 저장 실패');
+9543:     readonlyCache=result.data||readonlyCache;
+9544:     toast(`${label}를 UEP 기본정보 연결시트에 저장했습니다.`);
+9545:     if(embedded&&state.activePage==='students'){render('students');window.scrollTo(0,0);}else openStudentDrawer(index);
+9546:   }catch(error){toast(error?.message||`${label} 수정에 실패했습니다.`);if(embedded&&state.activePage==='students')render('students');else openStudentDrawer(index);}
+9547: }
+9548: function editStudentContact(student,field,label,index,button){
+9549:   const access=studentAccessContext(student);
+9550:   if(!access.canEditContact)return toast('담임은 자기 반 학생의 연락정보만 수정할 수 있습니다.');
+9551:   const embedded=Boolean(button?.closest?.('#studentDashboardEmbedded'));
+9552:   const line=button?.closest?.('.contact-value-line,.student-email-line');
+9553:   if(!line)return toast(`${label} 수정창을 열 수 없습니다.`);
+9554:   const current=studentWithContactOverride(student)[field]||'';
+---
+### saveStudentContact @ 9541
+9533:   return `<button type="button" class="student-sensitive-mask" data-reveal-student-card="${escapeHtml(card)}"><b>＊＊＊＊</b><span>${escapeHtml(label)} · 클릭하여 보기</span><small>보호 정보는 필요할 때만 현재 화면에서 일시적으로 공개됩니다.</small></button>`;
+9534: }
+9535: function studentWithContactOverride(student){return {...student};}
+9536: async function saveStudentContactToSheet(student,field,value,index,label,embedded=false){
+9537:   const access=studentAccessContext(student);
+9538:   if(!access.canEditContact)return toast('이 학생의 연락정보 수정 권한이 없습니다.');
+9539:   const button=document.querySelector('.contact-inline-save'); if(button){button.disabled=true;button.textContent='저장 중…';}
+9540:   try{
+9541:     const result=await window.schoolBoard?.saveStudentContact?.({studentId:student.id,studentNo:student.studentNo,className:student.className,field,value,role:access.role,requester:currentLoginTeacherName()});
+9542:     if(!result?.ok)throw new Error(result?.reason||'시트 저장 실패');
+9543:     readonlyCache=result.data||readonlyCache;
+9544:     toast(`${label}를 UEP 기본정보 연결시트에 저장했습니다.`);
+9545:     if(embedded&&state.activePage==='students'){render('students');window.scrollTo(0,0);}else openStudentDrawer(index);
+9546:   }catch(error){toast(error?.message||`${label} 수정에 실패했습니다.`);if(embedded&&state.activePage==='students')render('students');else openStudentDrawer(index);}
+9547: }
+9548: function editStudentContact(student,field,label,index,button){
+9549:   const access=studentAccessContext(student);
+9550:   if(!access.canEditContact)return toast('담임은 자기 반 학생의 연락정보만 수정할 수 있습니다.');
+9551:   const embedded=Boolean(button?.closest?.('#studentDashboardEmbedded'));
+9552:   const line=button?.closest?.('.contact-value-line,.student-email-line');
+9553:   if(!line)return toast(`${label} 수정창을 열 수 없습니다.`);
+9554:   const current=studentWithContactOverride(student)[field]||'';
+9555:   const type=field==='email'?'email':'tel';
+9556:   line.innerHTML=`<input class="contact-inline-input" type="${type}" value="${escapeHtml(current==='-'?'':current)}" aria-label="${escapeHtml(label)}"><em class="storage-badge sheet">시트 저장</em><button type="button" class="contact-inline-save">저장</button><button type="button" class="contact-inline-cancel">취소</button>`;
+9557:   const input=line.querySelector('input'); input?.focus(); input?.select();
+9558:   line.querySelector('.contact-inline-cancel').onclick=()=>{if(embedded&&state.activePage==='students')render('students');else openStudentDrawer(index);};
+9559:   line.querySelector('.contact-inline-save').onclick=()=>saveStudentContactToSheet(student,field,String(input?.value||'').trim(),index,label,embedded);
+---
+### saveStudentContact @ 9559
+9551:   const embedded=Boolean(button?.closest?.('#studentDashboardEmbedded'));
+9552:   const line=button?.closest?.('.contact-value-line,.student-email-line');
+9553:   if(!line)return toast(`${label} 수정창을 열 수 없습니다.`);
+9554:   const current=studentWithContactOverride(student)[field]||'';
+9555:   const type=field==='email'?'email':'tel';
+9556:   line.innerHTML=`<input class="contact-inline-input" type="${type}" value="${escapeHtml(current==='-'?'':current)}" aria-label="${escapeHtml(label)}"><em class="storage-badge sheet">시트 저장</em><button type="button" class="contact-inline-save">저장</button><button type="button" class="contact-inline-cancel">취소</button>`;
+9557:   const input=line.querySelector('input'); input?.focus(); input?.select();
+9558:   line.querySelector('.contact-inline-cancel').onclick=()=>{if(embedded&&state.activePage==='students')render('students');else openStudentDrawer(index);};
+9559:   line.querySelector('.contact-inline-save').onclick=()=>saveStudentContactToSheet(student,field,String(input?.value||'').trim(),index,label,embedded);
+9560: }
+9561: function programStableKey(program){
+9562:   const id=String(program?.programId||program?.activityId||program?.id||"").trim();
+9563:   if(id)return `${id}|${program?.date||""}`;
+9564:   return `${program?.recordTitle||program?.actualTitle||program?.title||""}|${program?.date||""}|${program?.time||""}`;
+9565: }
+9566: function reportProgramId(report){
+9567:   return String(report?.programId||report?.activityId||report?.sourceProgramId||report?.linkedProgramId||"").trim();
+9568: }
+9569: 
+9570: function studentLatestInternalRows(student){
+9571:   const rows=(readonlyCache?.scoreRecords||[]).filter(row=>row.studentId===student.id&&row.scoreType==='내신'&&Number.isFinite(Number(row.level))&&!/산출제외/.test(String(row.note||row.status||'')));
+9572:   if(!rows.length)return [];
+9573:   const exams=[...new Set(rows.map(row=>row.exam).filter(Boolean))];
+9574:   const exam=exams[exams.length-1]||'';
+9575:   return exam?rows.filter(row=>row.exam===exam):rows;
+9576: }
+9577: function studentAllOneGrade(student){
+---
+### deleteOfficialAttendance @ 10426
+10418:     const officialStudentSelect=$("#officialStudentFilter");
+10419:     if(officialStudentSelect)officialStudentSelect.onchange=()=>{officialStudentFilter=officialStudentSelect.value||"all";render("attendance");};
+10420:     const attendanceStatClassSelect=$("#attendanceStatClassFilter");
+10421:     if(attendanceStatClassSelect)attendanceStatClassSelect.onchange=()=>{attendanceStatClassFilter=attendanceStatClassSelect.value||"all";attendanceStatStudentFilter="all";render("attendance");};
+10422:     const attendanceStatStudentSelect=$("#attendanceStatStudentFilter");
+10423:     if(attendanceStatStudentSelect)attendanceStatStudentSelect.onchange=()=>{attendanceStatStudentFilter=attendanceStatStudentSelect.value||"all";render("attendance");};
+10424:     uepBindOnce($("#officialAttendanceAdd"),"officialAttendanceAdd","click",()=>{if(currentRoleId()!=="admin")return toast("공결 등록·수정은 관리자만 가능합니다.");openOfficialAttendanceEditor();});
+10425:     $$(`[data-official-edit]`).forEach(button=>button.onclick=()=>{if(currentRoleId()!=="admin")return toast("공결 수정은 관리자만 가능합니다.");const row=(readonlyCache?.officialAttendance||[]).find(item=>String(item.id)===String(button.dataset.officialEdit));if(row)openOfficialAttendanceEditor(row);});
+10426:     $$(`[data-official-delete]`).forEach(button=>button.onclick=()=>{if(currentRoleId()!=="admin")return toast("공결 삭제는 관리자만 가능합니다.");const row=(readonlyCache?.officialAttendance||[]).find(item=>String(item.id)===String(button.dataset.officialDelete));if(row)deleteOfficialAttendanceRow(row);});
+10427:     $$(`[data-late-class]`).forEach((button) => { button.onclick = () => { lateClassFilter = button.dataset.lateClass || "all"; render("attendance"); }; });
+10428:     uepBindOnce($("#lateAttendanceAdd"),"lateAttendanceAdd","click",()=>openLateAttendanceEditor());
+10429:     $$(`[data-night-class]`).forEach((button) => { button.onclick = () => { nightClassFilter = button.dataset.nightClass || "1"; render("attendance"); }; });
+10430:     const selectedNightDate = document.querySelector('.night-month-matrix th.selected-day');
+10431:     if (selectedNightDate) requestAnimationFrame(() => selectedNightDate.scrollIntoView({block:'nearest', inline:'center'}));
+10432:     $$(`[data-late-student]`).forEach((button) => { button.onclick = () => {const rid=button.dataset.lateRecordId;if(currentRoleId()==="admin"&&rid){const row=(readonlyCache?.lateAttendance||[]).find(x=>String(x.id)===String(rid));if(row)return openLateAttendanceEditor(row);}openAttendanceHistory("late", button.dataset.lateStudent);}; });
+10433:     $$(`[data-night-program]`).forEach((button) => { button.onclick = (event) => { event.stopPropagation(); const id=button.dataset.nightProgram; const kind=button.dataset.nightProgramKind; if(kind==="after") openNightProgramSummary(id,button.dataset.nightStudent,button.dataset.nightDay,button.dataset.nightSlot); else openProgramDrawer(id); }; });
+10434:     $$(`.night-status-cell[data-night-student]:not([data-night-program])`).forEach((button) => { button.onclick = () => openNightAttendanceDetail(button.dataset.nightStudent, button.dataset.nightDay, button.dataset.nightSlot); });
+10435:     $$(`.student-name-cell [data-night-student]`).forEach((button) => { button.onclick = () => openAttendanceHistory("night", button.dataset.nightStudent); });
+10436:   }
+10437:   if (page === "scores") {
+10438:     const classSelect=$("#scoreClass"), studentSelect=$("#scoreStudent"), scope=$("#scoreScope");
+10439:     const updateStudents=()=>{if(studentSelect)studentSelect.innerHTML=`<option value="">학생 선택</option>${optionStudents(classSelect?.value || "")}`;};
+10440:     if(classSelect)classSelect.onchange=()=>{updateStudents();updateStudentSignalIndicator();};
+10441:     if(studentSelect)studentSelect.onchange=()=>{selectedStudentId=studentSelect.value||selectedStudentId;updateStudentSignalIndicator();};
+10442:     if(scope)scope.onchange=()=>{$("#scoreStudentLabel")?.classList.toggle("hidden",scope.value!=="individual");updateStudentSignalIndicator();};
+10443:     uepBindOnce($("#scoreQueryButton"),"scoreQueryButton","click",runScoreQuery);
+10444:     $("#scoreQueryReset")?.addEventListener("click",()=>{if(scope)scope.value="class";if(classSelect)classSelect.value="";updateStudents();const exam=$("#scoreExam");if(exam)exam.value="";$("#scoreStudentLabel")?.classList.add("hidden");$("#scoreQueryResult").innerHTML=`<div class="query-empty"><span>⌁</span><b>성적 조회 대상을 선택하세요.</b><small>조회 전에는 학생 명단과 성적이 표시되지 않습니다.</small></div>`;});
+---
+### saveDormOuting @ 11718
+11710: 
+11711: function openDormOutingTeacherEditor(){
+11712:   const all=readonlyCache?.students||[], dorm=readonlyCache?.dormStudents||[];
+11713:   const ids=new Set(dorm.flatMap(x=>[String(x.studentId||''),String(x.studentNo||'')]).filter(Boolean));
+11714:   const students=(ids.size?all.filter(s=>ids.has(String(s.id||''))||ids.has(String(s.studentNo||''))):all).filter(s=>String(s.status||'재학')==='재학').sort((a,b)=>String(a.studentNo||'').localeCompare(String(b.studentNo||''),'ko'));
+11715:   const layer=document.createElement('div');layer.className='issue-layer';layer.id='dormOutingTeacherLayer';
+11716:   layer.innerHTML=`<div class="issue-dialog dorm-outing-teacher-dialog"><header><div><small>DORMITORY · TEACHER ENTRY</small><h3>학사외출 교사 추가</h3><p>갑작스러운 병원 진료 등 학생 폼 제출이 어려운 경우 교사가 직접 기록합니다.</p></div><button type="button" data-outing-editor-close>×</button></header><form id="dormOutingTeacherForm"><div class="dorm-outing-editor-grid"><label>학생<select id="dormOutingTeacherStudent" required><option value="">학생 선택</option>${students.map(s=>`<option value="${escapeHtml(s.id||s.studentNo||'')}">${escapeHtml((s.studentNo||'')+' '+(s.name||''))}</option>`).join('')}</select></label><label>날짜<input id="dormOutingTeacherDate" type="date" value="${escapeHtml(dateKey(outingViewDate))}" required></label><label>구분<select id="dormOutingTeacherCategory"><option>외출</option><option>병원외출</option><option>퇴소</option><option>늦은 입소</option></select></label><label>외출시간<input id="dormOutingTeacherOut" type="time"></label><label>복귀·귀가 예정<input id="dormOutingTeacherReturn" type="time"></label><label>사유<input id="dormOutingTeacherReason" placeholder="예: 복통으로 병원 진료" required></label><label>목적지<input id="dormOutingTeacherDestination" placeholder="병원·자택 등"></label><label class="wide">비고<input id="dormOutingTeacherNote" placeholder="보호자 연락 여부 등"></label></div><div class="modal-actions"><button type="button" class="btn secondary" data-outing-editor-close>취소</button><button class="btn primary" type="submit">교사등록 저장</button></div></form></div>`;
+11717:   document.body.appendChild(layer);const close=()=>layer.remove();layer.querySelectorAll('[data-outing-editor-close]').forEach(b=>b.onclick=close);
+11718:   layer.querySelector('#dormOutingTeacherForm').onsubmit=async e=>{e.preventDefault();const id=layer.querySelector('#dormOutingTeacherStudent').value,student=students.find(s=>String(s.id||s.studentNo||'')===String(id));if(!student)return toast('학생을 선택하세요.');const payload={role:currentRoleId(),studentId:String(student.id||''),studentNo:String(student.studentNo||''),name:String(student.name||''),grade:String(student.grade||'1'),className:String(classNumberOf(student)||''),number:String(student.number||''),date:layer.querySelector('#dormOutingTeacherDate').value,category:layer.querySelector('#dormOutingTeacherCategory').value,outTime:layer.querySelector('#dormOutingTeacherOut').value,returnTime:layer.querySelector('#dormOutingTeacherReturn').value,reason:layer.querySelector('#dormOutingTeacherReason').value.trim(),destination:layer.querySelector('#dormOutingTeacherDestination').value.trim(),note:layer.querySelector('#dormOutingTeacherNote').value.trim(),status:'확인',writer:currentLoginTeacherName()||''};const btn=e.submitter;btn.disabled=true;btn.textContent='저장 중…';try{const result=await window.schoolBoard?.saveDormOuting?.(payload);if(!result?.ok)throw new Error(result?.reason||'저장 실패');readonlyCache=result.data||readonlyCache;close();openDormOutingDrawer();updateDormOutingCount();toast('학사외출을 교사등록으로 저장했습니다.');}catch(err){btn.disabled=false;btn.textContent='교사등록 저장';toast(err?.message||'학사외출 저장 실패');}};
+11719: }
+11720: function openDormOutingDrawer() {
+11721:   const viewKey = dateKey(outingViewDate);
+11722:   const liveOutings = (readonlyCache?.dormOutings || []).filter(item=>!dormOutingExcludedByRule(item));
+11723:   const items = liveOutings.filter((item) => item.date === viewKey);
+11724:   const monday = new Date(outingViewDate);
+11725:   const day = monday.getDay();
+11726:   monday.setDate(monday.getDate() - (day === 0 ? 6 : day - 1));
+11727:   const sunday = new Date(monday);
+11728:   sunday.setDate(sunday.getDate() + 6);
+11729:   const weekItems = liveOutings.filter((item) => item.date >= dateKey(monday) && item.date <= dateKey(sunday));
+11730:   const displayDate = new Intl.DateTimeFormat("ko-KR", { year: "numeric", month: "long", day: "numeric", weekday: "short" }).format(outingViewDate);
+11731:   $("#drawerKicker").textContent = "DORMITORY · OUTING";
+11732:   $("#drawerTitle").textContent = `학사외출 · ${displayDate}`;
+11733:   const outingMasterStudent = (item) => {
+11734:     const students=readonlyCache?.students||[];
+11735:     const ids=[item.studentId,item.studentNo,item.studentNumber].filter(Boolean).map(String);
+11736:     const byId=students.find(student=>ids.some(id=>id===String(student.id||"")||id===String(student.studentId||"")||id===String(student.studentNo||"")));
+---
