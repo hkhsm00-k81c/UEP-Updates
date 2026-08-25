@@ -1,0 +1,42 @@
+name: Diagnose UEP 0.81.71 Data Domains
+'on':
+  push:
+    branches: [main]
+    paths: [diag-uep-0.81.71-data-domains.trigger]
+permissions:
+  contents: write
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download stable
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          gh release download v0.81.71 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+      - name: Inventory sheet domains
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $js=@'
+          const path=require('path');
+          const p=path.resolve('app/resources/app/electron/google-data.cjs');
+          const mod=require(p);
+          const ranges=mod.SHEET_RANGES||{};
+          const rules=mod.RULE_SHEET_RANGES||{};
+          function rowCap(r){const m=String(r).match(/(\d+)(?::[A-Z]+(\d+))?$/);return m?Number(m[2]||m[1]||0):0}
+          const classify=k=>/학생|연락|성적|선택과목|소속|마스터|기초/i.test(k)?'STATIC_STUDENT':/공지|출결|지각|야자|학사|외출|보고|프로그램|캘린더|감독|급식|상담/i.test(k)?'DYNAMIC_OPERATIONAL':'OTHER';
+          let out=['# UEP 0.81.71 data domain inventory','',`SHEET_RANGES count=${Object.keys(ranges).length}`,`RULE_SHEET_RANGES count=${Object.keys(rules).length}`,''];
+          for(const [k,r] of Object.entries(ranges))out.push(`${classify(k)} | ${k} | ${r} | cap=${rowCap(r)}`);
+          out.push('','## RULES');for(const [k,r] of Object.entries(rules))out.push(`RULE | ${k} | ${r} | cap=${rowCap(r)}`);
+          require('fs').writeFileSync('diag-uep-0.81.71-data-domains.txt',out.join('\n'),'utf8');
+          '@
+          Set-Content temp-domain.js $js -Encoding UTF8
+          node temp-domain.js
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git pull --rebase origin main;git add diag-uep-0.81.71-data-domains.txt;git commit -m 'diag: inventory UEP 0.81.71 data domains';git push
