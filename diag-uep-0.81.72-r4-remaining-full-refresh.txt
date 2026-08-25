@@ -1,0 +1,699 @@
+# UEP 0.81.72 R4 remaining full refresh audit
+
+## main fetchLiveData(force:true) remaining
+569:     }
+570:     const tokenPayload=await response.json();
+571:     if(!tokenPayload.access_token) throw googleOAuthError('Google 액세스 토큰을 받지 못했습니다.','UEP_GOOGLE_OAUTH_TOKEN_FAILED');
+572:     let info={};
+573:     try{info=await googleUserInfo(tokenPayload.access_token);}catch{}
+574:     let idTokenInfo={};
+575:     try{
+576:       const parts=String(tokenPayload.id_token||'').split('.');
+577:       if(parts.length>=2) idTokenInfo=JSON.parse(Buffer.from(parts[1].replace(/-/g,'+').replace(/_/g,'/'),'base64').toString('utf8'))||{};
+578:     }catch{}
+579:     const fallbackEmail=String(loginHint||'').trim();
+580:     const saved={...tokenPayload,client_id:clientId,email:String(info?.email||idTokenInfo?.email||fallbackEmail||''),sub:String(info?.sub||idTokenInfo?.sub||''),expires_at:Date.now()+Math.max(60,Number(tokenPayload.expires_in||3600))*1000,created_at:new Date().toISOString(),updated_at:new Date().toISOString()};
+581:     const persistResult=await saveGoogleUserOAuth(saved);
+582:     const verifySaved=await readGoogleUserOAuth();
+583:     if(!verifySaved?.access_token) throw googleOAuthError('Google 승인 토큰 저장 확인에 실패했습니다.','UEP_GOOGLE_OAUTH_PERSIST_FAILED');
+584:     liveDataCache=null;liveDataFetchedAt=0;
+585:     let syncOk=false, syncError='', syncCode='', data=null;
+586:     try {
+587:       data=await fetchLiveData({force:true});
+588:       syncOk=true;
+589:     } catch(error) {
+590:       syncError=String(error?.message||error||'Google 시트 조회 실패');
+591:       syncCode=String(error?.code||'');
+592:     }
+593:     return {ok:true,authorized:true,mode:'user_oauth',account:saved.email,sourceName:data?.sourceName||UEP_SPREADSHEET_NAME,preview:data?.summary||null,syncedAt:data?.syncedAt||'',syncOk,syncError,syncCode};
+594:   }finally{
+595:     if(timer)clearTimeout(timer);
+596:     try{server.close();}catch{}
+597:   }
+598: }
+599: async function disconnectGoogleUser(){
+---
+729:   const idCol=header.headers.indexOf("학생ID");
+730:   let fieldCol=-1;
+731:   for(const name of allowed[field]){ const idx=header.headers.indexOf(name); if(idx>=0){fieldCol=idx;break;} }
+732:   if(fieldCol<0) throw new Error(`04_학생연락식별정보에 ${allowed[field][0]} 열이 없습니다.`);
+733:   let dataRow=-1;
+734:   for(let r=header.index+1;r<matrix.length;r+=1){ if(String(matrix[r]?.[idCol]||"").trim()===studentId){dataRow=r;break;} }
+735:   const value=String(payload.value??"").trim();
+736:   if(dataRow<0){
+737:     const row=Array(Math.max(header.headers.length,fieldCol+1)).fill("");
+738:     row[idCol]=studentId; row[fieldCol]=value;
+739:     const useCol=header.headers.indexOf("현재사용여부"); if(useCol>=0)row[useCol]="Y";
+740:     await appendSheetValues(token,UEP_SPREADSHEET_ID,"'04_학생연락식별정보'!A:Z",[row]);
+741:   }else{
+742:     const sheetRow=dataRow+1;
+743:     const col=columnLetter(fieldCol);
+744:     await updateSheetValues(token,UEP_SPREADSHEET_ID,`'04_학생연락식별정보'!${col}${sheetRow}:${col}${sheetRow}`,[[value]]);
+745:   }
+746:   liveDataCache=null; liveDataFetchedAt=0;
+747:   const data=await fetchLiveData({force:true});
+748:   return {ok:true,data};
+749: }
+750: 
+751: 
+752: async function saveProgramOperation(payload={}) {
+753:   if (String(payload.role||"") !== "admin") throw new Error("프로그램 운영정보 양방향 수정은 관리자만 가능합니다.");
+754:   const account = await readEncrypted(credentialPath());
+755:   if (!validateServiceAccount(account)) throw new Error("저장된 Google 서비스 계정 인증정보가 올바르지 않습니다.");
+756:   const token = await getSheetsToken(account);
+757:   const source = String(payload.source||"");
+758:   const programId = String(payload.programId||"").trim();
+759:   const sessionId = String(payload.sessionId||"").trim();
+---
+849:     const col=columnLetter(colIndex);
+850:     await updateSheetValues(token,UEP_SPREADSHEET_ID,`'${specs.sheet}'!${col}${sheetRow}:${col}${sheetRow}`,[[value]]);
+851:   }
+852:   if(reportFormSettingKey && commonReportFormUrl!==undefined){
+853:     const settingRange="'00_UEP설정'!A1:E500";
+854:     const settingResult=await readSheetBatch(token,UEP_SPREADSHEET_ID,[settingRange]);
+855:     const settingMatrix=settingResult?.[0]?.values||[];
+856:     const settingHeader=findHeaderRowByRequired(settingMatrix,["설정키","설정값"]);
+857:     if(!settingHeader) throw new Error("00_UEP설정의 설정키·설정값 헤더를 찾지 못했습니다.");
+858:     const keyCol=settingHeader.headers.indexOf("설정키");
+859:     const valueCol=settingHeader.headers.indexOf("설정값");
+860:     let settingRow=-1;
+861:     for(let r=settingHeader.index+1;r<settingMatrix.length;r+=1){ if(String(settingMatrix[r]?.[keyCol]||"").trim()===reportFormSettingKey){settingRow=r;break;} }
+862:     if(settingRow<0) throw new Error(`${reportFormSettingKey} 설정키를 찾지 못했습니다.`);
+863:     const col=columnLetter(valueCol);
+864:     await updateSheetValues(token,UEP_SPREADSHEET_ID,`'00_UEP설정'!${col}${settingRow+1}:${col}${settingRow+1}`,[[commonReportFormUrl]]);
+865:   }
+866:   liveDataCache=null; liveDataFetchedAt=0;
+867:   const data=await fetchLiveData({force:true});
+868:   return {ok:true,data,sheet:specs.sheet};
+869: }
+870: 
+871: async function clearSheetValues(token, spreadsheetId, range) {
+872:   const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}:clear`;
+873:   const response = await fetch(url, {
+874:     method: "POST",
+875:     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+876:     body: "{}",
+877:   });
+878:   if (!response.ok) throw new Error(`공결 삭제 실패 (${response.status})`);
+879:   return response.json();
+---
+2028:       const match=result.reason.match(/\((\d{3})\)/);result.status=match?Number(match[1]):0;
+2029:     }
+2030:     return result;
+2031:   } catch(error) {result.reason=String(error?.message||error||"Google OAuth 진단 실패");return result;}
+2032: });ipcMain.handle("google:disconnectUser", async () => {
+2033:   try{return await disconnectGoogleUser();}catch(error){return {ok:false,reason:error?.message||String(error)};}
+2034: });
+2035:   ipcMain.handle("google:selectCredential", async (event) => {
+2036:     const win = BrowserWindow.fromWebContents(event.sender);
+2037:     const selected = await dialog.showOpenDialog(win, {
+2038:       title: "Google 서비스 계정 JSON 선택",
+2039:       properties: ["openFile"],
+2040:       filters: [{ name: "Google 서비스 계정", extensions: ["json"] }],
+2041:     });
+2042:     if (selected.canceled || !selected.filePaths[0]) return { ok: false, canceled: true };
+2043:     try {
+2044:       const credentials = JSON.parse(await fs.readFile(selected.filePaths[0], "utf8"));
+2045:       if (!validateServiceAccount(credentials)) return { ok: false, reason: "Google 서비스 계정 JSON 형식이 아닙니다." };
+2046:       const data = await fetchLiveData({ force: true, credentials });
+2047:       await saveEncrypted(credentialPath(), credentials);
+2048:       return {
+2049:         ok: true,
+2050:         account: credentials.client_email,
+2051:         sourceName: UEP_SPREADSHEET_NAME,
+2052:         preview: data.summary,
+2053:       };
+2054:     } catch (error) {
+2055:       liveDataCache = null;
+2056:       liveDataFetchedAt = 0;
+2057:       return { ok: false, reason: `${error.message || "구글시트 연결 실패"} 서비스 계정 이메일에 UEP 구글시트 보기 권한이 있는지 확인하세요.` };
+2058:     }
+---
+2045:       if (!validateServiceAccount(credentials)) return { ok: false, reason: "Google 서비스 계정 JSON 형식이 아닙니다." };
+2046:       const data = await fetchLiveData({ force: true, credentials });
+2047:       await saveEncrypted(credentialPath(), credentials);
+2048:       return {
+2049:         ok: true,
+2050:         account: credentials.client_email,
+2051:         sourceName: UEP_SPREADSHEET_NAME,
+2052:         preview: data.summary,
+2053:       };
+2054:     } catch (error) {
+2055:       liveDataCache = null;
+2056:       liveDataFetchedAt = 0;
+2057:       return { ok: false, reason: `${error.message || "구글시트 연결 실패"} 서비스 계정 이메일에 UEP 구글시트 보기 권한이 있는지 확인하세요.` };
+2058:     }
+2059:   });
+2060:   ipcMain.handle("google:previewOperationalSync", async () => {try{return await fetchOperationalData();}catch(error){return {ok:false,reason:error?.message||'UEP 운영자료 갱신 실패'};}});
+2061:   ipcMain.handle("google:previewReadonlySync", async () => {
+2062:     try {
+2063:       const data = await fetchLiveData({ force: true });
+2064:       return { ok: true, syncedAt: data.syncedAt, preview: data.summary, nightPreview: data.summary, sourceName: data.sourceName };
+2065:     } catch (error) {
+2066:       liveDataCache = null;
+2067:       liveDataFetchedAt = 0;
+2068:       return { ok: false, reason: error.message || "UEP 구글시트 새로고침 실패" };
+2069:     }
+2070:   });
+2071:   ipcMain.handle("google:readReadonlyCache", async () => {
+2072:     try { return { ok: true, data: await fetchLiveData() }; }
+2073:     catch (error) { return { ok: false, reason: error.message || "UEP 구글시트를 읽지 못했습니다." }; }
+2074:   });
+2075:   
+---
+## renderer full readonly refresh callers
+531:         .catch((error) => {
+532:           console.warn("[UEP] 읽기 캐시 불러오기 실패", error);
+533:           googleConnectionError = error?.message || "학교 데이터 동기화를 확인하세요. 마지막 저장 자료는 계속 사용할 수 있습니다.";
+534:         })
+535:     : Promise.resolve();
+536:   await Promise.all([credentialTask, cacheTask]);
+537:   // 화면은 로컬/메모리 캐시로 먼저 표시한 뒤, 실행당 한 번만 백그라운드 원격 동기화한다.
+538:   // 사용자는 기다리지 않고 UEP를 사용하며, 최신 Google Sheet가 도착하면 현재 화면만 갱신한다.
+539:   if(googleConnectionStatus?.ok){
+540:     const fullSyncedAt=readonlyCache?.syncedAt?new Date(readonlyCache.syncedAt).getTime():0;
+541:     const fullAge=fullSyncedAt?Date.now()-fullSyncedAt:Number.POSITIVE_INFINITY;
+542:     const needsFull=!readonlyCache||!fullSyncedAt||fullAge>=READONLY_FULL_REFRESH_MAX_AGE_MS;
+543:     const jitter=needsFull?(2000+Math.floor(Math.random()*10000)):(500+Math.floor(Math.random()*2500));
+544:     setTimeout(async()=>{
+545:       const ok=needsFull
+546:         ? await refreshReadonlyCacheSilently({force:true,rerender:true})
+547:         : await refreshOperationalCacheSilently({rerender:true});
+548:       if(ok){
+549:         updateTopSyncStatus();
+550:         if(currentRoleId()==='admin') migrateAdminProgramOverridesToSheetOnce().catch(()=>{});
+551:       }
+552:     },jitter);
+553:   }
+554:   if(googleConnectionStatus?.ok && readonlyCache) await migrateAdminProgramOverridesToSheetOnce();
+555:   updateDormOutingCount();
+556:   updateTopSyncStatus();
+557:   startReadonlyAutoRefresh();
+558:   // 여기서는 백그라운드에서 최신 계정 유효성을 재검증한다.
+---
+627:       render(state.activePage||'dashboard');
+628:       requestAnimationFrame(()=>window.scrollTo(0,scrollY));
+629:     }
+630:     return true;
+631:   } catch(error) {
+632:     googleConnectionError=error?.message||'UEP 학교 데이터 자동 갱신 실패';
+633:     updateTopSyncStatus();
+634:     return false;
+635:   }
+636:   })();
+637:   try{return await readonlyRefreshInFlight;}finally{readonlyRefreshInFlight=null;}
+638: }
+639: let operationalRefreshInFlight=null;
+640: async function refreshOperationalCacheSilently({rerender=true}={}){
+641:   if(operationalRefreshInFlight)return operationalRefreshInFlight;
+642:   if(!window.schoolBoard?.previewOperationalSync)return refreshReadonlyCacheSilently({force:true,rerender});
+643:   operationalRefreshInFlight=(async()=>{
+644:     if(!googleConnectionStatus?.ok)return false;
+645:     try{
+646:       const result=await window.schoolBoard.previewOperationalSync();
+647:       if(result?.requiresFullSync)return refreshReadonlyCacheSilently({force:true,rerender});
+648:       if(!result?.ok)throw new Error(result?.reason||'UEP 운영자료 갱신 실패');
+649:       if(result.patch&&typeof result.patch==='object')readonlyCache={...(readonlyCache||{}),...result.patch,operationalSyncedAt:result.operationalSyncedAt||result.syncedAt||new Date().toISOString()};
+650:       googleConnectionError='';updateTopSyncStatus();updateDormOutingCount();
+651:       if(rerender&&state.activePage)render(state.activePage);
+652:       return true;
+653:     }catch(error){googleConnectionError=error?.message||String(error);updateTopSyncStatus();return false;}
+654:   })();
+---
+632:     googleConnectionError=error?.message||'UEP 학교 데이터 자동 갱신 실패';
+633:     updateTopSyncStatus();
+634:     return false;
+635:   }
+636:   })();
+637:   try{return await readonlyRefreshInFlight;}finally{readonlyRefreshInFlight=null;}
+638: }
+639: let operationalRefreshInFlight=null;
+640: async function refreshOperationalCacheSilently({rerender=true}={}){
+641:   if(operationalRefreshInFlight)return operationalRefreshInFlight;
+642:   if(!window.schoolBoard?.previewOperationalSync)return refreshReadonlyCacheSilently({force:true,rerender});
+643:   operationalRefreshInFlight=(async()=>{
+644:     if(!googleConnectionStatus?.ok)return false;
+645:     try{
+646:       const result=await window.schoolBoard.previewOperationalSync();
+647:       if(result?.requiresFullSync)return refreshReadonlyCacheSilently({force:true,rerender});
+648:       if(!result?.ok)throw new Error(result?.reason||'UEP 운영자료 갱신 실패');
+649:       if(result.patch&&typeof result.patch==='object')readonlyCache={...(readonlyCache||{}),...result.patch,operationalSyncedAt:result.operationalSyncedAt||result.syncedAt||new Date().toISOString()};
+650:       googleConnectionError='';updateTopSyncStatus();updateDormOutingCount();
+651:       if(rerender&&state.activePage)render(state.activePage);
+652:       return true;
+653:     }catch(error){googleConnectionError=error?.message||String(error);updateTopSyncStatus();return false;}
+654:   })();
+655:   try{return await operationalRefreshInFlight;}finally{operationalRefreshInFlight=null;}
+656: }
+657: function startReadonlyAutoRefresh(){
+658:   if(readonlyAutoRefreshTimer) clearInterval(readonlyAutoRefreshTimer);
+659:   if(!googleConnectionStatus?.ok) return;
+---
+653:     }catch(error){googleConnectionError=error?.message||String(error);updateTopSyncStatus();return false;}
+654:   })();
+655:   try{return await operationalRefreshInFlight;}finally{operationalRefreshInFlight=null;}
+656: }
+657: function startReadonlyAutoRefresh(){
+658:   if(readonlyAutoRefreshTimer) clearInterval(readonlyAutoRefreshTimer);
+659:   if(!googleConnectionStatus?.ok) return;
+660:   readonlyAutoRefreshTimer=setInterval(()=>{
+661:     if(document.hidden) return;
+662:     readonlyAutoRefreshCycle+=1;
+663:     const fullSyncedAt=readonlyCache?.syncedAt?new Date(readonlyCache.syncedAt).getTime():0;
+664:     const fullAge=fullSyncedAt?Date.now()-fullSyncedAt:Number.POSITIVE_INFINITY;
+665:     const needsFull=!fullSyncedAt||fullAge>=READONLY_FULL_REFRESH_MAX_AGE_MS||readonlyAutoRefreshCycle%6===0;
+666:     if(needsFull){
+667:       const jitter=Math.floor(Math.random()*45000);
+668:       setTimeout(()=>{if(!document.hidden)refreshReadonlyCacheSilently({force:true,rerender:true});},jitter);
+669:       return;
+670:     }
+671:     refreshOperationalCacheSilently({rerender:true});
+672:   },READONLY_AUTO_REFRESH_MS);
+673: }
+674: 
+675: function updateTopSyncStatus() {
+676:   const button = $("#syncButton");
+677:   if (!button) return;
+678:   button.classList.remove("good", "warn", "bad");
+679:   const label = button.querySelector("span");
+680:   if (googleConnectionError) {
+---
+3075:   const rows=inputCenterDrafts.filter(x=>x.selected!==false); if(!rows.length)return toast('등록할 자료를 선택해 주세요.');
+3076:   const isProgramReport=inputCenterConfig.type==='보고서·탐구보고서'||inputCenterConfig.subtype==='보고서 제출'||rows.some(x=>/보고서/.test(String(x.detectedType||'')));
+3077:   const batchId=`IN-${new Date().toISOString().replace(/[-:.TZ]/g,'').slice(0,14)}-${Math.random().toString(36).slice(2,6).toUpperCase()}`;
+3078:   const selectedProgram=(readonlyCache?.programs||[]).find(p=>String(p.id||p.programId||'')===String(inputCenterConfig.programId||''));
+3079:   const resolvedType=isProgramReport?'보고서·탐구보고서':inputCenterConfig.type;
+3080:   const resolvedTitle=inputCenterConfig.title.trim()||String(rows[0]?.fileName||'입력센터 자료').replace(/\.[^.]+$/,'');
+3081:   const payload={batchId,source:inputCenterConfig.source,type:resolvedType,subtype:inputCenterConfig.subtype,storageMode:inputCenterConfig.storageMode,title:resolvedTitle,semester:inputCenterConfig.semester,teacher:currentLoginTeacherName()||currentUser?.name||'',programId:inputCenterConfig.programId||'',programKind:selectedProgram?.kind||'',programName:selectedProgram?.actualTitle||selectedProgram?.title||'',batchScope:inputCenterConfig.batchScope,batchGrade:inputCenterConfig.batchGrade,batchClass:inputCenterConfig.batchClass,batchStudentNo:inputCenterConfig.batchStudentNo,pagesPerStudent:Number(inputCenterConfig.pagesPerStudent||1),expectedCount:inputCenterBatchExpectedCount(),records:rows.map(x=>({...x,programId:inputCenterConfig.programId||'',programKind:selectedProgram?.kind||'',programName:selectedProgram?.actualTitle||selectedProgram?.title||'',reportFields:x.reportFields||[],submittedAt:x.submittedAt||''}))};
+3082:   let result=await window.schoolBoard?.saveInputRecords?.(payload); if(!result?.ok)return toast(result?.reason||'입력자료를 저장하지 못했습니다.');
+3083:   if(inputCenterConfig.storageMode==='uep'&&result?.requiresConfirmation){
+3084:     const programLabel=selectedProgram?`${selectedProgram.kind==='common'?'공통활동':'선택활동'} · ${selectedProgram.actualTitle||selectedProgram.title||inputCenterConfig.programId}`:'선택 프로그램';
+3085:     const summary=`등록 대상: ${programLabel}\n\n신규 ${result.newCount||0}건 · 중복 ${result.duplicateCount||0}건 · 갱신 ${result.updateCount||0}건\n중복 자료는 저장하지 않고, 기존 학생·프로그램 보고서가 있으면서 제출시각이 달라진 자료는 갱신합니다.\n\n계속 저장할까요?`;
+3086:     if(!confirm(summary))return toast('영구 저장을 취소했습니다. 기존 자료는 변경되지 않았습니다.');
+3087:     result=await window.schoolBoard?.saveInputRecords?.({...payload,confirmed:true}); if(!result?.ok)return toast(result?.reason||'입력자료를 저장하지 못했습니다.');
+3088:   }
+3089:   if(inputCenterConfig.storageMode==='local') inputCenterLocalHistory.unshift(...rows.map(r=>({...r,source:payload.source,type:payload.type,subtype:payload.subtype,title:payload.title||r.fileName,storageMode:'local',savedAt:new Date().toISOString(),createdAt:new Date().toISOString()})));
+3090:   inputCenterDrafts=[]; await refreshReadonlyCacheSilently({force:true,rerender:false}); if(inputCenterConfig.storageMode==='uep'){inputCenterConfig.tab='library';inputCenterConfig.batchFilter=batchId;inputCenterConfig.historyMode='active';} render('inputs');
+3091:   if(inputCenterConfig.storageMode==='uep') toast(`입력센터 원본 저장 완료 · 신규 ${result.newCount||0} · 갱신 ${result.updateCount||0} · 중복 제외 ${result.duplicateCount||0} · 02 검수·분류로 이동했습니다.`);
+3092:   else toast(`${result.count||rows.length}건을 내 PC 로컬에 저장했습니다.`);
+3093: }
+3094: function inputCenterHumanReportText(value=''){
+3095:   const source=String(value||'').trim();if(!source)return '';
+3096:   try{
+3097:     const meta=JSON.parse(source);
+3098:     const fields=Array.isArray(meta?.fields)?meta.fields:Array.isArray(meta)?meta:[];
+3099:     const skip=/^(연락처|전화번호|휴대폰|서명|이메일|학번|성명|이름|학년|반|수정시간|제출시간|제출일시)$/;
+3100:     const pairs=fields.map((f,i)=>({label:String(f?.label||`문항 ${i+1}`).trim(),value:String(f?.value||'').trim()})).filter(x=>x.value&&!skip.test(x.label));
+3101:     if(pairs.length)return pairs.map(x=>`[${x.label||'문항'}]\n${x.value}`).join('\n\n');
+3102:   }catch{}
+---
+3130:   if(/신청서|신청자|신청명단/.test(joined)) return {type:'프로그램 신청서',label:'프로그램 > 신청·참여 대상',description:'학생별 신청내용을 프로그램 신청/참여 자료로 연결합니다. 실제 참여 확정 전에는 신청자료로 구분합니다.'};
+3131:   if(/보고서|독서|탐구/.test(joined)) return {type:'학생 보고서',label:'프로그램 > 참여이력·보고서',description:'검수 텍스트를 학생별 프로그램 참여이력의 보고서 자료로 연결합니다.'};
+3132:   if(/만족도|설문/.test(joined)) return {type:'만족도·설문',label:'프로그램 > 만족도·설문 결과',description:'학생별 응답을 프로그램 만족도/설문 자료로 연결합니다.'};
+3133:   if(/수행평가|평가지/.test(joined)) return {type:'교과 수행평가',label:'학생정보 > 교과활동 참고자료',description:'수행평가 원문·검수본을 학생별 교과활동 참고자료로 연결합니다.'};
+3134:   return {type:'외부 학생자료',label:'학생정보 > 외부자료',description:'자료유형이 명확하지 않아 학생별 외부자료로 보관합니다. 이후 용도를 다시 지정할 수 있습니다.'};
+3135: }
+3136: async function inputCenterApply(mode='uep'){
+3137:   const rows=inputCenterReviewRowsCache||[];if(!rows.length)return toast('적용할 검수 자료가 없습니다.');
+3138:   const unmatched=rows.filter(r=>!r.studentNo&&!r.studentId).length;if(unmatched)return toast(`학생 매칭이 끝나지 않은 자료 ${unmatched}건이 있습니다.`);
+3139:   const first=rows[0]||{};const program=(readonlyCache?.programs||[]).find(v=>String(v.id||v.programId||'')===String(first.programId||''))||{};
+3140:   const nature=String(first.type||'').includes('보고서')?'보고서':String(first.type||'').includes('신청')?'신청':String(first.type||'').includes('만족도')||String(first.type||'').includes('설문')?'만족도조사':first.type||'기타';
+3141:   if(nature==='보고서'&&!first.programId)return toast('보고서는 연결프로그램을 먼저 확정해 주세요.');
+3142:   const payload={batchId:first.batchId||'',nature,programId:first.programId||'',programKind:first.programKind||program.kind||'',programName:program.actualTitle||program.title||'',programSemester:program.semester||program.term||'',records:rows.map(r=>({id:r.id,batchId:r.batchId,studentId:r.studentId,studentNo:r.studentNo,name:r.name,schoolYear:r.schoolYear,semester:r.semester,programId:r.programId,programKind:r.programKind,rawText:r.rawText,normalizedText:r.normalizedText,reviewText:r.reviewText||'',createdAt:r.createdAt}))};
+3143:   let result=await window.schoolBoard?.normalizeInputBatch?.(payload);if(!result?.ok)return toast(result?.reason||'UEP 정규화 사전검사에 실패했습니다.');
+3144:   if(result.requiresConfirmation){const summary=`정규화 대상: ${result.targetSheet||''}\n${result.programName||payload.programName||''}\n\n신규 ${result.newCount||0}건 · 중복 ${result.duplicateCount||0}건 · 갱신 ${result.updateCount||0}건\n\n계속 UEP에 적용할까요?`;if(!confirm(summary))return toast('UEP 적용을 취소했습니다.');result=await window.schoolBoard?.normalizeInputBatch?.({...payload,confirmed:true});if(!result?.ok)return toast(result?.reason||'UEP 정규화 적용에 실패했습니다.');}
+3145:   await refreshReadonlyCacheSilently({force:true,rerender:false});inputCenterConfig.historyMode='active';inputCenterConfig.batchFilter='latest';toast(`${result.targetSheet||'UEP'} 적용 완료 · 신규 ${result.newCount||0} · 갱신 ${result.updateCount||0} · 중복 ${result.duplicateCount||0} · 작업목록에서 완료 배치를 내렸습니다.`);render('inputs');
+3146: }
+3147: 
+3148: function inputCenterExportCsv(){
+3149:   const rows=inputCenterReviewRowsCache||[]; if(!rows.length)return toast('내보낼 검수 자료가 없습니다.');
+3150:   const q=v=>'"'+String(v??'').replace(/"/g,'""')+'"';
+3151:   const csv='\ufeff'+[['학번','이름','학년','반','자료유형','자료제목','검수텍스트','원본파일'].map(q).join(','),...rows.map(r=>[r.studentNo,r.name,r.grade,r.className,r.type,r.title||r.fileName,r.reviewText||r.normalizedText||r.rawText||r.text,r.fileName].map(q).join(','))].join('\r\n');
+3152:   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));a.download=`UEP_검수자료_${new Date().toISOString().slice(0,10)}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);toast(`${rows.length}건을 CSV로 내보냈습니다.`);
+3153: }
+3154: function bindInputCenter(){
+3155:   $$('[data-input-tab]').forEach(b=>b.onclick=()=>{inputCenterConfig.tab=b.dataset.inputTab;render('inputs');});
+3156:   $$('[data-input-history-mode]').forEach(b=>b.onclick=()=>{inputCenterConfig.historyMode=b.dataset.inputHistoryMode||'active';inputCenterConfig.batchFilter='latest';render('inputs');});
+3157:   $('[data-input-batch-filter]')?.addEventListener('change',e=>{inputCenterConfig.batchFilter=e.target.value;render('inputs');});
+---
+3150:   const q=v=>'"'+String(v??'').replace(/"/g,'""')+'"';
+3151:   const csv='\ufeff'+[['학번','이름','학년','반','자료유형','자료제목','검수텍스트','원본파일'].map(q).join(','),...rows.map(r=>[r.studentNo,r.name,r.grade,r.className,r.type,r.title||r.fileName,r.reviewText||r.normalizedText||r.rawText||r.text,r.fileName].map(q).join(','))].join('\r\n');
+3152:   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));a.download=`UEP_검수자료_${new Date().toISOString().slice(0,10)}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);toast(`${rows.length}건을 CSV로 내보냈습니다.`);
+3153: }
+3154: function bindInputCenter(){
+3155:   $$('[data-input-tab]').forEach(b=>b.onclick=()=>{inputCenterConfig.tab=b.dataset.inputTab;render('inputs');});
+3156:   $$('[data-input-history-mode]').forEach(b=>b.onclick=()=>{inputCenterConfig.historyMode=b.dataset.inputHistoryMode||'active';inputCenterConfig.batchFilter='latest';render('inputs');});
+3157:   $('[data-input-batch-filter]')?.addEventListener('change',e=>{inputCenterConfig.batchFilter=e.target.value;render('inputs');});
+3158:   $$('[data-input-scope]').forEach(b=>b.onclick=()=>{inputCenterConfig.libraryScope=b.dataset.inputScope;render('inputs');});
+3159:   $$('[data-input-grade-filter]').forEach(b=>b.onclick=()=>{inputCenterConfig.gradeFilter=b.dataset.inputGradeFilter;inputCenterConfig.classFilter='all';render('inputs');});
+3160:   $$('[data-input-class-filter]').forEach(b=>b.onclick=()=>{inputCenterConfig.classFilter=b.dataset.inputClassFilter;render('inputs');});
+3161:   $$('[data-input-match-filter]').forEach(b=>b.onclick=()=>{inputCenterConfig.matchFilter=b.dataset.inputMatchFilter;render('inputs');});
+3162:   $$('[data-input-source-filter]').forEach(b=>b.onclick=()=>{inputCenterConfig.sourceFilter=b.dataset.inputSourceFilter;render('inputs');});
+3163:   $$('[data-input-view]').forEach(b=>b.onclick=()=>{const rows=inputCenterLibraryRows().filter(x=>inputCenterConfig.libraryScope==='local'?x.storageMode==='local':inputCenterConfig.libraryScope==='uep'?x.storageMode!=='local':true);const row=rows[Number(b.dataset.inputView)];if(row)inputCenterOpenDetail(row);});
+3164: 
+3165:   $('[data-input-confirm-classification]')?.addEventListener('click',async()=>{const rows=filtered;if(!rows.length)return toast('확정할 배치가 없습니다.');const nature=$('[data-input-review-nature]')?.value||'기타';const programId=$('[data-input-review-program]')?.value||'';const program=(readonlyCache?.programs||[]).find(v=>String(v.id||v.programId||'')===String(programId))||{};const result=await window.schoolBoard?.classifyInputBatch?.({batchId:activeBatchId,nature,programId,programKind:program.kind||'',programName:program.actualTitle||program.title||'',programSemester:program.semester||program.term||''});if(!result?.ok)return toast(result?.reason||'검수·분류 저장에 실패했습니다.');await refreshReadonlyCacheSilently({force:true,rerender:false});inputCenterConfig.tab='review';toast(`${result.count||rows.length}건 검수·분류 확정 · 03 UEP 적용으로 이동합니다.`);render('inputs');});
+3166:   $('[data-input-export-csv]')?.addEventListener('click',inputCenterExportCsv);
+3167:   $('[data-input-apply-local]')?.addEventListener('click',()=>inputCenterApply('local'));
+3168:   $('[data-input-apply-uep]')?.addEventListener('click',()=>inputCenterApply('uep'));
+3169:   $$('[data-input-review-view]').forEach(b=>b.onclick=()=>{const row=inputCenterReviewRowsCache[Number(b.dataset.inputReviewView)];if(row)inputCenterOpenDetail(row);});
+3170:   $$('[data-input-purpose]').forEach(b=>b.onclick=()=>{inputCenterConfig.purpose=b.dataset.inputPurpose;const map={'보고서 연결':'보고서·탐구보고서','프로그램 참가신청':'프로그램 신청서','만족도조사':'만족도·설문조사','텍스트 추출·기타':'기타'};inputCenterConfig.type=map[inputCenterConfig.purpose]||'기타';inputCenterConfig.programId='';render('inputs');});
+3171:   $$('[data-input-source]').forEach(b=>b.onclick=()=>{inputCenterConfig.source=b.dataset.inputSource;const actual={'Excel·CSV':'교사 파일','문서 파일':'교사 파일'}[inputCenterConfig.source]||inputCenterConfig.source;if(actual==='리로스쿨'&&inputCenterConfig.purpose==='보고서 연결')inputCenterConfig.subtype='보고서 제출';else if(actual==='리로스쿨'&&inputCenterConfig.purpose==='프로그램 참가신청')inputCenterConfig.subtype='참가신청 명단';render('inputs');});
+3172:   $('[data-input-subtype]')?.addEventListener('change',e=>inputCenterConfig.subtype=e.target.value);
+3173:   $$('input[name="input-storage"]').forEach(r=>r.addEventListener('change',e=>inputCenterConfig.storageMode=e.target.value));
+3174:   $('[data-input-semester]')?.addEventListener('change',e=>{inputCenterConfig.semester=e.target.value;inputCenterConfig.programId='';render('inputs');});
+3175:   const titleInput=$('[data-input-title]'); if(titleInput){titleInput.readOnly=false;titleInput.disabled=false;titleInput.addEventListener('input',e=>{inputCenterConfig.title=e.target.value;});titleInput.addEventListener('change',e=>{inputCenterConfig.title=e.target.value;});titleInput.addEventListener('keydown',e=>{e.stopPropagation();});}
+3176:   $('[data-input-batch-scope]')?.addEventListener('change',e=>{inputCenterConfig.batchScope=e.target.value;render('inputs');});
+3177:   $('[data-input-batch-grade]')?.addEventListener('change',e=>{inputCenterConfig.batchGrade=e.target.value;render('inputs');});
+---
+12614:     if(busy)return;busy=true;
+12615:     const btn=document.querySelector('[data-uep-google-oauth]');if(btn){btn.disabled=true;btn.textContent='Google 승인 진행 중…';}
+12616:     try{
+12617:       const profile=(typeof currentUserProfile==='function'?currentUserProfile():{})||{};
+12618:       const result=await window.schoolBoard?.authorizeGoogleUser?.({loginHint:String(profile.email||'')});
+12619:       if(!result?.ok){googleConnectionError=result?.reason||'학교 공용 연결 확인에 실패했습니다.'; if(typeof toast==='function')toast(googleConnectionError); try{render(state.activePage||'dashboard');}catch{} return;}
+12620:       const status=await window.schoolBoard?.googleCredentialStatus?.();if(status)googleConnectionStatus=status;
+12621:       if(result.syncOk===false){
+12622:         googleConnectionError=result.syncError||'Google 계정 승인은 완료되었지만 학교 시트 조회에 실패했습니다.';
+12623:         if(typeof toast==='function')toast(`학교 공용 연결 확인 완료 · 시트 조회 확인 필요: ${googleConnectionError}`);
+12624:       } else {
+12625:         googleConnectionError='';
+12626:         if(typeof toast==='function')toast('학교 공용 읽기 연결 및 학교 시트 동기화가 완료되었습니다.');
+12627:       }
+12628:       if(window.schoolBoard?.readReadonlyCache){const cached=await window.schoolBoard.readReadonlyCache();if(cached?.ok)readonlyCache=uep08123NormalizeReadonlyCache(cached.data);}
+12629:       if(typeof refreshReadonlyCacheSilently==='function')await refreshReadonlyCacheSilently({force:true,rerender:true});
+12630:       if(typeof updateTopSyncStatus==='function')updateTopSyncStatus();
+12631:       if(typeof startReadonlyAutoRefresh==='function')startReadonlyAutoRefresh();
+12632:       if(typeof toast==='function')toast(`Google 읽기 연결 완료${result.account?' · '+result.account:''}`);
+12633:       document.querySelector('[data-uep-google-oauth]')?.remove();
+12634:     }catch(error){if(typeof toast==='function')toast(error?.message||'학교 공용 연결 확인에 실패했습니다.');}
+12635:     finally{busy=false;const b=document.querySelector('[data-uep-google-oauth]');if(b){b.disabled=false;b.textContent='학교 공용 연결 확인';}}
+12636:   }
+12637:   function enhance(){
+12638:     const drawer=document.querySelector('#drawerBody');if(!drawer)return;
+12639:     const text=String(drawer.textContent||'');
+12640:     if(!googleConnectionStatus?.setupRequired && !text.includes('Google 시트 연결 승인') && !text.includes('학교 공용 연결 확인'))return;
+12641:     if(drawer.querySelector('[data-uep-google-oauth]'))return;
+---
+## result.data whole-cache replacements
+9567: }
+9568: function maskedStudentCardMarkup(card,label){
+9569:   return `<button type="button" class="student-sensitive-mask" data-reveal-student-card="${escapeHtml(card)}"><b>＊＊＊＊</b><span>${escapeHtml(label)} · 클릭하여 보기</span><small>보호 정보는 필요할 때만 현재 화면에서 일시적으로 공개됩니다.</small></button>`;
+9570: }
+9571: function studentWithContactOverride(student){return {...student};}
+9572: async function saveStudentContactToSheet(student,field,value,index,label,embedded=false){
+9573:   const access=studentAccessContext(student);
+9574:   if(!access.canEditContact)return toast('이 학생의 연락정보 수정 권한이 없습니다.');
+9575:   const button=document.querySelector('.contact-inline-save'); if(button){button.disabled=true;button.textContent='저장 중…';}
+9576:   try{
+9577:     const result=await window.schoolBoard?.saveStudentContact?.({studentId:student.id,studentNo:student.studentNo,className:student.className,field,value,role:access.role,requester:currentLoginTeacherName()});
+9578:     if(!result?.ok)throw new Error(result?.reason||'시트 저장 실패');
+9579:     readonlyCache=result.data||readonlyCache;
+9580:     toast(`${label}를 UEP 기본정보 연결시트에 저장했습니다.`);
+9581:     if(embedded&&state.activePage==='students'){render('students');window.scrollTo(0,0);}else openStudentDrawer(index);
+9582:   }catch(error){toast(error?.message||`${label} 수정에 실패했습니다.`);if(embedded&&state.activePage==='students')render('students');else openStudentDrawer(index);}
+9583: }
+9584: function editStudentContact(student,field,label,index,button){
+9585:   const access=studentAccessContext(student);
+9586:   if(!access.canEditContact)return toast('담임은 자기 반 학생의 연락정보만 수정할 수 있습니다.');
+9587:   const embedded=Boolean(button?.closest?.('#studentDashboardEmbedded'));
+9588:   const line=button?.closest?.('.contact-value-line,.student-email-line');
+9589:   if(!line)return toast(`${label} 수정창을 열 수 없습니다.`);
+---
+## input center main functions
+### saveInputRecords line=0
+### classifyInputBatch line=0
+### normalizeInputBatch line=0
+## saveStudentContact exact
+713: async function saveStudentContact(payload={}) {
+714:   const allowed={phone:["학생연락처"],email:["학생이메일","이메일","이메일주소"],guardian1Phone:["보호자1연락처"],guardian2Phone:["보호자2연락처"]};
+715:   const field=String(payload.field||"");
+716:   if(!allowed[field]) throw new Error("수정할 수 없는 학생정보 항목입니다.");
+717:   const role=String(payload.role||"");
+718:   if(!["admin","homeroom"].includes(role)) throw new Error("학생 연락정보 수정 권한이 없습니다.");
+719:   const account=await readEncrypted(credentialPath());
+720:   if(!validateServiceAccount(account)) throw new Error("저장된 Google 서비스 계정 인증정보가 올바르지 않습니다.");
+721:   const token=await getSheetsToken(account);
+722:   const range="'04_학생연락식별정보'!A1:Z1000";
+723:   const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,[range]);
+724:   const matrix=result?.[0]?.values||[];
+725:   const header=findHeaderRowByRequired(matrix,["학생ID"]);
+726:   if(!header) throw new Error("04_학생연락식별정보의 헤더에서 학생ID를 찾지 못했습니다.");
+727:   const studentId=String(payload.studentId||"").trim();
+728:   if(!studentId) throw new Error("학생ID가 없어 저장할 수 없습니다.");
+729:   const idCol=header.headers.indexOf("학생ID");
+730:   let fieldCol=-1;
+731:   for(const name of allowed[field]){ const idx=header.headers.indexOf(name); if(idx>=0){fieldCol=idx;break;} }
+732:   if(fieldCol<0) throw new Error(`04_학생연락식별정보에 ${allowed[field][0]} 열이 없습니다.`);
+733:   let dataRow=-1;
+734:   for(let r=header.index+1;r<matrix.length;r+=1){ if(String(matrix[r]?.[idCol]||"").trim()===studentId){dataRow=r;break;} }
+735:   const value=String(payload.value??"").trim();
+736:   if(dataRow<0){
+737:     const row=Array(Math.max(header.headers.length,fieldCol+1)).fill("");
+738:     row[idCol]=studentId; row[fieldCol]=value;
+739:     const useCol=header.headers.indexOf("현재사용여부"); if(useCol>=0)row[useCol]="Y";
+740:     await appendSheetValues(token,UEP_SPREADSHEET_ID,"'04_학생연락식별정보'!A:Z",[row]);
+741:   }else{
+742:     const sheetRow=dataRow+1;
+743:     const col=columnLetter(fieldCol);
+744:     await updateSheetValues(token,UEP_SPREADSHEET_ID,`'04_학생연락식별정보'!${col}${sheetRow}:${col}${sheetRow}`,[[value]]);
+745:   }
+746:   liveDataCache=null; liveDataFetchedAt=0;
+747:   const data=await fetchLiveData({force:true});
+748:   return {ok:true,data};
+749: }
+750: 
+751: 
+752: async function saveProgramOperation(payload={}) {
+753:   if (String(payload.role||"") !== "admin") throw new Error("프로그램 운영정보 양방향 수정은 관리자만 가능합니다.");
+754:   const account = await readEncrypted(credentialPath());
+755:   if (!validateServiceAccount(account)) throw new Error("저장된 Google 서비스 계정 인증정보가 올바르지 않습니다.");
+756:   const token = await getSheetsToken(account);
+757:   const source = String(payload.source||"");
+758:   const programId = String(payload.programId||"").trim();
+759:   const sessionId = String(payload.sessionId||"").trim();
+760:   const date = String(payload.date||"").trim();
+761:   const endDate = String(payload.endDate||"").trim();
+762:   const time = String(payload.time||"").trim();
+763:   const startTime = String(payload.startTime||"").trim();
+764:   const endTime = String(payload.endTime||"").trim();
+765:   const place = String(payload.place||"").trim();
+766:   const teacher = String(payload.teacher||"").trim();
+767:   const title = String(payload.title||"").trim();
+768:   const recordTitle = String(payload.recordTitle||"").trim();
+769:   const department = String(payload.department||"").trim();
+770:   const subject = String(payload.subject||"").trim();
+771:   const reportRequired = payload.reportRequired === undefined ? undefined : (payload.reportRequired ? "Y" : "N");
+772:   const reportToAuthority = payload.reportToAuthority === undefined ? undefined : (payload.reportToAuthority ? "Y" : "N");
+773:   const reportAgency = String(payload.reportAgency||"").trim();
+774:   const reportAfterDays = payload.reportAfterDays === undefined ? undefined : String(payload.reportAfterDays ?? "").trim();
+775:   const reportDeadline = String(payload.reportDeadline||"").trim();
+776:   const photoRequired = payload.photoRequired === undefined ? undefined : (payload.photoRequired ? "Y" : "N");
+777:   const memo = String(payload.memo||"").trim();
+778:   const activityType = String(payload.activityType||"").trim();
+779:   const afterType = String(payload.afterType||"").trim();
+780:   const weekdays = String(payload.weekdays||"").trim();
+781:   const operationPeriod = String(payload.operationPeriod||"").trim();
+782:   const targetGrade = String(payload.targetGrade||"").trim();
+783:   const nightLinked = payload.nightLinked === undefined ? undefined : (payload.nightLinked ? "Y" : "N");
+784:   const attendanceMethod = String(payload.attendanceMethod||"").trim();
+785:   const status = String(payload.status||"").trim();
+786:   const commonReportFormUrl = payload.commonReportFormUrl === undefined ? undefined : String(payload.commonReportFormUrl||"").trim();
+787:   const reportFormSettingKey = source.includes("09_공통활동마스터") ? "COMMON_ACTIVITY_REPORT_FORM_URL" : source.includes("10_선택활동마스터") ? "SELECTED_ACTIVITY_REPORT_FORM_URL" : "";
+788:   const clocks = time.match(/\d{1,2}:\d{2}/g) || [];
+789:   const specs = source.includes("12_차시일정")
+790:     ? {sheet:"12_차시일정", keyNames:["차시ID"], keyValue:sessionId, fields:{date:["실제수업일","운영일자","예정일"], start:["시작시각"], end:["종료시각"], place:["장소"], teacher:["담당교사"]}}
+791:     : source.includes("11_방과후학교")
+792:       ? {sheet:"11_방과후학교", keyNames:["방과후ID","프로그램ID"], keyValue:programId, fields:{title:["프로그램명"], operationPeriod:["운영기간구분"], subject:["교과"], department:["담당부서"], afterType:["방과후유형"], teacher:["담당교사"], date:["운영시작일"], endDate:["운영종료일"], weekdays:["요일"], startTime:["시작시간"], endTime:["종료시간"], place:["장소"], targetGrade:["대상학년"], nightLinked:["야자연계여부"], attendanceMethod:["출석관리방식"], status:["운영상태"], memo:["학생안내"]}}
+793:       : source.includes("10_선택활동마스터")
+## saveProgramOperation exact tail
+752: async function saveProgramOperation(payload={}) {
+753:   if (String(payload.role||"") !== "admin") throw new Error("프로그램 운영정보 양방향 수정은 관리자만 가능합니다.");
+754:   const account = await readEncrypted(credentialPath());
+755:   if (!validateServiceAccount(account)) throw new Error("저장된 Google 서비스 계정 인증정보가 올바르지 않습니다.");
+756:   const token = await getSheetsToken(account);
+757:   const source = String(payload.source||"");
+758:   const programId = String(payload.programId||"").trim();
+759:   const sessionId = String(payload.sessionId||"").trim();
+760:   const date = String(payload.date||"").trim();
+761:   const endDate = String(payload.endDate||"").trim();
+762:   const time = String(payload.time||"").trim();
+763:   const startTime = String(payload.startTime||"").trim();
+764:   const endTime = String(payload.endTime||"").trim();
+765:   const place = String(payload.place||"").trim();
+766:   const teacher = String(payload.teacher||"").trim();
+767:   const title = String(payload.title||"").trim();
+768:   const recordTitle = String(payload.recordTitle||"").trim();
+769:   const department = String(payload.department||"").trim();
+770:   const subject = String(payload.subject||"").trim();
+771:   const reportRequired = payload.reportRequired === undefined ? undefined : (payload.reportRequired ? "Y" : "N");
+772:   const reportToAuthority = payload.reportToAuthority === undefined ? undefined : (payload.reportToAuthority ? "Y" : "N");
+773:   const reportAgency = String(payload.reportAgency||"").trim();
+774:   const reportAfterDays = payload.reportAfterDays === undefined ? undefined : String(payload.reportAfterDays ?? "").trim();
+775:   const reportDeadline = String(payload.reportDeadline||"").trim();
+776:   const photoRequired = payload.photoRequired === undefined ? undefined : (payload.photoRequired ? "Y" : "N");
+777:   const memo = String(payload.memo||"").trim();
+778:   const activityType = String(payload.activityType||"").trim();
+779:   const afterType = String(payload.afterType||"").trim();
+780:   const weekdays = String(payload.weekdays||"").trim();
+781:   const operationPeriod = String(payload.operationPeriod||"").trim();
+782:   const targetGrade = String(payload.targetGrade||"").trim();
+783:   const nightLinked = payload.nightLinked === undefined ? undefined : (payload.nightLinked ? "Y" : "N");
+784:   const attendanceMethod = String(payload.attendanceMethod||"").trim();
+785:   const status = String(payload.status||"").trim();
+786:   const commonReportFormUrl = payload.commonReportFormUrl === undefined ? undefined : String(payload.commonReportFormUrl||"").trim();
+787:   const reportFormSettingKey = source.includes("09_공통활동마스터") ? "COMMON_ACTIVITY_REPORT_FORM_URL" : source.includes("10_선택활동마스터") ? "SELECTED_ACTIVITY_REPORT_FORM_URL" : "";
+788:   const clocks = time.match(/\d{1,2}:\d{2}/g) || [];
+789:   const specs = source.includes("12_차시일정")
+790:     ? {sheet:"12_차시일정", keyNames:["차시ID"], keyValue:sessionId, fields:{date:["실제수업일","운영일자","예정일"], start:["시작시각"], end:["종료시각"], place:["장소"], teacher:["담당교사"]}}
+791:     : source.includes("11_방과후학교")
+792:       ? {sheet:"11_방과후학교", keyNames:["방과후ID","프로그램ID"], keyValue:programId, fields:{title:["프로그램명"], operationPeriod:["운영기간구분"], subject:["교과"], department:["담당부서"], afterType:["방과후유형"], teacher:["담당교사"], date:["운영시작일"], endDate:["운영종료일"], weekdays:["요일"], startTime:["시작시간"], endTime:["종료시간"], place:["장소"], targetGrade:["대상학년"], nightLinked:["야자연계여부"], attendanceMethod:["출석관리방식"], status:["운영상태"], memo:["학생안내"]}}
+793:       : source.includes("10_선택활동마스터")
+794:         ? {sheet:"10_선택활동마스터", keyNames:["프로그램ID"], keyValue:programId, fields:{date:["운영시작일"], time:["운영시간"], place:["장소"], teacher:["담당교사"], title:["프로그램명"], recordTitle:["생활기록부표기명"], department:["운영부서"], subject:["교과"], reportRequired:["보고서사용"], reportToAuthority:["기관보고여부"], reportAgency:["보고대상기관"], reportAfterDays:["보고기한일수"], reportDeadline:["학생보고서마감일"], photoRequired:["사진증빙사용"], memo:["학생안내"], activityType:["프로그램유형"]}}
+795:         : source.includes("09_공통활동마스터")
+796:           ? {sheet:"09_공통활동마스터", keyNames:["활동ID"], keyValue:programId, fields:{title:["활동명"], activityType:["활동영역"], date:["운영시작일"], endDate:["운영종료일"], time:["운영시간"], place:["장소"], teacher:["담당교사"], department:["운영부서"], subject:["교과"], reportRequired:["보고서사용"], reportDeadline:["학생보고서마감일"], memo:["학생안내"]}}
+797:           : null;
+798:   if (!specs || !specs.keyValue) throw new Error("양방향 저장 가능한 프로그램 원본을 확인하지 못했습니다.");
+799:   const range = `'${specs.sheet}'!A1:AZ2000`;
+800:   const result = await readSheetBatch(token, UEP_SPREADSHEET_ID, [range]);
+801:   const matrix = result?.[0]?.values || [];
+802:   let header = null;
+803:   for (const keyName of specs.keyNames) { header = findHeaderRowByRequired(matrix,[keyName]); if (header) break; }
+804:   if (!header) throw new Error(`${specs.sheet}의 프로그램 ID 헤더를 찾지 못했습니다.`);
+805:   let keyCol=-1;
+806:   for (const keyName of specs.keyNames){ const i=header.headers.indexOf(keyName); if(i>=0){keyCol=i;break;} }
+807:   let dataRow=-1;
+808:   for(let r=header.index+1;r<matrix.length;r+=1){
+809:     const raw=String(matrix[r]?.[keyCol]||"").trim().replace(/^CRS-/,'');
+810:     if(raw===String(specs.keyValue).replace(/^CRS-/,'')){dataRow=r;break;}
+811:   }
+812:   if(dataRow<0) throw new Error(`${specs.sheet}에서 해당 프로그램 행을 찾지 못했습니다.`);
+813:   const updates=[];
+814:   const add=(aliases,value)=>{
+815:     if(value===undefined||value===null||value==='') return;
+816:     for(const name of aliases||[]){ const c=header.headers.indexOf(name); if(c>=0){updates.push([c,String(value)]);return;} }
+817:   };
+818:   add(specs.fields.date,date);
+819:   if(specs.fields.endDate) add(specs.fields.endDate,endDate);
+820:   if(specs.fields.time) add(specs.fields.time,time);
+821:   if(specs.fields.startTime) add(specs.fields.startTime,startTime||clocks[0]||time);
+822:   if(specs.fields.endTime) add(specs.fields.endTime,endTime||clocks[1]||'');
+823:   if(specs.fields.start) add(specs.fields.start,clocks[0]||time);
+824:   if(specs.fields.end) add(specs.fields.end,clocks[1]||'');
+825:   add(specs.fields.place,place);
+826:   add(specs.fields.teacher,teacher);
+827:   if(specs.fields.title) add(specs.fields.title,title);
+828:   if(specs.fields.recordTitle) add(specs.fields.recordTitle,recordTitle);
+829:   if(specs.fields.department) add(specs.fields.department,department);
+830:   if(specs.fields.subject) add(specs.fields.subject,subject);
+831:   if(specs.fields.reportRequired) add(specs.fields.reportRequired,reportRequired);
+832:   if(specs.fields.reportToAuthority) add(specs.fields.reportToAuthority,reportToAuthority);
+833:   if(specs.fields.reportAgency) add(specs.fields.reportAgency,reportAgency);
+834:   if(specs.fields.reportAfterDays) add(specs.fields.reportAfterDays,reportAfterDays);
+835:   if(specs.fields.reportDeadline) add(specs.fields.reportDeadline,reportDeadline);
+836:   if(specs.fields.photoRequired) add(specs.fields.photoRequired,photoRequired);
+837:   if(specs.fields.memo) add(specs.fields.memo,memo);
+838:   if(specs.fields.activityType) add(specs.fields.activityType,activityType);
+839:   if(specs.fields.afterType) add(specs.fields.afterType,afterType);
+840:   if(specs.fields.weekdays) add(specs.fields.weekdays,weekdays);
+841:   if(specs.fields.operationPeriod) add(specs.fields.operationPeriod,operationPeriod);
+842:   if(specs.fields.targetGrade) add(specs.fields.targetGrade,targetGrade);
+843:   if(specs.fields.nightLinked) add(specs.fields.nightLinked,nightLinked);
+844:   if(specs.fields.attendanceMethod) add(specs.fields.attendanceMethod,attendanceMethod);
+845:   if(specs.fields.status) add(specs.fields.status,status);
+846:   if(!updates.length && (commonReportFormUrl===undefined || !reportFormSettingKey)) throw new Error(`${specs.sheet}에서 수정 가능한 운영정보 열을 찾지 못했습니다.`);
+847:   const sheetRow=dataRow+1;
+848:   for(const [colIndex,value] of updates){
+849:     const col=columnLetter(colIndex);
+850:     await updateSheetValues(token,UEP_SPREADSHEET_ID,`'${specs.sheet}'!${col}${sheetRow}:${col}${sheetRow}`,[[value]]);
+851:   }
+852:   if(reportFormSettingKey && commonReportFormUrl!==undefined){
+853:     const settingRange="'00_UEP설정'!A1:E500";
+854:     const settingResult=await readSheetBatch(token,UEP_SPREADSHEET_ID,[settingRange]);
+855:     const settingMatrix=settingResult?.[0]?.values||[];
+856:     const settingHeader=findHeaderRowByRequired(settingMatrix,["설정키","설정값"]);
+857:     if(!settingHeader) throw new Error("00_UEP설정의 설정키·설정값 헤더를 찾지 못했습니다.");
+858:     const keyCol=settingHeader.headers.indexOf("설정키");
+859:     const valueCol=settingHeader.headers.indexOf("설정값");
+860:     let settingRow=-1;
+861:     for(let r=settingHeader.index+1;r<settingMatrix.length;r+=1){ if(String(settingMatrix[r]?.[keyCol]||"").trim()===reportFormSettingKey){settingRow=r;break;} }
+862:     if(settingRow<0) throw new Error(`${reportFormSettingKey} 설정키를 찾지 못했습니다.`);
+863:     const col=columnLetter(valueCol);
+864:     await updateSheetValues(token,UEP_SPREADSHEET_ID,`'00_UEP설정'!${col}${settingRow+1}:${col}${settingRow+1}`,[[commonReportFormUrl]]);
+865:   }
+866:   liveDataCache=null; liveDataFetchedAt=0;
+867:   const data=await fetchLiveData({force:true});
+868:   return {ok:true,data,sheet:specs.sheet};
+869: }
+870: 
+871: async function clearSheetValues(token, spreadsheetId, range) {
+872:   const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}:clear`;
+873:   const response = await fetch(url, {
+874:     method: "POST",
+875:     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+876:     body: "{}",
+877:   });
+878:   if (!response.ok) throw new Error(`공결 삭제 실패 (${response.status})`);
+879:   return response.json();
+880: }
+881: 
+882: function officialAttendanceRow(payload={}, id="") {
+883:   const now=new Date().toISOString();
+884:   const type=String(payload.detailType||"결석");
+885:   const start=String(payload.startPeriod||"");
+886:   const end=String(payload.endPeriod||"");
+887:   const unit=(start||end)?"교시":"일일";
+888:   const scope=(start||end)?(start&&end?`${start}~${end}교시`:`${start||end}교시`):"하루 전체";
+889:   return [[
+890:     id,
+891:     String(payload.studentId||""), String(payload.studentNo||""), String(payload.name||""),
+892:     String(payload.grade||"1"), String(payload.className||payload.classNo||""), String(payload.date||""),
+893:     String(payload.attendanceType||"출석인정"), type, start, end,
+894:     String(payload.reasonText||payload.reason||""), String(payload.place||""),
+895:     String(payload.evidenceRequired||"N"), String(payload.evidence||"불필요"),
+896:     String(payload.signatureRequired||"N"), String(payload.signatureStatus||"불필요"),
+897:     String(payload.registrar||"UEP 직접등록"), now, String(payload.editor||"UEP"), String(payload.note||""),
+898:     unit, scope, String(payload.originalType||"공결"), String(payload.sourceTab||"UEP 직접등록"), String(payload.sourceRow||"")
+899:   ]];
+900: }
+901: 
+902: async function saveOfficialAttendance(payload={}) {
+903:   const account=await readEncrypted(credentialPath());
+904:   if(!validateServiceAccount(account)) throw new Error("저장된 Google 서비스 계정 인증정보가 올바르지 않습니다.");
+905:   const token=await getSheetsToken(account);
+906:   const range="'30_공결기록'!A3:Z3000";
+907:   const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,[range]);
+908:   const matrix=result?.[0]?.values||[];
+909:   const rows=matrix.slice(1);
+910:   let id=String(payload.id||"").trim();
+911:   let sheetRow=-1;
+912:   if(id){
+913:     const pos=rows.findIndex(row=>String(row?.[0]||"").trim()===id);
+914:     if(pos>=0) sheetRow=pos+4;
+915:   }else{
+916:     let max=0;
+917:     rows.forEach(row=>{const m=String(row?.[0]||"").match(/^ATT-2026-(\\d+)$/);if(m)max=Math.max(max,Number(m[1]));});
+918:     id=`ATT-2026-${String(max+1).padStart(4,"0")}`;
+919:   }
+920:   const values=officialAttendanceRow(payload,id);
+921:   if(sheetRow>0) await updateSheetValues(token,UEP_SPREADSHEET_ID,`'30_공결기록'!A${sheetRow}:Z${sheetRow}`,values);
+922:   else await appendSheetValues(token,UEP_SPREADSHEET_ID,"'30_공결기록'!A:Z",values);
+923:   const operational=await fetchOperationalData();
+924:   return {ok:true,id,patch:operational.patch||{}};
+925: }
+926: 
+927: async function deleteOfficialAttendance(id="") {
+928:   const key=String(id||"").trim();
+929:   if(!key) throw new Error("삭제할 공결 ID가 없습니다.");
+930:   const account=await readEncrypted(credentialPath());
+931:   if(!validateServiceAccount(account)) throw new Error("저장된 Google 서비스 계정 인증정보가 올바르지 않습니다.");
+932:   const token=await getSheetsToken(account);
+933:   const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,["'30_공결기록'!A3:Z3000"]);
+934:   const rows=(result?.[0]?.values||[]).slice(1);
+935:   const pos=rows.findIndex(row=>String(row?.[0]||"").trim()===key);
+936:   if(pos<0) throw new Error("삭제할 공결 기록을 찾지 못했습니다.");
+937:   const sheetRow=pos+4;
+938:   await clearSheetValues(token,UEP_SPREADSHEET_ID,`'30_공결기록'!A${sheetRow}:Z${sheetRow}`);
+939:   const operational=await fetchOperationalData();
+940:   return {ok:true,patch:operational.patch||{}};
+941: }
+942: 
