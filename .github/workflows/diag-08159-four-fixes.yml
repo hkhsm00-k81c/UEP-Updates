@@ -1,0 +1,50 @@
+name: Diagnose UEP 0.81.59 Four Fixes
+
+'on':
+  push:
+    branches: [main]
+    paths: [diag-08159-four-fixes.trigger]
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download 0.81.58
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          gh release download v0.81.58 --repo $env:GITHUB_REPOSITORY --pattern '*.zip' --dir source
+          $z=Get-ChildItem source -Filter '*.zip'|Select-Object -First 1
+          if(!$z){throw '0.81.58 release zip not found'}
+          Expand-Archive $z.FullName app -Force
+      - name: Capture exact targets
+        shell: pwsh
+        run: |
+          $out=@()
+          function Add-Hits($file,$patterns,$pad=16){
+            $lines=Get-Content $file -Encoding UTF8
+            $out += "===== $file ====="
+            foreach($p in $patterns){
+              $hits=$lines|Select-String $p
+              foreach($h in $hits){
+                $s=[Math]::Max(0,$h.LineNumber-1-$pad);$e=[Math]::Min($lines.Count-1,$h.LineNumber-1+$pad)
+                $out += "--- $p @ $($h.LineNumber) ---"
+                for($i=$s;$i -le $e;$i++){$out += ('{0}: {1}' -f ($i+1),$lines[$i])}
+              }
+            }
+          }
+          Add-Hits 'app/resources/app/electron/google-data.cjs' @('function localDate','const localDate','localDate =','lateRows','nightRows','31_지각기록','30_공식출결기록') 22
+          Add-Hits 'app/resources/app/gyomuon.js' @('function uepSelectionSubjectState','data-curriculum-workspace','과목별 신청현황','unlockSensitiveInfo','권한 없음','상세정보 확인','student-signal','sensitive','currentRoleId') 20
+          $out|Set-Content diag-08159-four-fixes.txt -Encoding UTF8
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add diag-08159-four-fixes.txt
+          git commit -m 'diag: capture 0.81.59 four fix targets'
+          git push
