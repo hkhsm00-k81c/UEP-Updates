@@ -1,0 +1,4 @@
+const fs=require('fs'),path=require('path');const root=process.argv[2]||'app';
+const specs=[['resources/app/gyomuon.js',['const UEP_SUBJECT_CONFIDENTIAL','function subjectConfidential','async function setSubjectConfidentialPassword','async function unlockSubjectConfidential','data-curriculum-workspace']],['resources/app/electron/main.cjs',['ipcMain.handle("notice:receiptSave"','function schoolReadPost','async function schoolReadPost']]];
+let out=[];for(const [rel,needles] of specs){const f=path.join(root,...rel.split('/'));const t=fs.readFileSync(f,'utf8');for(const n of needles){const i=t.indexOf(n);if(i>=0)out.push(`=== ${rel} :: ${n} @ ${i} ===\n`+t.slice(Math.max(0,i-2500),Math.min(t.length,i+8500)));}}
+fs.writeFileSync('diag-08163-exact.txt',out.join('\n\n---\n\n'),'utf8');console.log(out.length);
