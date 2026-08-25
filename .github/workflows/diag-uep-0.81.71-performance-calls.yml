@@ -1,0 +1,56 @@
+name: Diagnose UEP 0.81.71 Performance Call Paths
+'on':
+  push:
+    branches: [main]
+    paths: [diag-uep-0.81.71-performance-calls.trigger]
+permissions:
+  contents: write
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download stable 0.81.71
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          gh release download v0.81.71 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+      - name: Trace refresh, rerender, timers and listeners
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $targets=@('app/resources/app/gyomuon.js','app/resources/app/electron/main.cjs')
+          $out=@('# UEP 0.81.71 performance call-path audit','')
+          foreach($file in $targets){
+            $lines=Get-Content $file -Encoding UTF8
+            $out+="## $file"
+            $needles=@('refreshReadonlyCacheSilently','previewReadonlySync','readReadonlyCache','fetchLiveData({ force: true','fetchLiveData({force:true','startReadonlyAutoRefresh','setInterval(','addEventListener(','navigate(','renderDashboard','renderStudent','renderPage','render();','render()')
+            foreach($needle in $needles){
+              $hits=@();for($i=0;$i -lt $lines.Count;$i++){if($lines[$i].Contains($needle)){$hits+=$i}}
+              $out+="### $needle hits=$($hits.Count)"
+              foreach($idx in ($hits|Select-Object -First 80)){
+                $s=[Math]::Max(0,$idx-5);$e=[Math]::Min($lines.Count-1,$idx+9)
+                for($j=$s;$j -le $e;$j++){$out+=('{0}: {1}' -f ($j+1),$lines[$j])}
+                $out+='---'
+              }
+            }
+          }
+          $renderer='app/resources/app/gyomuon.js';$lines=Get-Content $renderer -Encoding UTF8
+          $out+='## Timer inventory'
+          for($i=0;$i -lt $lines.Count;$i++){if($lines[$i] -match 'setInterval\('){$s=[Math]::Max(0,$i-6);$e=[Math]::Min($lines.Count-1,$i+14);for($j=$s;$j -le $e;$j++){$out+=('{0}: {1}' -f ($j+1),$lines[$j])};$out+='---'}}
+          $out+='## Global/document/window listener inventory'
+          for($i=0;$i -lt $lines.Count;$i++){if($lines[$i] -match '(window|document)\.addEventListener\('){$s=[Math]::Max(0,$i-5);$e=[Math]::Min($lines.Count-1,$i+10);for($j=$s;$j -le $e;$j++){$out+=('{0}: {1}' -f ($j+1),$lines[$j])};$out+='---'}}
+          $out+='## Force refresh classification'
+          for($i=0;$i -lt $lines.Count;$i++){if($lines[$i] -match 'refreshReadonlyCacheSilently\('){$s=[Math]::Max(0,$i-8);$e=[Math]::Min($lines.Count-1,$i+12);for($j=$s;$j -le $e;$j++){$out+=('{0}: {1}' -f ($j+1),$lines[$j])};$out+='---'}}
+          $out|Set-Content diag-uep-0.81.71-performance-calls.txt -Encoding UTF8
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git pull --rebase origin main
+          git add diag-uep-0.81.71-performance-calls.txt
+          git commit -m 'diag: capture UEP 0.81.71 performance call paths'
+          git push
