@@ -1,0 +1,62 @@
+name: Diagnose UEP 0.81.71 Performance Structure
+'on':
+  push:
+    branches: [main]
+    paths: [diag-uep-0.81.71-performance-structure.trigger]
+permissions:
+  contents: write
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download stable 0.81.71
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          gh release download v0.81.71 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+      - name: Audit runtime structure without modifying package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $files=@('app/resources/app/gyomuon.js','app/resources/app/electron/main.cjs','app/resources/app/electron/preload.cjs')
+          $patterns=@('setInterval','setTimeout','addEventListener','visibilitychange','focus','fetch(','schoolRead','schoolReadApiRequest','schoolReadBatchRead','fetchLiveData','readonlyCache','liveDataCache','localStorage','sessionStorage','ipcRenderer.invoke','ipcMain.handle','getDataRange','batch','refresh','reload','sync','loadData','render')
+          $out=@('# UEP 0.81.71 runtime performance structure audit','')
+          foreach($file in $files){
+            $text=Get-Content $file -Raw -Encoding UTF8
+            $lines=Get-Content $file -Encoding UTF8
+            $out+="## $file"
+            $out+="bytes=$([Text.Encoding]::UTF8.GetByteCount($text)) lines=$($lines.Count)"
+            foreach($p in $patterns){$c=([regex]::Matches($text,[regex]::Escape($p),[Text.RegularExpressions.RegexOptions]::IgnoreCase)).Count;if($c -gt 0){$out+="COUNT $p = $c"}}
+            $out+=''
+          }
+          $targets=@('schoolReadApiRequest','schoolReadBatchRead','resolveGoogleReadAuth','readSchoolReadSession','saveSchoolReadSession','fetchLiveData','parseGoogleSheetData','loadLiveData','refreshLiveData','sync','bootstrap','initialize','renderDashboard','loadDashboard')
+          foreach($file in $files){
+            $lines=Get-Content $file -Encoding UTF8
+            $out+="## Function/reference excerpts: $file"
+            foreach($name in $targets){
+              $hits=@();for($i=0;$i -lt $lines.Count;$i++){if($lines[$i] -match [regex]::Escape($name)){$hits+=$i}}
+              if($hits.Count -gt 0){$out+="### $name hits=$($hits.Count)";foreach($idx in ($hits|Select-Object -First 12)){$s=[Math]::Max(0,$idx-5);$e=[Math]::Min($lines.Count-1,$idx+14);for($j=$s;$j -le $e;$j++){$out+=('{0}: {1}' -f ($j+1),$lines[$j])};$out+='---'}}
+            }
+          }
+          foreach($file in $files){
+            $lines=Get-Content $file -Encoding UTF8
+            $out+="## Timers/events/network excerpts: $file"
+            for($i=0;$i -lt $lines.Count;$i++){
+              if($lines[$i] -match 'setInterval|setTimeout|visibilitychange|addEventListener\(.?(focus|online)|fetch\(|ipcRenderer\.invoke|ipcMain\.handle'){
+                $s=[Math]::Max(0,$i-3);$e=[Math]::Min($lines.Count-1,$i+8);for($j=$s;$j -le $e;$j++){$out+=('{0}: {1}' -f ($j+1),$lines[$j])};$out+='---'
+              }
+            }
+          }
+          $out|Set-Content diag-uep-0.81.71-performance-structure.txt -Encoding UTF8
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git pull --rebase origin main
+          git add diag-uep-0.81.71-performance-structure.txt
+          git commit -m 'diag: capture UEP 0.81.71 performance structure'
+          git push
