@@ -1,4 +1,4 @@
-UEP v0.81.71 core-fix build trigger R6
+UEP v0.81.71 core-fix build trigger R7
 base: v0.81.70 stable
-scope: final runtime verification and release
+scope: direct reopened-package hash verification + release
 requested: 2026-08-26
