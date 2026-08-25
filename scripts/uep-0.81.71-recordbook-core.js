@@ -39,6 +39,9 @@ function makeNeisRecordbookRecords08171({sheets=[],students=[],defaultGrade='1',
     const findIndex=rx=>headers.findIndex(x=>rx.test(x));
     const subjectIndex=findIndex(/과목명|교과목|^과\s*목$/),gradeIndex=findIndex(/^학\s*년$|^학년$/),semesterIndex=findIndex(/^학기$/),classIndex=findIndex(/^반$|^학급$|^반명$/),numberIndex=findIndex(/^학번$|^학생번호$|^번호$|^번\s*호$/),nameIndex=findIndex(/성명|학생명|성\s*명|이름/),textIndex=findIndex(/세부능력|특기사항|세특/);
     let currentSubject=cleanSheetSubject(sheet?.name||''),currentGrade=String(defaultGrade||'1'),currentClass='',currentSemester='';
+    // NEIS printouts put the first "N학년 N반" line before the first repeated column header.
+    // Seed page context from those leading rows so page 1 matches the student master exactly like later pages.
+    for(const leadRow of rows.slice(0,h.index)){const section=parseSection((leadRow||[]).map(norm));if(section){currentGrade=section.grade;currentClass=section.classNo;}}
     rows.slice(h.index+1).forEach((row,rowIndex)=>{
       const cells=(row||[]).map(norm);if(!cells.some(Boolean))return;
       const sourceRow=rowIndex+h.index+2;
