@@ -6,18 +6,17 @@ const A=(c,m)=>{if(!c)throw new Error(m)};
 A(g.includes('UEP_08173_CURRICULUM_WORKSPACE_START'),'08173 module missing');
 A(g.includes('__uepCurriculumWorkspace08173'),'workspace entry missing');
 
-// subjectName must be DOM-only. Never dereference curriculum dataset objects while decorating cards.
-const s=g.indexOf('  function subjectName(card)');
-const e=g.indexOf('\n  function currentTerm()',s);
-A(s>=0&&e>s,'subjectName block anchors missing');
-const safe=String.raw`  function subjectName(card){
+// Replace subjectName structurally. Do not depend on the following function name or whitespace.
+const subjectRe=/function\s+subjectName\s*\(\s*card\s*\)\s*\{[\s\S]*?\}\s*(?=function\s+[A-Za-z_$][\w$]*\s*\()/;
+A(subjectRe.test(g),'subjectName function missing');
+const safe=String.raw`function subjectName(card){
     if(!card)return '';
     const lines=String(card.innerText||card.textContent||'').split(/\n+/).map(x=>x.trim()).filter(Boolean);
     const ignored=/^(\d+-\d+|신청\s*\d+명|예상\s*\d+분반|안정|폐강대상|개설 유지|폐강 확정|자동판정)$/;
     return lines.find(x=>x&&!ignored.test(x)&&x.length<=80)||'';
   }
-`;
-g=g.slice(0,s)+safe+g.slice(e);
+  `;
+g=g.replace(subjectRe,safe);
 
 // Add a fail-open wrapper after the curriculum module instead of matching its exact function body.
 const END='/* UEP_08173_CURRICULUM_WORKSPACE_END */';
