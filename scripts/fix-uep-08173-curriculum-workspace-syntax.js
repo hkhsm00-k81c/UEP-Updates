@@ -1,0 +1,11 @@
+const fs=require('fs'),path=require('path');
+const root=process.argv[2]||'app';
+const gFile=path.join(root,'resources','app','gyomuon.js');
+let g=fs.readFileSync(gFile,'utf8');
+const bad="function subjectName(card){const lines=String(card.innerText||'').split(/\\n+/).map(x=>x.trim()).filter(Boolean);return lines.find(x=>!/^\\d-\\d$/.test(x)&&!/^신청\\s*\\d+명/.test(x)&&!(/^(안정|폐강대상|개설 유지|폐강 확정)$/).test(x))&&x.length<45)||'';}";
+const good="function subjectName(card){const lines=String(card.innerText||'').split(/\\n+/).map(x=>x.trim()).filter(Boolean);return lines.find(x=>!/^\\d-\\d$/.test(x)&&!/^신청\\s*\\d+명/.test(x)&&!/^(안정|폐강대상|개설 유지|폐강 확정)$/.test(x)&&x.length<45)||'';}";
+if(!g.includes(bad)) throw new Error('08173 subjectName syntax anchor not found');
+g=g.replace(bad,good);
+fs.writeFileSync(gFile,g,'utf8');
+if(g.includes(bad)||!g.includes(good)) throw new Error('08173 subjectName syntax correction failed');
+console.log('UEP 0.81.73 curriculum subjectName syntax corrected');
