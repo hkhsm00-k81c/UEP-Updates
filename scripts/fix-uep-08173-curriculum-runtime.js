@@ -22,11 +22,14 @@ const courseBlock=String.raw`  function ownCourseSummary(el){const t=String(el?.
   }
   function statusBadges(card){return [...card.querySelectorAll('span,small,em,b,strong,div')].filter(el=>el.children.length===0&&/^(안정|폐강대상|개설 유지|폐강 확정)$/.test(String(el.textContent||'').trim()));}
   function existingStatusBadge(card){return statusBadges(card)[0]||null;}
-  function removeDuplicateStatusBadges(card,keep){statusBadges(card).forEach(el=>{if(el!==keep)el.remove();});}
-  function applyCourseStatus(badge,value,count){const state=value==='closed'?'closed':value==='keep'?'keep':count<=25?'risk':'safe';badge.classList.add('uep-course-auto-08173');badge.classList.remove('risk','safe','keep','closed');badge.classList.add(state);badge.textContent=value==='closed'?'폐강 확정':value==='keep'?'개설 유지':count<=25?'폐강대상':'안정';}
+  function removeDuplicateStatusBadges(card){card.querySelectorAll('.uep-course-auto-08173').forEach(el=>el.remove());}
+  function applyCourseStatus(select,value,count){
+    select.dataset.state=value==='closed'?'closed':value==='keep'?'keep':count<=25?'risk':'safe';
+    select.title=value==='closed'?'폐강 확정':value==='keep'?'개설 유지':count<=25?'25명 이하 폐강대상':'26명 이상 안정';
+  }
   function enhanceCourseCards(){
     const leaves=[...document.querySelectorAll('body *')].filter(ownCourseSummary),seen=new Set();
-    leaves.forEach(el=>{const card=closestCourseCard(el);if(!card||seen.has(card))return;seen.add(card);const text=String(card.innerText||''),m=text.match(/신청\s*(\d+)명/);if(!m||summaryCount(card)!==1)return;const count=Number(m[1]),name=subjectName(card);if(!name)return;const term=currentTerm(),key=term+'::'+name,d=decisions()[key]||'';let badge=existingStatusBadge(card);if(!badge){badge=document.createElement('span');card.appendChild(badge);}removeDuplicateStatusBadges(card,badge);applyCourseStatus(badge,d,count);if(card.querySelector('.uep-course-decision-08173'))return;const wrap=document.createElement('div');wrap.className='uep-course-decision-08173';const sel=document.createElement('select');sel.setAttribute('aria-label',name+' 개설 상태');sel.innerHTML='<option value="">자동판정</option><option value="keep">개설 유지</option><option value="closed">폐강 확정</option>';sel.value=d;const stop=e=>e.stopPropagation();wrap.addEventListener('click',stop);sel.addEventListener('click',stop);sel.addEventListener('change',e=>{stop(e);saveDecision(key,sel.value);applyCourseStatus(badge,sel.value,count)});wrap.appendChild(sel);card.appendChild(wrap);});
+    leaves.forEach(el=>{const card=closestCourseCard(el);if(!card||seen.has(card))return;seen.add(card);const text=String(card.innerText||''),m=text.match(/신청\s*(\d+)명/);if(!m||summaryCount(card)!==1)return;const count=Number(m[1]),name=subjectName(card);if(!name)return;const term=currentTerm(),key=term+'::'+name,d=decisions()[key]||'';removeDuplicateStatusBadges(card);let wrap=card.querySelector('.uep-course-decision-08173'),sel=wrap?.querySelector('select');if(!wrap){wrap=document.createElement('div');wrap.className='uep-course-decision-08173';sel=document.createElement('select');sel.setAttribute('aria-label',name+' 개설 상태');sel.innerHTML='<option value="">자동판정</option><option value="keep">개설 유지</option><option value="closed">폐강 확정</option>';const stop=e=>e.stopPropagation();wrap.addEventListener('click',stop);sel.addEventListener('click',stop);sel.addEventListener('change',e=>{stop(e);saveDecision(key,sel.value);applyCourseStatus(sel,sel.value,count)});wrap.appendChild(sel);card.appendChild(wrap);}sel.value=d;applyCourseStatus(sel,d,count);});
   }
 `;
 g=g.slice(0,start)+courseBlock+g.slice(end);
@@ -55,14 +58,26 @@ const rosterBlock=String.raw`  function findRosterPanel(){
     const panel=findRosterPanel();if(!panel)return;ensureStyle();
     const sortButtons=[...panel.querySelectorAll('button')].filter(b=>/^(예상성적순|반.?번호순)$/.test(String(b.textContent||'').trim()));
     const anchor=sortButtons.find(b=>/반.?번호순/.test(String(b.textContent||'')))||sortButtons[0];if(!anchor)return;
-    const host=anchor.parentElement||panel;let btn=host.querySelector('.uep-roster-print-08173')||panel.querySelector('.uep-roster-print-08173');
+    const host=anchor.parentElement||panel;let btn=panel.querySelector('.uep-roster-print-08173');
     if(!btn){btn=document.createElement('button');btn.type='button';btn.className='uep-roster-print-08173';btn.textContent='신청명단 출력';btn.title='성적정보 없이 학년·반·번호순으로 출력';btn.addEventListener('click',e=>{e.stopPropagation();printRoster(panel)});}
-    if(btn.parentElement!==host)host.appendChild(btn);else if(btn!==anchor.nextElementSibling)anchor.insertAdjacentElement('afterend',btn);
+    if(btn.parentElement!==host||btn!==anchor.nextElementSibling)anchor.insertAdjacentElement('afterend',btn);
   }
+  function installRosterRefresh(){
+    if(window.__UEP08173RosterRefreshInstalled)return;window.__UEP08173RosterRefreshInstalled=true;
+    document.addEventListener('click',e=>{
+      if(!isCurriculumPage())return;
+      const target=e.target?.closest?.('button,[role="button"],article,.subject-card,.course-card');
+      if(!target)return;
+      const t=String(target.innerText||target.textContent||'');
+      if(!/신청\s*\d+명/.test(t)&&!/^(예상성적순|반.?번호순)$/.test(String(target.textContent||'').trim()))return;
+      [40,120,260].forEach(ms=>setTimeout(()=>{try{enhanceRosterPanel();}catch(err){console.warn('[UEP 0.81.73] roster refresh skipped',err);}},ms));
+    },true);
+  }
+  installRosterRefresh();
 `;
 g=g.slice(0,rosterStart)+rosterBlock+g.slice(rosterEnd);
 
 fs.writeFileSync(gFile,g,'utf8');
 const out=fs.readFileSync(gFile,'utf8');
-for(const marker of ['function ownCourseSummary','summaryCount(card)!==1','function statusBadges','function removeDuplicateStatusBadges','function applyCourseStatus','신청명단 출력','function findRosterPanel','insertAdjacentElement'])A(out.includes(marker),'runtime fix marker missing: '+marker);
+for(const marker of ['function ownCourseSummary','summaryCount(card)!==1','function existingStatusBadge','function applyCourseStatus','신청명단 출력','function findRosterPanel','function installRosterRefresh','roster refresh skipped'])A(out.includes(marker),'runtime fix marker missing: '+marker);
 console.log('UEP 0.81.73 curriculum runtime targeting fix applied');
