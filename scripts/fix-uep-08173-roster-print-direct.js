@@ -10,7 +10,7 @@ const s=g.indexOf('  function enhanceRosterPanel(){');
 const e=g.indexOf('  function retryRosterPanel(){',s);
 A(s>=0&&e>s,'roster enhancement anchors missing');
 const direct=String.raw`  function visibleRosterSortButtons(){
-    return [...document.querySelectorAll('button')].filter(b=>{
+    return [...document.querySelectorAll('button,[role="button"]')].filter(b=>{
       const txt=String(b.textContent||'').trim();
       if(!/^(예상성적순|반.?번호순)$/.test(txt))return false;
       const r=b.getBoundingClientRect?.();
@@ -43,7 +43,21 @@ const direct=String.raw`  function visibleRosterSortButtons(){
 `;
 g=g.slice(0,s)+direct+g.slice(e);
 
+const rs=g.indexOf('  function installRosterRefresh(){');
+const re=g.indexOf('  installRosterRefresh();',rs);
+A(rs>=0&&re>rs,'roster refresh anchors missing');
+const refresh=String.raw`  function installRosterRefresh(){
+    if(window.__UEP08173RosterRefreshInstalled)return;window.__UEP08173RosterRefreshInstalled=true;
+    document.addEventListener('click',e=>{
+      if(!isCurriculumPage())return;
+      if(e.target?.closest?.('.uep-roster-print-08173'))return;
+      retryRosterPanel();
+    },true);
+  }
+`;
+g=g.slice(0,rs)+refresh+g.slice(re);
+
 fs.writeFileSync(gFile,g,'utf8');
 const out=fs.readFileSync(gFile,'utf8');
-for(const m of ['function visibleRosterSortButtons','function rosterPanelFromAnchor','신청명단 출력','anchor.insertAdjacentElement'])A(out.includes(m),'direct roster marker missing: '+m);
+for(const m of ['function visibleRosterSortButtons','button,[role="button"]','function rosterPanelFromAnchor','신청명단 출력','anchor.insertAdjacentElement','function installRosterRefresh','retryRosterPanel();'])A(out.includes(m),'direct roster marker missing: '+m);
 console.log('UEP 0.81.73 direct roster print attachment applied');
