@@ -43,41 +43,47 @@ A(printStart>=0,'printRoster missing');
 const printEnd=oldRoster.indexOf('  function enhanceRosterPanel()',printStart);
 A(printEnd>printStart,'enhanceRosterPanel anchor missing');
 const printRosterCode=oldRoster.slice(printStart,printEnd);
-const rosterBlock=String.raw`  function findRosterPanel(){
-    const sortButtons=[...document.querySelectorAll('button')].filter(b=>/^(예상성적순|반.?번호순)$/.test(String(b.textContent||'').trim()));
-    for(const b of sortButtons){
-      let n=b.closest?.('aside,[role="dialog"],section');
-      if(n&&String(n.innerText||'').includes('학번·성명')&&String(n.innerText||'').includes('예상등급'))return n;
-      n=b.parentElement;
-      for(let i=0;i<9&&n;i++,n=n.parentElement){const t=String(n.innerText||'');if(t.includes('학번·성명')&&t.includes('예상등급')&&/신청\s*\d+명/.test(t))return n;}
+const rosterBlock=String.raw`  function rosterSortButtons(root=document){return [...root.querySelectorAll('button')].filter(b=>/^(예상성적순|반.?번호순)$/.test(String(b.textContent||'').trim()));}
+  function findRosterPanel(){
+    for(const b of rosterSortButtons()){
+      let n=b.parentElement,best=null;
+      while(n&&n!==document.body){
+        const t=String(n.innerText||'');
+        if(t.includes('학번·성명')&&t.includes('예상등급')){best=n;break;}
+        n=n.parentElement;
+      }
+      if(best)return best;
     }
     return null;
   }
   function rosterRows(panel){const map=new Map();[...panel.querySelectorAll('button,tr,[role="row"],div')].forEach(el=>{const t=String(el.innerText||'').replace(/\s+/g,' ').trim();const m=t.match(/\b(\d{4})\s+([^\s]+)\b/);if(!m)return;const no=m[1],name=m[2];if(!map.has(no))map.set(no,{no,name})});return [...map.values()].sort((a,b)=>Number(a.no)-Number(b.no));}
 `+printRosterCode+String.raw`  function enhanceRosterPanel(){
-    const panel=findRosterPanel();if(!panel)return;ensureStyle();
-    const sortButtons=[...panel.querySelectorAll('button')].filter(b=>/^(예상성적순|반.?번호순)$/.test(String(b.textContent||'').trim()));
-    const anchor=sortButtons.find(b=>/반.?번호순/.test(String(b.textContent||'')))||sortButtons[0];if(!anchor)return;
+    const panel=findRosterPanel();if(!panel)return false;ensureStyle();
+    const sortButtons=rosterSortButtons(panel);const anchor=sortButtons.find(b=>/반.?번호순/.test(String(b.textContent||'')))||sortButtons[0];if(!anchor)return false;
     const host=anchor.parentElement||panel;let btn=panel.querySelector('.uep-roster-print-08173');
     if(!btn){btn=document.createElement('button');btn.type='button';btn.className='uep-roster-print-08173';btn.textContent='신청명단 출력';btn.title='성적정보 없이 학년·반·번호순으로 출력';btn.addEventListener('click',e=>{e.stopPropagation();printRoster(panel)});}
     if(btn.parentElement!==host||btn!==anchor.nextElementSibling)anchor.insertAdjacentElement('afterend',btn);
+    return true;
+  }
+  function retryRosterPanel(){
+    const waits=[0,80,200,450,900,1500];
+    waits.forEach(ms=>setTimeout(()=>{try{enhanceRosterPanel();}catch(err){console.warn('[UEP 0.81.73] roster refresh skipped',err);}},ms));
   }
   function installRosterRefresh(){
     if(window.__UEP08173RosterRefreshInstalled)return;window.__UEP08173RosterRefreshInstalled=true;
     document.addEventListener('click',e=>{
       if(!isCurriculumPage())return;
-      const target=e.target?.closest?.('button,[role="button"],article,.subject-card,.course-card');
-      if(!target)return;
+      const target=e.target?.closest?.('button,[role="button"],article,.subject-card,.course-card');if(!target)return;
       const t=String(target.innerText||target.textContent||'');
-      if(!/신청\s*\d+명/.test(t)&&!/^(예상성적순|반.?번호순)$/.test(String(target.textContent||'').trim()))return;
-      [40,120,260].forEach(ms=>setTimeout(()=>{try{enhanceRosterPanel();}catch(err){console.warn('[UEP 0.81.73] roster refresh skipped',err);}},ms));
+      if(/신청\s*\d+명/.test(t)||/^(예상성적순|반.?번호순)$/.test(String(target.textContent||'').trim()))retryRosterPanel();
     },true);
   }
   installRosterRefresh();
+  retryRosterPanel();
 `;
 g=g.slice(0,rosterStart)+rosterBlock+g.slice(rosterEnd);
 
 fs.writeFileSync(gFile,g,'utf8');
 const out=fs.readFileSync(gFile,'utf8');
-for(const marker of ['function ownCourseSummary','summaryCount(card)!==1','function existingStatusBadge','function applyCourseStatus','신청명단 출력','function findRosterPanel','function installRosterRefresh','roster refresh skipped'])A(out.includes(marker),'runtime fix marker missing: '+marker);
+for(const marker of ['function ownCourseSummary','summaryCount(card)!==1','function existingStatusBadge','function applyCourseStatus','신청명단 출력','function rosterSortButtons','function findRosterPanel','function retryRosterPanel','function installRosterRefresh','roster refresh skipped'])A(out.includes(marker),'runtime fix marker missing: '+marker);
 console.log('UEP 0.81.73 curriculum runtime targeting fix applied');
