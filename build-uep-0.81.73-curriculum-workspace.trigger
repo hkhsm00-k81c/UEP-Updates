@@ -2,8 +2,8 @@ UEP v0.81.73 curriculum workspace candidate
 base: v0.81.72 stable
 scope: curriculum UX + protected cards + closure decisions + roster print + release notes
 syntax-fix: subjectName predicate corrected
-runtime-fix: one selector per real course card + no duplicate generated status + direct roster print attachment beside visible sort control
+runtime-fix: one selector per real course card + no duplicate generated status + direct roster print attachment beside visible sort control + refresh after any curriculum click
 runtime-boundary: wrapper-based fail-open without brittle function-body anchor
 subject-name: structural replacement + DOM-only null-safe extraction
-attempt: 11
+attempt: 12
 release: no
