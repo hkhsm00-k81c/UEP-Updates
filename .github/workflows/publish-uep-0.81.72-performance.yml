@@ -1,0 +1,96 @@
+name: Publish UEP 0.81.72 Performance Stable
+'on':
+  push:
+    branches: [main]
+    paths:
+      - publish-uep-0.81.72-performance.trigger
+permissions:
+  contents: write
+concurrency:
+  group: publish-uep-0.81.72-performance
+  cancel-in-progress: true
+jobs:
+  build-publish:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download stable 0.81.71 baseline
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop';$PSNativeCommandUseErrorActionPreference=$true
+          New-Item -ItemType Directory -Force source,app,verify|Out-Null
+          gh release download v0.81.71 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+          if(!(Test-Path app/UEP.exe)){throw '0.81.71 baseline UEP.exe missing'}
+      - name: Apply verified 0.81.72 R9 performance chain
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop';$PSNativeCommandUseErrorActionPreference=$true
+          $scripts=@('scripts/patch-uep-08172-structure.js','scripts/patch-uep-08172-operational-writes.js','scripts/patch-uep-08172-refresh-policy.js','scripts/patch-uep-08172-input-contact.js','scripts/patch-uep-08172-program-write-r6.js','scripts/patch-uep-08172-render-r7.js','scripts/patch-uep-08172-observers-r8.js','scripts/patch-uep-08172-runtime-r9.js')
+          foreach($script in $scripts){node --check $script;if($LASTEXITCODE -ne 0){throw "patch syntax failed: $script"};node $script;if($LASTEXITCODE -ne 0){throw "patch failed: $script"}}
+          foreach($f in @('app/resources/app/gyomuon.js','app/resources/app/electron/main.cjs','app/resources/app/electron/preload.cjs')){node --check $f;if($LASTEXITCODE -ne 0){throw "runtime syntax failed: $f"}}
+          $pkg='app/resources/app/package.json';$p=Get-Content $pkg -Raw -Encoding UTF8|ConvertFrom-Json;$p.version='0.81.72';$p|ConvertTo-Json -Depth 50|Set-Content $pkg -Encoding UTF8
+      - name: Verify R9 runtime structure and no performance regressions
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop';$PSNativeCommandUseErrorActionPreference=$true
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8;$m=Get-Content app/resources/app/electron/main.cjs -Raw -Encoding UTF8;$pre=Get-Content app/resources/app/electron/preload.cjs -Raw -Encoding UTF8
+          foreach($good in @('const APP_VERSION = "0.81.72"','refreshOperationalCacheSilently','READONLY_FULL_REFRESH_MAX_AGE_MS','OPERATIONAL_RENDER_PAGES08172','runRenderPostProcess08172','GROWTH_RENDER_PAGES08172','STATS_PRIVACY_RENDER_PAGES08172','__uepUrgentBellHost08172','UEP_APPROVAL_POPUP_FIX_08068','refreshInputCenterSourceSilently','applyProgramWritePatch08172')){if(-not $g.Contains($good)){throw "0.81.72 runtime marker missing: $good"}}
+          foreach($good in @('fetchOperationalData','google:previewOperationalSync')){if(-not $m.Contains($good)){throw "0.81.72 main marker missing: $good"}}
+          if(-not $pre.Contains('previewOperationalSync')){throw 'preload operational sync bridge missing'}
+          if($g.Contains('observe(document.documentElement')){throw 'document-wide MutationObserver regression'}
+          if($g.Contains('if(rerender&&state.activePage)render(state.activePage);')){throw 'unconditional operational rerender regression'}
+          if($g.Contains('try{window.__uepRefineGrowth089?.();window.__uepFinalRefinement090?.();window.__uepGrowthProgramGuide082?.();')){throw 'unscoped render refinement regression'}
+          foreach($bad in @('UEP_APPROVAL_POPUP_FIX_08066','UEP_APPROVAL_POPUP_FIX_08067','UEP_08134_CURRICULUM_SECURITY_START','setInterval(tick,2000)','setInterval(syncSchoolReadAuthBadge,5000)')){if($g.Contains($bad)){throw "legacy performance runtime remains: $bad"}}
+          foreach($fn in @('saveOfficialAttendance','deleteOfficialAttendance','saveLateAttendance','deleteLateAttendance','saveDormOuting','saveNightSupervisor','saveLunchDuty','saveStudentContact','saveProgramOperation')){$start=$m.IndexOf("async function $fn");if($start -lt 0){throw "missing $fn"};$next=$m.IndexOf('async function ',$start+20);if($next -lt 0){$next=$m.Length};$block=$m.Substring($start,$next-$start);if($block -match 'fetchLiveData\(\{\s*force\s*:\s*true'){throw "$fn full-refresh regression"}}
+          if(-not $g.Contains("if(GROWTH_RENDER_PAGES08172.has(p))window.__uepRefineGrowth089?.()")){throw 'page-scoped growth hook missing'}
+          if(-not $g.Contains("if(p==='programs')window.__uepGrowthProgramGuide082?.()")){throw 'program-only guide hook missing'}
+          if(-not $g.Contains('function uepUrgentTick08166(){if(document.hidden)return;')){throw 'urgent hidden-window guard missing'}
+          if(-not $m.Contains('ipcMain.handle("google:previewReadonlySync"')){throw 'intentional manual full-sync bridge missing'}
+          $idx=$g.IndexOf('normalizeInputBatch');if($idx -lt 0){throw 'normalize path missing'};$block=$g.Substring($idx,[Math]::Min(2800,$g.Length-$idx));if(-not $block.Contains('refreshReadonlyCacheSilently({force:true,rerender:false})')){throw 'intentional normalize full refresh removed'}
+          Write-Host '0.81.72 R9 runtime verification PASS'
+      - name: Reopen final package and verify hashes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop';$PSNativeCommandUseErrorActionPreference=$true
+          Compress-Archive -Path 'app/*' -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          Expand-Archive UEP-update.zip verify -Force
+          if(!(Test-Path verify/UEP.exe)){throw 'final UEP.exe missing'}
+          foreach($f in @('verify/resources/app/gyomuon.js','verify/resources/app/electron/main.cjs','verify/resources/app/electron/preload.cjs')){node --check $f;if($LASTEXITCODE -ne 0){throw "archive syntax failed: $f"}}
+          $pkg=Get-Content verify/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json;if($pkg.version -ne '0.81.72'){throw "package version mismatch: $($pkg.version)"}
+          $src=(Get-FileHash app/resources/app/gyomuon.js -Algorithm SHA256).Hash.ToLower().Trim();$dst=(Get-FileHash verify/resources/app/gyomuon.js -Algorithm SHA256).Hash.ToLower().Trim();if($src -ne $dst){throw 'gyomuon hash mismatch after package reopen'}
+          $vg=Get-Content verify/resources/app/gyomuon.js -Raw -Encoding UTF8;if($vg.Contains('observe(document.documentElement')){throw 'archive document-wide observer regression'};if(-not $vg.Contains('runRenderPostProcess08172')){throw 'archive R9 marker missing'}
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower().Trim();"UEP_SHA256=$sha"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "0.81.72 final package PASS sha256=$sha"
+      - name: Publish v0.81.72 and promote homeroom stable
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop';$PSNativeCommandUseErrorActionPreference=$true
+          $exists=$false;try{gh release view v0.81.72 --repo $env:GITHUB_REPOSITORY *> $null;$exists=$true}catch{$exists=$false};if($exists){throw 'v0.81.72 release already exists; refusing to overwrite a stable release'}
+          $notes=@'
+UEP 0.81.72는 0.81.71 안정판을 기준으로 다중 사용자 환경의 데이터 조회·렌더링 구조를 정리한 성능 안정화 버전입니다.
+
+- 10분 자동갱신에서 전체 데이터 그래프를 매번 다시 읽지 않고 공결·지각·공지·공지확인·급식지도·야자감독 등 변동성이 높은 운영자료를 부분 동기화합니다.
+- 전체 동기화는 캐시 노후화·최초 연결·명시적 새로고침처럼 필요한 경우에 유지하며, 여러 PC가 동시에 전체 조회하지 않도록 시작/주기 갱신 시점을 분산합니다.
+- 공결·지각·학사외출·야자감독·급식지도·학생 연락처·프로그램 운영정보 저장 후 전체 UEP DB를 재조회하던 경로를 레코드/도메인 패치 방식으로 변경했습니다.
+- 입력센터 원본 저장·분류는 입력센터 원본 영역만 갱신하며, 여러 데이터 영역을 동시에 변경할 수 있는 최종 정규화 작업의 안전한 전체 동기화는 유지합니다.
+- 운영자료 갱신 후 현재 화면 전체를 무조건 다시 그리지 않고 실제 운영자료를 사용하는 화면만 재렌더합니다.
+- 0.80.66~0.80.67 결재라인 중복 보정과 0.81.34 전역 DOM 보정/주기 폴링을 제거하고 최신 본체/0.80.68 보정으로 실행 경로를 단일화했습니다.
+- document 전체를 상시 감시하던 MutationObserver를 제거하고 필요한 drawer 영역으로 제한하거나 정식 render 후처리 훅으로 통합했습니다.
+- 성장프로파일·SDGs·통계 개인정보·프로그램 추천 후처리를 관련 페이지에서만 실행합니다.
+- 긴급공지 주기작업은 창이 숨겨진 동안 중단하고 상단 알림벨 DOM을 캐시하여 반복 탐색 비용을 줄였습니다.
+'@
+          gh release create v0.81.72 UEP-update.zip --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.72 Multi-user Performance & Runtime Structure' --notes $notes
+          $url='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.72/UEP-update.zip'
+          git pull --rebase origin main
+          $policy=Get-Content uep-policy.json -Raw -Encoding UTF8|ConvertFrom-Json;$policy.latestVersion='0.81.72';$policy.downloadUrl=$url;$policy.sha256=$env:UEP_SHA256.Trim();$policy.message='다중 사용자 성능 안정화: 운영자료 부분동기화·저장후 부분패치·렌더/Observer 구조정리';$policy.forceUpdate=$false;$policy|ConvertTo-Json -Depth 50|Set-Content uep-policy.json -Encoding UTF8
+          $manifest=@{version='0.81.72';channel='stable';downloadUrl=$url;sha256=$env:UEP_SHA256.Trim();notes='다중 사용자 성능 안정화 · 운영자료 부분동기화 · 저장 후 부분패치 · 페이지별 렌더 · 전역 Observer 제거'}|ConvertTo-Json;Set-Content uep-update.json $manifest -Encoding UTF8;Set-Content uep-version.json $manifest -Encoding UTF8
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add uep-policy.json uep-update.json uep-version.json
+          git commit -m 'release: promote UEP 0.81.72 performance stable'
+          git push
