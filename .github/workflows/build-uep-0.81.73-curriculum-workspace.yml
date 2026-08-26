@@ -1,0 +1,72 @@
+name: Build UEP 0.81.73 Curriculum Workspace Candidate
+'on':
+  push:
+    branches: [main]
+    paths:
+      - build-uep-0.81.73-curriculum-workspace.trigger
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download stable 0.81.72
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,out|Out-Null
+          gh release download v0.81.72 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+      - name: Apply curriculum workspace module
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node scripts/patch-uep-08173-curriculum-workspace.js
+          if($LASTEXITCODE -ne 0){throw 'curriculum workspace patch failed'}
+      - name: Hard syntax checks
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($f in @('app/resources/app/gyomuon.js','app/resources/app/electron/main.cjs','app/resources/app/electron/preload.cjs')){node --check $f;if($LASTEXITCODE -ne 0){throw "syntax failed: $f"}}
+      - name: Curriculum security and function regression checks
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          foreach($good in @('const APP_VERSION = "0.81.73";','subjectConfidentialPasswordHash','SUBJECT_CONFIDENTIAL_PIN_HASH','문이과 교차오류','과목별 신청현황','__uepCurriculumWorkspace08173','UEP_08173_CURRICULUM_WORKSPACE_START','폐강대상','개설 유지','폐강 확정','신청명단 출력','runRenderPostProcess08172','GROWTH_RENDER_PAGES08172')){if(-not $g.Contains($good)){throw "required marker missing: $good"}}
+          foreach($good in @('uepCrossTrackRows08161','uepCrossTrackView08161','uepSelectionDataset','curriculumWorkspaceMode','curriculumTermFilter','curriculumRosterSort')){if(-not $g.Contains($good)){throw "existing curriculum function missing: $good"}}
+          if($g.Contains('observe(document.documentElement')){throw 'document-wide observer regression'}
+          if(-not $g.Contains("window.__uepCurriculumWorkspace08173?.()")){throw 'page-scoped curriculum post-render hook missing'}
+      - name: Package and archive revalidation
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Compress-Archive -Path app/* -DestinationPath out/UEP-update-0.81.73-curriculum-candidate.zip -CompressionLevel Optimal
+          New-Item -ItemType Directory -Force verify|Out-Null
+          Expand-Archive out/UEP-update-0.81.73-curriculum-candidate.zip verify -Force
+          foreach($f in @('verify/resources/app/gyomuon.js','verify/resources/app/electron/main.cjs','verify/resources/app/electron/preload.cjs')){node --check $f;if($LASTEXITCODE -ne 0){throw "archive syntax failed: $f"}}
+          $vg=Get-Content verify/resources/app/gyomuon.js -Raw -Encoding UTF8
+          foreach($good in @('const APP_VERSION = "0.81.73";','subjectConfidentialPasswordHash','__uepCurriculumWorkspace08173','폐강 확정','신청명단 출력')){if(-not $vg.Contains($good)){throw "archive marker missing: $good"}}
+          $sha=(Get-FileHash out/UEP-update-0.81.73-curriculum-candidate.zip -Algorithm SHA256).Hash.ToLower()
+          @(
+            'candidate=0.81.73-curriculum',
+            'base=0.81.72-stable',
+            "sha256=$sha",
+            'curriculum-ux=program-card-style',
+            'confidential-auth=preserved-delegated',
+            'closure-threshold=25-or-less',
+            'closure-decision=local-admin-persistent',
+            'roster-print=grade-class-number-only-no-grades',
+            'data-update-time=selection-row-derived',
+            'release-notes=once-per-version',
+            'release=no'
+          )|Set-Content out/UEP-0.81.73-curriculum-candidate-report.txt -Encoding UTF8
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UEP-0.81.73-curriculum-workspace-candidate
+          path: out/*
+          retention-days: 7
