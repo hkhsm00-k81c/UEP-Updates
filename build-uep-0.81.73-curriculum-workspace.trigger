@@ -3,7 +3,7 @@ base: v0.81.72 stable
 scope: curriculum UX + protected cards + closure decisions + roster print + release notes
 syntax-fix: subjectName predicate corrected
 runtime-fix: one selector per real course card + deduplicated existing status badge + detail panel roster print adjacent to sort controls
-runtime-boundary: enhancement failures cannot break original curriculum render
+runtime-boundary: enhancement failures cannot break original curriculum render; idempotent boundary patch
 subject-name: DOM-only null-safe extraction
-attempt: 5
+attempt: 6
 release: no
