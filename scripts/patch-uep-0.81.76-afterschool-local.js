@@ -3,8 +3,9 @@ const path='work/resources/app/gyomuon.js';
 let s=fs.readFileSync(path,'utf8');
 const marker='/* UEP_08176_AFTER_SCHOOL_LOCAL_FIX */';
 if(s.includes(marker)) throw new Error('0.81.76 patch already present');
-const anchor='/* UEP_08174_TRANSFER_STUDENT_SUPPORT */';
-if(!s.includes(anchor)) throw new Error('0.81.74 baseline marker missing');
+if(s.includes('UEP_08175_PROGRAM_DATETIME_FIX')) throw new Error('0.81.75 global datetime patch must not exist in baseline');
+if(!s.includes('function showToast')) throw new Error('safe insertion anchor missing');
+if(!(s.includes('programWithOverride') || s.includes('afterSchoolPrograms'))) throw new Error('after-school program path missing');
 
 const patch=String.raw`
 
@@ -43,7 +44,9 @@ const patch=String.raw`
     const p={...src};
     const summer=isSummerAfterSchool_(p);
     if(summer){
-      for(const k of ['date','startDate','endDate','operationDate']) if(/^\d{4}-\d{2}-\d{2}$/.test(String(p[k]||''))) p[k]=ymdPlusOne_(p[k]);
+      for(const k of ['date','startDate','endDate','operationDate']){
+        if(/^\d{4}-\d{2}-\d{2}$/.test(String(p[k]||''))) p[k]=ymdPlusOne_(p[k]);
+      }
     }
     if(explicitNightOff_(p)) p.affectsAttendance=false;
     const arrKey=Array.isArray(p.sessions)?'sessions':Array.isArray(p.schedule)?'schedule':null;
@@ -51,8 +54,14 @@ const patch=String.raw`
       p[arrKey]=p[arrKey].map(x=>{
         if(!x||typeof x!=='object') return x;
         const y={...x};
-        if(summer){ for(const k of ['date','sessionDate','operationDate']) if(/^\d{4}-\d{2}-\d{2}$/.test(String(y[k]||''))) y[k]=ymdPlusOne_(y[k]); }
-        for(const k of ['startTime','endTime','start','end']) if(y[k]!=null) y[k]=fractionTime_(y[k]);
+        if(summer){
+          for(const k of ['date','sessionDate','operationDate']){
+            if(/^\d{4}-\d{2}-\d{2}$/.test(String(y[k]||''))) y[k]=ymdPlusOne_(y[k]);
+          }
+        }
+        for(const k of ['startTime','endTime','start','end']){
+          if(y[k]!=null) y[k]=fractionTime_(y[k]);
+        }
         return y;
       });
     }
@@ -74,13 +83,15 @@ const patch=String.raw`
 `;
 
 const insertAt=s.indexOf('\nfunction showToast');
-if(insertAt<0) throw new Error('showToast anchor missing');
+if(insertAt<0) throw new Error('showToast insertion point missing');
 s=s.slice(0,insertAt)+patch+s.slice(insertAt);
 
 s=s.replace(/const UPDATE_NOTICE_VERSION = "0\.81\.74";/,'const UPDATE_NOTICE_VERSION = "0.81.76";');
 s=s.replace(/const UPDATE_NOTICE_TITLE = "[^"]*";/,'const UPDATE_NOTICE_TITLE = "방과후 일정 표시 정상화";');
 s=s.replace(/const UPDATE_NOTICE_ITEMS = \[[\s\S]*?\];/m,`const UPDATE_NOTICE_ITEMS = [\n  "여름방학 방과후 차시 날짜와 시간을 원본 일정대로 표시합니다.",\n  "학생정보 참여 프로그램 이력의 방과후 운영기간 표시를 정상화했습니다.",\n  "야자연계가 아닌 방과후 프로그램은 오후자습·야자 시간표에서 제외합니다.",\n  "학사외출 등 기존 공통 날짜 처리는 변경하지 않았습니다."\n];`);
 
+if(!s.includes(marker)) throw new Error('patch marker was not inserted');
+if(!s.includes('__uepNormalizeAfterSchoolProgram08176')) throw new Error('normalizer was not inserted');
+if(!s.includes('0.81.76')) throw new Error('update notice version was not updated');
 fs.writeFileSync(path,s,'utf8');
-console.log('patched 0.81.76 after-school local fix');
-// workflow trigger revision 1
+console.log('patched 0.81.76 localized after-school fix');
