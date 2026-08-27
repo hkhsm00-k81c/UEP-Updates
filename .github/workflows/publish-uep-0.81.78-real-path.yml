@@ -1,0 +1,39 @@
+name: Publish UEP 0.81.78 Real Data Path Recovery
+'on':
+  push:
+    branches: [main]
+    paths: [scripts/patch-uep-0.81.78-real-path.js]
+permissions: {contents: write}
+jobs:
+  publish:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download 0.81.77 recovery baseline
+        shell: pwsh
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: gh release download v0.81.77 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip; Expand-Archive UEP-update.zip work -Force
+      - name: Apply actual-path repair
+        run: node scripts/patch-uep-0.81.78-real-path.js
+      - name: Real School Read regression A-D
+        run: node tests/regression-uep-0.81.78.cjs
+      - name: Package and reopen verify
+        shell: pwsh
+        run: |
+          Compress-Archive -Path work\* -DestinationPath UEP-update-0.81.78.zip -Force
+          Expand-Archive UEP-update-0.81.78.zip verify -Force
+          node tests/regression-uep-0.81.78.cjs
+          $pkg=Get-Content verify/resources/app/package.json -Raw|ConvertFrom-Json;$ui=Get-Content verify/resources/app/gyomuon.js -Raw;$main=Get-Content verify/resources/app/electron/main.cjs -Raw
+          if($pkg.version-ne'0.81.78'-or-not $ui.Contains('const APP_VERSION = "0.81.78";')-or-not $ui.Contains('__UEP_08178_REAL_DATA_PATH_RECOVERY__')-or-not $main.Contains('normalizeSchoolReadBatch')){throw 'reopened ZIP verification failed'}
+          (Get-FileHash UEP-update-0.81.78.zip -Algorithm SHA256).Hash.ToLower()|Set-Content sha256.txt -Encoding ascii
+      - name: Publish release and promote manifests
+        shell: pwsh
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: |
+          $hash=(Get-Content sha256.txt -Raw).Trim();$url='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.78/UEP-update.zip';$message='UEP 0.81.78 실제 데이터 경로 복구 · 학사외출 금/일 정상화 · 여름방학 7/22~7/31 및 08:40~10:30 복구 · 야자연계 N 표시 차단'
+          $message|Set-Content notes.md -Encoding UTF8;gh release create v0.81.78 UEP-update-0.81.78.zip --repo $env:GITHUB_REPOSITORY --title 'UEP v0.81.78 실제 데이터 경로 복구' --notes-file notes.md;Copy-Item UEP-update-0.81.78.zip UEP-update.zip;gh release upload v0.81.78 UEP-update.zip --repo $env:GITHUB_REPOSITORY
+          function PutJson($path,$obj){$tmp=Join-Path $env:RUNNER_TEMP ($path-replace'/','_');$obj|ConvertTo-Json -Depth 10|Set-Content $tmp -Encoding UTF8;$sha=(gh api "repos/$env:GITHUB_REPOSITORY/contents/$path" --jq .sha);$b64=[Convert]::ToBase64String([IO.File]::ReadAllBytes($tmp));@{message="release: promote $path to UEP 0.81.78";content=$b64;sha=$sha;branch='main'}|ConvertTo-Json|gh api --method PUT "repos/$env:GITHUB_REPOSITORY/contents/$path" --input -|Out-Null}
+          $policy=Get-Content uep-policy.json -Raw|ConvertFrom-Json;$policy.latestVersion='0.81.78';$policy.downloadUrl=$url;$policy.sha256=$hash;$policy.message=$message;PutJson 'uep-policy.json' $policy
+          $m=[ordered]@{version='0.81.78';channel='stable';downloadUrl=$url;notes=$message;sha256=$hash};PutJson 'uep-update.json' $m;PutJson 'uep-version.json' $m
+          $legacy=[ordered]@{latestVersion='0.81.78';downloadUrl=$url;sha256=$hash;forceUpdate=$false;message=$message};PutJson 'policy.json' $legacy
