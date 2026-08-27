@@ -20,21 +20,28 @@ jobs:
           $ErrorActionPreference='Stop'
           gh release download v0.81.74 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip
           Expand-Archive UEP-update.zip work -Force
+          $p='work/resources/app/gyomuon.js'
+          if(-not (Test-Path $p)){ throw '0.81.74 baseline gyomuon.js missing' }
+          $s=Get-Content $p -Raw -Encoding UTF8
+          if($s.Contains('UEP_08175_PROGRAM_DATETIME_FIX')){ throw '0.81.75 global datetime patch leaked into baseline' }
+          if(-not $s.Contains('function showToast')){ throw 'baseline showToast anchor missing' }
+          if(-not ($s.Contains('programWithOverride') -or $s.Contains('afterSchoolPrograms'))){ throw 'after-school program path missing in baseline' }
+          Write-Host "0.81.74 baseline verified"
       - name: Patch localized after-school handling
         shell: pwsh
         run: |
           node scripts/patch-uep-0.81.76-afterschool-local.js
-      - name: Verify regression guards
+      - name: Verify regression guards and behavior
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
           $p='work/resources/app/gyomuon.js'
           $s=Get-Content $p -Raw -Encoding UTF8
-          foreach($needle in @('UEP_08174_TRANSFER_STUDENT_SUPPORT','UEP_08176_AFTER_SCHOOL_LOCAL_FIX','__uepNormalizeAfterSchoolProgram08176','0.81.76','학사외출 등 기존 공통 날짜 처리는 변경하지 않았습니다.')){ if(-not $s.Contains($needle)){ throw "missing guard: $needle" } }
+          foreach($needle in @('UEP_08176_AFTER_SCHOOL_LOCAL_FIX','__uepNormalizeAfterSchoolProgram08176','0.81.76','학사외출 등 기존 공통 날짜 처리는 변경하지 않았습니다.')){ if(-not $s.Contains($needle)){ throw "missing guard: $needle" } }
           if($s.Contains('UEP_08175_PROGRAM_DATETIME_FIX')){ throw '0.81.75 global datetime patch leaked into 0.81.76 baseline' }
           if($s.Contains('window.parseProgramDate_ = function')){ throw 'global parseProgramDate override forbidden' }
           if($s.Contains('window.formatProgramTime_ = function')){ throw 'global formatProgramTime override forbidden' }
-          node -e "const fs=require('fs');const s=fs.readFileSync('work/resources/app/gyomuon.js','utf8');const m=s.match(/\/\* UEP_08176_AFTER_SCHOOL_LOCAL_FIX \*\/[\s\S]*?window\.__uepNormalizeAfterSchoolProgram08176=normalizeProgram_;[\s\S]*?\}\)\(\);/);if(!m)throw Error('patch block missing');console.log('local patch bytes',m[0].length);"
+          node -e "const fs=require('fs'),vm=require('vm');const s=fs.readFileSync('work/resources/app/gyomuon.js','utf8');const m=s.match(/\/\* UEP_08176_AFTER_SCHOOL_LOCAL_FIX \*\/[\s\S]*?window\.__uepNormalizeAfterSchoolProgram08176=normalizeProgram_;[\s\S]*?\}\)\(\);/);if(!m)throw Error('patch block missing');const ctx={window:{}};vm.createContext(ctx);vm.runInContext(m[0],ctx);const n=ctx.window.__uepNormalizeAfterSchoolProgram08176;if(typeof n!=='function')throw Error('normalizer missing');const summer=n({id:'AF2026-SUM-01',date:'2026-07-21',startDate:'2026-07-21',endDate:'2026-07-30',야자연계여부:'N',sessions:[{date:'2026-07-21',startTime:0.3611111111,endTime:0.3958333333}]});if(summer.date!=='2026-07-22'||summer.startDate!=='2026-07-22'||summer.endDate!=='2026-07-31')throw Error('summer date normalization failed');if(summer.sessions[0].date!=='2026-07-22'||summer.sessions[0].startTime!=='08:40'||summer.sessions[0].endTime!=='09:30')throw Error('session date/time normalization failed');if(summer.affectsAttendance!==false)throw Error('night-link exclusion failed');const ordinary=n({id:'OTHER-01',date:'2026-08-26',startDate:'2026-08-26',endDate:'2026-08-27'});if(ordinary.date!=='2026-08-26'||ordinary.startDate!=='2026-08-26'||ordinary.endDate!=='2026-08-27')throw Error('non-summer date regression');console.log('0.81.76 behavior guards PASS');"
       - name: Package and reopen verify
         shell: pwsh
         run: |
@@ -43,6 +50,7 @@ jobs:
           Expand-Archive UEP-update-0.81.76.zip verify -Force
           $s=Get-Content verify\resources\app\gyomuon.js -Raw -Encoding UTF8
           if(-not $s.Contains('UEP_08176_AFTER_SCHOOL_LOCAL_FIX')){ throw 'zip verify failed' }
+          if($s.Contains('UEP_08175_PROGRAM_DATETIME_FIX')){ throw 'zip contains forbidden 0.81.75 global patch' }
           $hash=(Get-FileHash UEP-update-0.81.76.zip -Algorithm SHA256).Hash.ToLower()
           Set-Content sha256.txt $hash -Encoding ascii
       - name: Publish release
