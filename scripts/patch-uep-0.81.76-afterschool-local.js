@@ -4,7 +4,6 @@ let s=fs.readFileSync(path,'utf8');
 const marker='/* UEP_08176_AFTER_SCHOOL_LOCAL_FIX */';
 if(s.includes(marker)) throw new Error('0.81.76 patch already present');
 if(s.includes('UEP_08175_PROGRAM_DATETIME_FIX')) throw new Error('0.81.75 global datetime patch must not exist in baseline');
-if(!s.includes('function showToast')) throw new Error('safe insertion anchor missing');
 if(!(s.includes('programWithOverride') || s.includes('afterSchoolPrograms'))) throw new Error('after-school program path missing');
 
 const patch=String.raw`
@@ -82,9 +81,7 @@ const patch=String.raw`
 })();
 `;
 
-const insertAt=s.indexOf('\nfunction showToast');
-if(insertAt<0) throw new Error('showToast insertion point missing');
-s=s.slice(0,insertAt)+patch+s.slice(insertAt);
+s += patch;
 
 s=s.replace(/const UPDATE_NOTICE_VERSION = "0\.81\.74";/,'const UPDATE_NOTICE_VERSION = "0.81.76";');
 s=s.replace(/const UPDATE_NOTICE_TITLE = "[^"]*";/,'const UPDATE_NOTICE_TITLE = "방과후 일정 표시 정상화";');
