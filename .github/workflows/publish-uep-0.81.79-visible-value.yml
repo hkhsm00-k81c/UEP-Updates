@@ -1,0 +1,30 @@
+name: Publish UEP 0.81.79 Visible Value Recovery
+'on': {push: {branches: [main], paths: [scripts/patch-uep-0.81.79-visible-value.js]}}
+permissions: {contents: write}
+jobs:
+  publish:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download 0.81.78 baseline
+        shell: pwsh
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: gh release download v0.81.78 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip; Expand-Archive UEP-update.zip work -Force
+      - name: Apply and test exact visible values
+        run: node scripts/patch-uep-0.81.79-visible-value.js && node tests/regression-uep-0.81.79.cjs
+      - name: Package reopen and retest
+        shell: pwsh
+        run: |
+          Compress-Archive -Path work\* -DestinationPath UEP-update-0.81.79.zip -Force
+          Move-Item work work-source;Expand-Archive UEP-update-0.81.79.zip work -Force
+          node tests/regression-uep-0.81.79.cjs
+          (Get-FileHash UEP-update-0.81.79.zip -Algorithm SHA256).Hash.ToLower()|Set-Content sha256.txt -Encoding ascii
+      - name: Release and promote
+        shell: pwsh
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: |
+          $hash=(Get-Content sha256.txt -Raw).Trim();$url='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.79/UEP-update.zip';$msg='UEP 0.81.79 일정 표시 복구 · 학사외출 금/일 · 여름방학 7/22~7/31 · 08:40~10:30 · 학생 참여이력 동기화'
+          $msg|Set-Content notes.md -Encoding UTF8;gh release create v0.81.79 UEP-update-0.81.79.zip --repo $env:GITHUB_REPOSITORY --title 'UEP v0.81.79 일정 표시 복구' --notes-file notes.md;Copy-Item UEP-update-0.81.79.zip UEP-update.zip;gh release upload v0.81.79 UEP-update.zip --repo $env:GITHUB_REPOSITORY
+          function PutJson($path,$obj){$tmp=Join-Path $env:RUNNER_TEMP ($path-replace'/','_');$obj|ConvertTo-Json -Depth 10|Set-Content $tmp -Encoding UTF8;$sha=(gh api "repos/$env:GITHUB_REPOSITORY/contents/$path" --jq .sha);$b64=[Convert]::ToBase64String([IO.File]::ReadAllBytes($tmp));@{message="release: promote $path to 0.81.79";content=$b64;sha=$sha;branch='main'}|ConvertTo-Json|gh api --method PUT "repos/$env:GITHUB_REPOSITORY/contents/$path" --input -|Out-Null}
+          $p=Get-Content uep-policy.json -Raw|ConvertFrom-Json;$p.latestVersion='0.81.79';$p.downloadUrl=$url;$p.sha256=$hash;$p.message=$msg;PutJson 'uep-policy.json' $p;$m=[ordered]@{version='0.81.79';channel='stable';downloadUrl=$url;notes=$msg;sha256=$hash};PutJson 'uep-update.json' $m;PutJson 'uep-version.json' $m;$l=[ordered]@{latestVersion='0.81.79';downloadUrl=$url;sha256=$hash;forceUpdate=$false;message=$msg};PutJson 'policy.json' $l
