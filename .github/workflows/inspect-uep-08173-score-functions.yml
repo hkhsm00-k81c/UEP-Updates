@@ -1,0 +1,38 @@
+name: Inspect UEP 0.81.73 Score Functions
+'on':
+  push:
+    branches: [main]
+    paths:
+      - inspect-uep-08173-score-functions.trigger
+permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download runtime
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force app | Out-Null
+          gh release download v0.81.73 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip
+          Expand-Archive UEP-update.zip app -Force
+      - name: Extract functions
+        shell: node
+        run: |
+          const fs=require('fs');const s=fs.readFileSync('app/resources/app/gyomuon.js','utf8');
+          const re=/function\s+([A-Za-z0-9_$]+)\s*\([^)]*\)\s*\{/g;let m,out=[];
+          function grab(start){let i=s.indexOf('{',start),d=0,q=null,esc=false;for(let j=i;j<s.length;j++){const c=s[j];if(q){if(esc){esc=false;continue}if(c==='\\'){esc=true;continue}if(c===q)q=null;continue}if(c==='"'||c==="'"||c==='`'){q=c;continue}if(c==='{')d++;else if(c==='}'&&--d===0)return s.slice(start,j+1)}return s.slice(start,start+10000)}
+          while((m=re.exec(s))){const body=grab(m.index);if(/scoreRecords|scoreType|모의고사|내신|scoreMode|admissionBase/.test(body)){out.push('\n===== '+m[1]+' =====\n'+body)}}
+          fs.writeFileSync('score-functions-08173.txt',out.join('\n'),'utf8');
+      - name: Commit inspection
+        shell: pwsh
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add score-functions-08173.txt
+          git commit -m 'diag: capture 0.81.73 score functions'
+          git push
