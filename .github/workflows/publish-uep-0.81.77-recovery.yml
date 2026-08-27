@@ -1,0 +1,70 @@
+name: Publish UEP 0.81.77 Stability Recovery
+'on':
+  push:
+    branches: [main]
+    paths: [scripts/patch-uep-0.81.77-recovery.js]
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download verified 0.81.74 baseline
+        shell: pwsh
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: |
+          $ErrorActionPreference='Stop'
+          gh release download v0.81.74 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip
+          Expand-Archive UEP-update.zip work -Force
+          Copy-Item work/resources/app/electron/google-data.cjs baseline-google-data.cjs
+      - name: Apply recovery patch
+        shell: pwsh
+        run: node scripts/patch-uep-0.81.77-recovery.js
+      - name: Regression A-D
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node tests/regression-uep-0.81.77.cjs
+          if((Get-FileHash baseline-google-data.cjs).Hash -ne (Get-FileHash work/resources/app/electron/google-data.cjs).Hash){throw '0.81.74 common date parser changed'}
+      - name: Package and reopen verify
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Compress-Archive -Path work\* -DestinationPath UEP-update-0.81.77.zip -Force
+          Expand-Archive UEP-update-0.81.77.zip verify -Force
+          $pkg=Get-Content verify/resources/app/package.json -Raw | ConvertFrom-Json
+          $ui=Get-Content verify/resources/app/gyomuon.js -Raw
+          if($pkg.version -ne '0.81.77' -or -not $ui.Contains('const APP_VERSION = "0.81.77";') -or -not $ui.Contains('__UEP_08177_STABILITY_RECOVERY__')){throw 'built ZIP version/content verification failed'}
+          if($ui.Contains('UEP_08175_PROGRAM_DATETIME_FIX') -or $ui.Contains('UEP_08176_AFTER_SCHOOL_LOCAL_FIX')){throw 'old patch leaked into ZIP'}
+          (Get-FileHash UEP-update-0.81.77.zip -Algorithm SHA256).Hash.ToLower() | Set-Content sha256.txt -Encoding ascii
+      - name: Publish release
+        shell: pwsh
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: |
+          $ErrorActionPreference='Stop';$hash=(Get-Content sha256.txt -Raw).Trim()
+          @"
+          UEP 0.81.77 안정화 복구
+
+          - 프로그램 일정 수정 과정에서 발생한 날짜 표시 회귀 복구
+          - 학사외출 날짜 정상화
+          - 방과후학교 일정의 날짜·시간 처리 범위 분리
+          - 야자연계되지 않은 방과후 프로그램의 야간시간표 오표시 방지
+          - 버전 표시 및 업데이트 정보 일치
+
+          SHA-256: $hash
+          "@ | Set-Content notes.md -Encoding UTF8
+          gh release create v0.81.77 UEP-update-0.81.77.zip --repo $env:GITHUB_REPOSITORY --title 'UEP v0.81.77 안정화 복구' --notes-file notes.md
+          Copy-Item UEP-update-0.81.77.zip UEP-update.zip
+          gh release upload v0.81.77 UEP-update.zip --repo $env:GITHUB_REPOSITORY --clobber
+      - name: Promote all update manifests
+        shell: pwsh
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: |
+          $ErrorActionPreference='Stop';$version='0.81.77';$url='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.77/UEP-update.zip';$hash=(Get-Content sha256.txt -Raw).Trim()
+          function PutJson($path,$obj,$message){$tmp=Join-Path $env:RUNNER_TEMP ($path-replace'/','_');$obj|ConvertTo-Json -Depth 10|Set-Content $tmp -Encoding UTF8;$sha=(gh api "repos/$env:GITHUB_REPOSITORY/contents/$path" --jq .sha);$b64=[Convert]::ToBase64String([IO.File]::ReadAllBytes($tmp));$body=@{message=$message;content=$b64;sha=$sha;branch='main'}|ConvertTo-Json;$body|gh api --method PUT "repos/$env:GITHUB_REPOSITORY/contents/$path" --input -|Out-Null}
+          $message='UEP 0.81.77 안정화 복구 · 날짜 회귀 복구 · 방과후 처리 분리 · 야자연계 N 오표시 방지'
+          $policy=(gh api "repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json" --jq .content|%{[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(($_-replace'\s','')))}|ConvertFrom-Json);$policy.latestVersion=$version;$policy.downloadUrl=$url;$policy.sha256=$hash;$policy.forceUpdate=$false;$policy.updateEnabled=$true;$policy.message=$message;PutJson 'uep-policy.json' $policy 'release: promote launcher policy to UEP 0.81.77'
+          $manifest=[ordered]@{version=$version;channel='stable';downloadUrl=$url;notes=$message;sha256=$hash};PutJson 'uep-update.json' $manifest 'release: sync update manifest to UEP 0.81.77';PutJson 'uep-version.json' $manifest 'release: sync version manifest to UEP 0.81.77'
+          $legacy=[ordered]@{latestVersion=$version;downloadUrl=$url;sha256=$hash;forceUpdate=$false;message=$message};PutJson 'policy.json' $legacy 'release: sync legacy policy to UEP 0.81.77'
