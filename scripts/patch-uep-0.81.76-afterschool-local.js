@@ -10,6 +10,7 @@ const patch=String.raw`
 
 /* UEP_08176_AFTER_SCHOOL_LOCAL_FIX */
 (function(){
+  const VERSION='0.81.76';
   const DAY_MS=86400000;
   function ymdPlusOne_(v){
     const m=String(v??'').match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -78,17 +79,32 @@ const patch=String.raw`
     };
   }
   window.__uepNormalizeAfterSchoolProgram08176=normalizeProgram_;
+
+  function showUpdateNotice_(){
+    if(typeof document==='undefined' || typeof localStorage==='undefined') return;
+    const key='uep-update-notice-'+VERSION;
+    if(localStorage.getItem(key)==='shown') return;
+    const wrap=document.createElement('div');
+    wrap.setAttribute('data-uep-update-notice',VERSION);
+    wrap.style.cssText='position:fixed;inset:0;z-index:2147483000;background:rgba(15,23,42,.42);display:flex;align-items:center;justify-content:center;padding:24px;';
+    const box=document.createElement('div');
+    box.style.cssText='width:min(520px,92vw);background:#fff;border-radius:18px;box-shadow:0 24px 70px rgba(15,23,42,.24);padding:24px 26px;font-family:inherit;color:#15334a;';
+    box.innerHTML='<div style="font-size:13px;font-weight:800;color:#15977e;margin-bottom:7px">UEP v'+VERSION+'</div><div style="font-size:21px;font-weight:800;margin-bottom:14px">방과후 일정 표시 정상화</div><div style="font-size:14px;line-height:1.8;color:#405466">• 여름방학 방과후 차시 날짜와 시간을 원본 일정대로 표시합니다.<br>• 학생정보 참여 프로그램 이력의 방과후 운영기간을 정상화했습니다.<br>• 야자연계가 아닌 방과후는 오후자습·야자 시간표에서 제외합니다.<br>• 학사외출 등 기존 공통 날짜 처리는 변경하지 않았습니다.</div><button type="button" style="margin-top:20px;width:100%;border:0;border-radius:11px;padding:11px 14px;background:#15977e;color:white;font-weight:800;cursor:pointer">확인</button>';
+    box.querySelector('button').onclick=()=>{localStorage.setItem(key,'shown');wrap.remove();};
+    wrap.appendChild(box); document.body.appendChild(wrap);
+  }
+  if(typeof document!=='undefined'){
+    if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',()=>setTimeout(showUpdateNotice_,500),{once:true});
+    else setTimeout(showUpdateNotice_,500);
+  }
 })();
 `;
 
 s += patch;
 
-s=s.replace(/const UPDATE_NOTICE_VERSION = "0\.81\.74";/,'const UPDATE_NOTICE_VERSION = "0.81.76";');
-s=s.replace(/const UPDATE_NOTICE_TITLE = "[^"]*";/,'const UPDATE_NOTICE_TITLE = "방과후 일정 표시 정상화";');
-s=s.replace(/const UPDATE_NOTICE_ITEMS = \[[\s\S]*?\];/m,`const UPDATE_NOTICE_ITEMS = [\n  "여름방학 방과후 차시 날짜와 시간을 원본 일정대로 표시합니다.",\n  "학생정보 참여 프로그램 이력의 방과후 운영기간 표시를 정상화했습니다.",\n  "야자연계가 아닌 방과후 프로그램은 오후자습·야자 시간표에서 제외합니다.",\n  "학사외출 등 기존 공통 날짜 처리는 변경하지 않았습니다."\n];`);
-
 if(!s.includes(marker)) throw new Error('patch marker was not inserted');
 if(!s.includes('__uepNormalizeAfterSchoolProgram08176')) throw new Error('normalizer was not inserted');
-if(!s.includes('0.81.76')) throw new Error('update notice version was not updated');
+if(!s.includes("const VERSION='0.81.76'")) throw new Error('update notice version was not inserted');
+if(!s.includes('학사외출 등 기존 공통 날짜 처리는 변경하지 않았습니다.')) throw new Error('update notice content missing');
 fs.writeFileSync(path,s,'utf8');
-console.log('patched 0.81.76 localized after-school fix');
+console.log('patched 0.81.76 localized after-school fix and notice');
