@@ -1,0 +1,43 @@
+name: Diagnose UEP 0.81.74 DateTime Paths
+'on':
+  push:
+    branches: [main]
+    paths:
+      - diagnose-uep-0.81.74-datetime.trigger
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download 0.81.74 baseline
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop';$PSNativeCommandUseErrorActionPreference=$true
+          New-Item -ItemType Directory -Force app | Out-Null
+          gh release download v0.81.74 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip
+          Expand-Archive UEP-update.zip app -Force
+      - name: Print datetime and program construction contexts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          @'
+          const fs=require('fs');
+          const g=fs.readFileSync('app/resources/app/gyomuon.js','utf8');
+          const terms=['parseProgramDate_','formatProgramTime_','readonlyCache?.programs','readonlyCache.programs','afterSchoolPrograms','getTodayAfterPrograms','programWithOverride','학사외출','dorm','outing','외출','입소','퇴소','affectsAttendance','야자연계'];
+          for(const term of terms){
+            console.log('\n===== '+term+' =====');
+            let pos=0,count=0;
+            while((pos=g.indexOf(term,pos))>=0 && count<12){
+              const a=Math.max(0,pos-900),b=Math.min(g.length,pos+term.length+1400);
+              console.log('\n--- #'+(++count)+' @'+pos+' ---\n'+g.slice(a,b));
+              pos+=term.length;
+            }
+            if(!count)console.log('NO MATCH');
+          }
+          '@ | Set-Content diagnose.js -Encoding UTF8
+          node diagnose.js
