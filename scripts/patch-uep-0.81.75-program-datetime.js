@@ -7,32 +7,23 @@ const A=(c,m)=>{if(!c)throw new Error(m)};
 A(/const\s+APP_VERSION\s*=\s*["']0\.81\.74["']\s*;/.test(g),'0.81.74 version marker missing');
 g=g.replace(/const\s+APP_VERSION\s*=\s*["']0\.81\.74["']\s*;/,'const APP_VERSION = "0.81.75";');
 
-// Explicit N must always win over any inferred night-study slot.
-const nightCall='parseBool(explicitNightLink,';
-if(!g.includes(nightCall)){
-  const needles=['야자연계','nightLink','nightSlot','attendanceAffect','affectsAttendance','parseBool('];
-  console.log('=== UEP 0.81.74 NIGHT LINK DIAGNOSTIC ===');
-  for(const needle of needles){
-    let from=0,count=0;
-    while(count<8){
-      const i=g.indexOf(needle,from);if(i<0)break;
-      const s=Math.max(0,i-260),e=Math.min(g.length,i+420);
-      console.log(`\n--- ${needle} #${count+1} @${i} ---\n`+g.slice(s,e).replace(/\r?\n/g,' '));
-      from=i+needle.length;count++;
-    }
-    if(count===0)console.log(`\n--- ${needle}: no match ---`);
-  }
-  throw new Error('night attendance call missing; diagnostic emitted');
-}
-g=g.replace(nightCall,'uepNightAttendance08175(explicitNightLink,');
-
 const addon=String.raw`
 
 // __UEP_08175_PROGRAM_DATETIME_FIX__
-function uepNightAttendance08175(raw,fallback){
-  const t=normalize(raw);
-  if(/^(n|no|false|0|아니오|미연계|해당없음)$/i.test(t))return false;
-  return parseBool(raw,fallback);
+function uepNightAttendance08175(raw,fallback=false){
+  if(raw===false)return false;
+  if(raw===true)return true;
+  const t=String(raw??'').trim().toLowerCase();
+  if(/^(n|no|false|0|아니오|미연계|해당없음|비연계)$/.test(t))return false;
+  if(/^(y|yes|true|1|예|연계|해당)$/.test(t))return true;
+  return Boolean(fallback);
+}
+function uepNormalizeNightProgram08175(program){
+  if(!program||typeof program!=='object')return program;
+  const raw=program.affectsAttendance??program.nightLinked??program.nightLink??program['야자연계여부'];
+  const linked=uepNightAttendance08175(raw,Boolean(program.affectsAttendance));
+  if(linked===program.affectsAttendance && (linked||!(program.nightSlots||[]).length))return program;
+  return {...program,affectsAttendance:linked,nightSlots:linked?(program.nightSlots||[]):[]};
 }
 function uepSeoulDateKey08175(date){
   if(!(date instanceof Date)||Number.isNaN(date.getTime()))return '';
@@ -86,11 +77,19 @@ function uepProgramTime08175(value){
 parseProgramDate_=uepProgramDate08175;
 formatProgramTime_=uepProgramTime08175;
 
+// Normalize the actual program objects used by attendance/timetable code. 0.81.74 stores
+// sheet values in affectsAttendance, so the string "N" must not be treated as truthy.
+const __programWithOverride08175=typeof programWithOverride==='function'?programWithOverride:null;
+if(__programWithOverride08175){
+  programWithOverride=function(program){return uepNormalizeNightProgram08175(__programWithOverride08175(program));};
+}
+const __afterSchoolPrograms08175=typeof afterSchoolPrograms==='function'?afterSchoolPrograms:null;
+if(__afterSchoolPrograms08175){
+  afterSchoolPrograms=function(...args){return (__afterSchoolPrograms08175(...args)||[]).map(uepNormalizeNightProgram08175);};
+}
 const __getTodayAfterPrograms08175=typeof getTodayAfterPrograms==='function'?getTodayAfterPrograms:null;
 if(__getTodayAfterPrograms08175){
-  getTodayAfterPrograms=function(date){
-    return (__getTodayAfterPrograms08175(date)||[]).map(p=>p&&p.affectsAttendance===false?{...p,nightSlot:'',attendanceAffect:'none'}:p);
-  };
+  getTodayAfterPrograms=function(date){return (__getTodayAfterPrograms08175(date)||[]).map(uepNormalizeNightProgram08175);};
 }
 
 // __UEP_08175_RELEASE_NOTES_POPUP__
@@ -116,5 +115,5 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 g+=addon;
 fs.writeFileSync(gFile,g,'utf8');
 const out=fs.readFileSync(gFile,'utf8');
-for(const marker of ['const APP_VERSION = "0.81.75";','__UEP_08175_PROGRAM_DATETIME_FIX__','uepNightAttendance08175(explicitNightLink,','function uepNightAttendance08175','uepProgramDate08175','uepProgramTime08175','__UEP_08175_RELEASE_NOTES_POPUP__','UEP_RELEASE_NOTES_08175'])A(out.includes(marker),'0.81.75 marker missing: '+marker);
+for(const marker of ['const APP_VERSION = "0.81.75";','__UEP_08175_PROGRAM_DATETIME_FIX__','function uepNightAttendance08175','function uepNormalizeNightProgram08175','__programWithOverride08175','parseProgramDate_=uepProgramDate08175','formatProgramTime_=uepProgramTime08175','__UEP_08175_RELEASE_NOTES_POPUP__','UEP_RELEASE_NOTES_08175'])A(out.includes(marker),'0.81.75 marker missing: '+marker);
 console.log('UEP 0.81.75 program date/time and night linkage patch applied');
