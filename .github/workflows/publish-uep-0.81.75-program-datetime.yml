@@ -1,0 +1,82 @@
+name: Publish UEP 0.81.75 Program DateTime
+'on':
+  push:
+    branches: [main]
+    paths:
+      - publish-uep-0.81.75-program-datetime.trigger
+permissions:
+  contents: write
+concurrency:
+  group: publish-uep-0.81.75-program-datetime
+  cancel-in-progress: true
+jobs:
+  build-publish:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download stable 0.81.74 baseline
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop';$PSNativeCommandUseErrorActionPreference=$true
+          New-Item -ItemType Directory -Force app,verify | Out-Null
+          gh release download v0.81.74 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip
+          Expand-Archive UEP-update.zip app -Force
+          if(!(Test-Path app/UEP.exe)){throw '0.81.74 baseline UEP.exe missing'}
+      - name: Apply program datetime patch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop';$PSNativeCommandUseErrorActionPreference=$true
+          node --check scripts/patch-uep-0.81.75-program-datetime.js
+          if($LASTEXITCODE -ne 0){throw '0.81.75 patch syntax failed'}
+          node scripts/patch-uep-0.81.75-program-datetime.js app
+          if($LASTEXITCODE -ne 0){throw '0.81.75 patch apply failed'}
+          foreach($f in @('app/resources/app/gyomuon.js','app/resources/app/electron/main.cjs','app/resources/app/electron/preload.cjs')){node --check $f;if($LASTEXITCODE -ne 0){throw "runtime syntax failed: $f"}}
+          $pkg='app/resources/app/package.json';$p=Get-Content $pkg -Raw -Encoding UTF8|ConvertFrom-Json;$p.version='0.81.75';$p|ConvertTo-Json -Depth 50|Set-Content $pkg -Encoding UTF8
+      - name: Verify date time and night linkage
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          foreach($good in @('const APP_VERSION = "0.81.75";','__UEP_08175_PROGRAM_DATETIME_FIX__','function uepSeoulDateKey08175','function uepProgramDate08175','function uepProgramTime08175','parseProgramDate_=uepProgramDate08175','formatProgramTime_=uepProgramTime08175','__UEP_08175_RELEASE_NOTES_POPUP__','uep_release_notes_seen_')){if(-not $g.Contains($good)){throw "0.81.75 marker missing: $good"}}
+          if(-not $g.Contains("/^(n|no|false|0|아니오|미연계|해당없음)$/i.test(normalize(explicitNightLink))?false")){throw 'explicit N night-link override missing'}
+          foreach($existing in @('__UEP_08174_TRANSFER_STUDENT_SUPPORT__','전입생 · 선택과목 자료 없음','function uepScoreNoDataText08174','문이과 교차오류','과목별 신청현황','폐강대상','function uepPrintSubjectRoster08173(selected)','scoreStatisticsRows')){if(-not $g.Contains($existing)){throw "existing feature missing: $existing"}}
+          node -e "const date=(s)=>new Date(new Date(s).getTime()+9*60*60*1000).toISOString().slice(0,10);if(date('2026-07-21T15:00:00.000Z')!=='2026-07-22')process.exit(2);const t=n=>{const f=((n%1)+1)%1,m=Math.round(f*1440)%1440;return String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0')};if(t(0.3611111111)!=='08:40'||t(0.3958333333)!=='09:30'||t(0.4027777778)!=='09:40'||t(0.4375)!=='10:30')process.exit(3);console.log('fixture PASS: 7/22 and 08:40-10:30')"
+          if($LASTEXITCODE -ne 0){throw 'datetime fixture validation failed'}
+          Write-Host 'UEP 0.81.75 program datetime verification PASS'
+      - name: Package and reopen
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          if(Test-Path UEP-update.zip){Remove-Item UEP-update.zip -Force}
+          if(Test-Path verify){Remove-Item verify -Recurse -Force}
+          New-Item -ItemType Directory -Force verify | Out-Null
+          Compress-Archive -Path 'app/*' -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          Expand-Archive UEP-update.zip verify -Force
+          if(!(Test-Path verify/UEP.exe)){throw 'final UEP.exe missing'}
+          foreach($f in @('verify/resources/app/gyomuon.js','verify/resources/app/electron/main.cjs','verify/resources/app/electron/preload.cjs')){node --check $f;if($LASTEXITCODE -ne 0){throw "archive syntax failed: $f"}}
+          $p=Get-Content verify/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json;if($p.version -ne '0.81.75'){throw "package version mismatch: $($p.version)"}
+          $vg=Get-Content verify/resources/app/gyomuon.js -Raw -Encoding UTF8
+          foreach($good in @('const APP_VERSION = "0.81.75";','__UEP_08175_PROGRAM_DATETIME_FIX__','uepProgramDate08175','uepProgramTime08175','__UEP_08175_RELEASE_NOTES_POPUP__','__UEP_08174_TRANSFER_STUDENT_SUPPORT__')){if(-not $vg.Contains($good)){throw "archive marker missing: $good"}}
+          $src=(Get-FileHash app/resources/app/gyomuon.js -Algorithm SHA256).Hash.ToLower().Trim();$dst=(Get-FileHash verify/resources/app/gyomuon.js -Algorithm SHA256).Hash.ToLower().Trim();if($src -ne $dst){throw 'gyomuon hash mismatch after reopen'}
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower().Trim();"UEP_SHA256=$sha"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "0.81.75 package PASS sha256=$sha"
+      - name: Publish v0.81.75 and promote stable
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop';$PSNativeCommandUseErrorActionPreference=$true
+          $exists=$false;try{gh release view v0.81.75 --repo $env:GITHUB_REPOSITORY *> $null;$exists=$true}catch{$exists=$false};if($exists){throw 'v0.81.75 already exists; refusing overwrite'}
+          $notes=@('UEP 0.81.75는 구글시트 프로그램 일정의 날짜·시간 변환과 야간시간표 연계를 보완한 버전입니다.','','- 방과후학교 차시일정에서 날짜가 하루 앞당겨 보이던 현상을 수정했습니다.','- 학생정보 참여 프로그램 전체 이력의 시작·종료일도 같은 기준으로 정상화했습니다.','- 여름방학 방과후 차시 시간을 08:40~09:30, 09:40~10:30 등 실제 시각으로 표시하도록 보완했습니다.','- 야자연계여부가 N인 프로그램은 오후자습·야자1·야자2 시간표에 배치되지 않도록 했습니다.','- ISO 날짜·Google Sheets 숫자 시리얼 등 여러 입력형식을 한국 학교 일정 기준으로 통일해 처리합니다.','- 업데이트 후 이번 버전의 주요 수정사항을 한 번 안내합니다.') -join [Environment]::NewLine
+          gh release create v0.81.75 UEP-update.zip --repo $env:GITHUB_REPOSITORY --title 'UEP 0.81.75 Program DateTime & Night Link Fix' --notes $notes
+          $url='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.75/UEP-update.zip'
+          git pull --rebase origin main
+          $policy=Get-Content uep-policy.json -Raw -Encoding UTF8|ConvertFrom-Json;$policy.latestVersion='0.81.75';$policy.downloadUrl=$url;$policy.sha256=$env:UEP_SHA256.Trim();$policy.message='프로그램 날짜·시간 정상화 · 학생 참여이력 날짜 수정 · 야자연계 N 시간표 제외';$policy.forceUpdate=$false;$policy|ConvertTo-Json -Depth 50|Set-Content uep-policy.json -Encoding UTF8
+          $manifest=@{version='0.81.75';channel='stable';downloadUrl=$url;sha256=$env:UEP_SHA256.Trim();notes='방과후 차시 날짜·시간 정상화 · 참여이력 날짜 수정 · 야자연계 N 오후자습/야자 제외 · 업데이트 안내'}|ConvertTo-Json;Set-Content uep-update.json $manifest -Encoding UTF8;Set-Content uep-version.json $manifest -Encoding UTF8
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add uep-policy.json uep-update.json uep-version.json
+          git commit -m 'release: promote UEP 0.81.75 program datetime stable'
+          git push
