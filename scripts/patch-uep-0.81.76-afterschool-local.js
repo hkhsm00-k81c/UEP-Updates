@@ -83,3 +83,4 @@ s=s.replace(/const UPDATE_NOTICE_ITEMS = \[[\s\S]*?\];/m,`const UPDATE_NOTICE_IT
 
 fs.writeFileSync(path,s,'utf8');
 console.log('patched 0.81.76 after-school local fix');
+// workflow trigger revision 1
