@@ -1,0 +1,30 @@
+name: Diagnose UEP 0.81.76 Local Program Paths
+'on':
+  push:
+    branches: [main]
+    paths:
+      - diag-uep-0.81.76-local-paths.trigger
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect 0.81.74 local program and attendance paths
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force app | Out-Null
+          gh release download v0.81.74 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip
+          Expand-Archive UEP-update.zip app -Force
+          @'
+          const fs=require('fs');
+          const text=fs.readFileSync('app/resources/app/gyomuon.js','utf8'),lines=text.split(/\r?\n/);
+          const keys=['function afterSchoolPrograms','afterSchoolPrograms =','function getTodayAfterPrograms','function programWithOverride','function parseProgramDate_','function formatProgramTime_','affectsAttendance','nightSlots','participation','participationHistory','참여 프로그램 전체 이력','학사외출','officialOuting','outing'];
+          for(const key of keys){let n=0;console.log('\n===== '+key+' =====');for(let i=0;i<lines.length&&n<20;i++){if(lines[i].includes(key)){console.log('--- line '+(i+1)+' ---\n'+lines.slice(Math.max(0,i-10),Math.min(lines.length,i+24)).join('\n'));n++;}}console.log('matches='+n);}
+          '@ | Set-Content diag76.js -Encoding UTF8
+          node diag76.js
