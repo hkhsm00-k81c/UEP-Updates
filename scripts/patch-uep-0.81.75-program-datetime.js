@@ -8,16 +8,14 @@ A(/const\s+APP_VERSION\s*=\s*["']0\.81\.74["']\s*;/.test(g),'0.81.74 version mar
 g=g.replace(/const\s+APP_VERSION\s*=\s*["']0\.81\.74["']\s*;/,'const APP_VERSION = "0.81.75";');
 
 // Explicit N must always win over name/type inference for night-study placement.
-const oldAffects='affectsAttendance=parseBool(explicitNightLink,["야자1","야자2","오후자습"].includes(nightType)||!!inferredNightSlot),';
-const newAffects='affectsAttendance=/^(n|no|false|0|아니오|미연계|해당없음)$/i.test(normalize(explicitNightLink))?false:parseBool(explicitNightLink,["야자1","야자2","오후자습"].includes(nightType)||!!inferredNightSlot),';
-A(g.includes(oldAffects),'night attendance mapper marker missing');
-g=g.replace(oldAffects,newAffects);
+const affectsRx=/affectsAttendance\s*=\s*parseBool\(explicitNightLink\s*,\s*(\[[^\]]+\]\.includes\(nightType\)\s*\|\|\s*!!inferredNightSlot)\s*\)/;
+const affectsMatch=g.match(affectsRx);
+A(affectsMatch,'night attendance mapper structure missing');
+g=g.replace(affectsRx,'affectsAttendance=/^(n|no|false|0|아니오|미연계|해당없음)$/i.test(normalize(explicitNightLink))?false:parseBool(explicitNightLink,$1)');
 
 const addon=String.raw`
 
 // __UEP_08175_PROGRAM_DATETIME_FIX__
-// Google Sheets dates/times can arrive as ISO timestamps, Date objects, or serial numbers.
-// Normalize them in Asia/Seoul semantics without shifting a school calendar date backward.
 function uepSeoulDateKey08175(date){
   if(!(date instanceof Date)||Number.isNaN(date.getTime()))return '';
   return new Date(date.getTime()+9*60*60*1000).toISOString().slice(0,10);
@@ -30,10 +28,8 @@ function uepSerialDate08175(n){
 function uepTimeFromFraction08175(n){
   if(!Number.isFinite(n))return '';
   const frac=((n%1)+1)%1;
-  let minutes=Math.round(frac*1440)%1440;
-  const hh=String(Math.floor(minutes/60)).padStart(2,'0');
-  const mm=String(minutes%60).padStart(2,'0');
-  return hh+':'+mm;
+  const minutes=Math.round(frac*1440)%1440;
+  return String(Math.floor(minutes/60)).padStart(2,'0')+':'+String(minutes%60).padStart(2,'0');
 }
 function uepProgramDate08175(value){
   if(value==null||value==='')return '';
@@ -42,8 +38,9 @@ function uepProgramDate08175(value){
   const text=String(value).trim();if(!text)return '';
   const numeric=Number(text);
   if(Number.isFinite(numeric)&&/^[-+]?\d+(?:\.\d+)?$/.test(text)&&numeric>=1)return uepSerialDate08175(numeric);
-  const isoZone=text.match(/^(20\d{2}-\d{2}-\d{2})[T\s](\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)(Z|[+-]\d{2}:?\d{2})$/i);
-  if(isoZone){const d=new Date(text);if(!Number.isNaN(d.getTime()))return uepSeoulDateKey08175(d);}
+  if(/^20\d{2}-\d{2}-\d{2}[T\s].*(?:Z|[+-]\d{2}:?\d{2})$/i.test(text)){
+    const d=new Date(text);if(!Number.isNaN(d.getTime()))return uepSeoulDateKey08175(d);
+  }
   const normalized=text.replace(/\./g,'-').replace(/\//g,'-');
   const direct=normalized.match(/^(20\d{2})-(\d{1,2})-(\d{1,2})(?:$|[T\s])/);
   if(direct)return direct[1]+'-'+String(Number(direct[2])).padStart(2,'0')+'-'+String(Number(direct[3])).padStart(2,'0');
@@ -61,8 +58,7 @@ function uepProgramTime08175(value){
   if(direct)return String(Number(direct[1])).padStart(2,'0')+':'+direct[2];
   const numeric=Number(text);
   if(Number.isFinite(numeric)&&/^[-+]?\d+(?:\.\d+)?$/.test(text))return uepTimeFromFraction08175(numeric);
-  const isoZone=text.match(/^\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})$/i);
-  if(isoZone){
+  if(/^\d{4}-\d{2}-\d{2}[T\s].*(?:Z|[+-]\d{2}:?\d{2})$/i.test(text)){
     const d=new Date(text);if(!Number.isNaN(d.getTime())){const k=new Date(d.getTime()+9*60*60*1000);return String(k.getUTCHours()).padStart(2,'0')+':'+String(k.getUTCMinutes()).padStart(2,'0');}
   }
   const isoLocal=text.match(/^\d{4}-\d{2}-\d{2}[T\s](\d{2}):(\d{2})/);
@@ -72,7 +68,6 @@ function uepProgramTime08175(value){
 parseProgramDate_=uepProgramDate08175;
 formatProgramTime_=uepProgramTime08175;
 
-// Safety net: explicit non-linkage must clear an inferred slot as well.
 const __getTodayAfterPrograms08175=typeof getTodayAfterPrograms==='function'?getTodayAfterPrograms:null;
 if(__getTodayAfterPrograms08175){
   getTodayAfterPrograms=function(date){
