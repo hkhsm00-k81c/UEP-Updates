@@ -61,3 +61,4 @@ const afterData=fs.readFileSync(dataPath);
 if(!beforeData.equals(afterData))throw new Error('common date/data parser changed');
 if(/UEP_08175_PROGRAM_DATETIME_FIX|UEP_08176_AFTER_SCHOOL_LOCAL_FIX/.test(js))throw new Error('regression patch leaked');
 console.log('patched 0.81.74 -> 0.81.77',crypto.createHash('sha256').update(afterData).digest('hex'));
+// metadata promotion retry: read launcher policy from the checked-out repository.
