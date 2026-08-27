@@ -74,16 +74,34 @@ jobs:
           gh release create v0.81.76 UEP-update-0.81.76.zip --repo $env:GITHUB_REPOSITORY --title "UEP v0.81.76" --notes-file notes.md
           Copy-Item UEP-update-0.81.76.zip UEP-update.zip
           gh release upload v0.81.76 UEP-update.zip --repo $env:GITHUB_REPOSITORY --clobber
-      - name: Promote stable policy
+      - name: Promote all update manifests
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference='Stop'
+          $version='0.81.76'
+          $url='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.76/UEP-update.zip'
           $hash=(Get-Content sha256.txt -Raw).Trim()
-          $policy=@{latestVersion='0.81.76';downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.76/UEP-update.zip';sha256=$hash;forceUpdate=$false;message='방과후 일정 표시 정상화 및 학사외출 날짜 회귀 복구'} | ConvertTo-Json -Depth 4
-          $tmp=Join-Path $env:RUNNER_TEMP 'policy.json'; Set-Content $tmp $policy -Encoding UTF8
-          $sha=(gh api repos/$env:GITHUB_REPOSITORY/contents/policy.json --jq .sha)
-          $b64=[Convert]::ToBase64String([IO.File]::ReadAllBytes($tmp))
-          $body=@{message='release: promote UEP 0.81.76 stable';content=$b64;sha=$sha} | ConvertTo-Json
-          $body | gh api --method PUT repos/$env:GITHUB_REPOSITORY/contents/policy.json --input - | Out-Null
+          function Put-RepoJson([string]$path,[object]$obj,[string]$message){
+            $tmp=Join-Path $env:RUNNER_TEMP ($path -replace '/','_')
+            $obj | ConvertTo-Json -Depth 10 | Set-Content $tmp -Encoding UTF8
+            $sha=(gh api "repos/$env:GITHUB_REPOSITORY/contents/$path" --jq .sha)
+            $b64=[Convert]::ToBase64String([IO.File]::ReadAllBytes($tmp))
+            $body=@{message=$message;content=$b64;sha=$sha;branch='main'} | ConvertTo-Json
+            $body | gh api --method PUT "repos/$env:GITHUB_REPOSITORY/contents/$path" --input - | Out-Null
+          }
+          $policyPath='uep-policy.json'
+          $policy=(gh api "repos/$env:GITHUB_REPOSITORY/contents/$policyPath" --jq .content | %{ [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(($_ -replace '\s',''))) } | ConvertFrom-Json)
+          $policy.latestVersion=$version
+          $policy.downloadUrl=$url
+          $policy.sha256=$hash
+          $policy.forceUpdate=$false
+          $policy.updateEnabled=$true
+          $policy.message='방과후 일정 표시 정상화 및 학사외출 날짜 회귀 복구'
+          Put-RepoJson $policyPath $policy 'release: promote launcher policy to UEP 0.81.76'
+          $manifest=[ordered]@{version=$version;channel='stable';downloadUrl=$url;notes='여름방학 방과후 차시 날짜·시간 정상화 · 참여이력 운영기간 수정 · 야자연계 N 오후자습/야자 제외 · 학사외출 날짜 회귀 복구';sha256=$hash}
+          Put-RepoJson 'uep-update.json' $manifest 'release: sync update manifest to UEP 0.81.76'
+          Put-RepoJson 'uep-version.json' $manifest 'release: sync version manifest to UEP 0.81.76'
+          $legacy=[ordered]@{latestVersion=$version;downloadUrl=$url;sha256=$hash;forceUpdate=$false;message='방과후 일정 표시 정상화 및 학사외출 날짜 회귀 복구'}
+          Put-RepoJson 'policy.json' $legacy 'release: sync legacy policy to UEP 0.81.76'
