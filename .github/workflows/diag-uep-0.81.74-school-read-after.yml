@@ -1,0 +1,30 @@
+name: Diagnose UEP 0.81.74 School Read After
+'on':
+  push:
+    branches: [main]
+    paths:
+      - diag-uep-0.81.74-school-read-after.trigger
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download and inspect school read mapping
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force app | Out-Null
+          gh release download v0.81.74 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip
+          Expand-Archive UEP-update.zip app -Force
+          @'
+          const fs=require('fs');
+          const files=['app/resources/app/electron/main.cjs','app/resources/app/gyomuon.js'];
+          const keys=['12_차시일정','11_방과후학교','afterSessions','sessionNo','startTime','endTime','야자연계','야자영향','serial','1899','25569','formattedValue','getRange','schoolRead'];
+          for(const f of files){const text=fs.readFileSync(f,'utf8'),lines=text.split(/\r?\n/);console.log('\n######## FILE '+f+' ########');for(const key of keys){let n=0;console.log('\n===== '+key+' =====');lines.forEach((line,i)=>{if(line.includes(key)&&n<25){const s=Math.max(0,i-5),e=Math.min(lines.length,i+7);console.log('--- line '+(i+1)+' ---\n'+lines.slice(s,e).join('\n'));n++;}});console.log('matches='+n);}}
+          '@ | Set-Content diag2.js -Encoding UTF8
+          node diag2.js
