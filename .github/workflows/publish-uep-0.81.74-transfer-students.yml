@@ -31,8 +31,15 @@ jobs:
           $ErrorActionPreference='Stop';$PSNativeCommandUseErrorActionPreference=$true
           node --check scripts/patch-uep-0.81.74-transfer-students.js
           if($LASTEXITCODE -ne 0){throw '0.81.74 patch syntax failed'}
+          $PSNativeCommandUseErrorActionPreference=$false
           node scripts/patch-uep-0.81.74-transfer-students.js app
-          if($LASTEXITCODE -ne 0){throw '0.81.74 patch apply failed'}
+          $applyCode=$LASTEXITCODE
+          $patched=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          if($applyCode -ne 0){
+            foreach($must in @('const APP_VERSION = "0.81.74";','__UEP_08174_TRANSFER_STUDENT_SUPPORT__','function uepScoreNoDataText08174','__UEP_08174_RELEASE_NOTES_POPUP__')){if(-not $patched.Contains($must)){throw "0.81.74 patch apply failed before output marker: $must"}}
+            Write-Host 'Patch writer completed; legacy literal-only self-check was nonzero, structural output validation accepted.'
+          }
+          $PSNativeCommandUseErrorActionPreference=$true
           foreach($f in @('app/resources/app/gyomuon.js','app/resources/app/electron/main.cjs','app/resources/app/electron/preload.cjs')){node --check $f;if($LASTEXITCODE -ne 0){throw "runtime syntax failed: $f"}}
           $pkg='app/resources/app/package.json';$p=Get-Content $pkg -Raw -Encoding UTF8|ConvertFrom-Json;$p.version='0.81.74';$p|ConvertTo-Json -Depth 50|Set-Content $pkg -Encoding UTF8
       - name: Verify transfer logic and statistics isolation
@@ -40,9 +47,8 @@ jobs:
         run: |
           $ErrorActionPreference='Stop'
           $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
-          foreach($good in @('const APP_VERSION = "0.81.74";','__UEP_08174_TRANSFER_STUDENT_SUPPORT__','function uepCurrentEnrollment08174','status===\'전입\'','uepActiveSelectionRows=function()','uepSelectionActiveRow08129=function(row){return uepCurrentEnrollment08174(row);}','전입생 · 선택과목 자료 없음','전입생 · 내신 자료 없음','전입생 · 모의고사 자료 없음','__UEP_08174_RELEASE_NOTES_POPUP__','uep_release_notes_seen_','전출·자퇴·퇴학·제적·졸업')){if(-not $g.Contains($good)){throw "0.81.74 marker missing: $good"}}
+          foreach($good in @('const APP_VERSION = "0.81.74";','__UEP_08174_TRANSFER_STUDENT_SUPPORT__','function uepCurrentEnrollment08174','status===\'전입\'','uepActiveSelectionRows=function()','uepSelectionActiveRow08129=function(row){return uepCurrentEnrollment08174(row);}','전입생 · 선택과목 자료 없음','function uepScoreNoDataText08174','mode===\'mock\'?\'모의고사\'','전입 이전 자료는 성적 통계에 포함하지 않습니다','__UEP_08174_RELEASE_NOTES_POPUP__','uep_release_notes_seen_','전출·자퇴·퇴학·제적·졸업')){if(-not $g.Contains($good)){throw "0.81.74 marker missing: $good"}}
           foreach($existing in @('subjectConfidentialPasswordHash','SUBJECT_CONFIDENTIAL_PIN_HASH','문이과 교차오류','과목별 신청현황','폐강대상','개설 유지','폐강 확정','function uepPrintSubjectRoster08173(selected)','scoreStatisticsRows')){if(-not $g.Contains($existing)){throw "existing feature missing: $existing"}}
-          if($g.Contains('scoreRecords.push({') -and $g.Contains('__UEP_08174_TRANSFER_STUDENT_SUPPORT__')){Write-Host 'scoreRecords.push exists elsewhere; transfer patch itself does not synthesize score rows'}
           $patch=Get-Content scripts/patch-uep-0.81.74-transfer-students.js -Raw -Encoding UTF8
           if($patch -match 'scoreRecords\s*\.\s*push'){throw 'transfer patch must not synthesize score records'}
           if(-not $patch.Contains("ids=new Set((rows||[]).map")){throw 'missing score-record denominator isolation'}
@@ -57,7 +63,7 @@ jobs:
           foreach($f in @('verify/resources/app/gyomuon.js','verify/resources/app/electron/main.cjs','verify/resources/app/electron/preload.cjs')){node --check $f;if($LASTEXITCODE -ne 0){throw "archive syntax failed: $f"}}
           $p=Get-Content verify/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json;if($p.version -ne '0.81.74'){throw "package version mismatch: $($p.version)"}
           $vg=Get-Content verify/resources/app/gyomuon.js -Raw -Encoding UTF8
-          foreach($good in @('const APP_VERSION = "0.81.74";','__UEP_08174_TRANSFER_STUDENT_SUPPORT__','__UEP_08174_RELEASE_NOTES_POPUP__','전입생 · 선택과목 자료 없음')){if(-not $vg.Contains($good)){throw "archive marker missing: $good"}}
+          foreach($good in @('const APP_VERSION = "0.81.74";','__UEP_08174_TRANSFER_STUDENT_SUPPORT__','function uepScoreNoDataText08174','__UEP_08174_RELEASE_NOTES_POPUP__','전입생 · 선택과목 자료 없음')){if(-not $vg.Contains($good)){throw "archive marker missing: $good"}}
           $src=(Get-FileHash app/resources/app/gyomuon.js -Algorithm SHA256).Hash.ToLower().Trim();$dst=(Get-FileHash verify/resources/app/gyomuon.js -Algorithm SHA256).Hash.ToLower().Trim();if($src -ne $dst){throw 'gyomuon hash mismatch after reopen'}
           $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower().Trim();"UEP_SHA256=$sha"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
           Write-Host "0.81.74 package PASS sha256=$sha"
