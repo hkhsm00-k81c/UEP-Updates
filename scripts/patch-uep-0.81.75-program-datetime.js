@@ -9,7 +9,21 @@ g=g.replace(/const\s+APP_VERSION\s*=\s*["']0\.81\.74["']\s*;/,'const APP_VERSION
 
 // Explicit N must always win over any inferred night-study slot.
 const nightCall='parseBool(explicitNightLink,';
-A(g.includes(nightCall),'night attendance call missing');
+if(!g.includes(nightCall)){
+  const needles=['야자연계','nightLink','nightSlot','attendanceAffect','affectsAttendance','parseBool('];
+  console.log('=== UEP 0.81.74 NIGHT LINK DIAGNOSTIC ===');
+  for(const needle of needles){
+    let from=0,count=0;
+    while(count<8){
+      const i=g.indexOf(needle,from);if(i<0)break;
+      const s=Math.max(0,i-260),e=Math.min(g.length,i+420);
+      console.log(`\n--- ${needle} #${count+1} @${i} ---\n`+g.slice(s,e).replace(/\r?\n/g,' '));
+      from=i+needle.length;count++;
+    }
+    if(count===0)console.log(`\n--- ${needle}: no match ---`);
+  }
+  throw new Error('night attendance call missing; diagnostic emitted');
+}
 g=g.replace(nightCall,'uepNightAttendance08175(explicitNightLink,');
 
 const addon=String.raw`
