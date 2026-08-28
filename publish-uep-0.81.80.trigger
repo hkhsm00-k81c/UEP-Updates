@@ -1,1 +1,1 @@
-release 0.81.80 retry 3 after normalizing Windows CRLF source
+release 0.81.80 retry 4 metadata endpoint correction
