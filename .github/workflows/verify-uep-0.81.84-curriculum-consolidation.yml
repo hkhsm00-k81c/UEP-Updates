@@ -1,0 +1,51 @@
+name: Verify UEP 0.81.84 Curriculum Consolidation
+on:
+  push:
+    branches:
+      - build/0.81.84-curriculum-consolidation
+    paths:
+      - verify-uep-0.81.84.trigger
+      - scripts/patch-uep-08184-curriculum-consolidation.js
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download 0.81.83 stable baseline
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,verify | Out-Null
+          gh release download v0.81.83 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+          if(!(Test-Path app/UEP.exe)){throw '0.81.83 baseline UEP.exe missing'}
+      - name: Apply consolidated 0.81.84 patch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check scripts/patch-uep-08184-curriculum-consolidation.js
+          node scripts/patch-uep-08184-curriculum-consolidation.js app
+          node --check app/resources/app/gyomuon.js
+          $pkg=Get-Content app/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json
+          if($pkg.version -ne '0.81.84'){throw 'package version mismatch'}
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          foreach($m in @('const APP_VERSION = "0.81.84";','UEP_08184_CURRICULUM_CONSOLIDATION_START','uep-error-grade-scope-08184','uep-roster-08184','2-2·3-1 과학 신청명단')){if(!$g.Contains($m)){throw "marker missing: $m"}}
+          foreach($old in @('UEP_08181_SELECTION_ROSTER_ERROR_NOTICE_START','UEP_08182_CURRICULUM_ROSTER_ERROR_UI_START','UEP_08183_CURRICULUM_UI_STABILITY_START')){if($g.Contains($old)){throw "old runtime patch still present: $old"}}
+          foreach($keep in @('function uepSelectionErrors08129','문이과 교차오류','과학과목 위계오류','과목별 신청현황')){if(!$g.Contains($keep)){throw "baseline feature missing: $keep"}}
+      - name: Package reopen verification
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Compress-Archive -Path app/* -DestinationPath UEP-update-test.zip -CompressionLevel Optimal
+          Expand-Archive UEP-update-test.zip verify -Force
+          node --check verify/resources/app/gyomuon.js
+          $pkg=Get-Content verify/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json
+          if($pkg.version -ne '0.81.84'){throw 'reopened package version mismatch'}
+          $g=Get-Content verify/resources/app/gyomuon.js -Raw -Encoding UTF8
+          if(!$g.Contains('UEP_08184_CURRICULUM_CONSOLIDATION_END')){throw 'reopened package consolidation marker missing'}
+          Write-Host 'UEP 0.81.84 verification PASS'
