@@ -1,0 +1,72 @@
+name: Publish UEP 0.81.83 Curriculum UI Stability
+on:
+  push:
+    branches: [main]
+    paths:
+      - publish-uep-0.81.83.trigger
+permissions:
+  contents: write
+concurrency:
+  group: publish-uep-0.81.83
+  cancel-in-progress: false
+jobs:
+  build-test-publish:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download verified 0.81.82 baseline
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,work,verify | Out-Null
+          gh release download v0.81.82 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip work -Force
+          if(!(Test-Path work/UEP.exe)){throw '0.81.82 baseline UEP.exe missing'}
+      - name: Apply 0.81.83 stability patch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check scripts/patch-uep-08183-curriculum-ui-stability.js
+          node scripts/patch-uep-08183-curriculum-ui-stability.js work
+          node --check work/resources/app/gyomuon.js
+          $pkg=Get-Content work/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json
+          if($pkg.version -ne '0.81.83'){throw 'package version mismatch'}
+      - name: Package and reopen verification
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Compress-Archive -Path work/* -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          Expand-Archive UEP-update.zip verify -Force
+          node --check verify/resources/app/gyomuon.js
+          $pkg=Get-Content verify/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json
+          if($pkg.version -ne '0.81.83'){throw 'reopened package version mismatch'}
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "UEP_SHA256=$sha"|Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Publish release and promote update metadata
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $notes=@'
+          UEP 0.81.83 선택과목 화면 안정화
+
+          - 2-2·3-1 과학 신청명단을 첫 클릭부터 안정적으로 표시
+          - 과목명·예상등급 말줄임 제거 및 넓은 명단 화면 유지
+          - 2학년 / 3학년 / 2·3학년 오류학생 카드의 실제 학생목록 필터링 보완
+          - 오류학생 카드와 전체반·1~9반 필터 조합 조회 안정화
+          '@
+          $notes|Set-Content release-notes.md -Encoding UTF8
+          gh release view v0.81.83 --repo $env:GITHUB_REPOSITORY *> $null
+          if($LASTEXITCODE -eq 0){throw 'v0.81.83 release already exists'}
+          $global:LASTEXITCODE=0
+          gh release create v0.81.83 UEP-update.zip --repo $env:GITHUB_REPOSITORY --title 'UEP v0.81.83 선택과목 화면 안정화' --notes-file release-notes.md
+          $url='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.83/UEP-update.zip'
+          $message='UEP 0.81.83 과학 명단 첫 표시·전체 과목명 표시·학년별 오류학생 실제 조회 안정화'
+          function PutJson($path,$obj){$tmp=Join-Path $env:RUNNER_TEMP ($path-replace'/','_');$obj|ConvertTo-Json -Depth 50|Set-Content $tmp -Encoding UTF8;$sha=(gh api "repos/${env:GITHUB_REPOSITORY}/contents/${path}?ref=main" --jq .sha);$b64=[Convert]::ToBase64String([IO.File]::ReadAllBytes($tmp));@{message="release: promote $path to UEP 0.81.83";content=$b64;sha=$sha;branch='main'}|ConvertTo-Json|gh api --method PUT "repos/${env:GITHUB_REPOSITORY}/contents/${path}" --input -|Out-Null}
+          $policy=Get-Content uep-policy.json -Raw|ConvertFrom-Json;$policy.latestVersion='0.81.83';$policy.downloadUrl=$url;$policy.sha256=$env:UEP_SHA256;$policy.message=$message;$policy.forceUpdate=$false;PutJson 'uep-policy.json' $policy
+          $manifest=[ordered]@{version='0.81.83';channel='stable';downloadUrl=$url;notes=$message;sha256=$env:UEP_SHA256};PutJson 'uep-update.json' $manifest;PutJson 'uep-version.json' $manifest
+          $legacy=[ordered]@{latestVersion='0.81.83';downloadUrl=$url;sha256=$env:UEP_SHA256;forceUpdate=$false;message=$message};PutJson 'policy.json' $legacy
