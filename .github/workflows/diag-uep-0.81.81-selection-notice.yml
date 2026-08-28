@@ -22,30 +22,38 @@ jobs:
           New-Item -ItemType Directory -Force source,app,diag | Out-Null
           gh release download v0.81.80 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
           Expand-Archive source/UEP-update.zip app -Force
-      - name: Extract relevant runtime snippets
+      - name: Extract exact runtime functions
         shell: pwsh
         run: |
-          $ErrorActionPreference='Stop'
-          $f='app/resources/app/gyomuon.js'
-          $text=Get-Content $f -Raw -Encoding UTF8
-          $patterns=@('function uepOpenSubjectModal08128','function uepCrossTrackRows08161','uepCrossTrackView08161','오류유형','uep.releaseNotes.seen','RELEASE_KEY','releaseNotes','업데이트 내역','APP_VERSION')
-          $out=New-Object System.Collections.Generic.List[string]
-          foreach($p in $patterns){
-            $out.Add("`n===== $p =====")
-            $start=0
-            while(($idx=$text.IndexOf($p,$start,[StringComparison]::OrdinalIgnoreCase)) -ge 0){
-              $a=[Math]::Max(0,$idx-2500);$len=[Math]::Min(9000,$text.Length-$a)
-              $out.Add($text.Substring($a,$len))
-              $start=$idx+$p.Length
-              if($start -ge $text.Length){break}
+          @'
+          const fs=require('fs');
+          const text=fs.readFileSync('app/resources/app/gyomuon.js','utf8');
+          function extractFunction(name){
+            const sig='function '+name+'(';
+            const start=text.indexOf(sig); if(start<0)return 'MISSING '+name;
+            const brace=text.indexOf('{',start); let depth=0,quote='',esc=false,templateDepth=0;
+            for(let i=brace;i<text.length;i++){
+              const ch=text[i],prev=text[i-1];
+              if(quote){ if(esc){esc=false;continue;} if(ch==='\\'){esc=true;continue;} if(ch===quote){quote='';} continue; }
+              if(ch==='"'||ch==="'"||ch==='`'){quote=ch;continue;}
+              if(ch==='{')depth++; else if(ch==='}'){depth--; if(depth===0)return text.slice(start,i+1);}
             }
+            return 'UNTERMINATED '+name;
           }
-          $out -join "`n" | Set-Content diag/08181-selection-notice-runtime.txt -Encoding UTF8
+          const names=['uepOpenSubjectModal08128','uepCrossTrackRows08161','uepCrossTrackView08161','bindSelectionAnalysis','uepSelectionDataset','uepSelectionErrorsForRow'];
+          let out=names.map(n=>'===== '+n+' =====\n'+extractFunction(n)).join('\n\n');
+          for(const needle of ['uep.releaseNotes.seen','RELEASE_KEY','업데이트 내역','releaseNotes']){
+            out+='\n\n===== NEEDLE '+needle+' =====\n';let p=0,c=0;
+            while((p=text.indexOf(needle,p))>=0&&c<8){out+=text.slice(Math.max(0,p-1800),Math.min(text.length,p+4200))+'\n---\n';p+=needle.length;c++;}
+          }
+          fs.writeFileSync('diag/08181-selection-notice-exact.txt',out,'utf8');
+          '@ | Set-Content extract-08181.cjs -Encoding UTF8
+          node extract-08181.cjs
       - name: Commit diagnostics
         shell: pwsh
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add diag/08181-selection-notice-runtime.txt
-          git commit -m 'diag: inspect 0.81.80 selection and update notice runtime'
+          git add diag/08181-selection-notice-exact.txt
+          git commit -m 'diag: extract exact 0.81.80 selection functions and notice runtime'
           git push
