@@ -1,0 +1,50 @@
+name: Verify UEP 0.81.81 Selection Roster Error Notice
+on:
+  push:
+    branches:
+      - build/0.81.81-selection-roster-error-notice
+    paths:
+      - verify-uep-0.81.81.trigger
+      - scripts/patch-uep-08181-selection-roster-error-notice.js
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download 0.81.80 stable baseline
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,verify | Out-Null
+          gh release download v0.81.80 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+          if(!(Test-Path app/UEP.exe)){throw '0.81.80 baseline UEP.exe missing'}
+      - name: Apply and syntax check 0.81.81 patch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check scripts/patch-uep-08181-selection-roster-error-notice.js
+          node scripts/patch-uep-08181-selection-roster-error-notice.js app
+          node --check app/resources/app/gyomuon.js
+          $pkg=Get-Content app/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json
+          if($pkg.version -ne '0.81.81'){throw 'package version mismatch'}
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          foreach($m in @('const APP_VERSION = "0.81.81";','UEP_08181_SELECTION_ROSTER_ERROR_NOTICE_START',"targetTerm+' 과학선택'",'2학년 오류학생','3학년 오류학생','2·3학년 오류학생','uep.updateNotes.lastShownVersion','UEP 0.81.81 업데이트','crossScienceChoices08181','errorInScope08181')){if(!$g.Contains($m)){throw "marker missing: $m"}}
+          foreach($keep in @('function uepSelectionErrors08129','function uepOpenSubjectModal08128','subjectConfidentialPasswordHash','문이과 교차오류','과목별 신청현황')){if(!$g.Contains($keep)){throw "baseline feature missing: $keep"}}
+      - name: Package reopen verification
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Compress-Archive -Path app/* -DestinationPath UEP-update-test.zip -CompressionLevel Optimal
+          Expand-Archive UEP-update-test.zip verify -Force
+          node --check verify/resources/app/gyomuon.js
+          $pkg=Get-Content verify/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json
+          if($pkg.version -ne '0.81.81'){throw 'reopened package version mismatch'}
+          $g=Get-Content verify/resources/app/gyomuon.js -Raw -Encoding UTF8
+          foreach($m in @('UEP_08181_SELECTION_ROSTER_ERROR_NOTICE_END','crossScienceChoices08181','2·3학년 오류학생','uep.updateNotes.lastShownVersion')){if(!$g.Contains($m)){throw "reopened package marker missing: $m"}}
+          Write-Host 'UEP 0.81.81 verification PASS'

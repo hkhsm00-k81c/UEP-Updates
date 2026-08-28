@@ -1,0 +1,98 @@
+name: Publish UEP 0.81.81 Selection Roster Error Notice
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - publish-uep-0.81.81.trigger
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-uep-0.81.81
+  cancel-in-progress: false
+
+jobs:
+  build-test-publish:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download verified 0.81.80 baseline
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,work,verify | Out-Null
+          gh release download v0.81.80 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip work -Force
+          if(!(Test-Path work/UEP.exe)){throw '0.81.80 baseline UEP.exe missing'}
+
+      - name: Apply 0.81.81 selection UI patch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check scripts/patch-uep-08181-selection-roster-error-notice.js
+          node scripts/patch-uep-08181-selection-roster-error-notice.js work
+          node --check work/resources/app/gyomuon.js
+          $pkg=Get-Content work/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json
+          if($pkg.version -ne '0.81.81'){throw 'package version mismatch'}
+          $ui=Get-Content work/resources/app/gyomuon.js -Raw -Encoding UTF8
+          foreach($m in @('const APP_VERSION = "0.81.81";','UEP_08181_SELECTION_ROSTER_ERROR_NOTICE_START',"targetTerm+' 과학선택'",'2학년 오류학생','3학년 오류학생','2·3학년 오류학생','uep.updateNotes.lastShownVersion','UEP 0.81.81 업데이트','crossScienceChoices08181','errorInScope08181')){if(!$ui.Contains($m)){throw "0.81.81 marker missing: $m"}}
+          foreach($keep in @('function uepSelectionErrors08129','function uepOpenSubjectModal08128','subjectConfidentialPasswordHash','문이과 교차오류','과목별 신청현황')){if(!$ui.Contains($keep)){throw "baseline feature missing: $keep"}}
+
+      - name: Package and reopen verification
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Compress-Archive -Path work/* -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          Expand-Archive UEP-update.zip verify -Force
+          node --check verify/resources/app/gyomuon.js
+          $pkg=Get-Content verify/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json
+          if($pkg.version -ne '0.81.81'){throw 'reopened package version mismatch'}
+          $ui=Get-Content verify/resources/app/gyomuon.js -Raw -Encoding UTF8
+          foreach($m in @('UEP_08181_SELECTION_ROSTER_ERROR_NOTICE_END','crossScienceChoices08181','2·3학년 오류학생','uep.updateNotes.lastShownVersion')){if(!$ui.Contains($m)){throw "reopened marker missing: $m"}}
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "UEP_SHA256=$sha"|Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Publish release and promote update metadata
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $notes=@'
+          UEP 0.81.81 선택과목 명단·오류학생 보기 개선
+
+          - 2-2 과학과목 신청명단에 3-1 과학 선택과 해당 과목 예상등급 교차 표시
+          - 3-1 과학과목 신청명단에 2-2 과학 선택과 해당 과목 예상등급 교차 표시
+          - 오류유형 드롭다운 제거 및 2학년 오류학생 / 3학년 오류학생 / 2·3학년 오류학생 보기 제공
+          - 기존 선택과목·예상등급·오류 판정 로직 유지
+          - 업데이트 완료 후 첫 실행에서 업데이트 내역 팝업을 1회 표시하도록 복구
+          '@
+          $notes|Set-Content release-notes.md -Encoding UTF8
+          gh release view v0.81.81 --repo $env:GITHUB_REPOSITORY *> $null
+          if($LASTEXITCODE -eq 0){throw 'v0.81.81 release already exists; refusing to overwrite verified release'}
+          $global:LASTEXITCODE=0
+          gh release create v0.81.81 UEP-update.zip --repo $env:GITHUB_REPOSITORY --title 'UEP v0.81.81 선택과목 명단·오류학생 보기 개선' --notes-file release-notes.md
+          $url='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.81/UEP-update.zip'
+          $message='UEP 0.81.81 과학 교차학기 선택·예상등급 표시 · 오류학생 학년별 보기 · 업데이트 내역 팝업 복구'
+          function PutJson($path,$obj){
+            $tmp=Join-Path $env:RUNNER_TEMP ($path-replace'/','_')
+            $obj|ConvertTo-Json -Depth 50|Set-Content $tmp -Encoding UTF8
+            $sha=(gh api "repos/${env:GITHUB_REPOSITORY}/contents/${path}?ref=main" --jq .sha)
+            $b64=[Convert]::ToBase64String([IO.File]::ReadAllBytes($tmp))
+            @{message="release: promote $path to UEP 0.81.81";content=$b64;sha=$sha;branch='main'}|ConvertTo-Json|gh api --method PUT "repos/${env:GITHUB_REPOSITORY}/contents/${path}" --input -|Out-Null
+          }
+          $policy=Get-Content uep-policy.json -Raw|ConvertFrom-Json
+          $policy.latestVersion='0.81.81';$policy.downloadUrl=$url;$policy.sha256=$env:UEP_SHA256;$policy.message=$message;$policy.forceUpdate=$false
+          PutJson 'uep-policy.json' $policy
+          $manifest=[ordered]@{version='0.81.81';channel='stable';downloadUrl=$url;notes=$message;sha256=$env:UEP_SHA256}
+          PutJson 'uep-update.json' $manifest
+          PutJson 'uep-version.json' $manifest
+          $legacy=[ordered]@{latestVersion='0.81.81';downloadUrl=$url;sha256=$env:UEP_SHA256;forceUpdate=$false;message=$message}
+          PutJson 'policy.json' $legacy
