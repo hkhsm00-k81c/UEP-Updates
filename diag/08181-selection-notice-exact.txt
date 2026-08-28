@@ -1,0 +1,626 @@
+===== uepOpenSubjectModal08128 =====
+function uepOpenSubjectModal08128(key){const data=uepSelectionDataset(),selected=data.subjects.find(x=>x.key===key);if(!selected)return;const rows=[...selected.students].sort(curriculumRosterSort==='class'?((a,b)=>String(a.student.studentNo).localeCompare(String(b.student.studentNo))):((a,b)=>(a.avg??99)-(b.avg??99)||String(a.student.studentNo).localeCompare(String(b.student.studentNo))));const privacy=privacyModeEnabled(),layer=document.createElement('div');layer.className='modal-backdrop subject-roster-modal-backdrop';layer.innerHTML='<div class="modal subject-roster-modal"><button class="modal-close" data-subject-modal-close>×</button><header><small>'+escapeHtml(selected.term)+'</small><h2>'+escapeHtml(selected.subject)+'</h2><p>신청 '+selected.students.length+'명 · 예상 '+selected.sectionCount+'분반</p><div class="roster-sort"><button data-roster-sort="grade" class="'+(curriculumRosterSort==='grade'?'active':'')+'">예상성적순</button><button data-roster-sort="class" class="'+(curriculumRosterSort==='class'?'active':'')+'">반·번호순</button><button type="button" data-native-roster-print="1">신청명단 출력</button></div></header><div class="selection-roster roster-six-columns '+(privacy?'masked':'')+'"><div class="selection-roster-head"><span>학번·성명</span><span>현재반</span><span>학사여부</span><span>1학년 내신평균</span><span>예상등수</span><span>예상등급</span></div>'+rows.map(x=>'<article><b>'+(privacy?'**** ＊＊＊':escapeHtml(x.student.studentNo)+' '+escapeHtml(x.student.name))+'</b><span>'+escapeHtml(recordStudentClass(x.student))+'반</span><span>'+(x.dorm?'학사':'-')+'</span><span>'+(privacy?'＊.＊＊':x.avg==null?'-':x.avg.toFixed(2))+'</span><span>'+(privacy?'＊위':x.expectedRank?x.expectedRank+'위':'-')+'</span><span>'+(privacy?'＊등급':x.expectedGrade==='-'?'-':x.expectedGrade+'등급')+'</span></article>').join('')+'</div></div>';document.body.appendChild(layer);const subjectPanel=layer.querySelector('.subject-roster-modal');if(subjectPanel)subjectPanel.style.cssText+=';position:fixed;top:0;right:0;left:auto;bottom:0;width:min(720px,48vw);max-width:720px;height:100vh;max-height:100vh;border-radius:18px 0 0 18px;overflow:auto;z-index:99999';layer.querySelector('[data-subject-modal-close]').onclick=()=>layer.remove();layer.onclick=e=>{if(e.target===layer)layer.remove();};layer.querySelectorAll('[data-roster-sort]').forEach(b=>b.onclick=()=>{curriculumRosterSort=b.dataset.rosterSort;layer.remove();uepOpenSubjectModal08128(key);});layer.querySelector('[data-native-roster-print]')?.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();uepPrintSubjectRoster08173(selected);});}
+
+===== uepCrossTrackRows08161 =====
+function uepCrossTrackRows08161(){
+  const terms=['2-1','2-2','3-1','3-2'],data=uepSelectionDataset();
+  return data.rows.filter(uepSelectionActiveRow08129).map(row=>{
+    const student=row.__student,byTerm={};let science=0,social=0;
+    terms.forEach(term=>{const subjects=uepSelectionSubjectsInTerm08129(row,term),s=subjects.filter(x=>uepCrossTrackKind08161(x)==='science'),h=subjects.filter(x=>uepCrossTrackKind08161(x)==='social');byTerm[term]={science:s.length,social:h.length,scienceSubjects:s,socialSubjects:h};science+=s.length;social+=h.length;});
+    const type=science&&social?'mixed':science?'science':social?'social':'none';
+    const mixed32=byTerm['3-2'].science>0&&byTerm['3-2'].social>0;
+    return{row,student,byTerm,science,social,type,mixed32,avg:uepStudentGradeAverage(student?.id)};
+  }).filter(x=>x.science+x.social>0);
+}
+
+===== uepCrossTrackView08161 =====
+function uepCrossTrackView08161(){
+  let rows=uepCrossTrackRows08161();
+  if(curriculumCrossClass!=='all')rows=rows.filter(x=>String(recordStudentClass(x.student))===String(curriculumCrossClass));
+  if(curriculumCrossType==='science')rows=rows.filter(x=>x.type==='science');
+  else if(curriculumCrossType==='social')rows=rows.filter(x=>x.type==='social');
+  else if(curriculumCrossType==='mixed')rows=rows.filter(x=>x.type==='mixed');
+  else if(curriculumCrossType==='mixed32')rows=rows.filter(x=>x.mixed32);
+  rows.sort(curriculumCrossSort==='grade'?((a,b)=>(a.avg??99)-(b.avg??99)||String(a.student.studentNo||'').localeCompare(String(b.student.studentNo||''))):((a,b)=>String(a.student.studentNo||'').localeCompare(String(b.student.studentNo||''))));
+  const all=uepCrossTrackRows08161(),count=t=>t==='mixed32'?all.filter(x=>x.mixed32).length:all.filter(x=>x.type===t).length;
+  const filters='<div class="cross-track-controls"><label>반<select data-cross-class><option value="all">전체 반</option>'+Array.from({length:9},(_,i)=>String(i+1)).map(c=>'<option value="'+c+'" '+(curriculumCrossClass===c?'selected':'')+'>'+c+'반</option>').join('')+'</select></label><label>유형<select data-cross-type><option value="all">전체</option><option value="science" '+(curriculumCrossType==='science'?'selected':'')+'>과학만</option><option value="social" '+(curriculumCrossType==='social'?'selected':'')+'>사회만</option><option value="mixed" '+(curriculumCrossType==='mixed'?'selected':'')+'>4학기 혼합</option><option value="mixed32" '+(curriculumCrossType==='mixed32'?'selected':'')+'>3-2 혼합</option></select></label><label>정렬<select data-cross-sort><option value="class" '+(curriculumCrossSort==='class'?'selected':'')+'>반·학번순</option><option value="grade" '+(curriculumCrossSort==='grade'?'selected':'')+'>1학년 내신평균순</option></select></label></div>';
+  const summary='<div class="cross-track-summary"><article><small>분석대상</small><b>'+all.length+'명</b></article><article><small>과학만</small><b>'+count('science')+'명</b></article><article><small>사회만</small><b>'+count('social')+'명</b></article><article><small>4학기 혼합</small><b>'+count('mixed')+'명</b></article><article class="warn"><small>3-2 혼합</small><b>'+count('mixed32')+'명</b></article></div>';
+  const cell=(x,term)=>{const t=x.byTerm[term];return '<span title="과학: '+escapeHtml(t.scienceSubjects.join(', ')||'-')+' / 사회: '+escapeHtml(t.socialSubjects.join(', ')||'-')+'"><b>과 '+t.science+'</b><em>사 '+t.social+'</em></span>';};
+  const body=rows.map(x=>'<button class="cross-track-row '+(x.mixed32?'danger':x.type==='mixed'?'watch':'')+'" data-cross-student="'+escapeHtml(x.student.id)+'"><b>'+escapeHtml(x.student.studentNo||'')+' '+escapeHtml(x.student.name||'')+'</b><span>'+escapeHtml(recordStudentClass(x.student))+'반</span>'+['2-1','2-2','3-1','3-2'].map(t=>cell(x,t)).join('')+'<span><strong>과 '+x.science+' / 사 '+x.social+'</strong><em>'+(x.mixed32?'3-2 혼합':x.type==='mixed'?'4학기 혼합':x.type==='science'?'과학만':'사회만')+'</em></span><span>'+(x.avg==null?'-':Number(x.avg).toFixed(2))+'</span></button>').join('');
+  return '<style>.cross-track-controls{display:flex;gap:10px;justify-content:flex-end;margin:14px 0}.cross-track-controls label{display:flex;gap:6px;align-items:center}.cross-track-summary{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin:12px 0}.cross-track-summary article{padding:14px;border:1px solid #dce9e6;border-radius:14px;background:#f8fbfa}.cross-track-summary small{display:block;color:#668}.cross-track-summary b{font-size:20px}.cross-track-summary .warn{background:#fff5f1;border-color:#f2c9bd}.cross-track-table{border:1px solid #dbe7e5;border-radius:16px;overflow:hidden}.cross-track-head,.cross-track-row{display:grid;grid-template-columns:1.5fr .55fr repeat(4,1fr) 1.1fr .65fr;gap:8px;align-items:center;width:100%;padding:11px 14px;border:0;border-bottom:1px solid #edf1f0;text-align:left;background:#fff}.cross-track-head{font-weight:700;background:#f3f8f7}.cross-track-row>span{display:flex;gap:6px;align-items:center}.cross-track-row span em{font-style:normal;color:#8a5a47}.cross-track-row.watch{background:#fffdf4}.cross-track-row.danger{background:#fff3ef}.cross-track-row:hover{background:#edf9f6}.cross-track-intro{padding:16px 18px;border:1px solid #dce9e6;border-radius:16px;background:#f8fbfa}.cross-track-intro h3{margin:0 0 6px}.cross-track-intro p{margin:0;color:#667}</style><section class="cross-track-intro"><h3>문이과 교차오류</h3><p>260명 기준 선택과목 중 사회·과학 계열을 2-1부터 3-2까지 전수 비교합니다. 한 과목이라도 해당 계열 신청이 있으면 포함하며, 혼합은 상담 확인 대상으로 표시합니다.</p></section>'+summary+filters+'<div class="cross-track-table"><div class="cross-track-head"><span>학번·학생</span><span>반</span><span>2-1</span><span>2-2</span><span>3-1</span><span>3-2</span><span>4학기 누계</span><span>1학년 내신</span></div>'+body+'</div>';
+}
+
+===== bindSelectionAnalysis =====
+function bindSelectionAnalysis(){
+  $$('[data-curriculum-workspace]').forEach(b=>b.onclick=async()=>{const next=b.dataset.curriculumWorkspace;if(next==='subjects'&&!(await unlockSubjectConfidential()))return;curriculumWorkspaceMode=next;render('records');});
+  $$('[data-record-class]').forEach(b=>b.onclick=()=>{recordClassNo=b.dataset.recordClass;recordStudentId='';render('records');});
+  $$('[data-record-query]').forEach(b=>b.onclick=()=>{recordQueryMode=b.dataset.recordQuery||'class';render('records');});
+  $$('[data-record-student]').forEach(b=>b.onclick=()=>openCurriculumStudentSidePanel(b.dataset.recordStudent));
+  $('[data-curriculum-error-only]')?.addEventListener('click',()=>{curriculumErrorOnly=!curriculumErrorOnly;render('records');});
+  $('[data-curriculum-error-type]')?.addEventListener('change',e=>{curriculumErrorType=e.target.value;render('records');});
+  $$('[data-curriculum-term]').forEach(b=>b.onclick=()=>{curriculumTermFilter=b.dataset.curriculumTerm;curriculumSubjectKey='';render('records');});
+  $$('[data-curriculum-subject]').forEach(b=>b.onclick=()=>{curriculumSubjectKey=b.dataset.curriculumSubject;render('records');});
+  $$('[data-roster-sort]').forEach(b=>b.onclick=()=>{curriculumRosterSort=b.dataset.rosterSort;render('records');});
+  $('[data-copy-current-selection-sms]')?.addEventListener('click',async()=>{try{await navigator.clipboard.writeText($('#currentSelectionSms')?.value||'');toast('보완 문자메시지를 복사했습니다.');}catch{toast('문자 복사에 실패했습니다.');}});
+  $('[data-open-student-picker]')?.addEventListener('click',()=>{const m=$('.uep-picker-menu');if(m)m.hidden=!m.hidden;});
+  $('[data-uep-student-search]')?.addEventListener('input',e=>{$$('.uep-picker-menu [data-record-student]').forEach(b=>b.hidden=!b.textContent.includes(e.target.value));});
+  const navData=uepSelectionDataset(),navAll=navData.rows.filter(uepSelectionActiveRow08129),navScope=String(recordClassNo)==='all'?navAll:navAll.filter(r=>recordStudentClass(r.__student)===String(recordClassNo)),navRows=navScope.filter(r=>{const es=navData.errors.filter(e=>e.student.id===r.__student.id);return(!curriculumErrorOnly||es.length)&&(curriculumErrorType==='all'||es.some(e=>e.type===curriculumErrorType));}),classRows=navRows.length?navRows:navScope,idx=classRows.findIndex(r=>r.__student.id===recordStudentId);$('[data-uep-student-prev]')?.addEventListener('click',()=>{if(classRows.length){const p=idx<0?0:(idx-1+classRows.length)%classRows.length;recordStudentId=classRows[p].__student.id;render('records');}});$('[data-uep-student-next]')?.addEventListener('click',()=>{if(classRows.length){const n=idx<0?0:(idx+1)%classRows.length;recordStudentId=classRows[n].__student.id;render('records');}});
+  $('[data-copy-sdgs-supplement]')?.addEventListener('click',async()=>{try{await navigator.clipboard.writeText($('#sdgsSupplementText')?.value||'');toast('SDGs 근거 보완 질문을 복사했습니다.');}catch{toast('복사에 실패했습니다.');}});
+}
+
+===== uepSelectionDataset =====
+function uepSelectionDataset(){
+  const rows=uepActiveSelectionRows(),dorm=uepDormStudentIds(),applications=[];
+  rows.forEach(row=>{
+    const student=row.__student,avg=uepStudentGradeAverage(student.id);
+    ["2-1","2-2","3-1","3-2"].forEach(term=>uepSelectionTermSubjects(row,term).forEach(subject=>applications.push({term,subject,row,student,avg,dorm:dorm.has(String(student.id||student.studentNo||""))||dorm.has(String(student.studentNo||""))})));
+  });
+  const subjects=new Map();
+  applications.forEach(app=>{const key=`${app.term}|${app.subject}`;if(!subjects.has(key))subjects.set(key,{key,term:app.term,subject:app.subject,students:[]});subjects.get(key).students.push(app);});
+  subjects.forEach(group=>{group.students.sort((a,b)=>(a.avg??99)-(b.avg??99)||String(a.student.studentNo).localeCompare(String(b.student.studentNo)));const graded=group.students.filter(x=>x.avg!=null).length;group.students.forEach((x,i)=>{x.expectedRank=x.avg==null?null:i+1;x.expectedGrade=x.avg==null?"-":uepExpectedGrade(i+1,graded);});group.sectionCount=Math.max(1,Math.ceil(group.students.length/30));});
+  const errors=rows.flatMap(row=>uepSelectionErrors08105(row).map(error=>({row,student:row.__student,...error})));
+  return {rows,applications,subjects:[...subjects.values()].sort((a,b)=>a.term.localeCompare(b.term)||b.students.length-a.students.length||a.subject.localeCompare(b.subject,"ko")),errors};
+}
+
+===== uepSelectionErrorsForRow =====
+MISSING uepSelectionErrorsForRow
+
+===== NEEDLE uep.releaseNotes.seen =====
+);
+    uepUpsertLocalSharedSetting08166?.(key,'',`${label} 비밀번호 초기화`);
+  }
+  toast(`${label} 비밀번호를 초기화했습니다. 새 비밀번호를 설정해 주세요.`);
+  if(state.activePage==='settings')render('settings');
+  setTimeout(uepInstallPasswordResetButtons08167,80);
+  return true;
+}
+function uepInstallPasswordResetButtons08167(){
+  if(state?.activePage!=='settings'||settingsPanel!=='security')return;
+  const cards=[...document.querySelectorAll('.setting-card')];
+  const targets=[
+    {needle:'민감정보 보안',kind:'sensitive'},
+    {needle:'선택과목 대외비 보안',kind:'subject'}
+  ];
+  for(const t of targets){
+    const card=cards.find(c=>String(c.textContent||'').includes(t.needle));
+    if(!card||card.querySelector(`[data-uep-reset-password08167="${t.kind}"]`))continue;
+    const area=card.querySelector('.connection-actions,.modal-actions')||card;
+    const btn=document.createElement('button');btn.type='button';btn.className='btn danger secondary';btn.textContent='비밀번호 초기화';btn.dataset.uepResetPassword08167=t.kind;
+    area.appendChild(btn);
+  }
+}
+document.addEventListener('click',event=>{
+  const btn=event.target.closest?.('[data-uep-reset-password08167]');if(!btn)return;
+  event.preventDefault();event.stopPropagation();uepResetSharedPassword08167(btn.dataset.uepResetPassword08167);
+});
+const __uepRender08167=render;
+render=function(...args){const out=__uepRender08167.apply(this,args);setTimeout(uepInstallPasswordResetButtons08167,50);return out;};
+setTimeout(uepInstallPasswordResetButtons08167,300);
+
+
+
+
+/* UEP_08173_CURRICULUM_WORKSPACE_START */
+(function(){
+  if(typeof window==='undefined'||window.__UEP08173CurriculumWorkspaceInstalled)return;
+  window.__UEP08173CurriculumWorkspaceInstalled=true;
+  const DECISION_KEY='uep.curriculum.courseDecision.v1';
+  const RELEASE_KEY='uep.releaseNotes.seen';
+  const RELEASE_VERSION='0.81.73';
+  const LABELS=['교육과정 편성표','학생신청','문이과 교차오류','과목별 신청현황'];
+  const META={
+    '교육과정 편성표':{icon:'▦',desc:'학년·학기별 교육과정과 과목 편성을 확인합니다.',foot:'6개 학기 · 2026 입학생'},
+    '학생신청':{icon:'◎',desc:'학생별 선택과목 신청 내역과 변경 상태를 확인합니다.',foot:'학생별 신청내역 · 보기 ›'},
+    '문이과 교차오류':{icon:'⇄',desc:'계열 교차·중복·위계 등 선택과목 오류를 점검합니다.',foot:'보안영역 · 분석 보기 ›',lock:true},
+    '과목별 신청현황':{icon:'▤',desc:'과목별 신청인원·예상 분반과 성적 분포를 분석합니다.',foot:'보안영역 · 과목 보기 ›',lock:true}
+  };
+  const css='\n<style id="uep-curriculum-workspace-style-08173">\n.uep-curr-status-08173{display:flex;align-items:center;gap:10px;margin:18px 0 14px;padding:14px 18px;border:1px solid #cfe6df;border-radius:16px;background:#eef9f6;color:#176c5d;font-weight:700}.uep-curr-status-08173 small{margin-left:auto;color:#607975;font-weight:600}.uep-curr-launcher-08173{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin:14px 0 24px}.uep-curr-launch-card-08173{position:relative;min-height:190px;padding:24px 24px 18px;border:1px solid #d6e5e2;border-radius:22px;background:#fff;text-align:left;box-shadow:0 8px 22px rgba(31,86,78,.05);cursor:pointer;transition:.18s ease}.uep-curr-launch-card-08173:hover{transform:translateY(-2px);border-color:#70c6b5;box-shadow:0 12px 28px rgba(31,86,78,.10)}.uep-curr-launch-card-08173.active{background:#edf9f6;border-color:#38ad97}.uep-curr-launch-icon-08173{display:flex;width:46px;height:46px;align-items:center;justify-content:center;margin-bottom:16px;border-radius:15px;background:#eaf6f3;color:#147867;font-size:23px}.uep-curr-launch-card-08173 h3{margin:0 0 9px;font-size:22px;color:#17252b}.uep-curr-launch-card-08173 p{margin:0;min-height:48px;color:#667b80;line-height:1.55}.uep-curr-launch-foot-08173{display:flex;align-items:center;margin-top:18px;padding-top:14px;border-top:1px solid #edf2f1;color:#445d62;font-weight:700;font-size:13px}.uep-curr-lock-08173{position:absolute;right:18px;top:18px;width:30px;height:30px;display:flex;align-items:center;justify-content:center;border-radius:10px;background:#fff4e7;color:#a86516;font-size:16px}.uep-course-decision-08173{display:flex;gap:6px;align-items:center;margin-top:8px;position:relative;z-index:3}.uep-course-decision-08173 select{max-width:126px;padding:5px 7px;border:1px solid #d4e2df;border-radius:9px;background:#fff;font-size:12px}.uep-course-auto-08173{display:inline-flex;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:800}.uep-course-auto-08173.risk{background:#fff0ed;color:#b84632}.uep-course-auto-08173.safe{background:#eaf8f3;color:#16745f}.uep-course-auto-08173.keep{background:#edf4ff;color:#335e9b}.uep-course-auto-08173.closed{background:#f4e9ea;color:#9a3341}.uep-roster-print-08173{padding:8px 12px;border:1px solid #58ae9e;border-radius:10px;background:#fff;color:#147665;font-weight:800;cursor:pointer}\n@media(max-width:1200px){.uep-curr-launcher-08173{grid-template-columns:repeat(2,minmax(0,1fr))}}\n</style>';
+  function ensureStyle(){if(!document.getElementById('uep-curriculum-workspace-style-08173'))document.head.insertAdjacentHTML('beforeend',css);}
+  function buttons(){return [...document.querySelectorAll('.curriculum-final-tabs button,.curriculum-final-tabs [role="button"]')];}
+  function byLabel(label){return buttons().find(b=>String(b.textContent||'').trim()===label);}
+  function decisions(){try{return JSON.parse(localStorage.getItem(DECISION_KEY)||'{}')||{}}catch{return{}}}
+  function saveDecision(k,v){const d=decisions();if(v)d[k]=v;else delete d[k];localStorage.setItem(DECISION_KEY,JSON.stringify(d));}
+  function currentTerm(){try{if(typeof curriculumTermFilter!=='undefined'&&curriculumTermFilter)return String(curriculumTermFilter)}catch{}const active=[...document.querySelectorAll('button,.card')].find(x=>/^[23]학년\s*[12]학기$/.test(String(x.textContent||'').trim())&&(x.classList.contains('active')||x.getAttribute('aria-selected')==='true'));const m=String(active?.textContent||'').match(/([23])학년\s*([12])학기/);return m?m[1]+'-'+m[2]:'';}
+  function allCandidateObjects(){let rows=[];try{if(typeof uepSelectionDataset==='function'){const d=uepSelectionDataset();if(Array.isArray(d?.rows))rows=d.rows
+---
+
+
+===== NEEDLE RELEASE_KEY =====
+nfidential?.();
+    uepUpsertLocalSharedSetting08166?.(key,'',`${label} 비밀번호 초기화`);
+  }
+  toast(`${label} 비밀번호를 초기화했습니다. 새 비밀번호를 설정해 주세요.`);
+  if(state.activePage==='settings')render('settings');
+  setTimeout(uepInstallPasswordResetButtons08167,80);
+  return true;
+}
+function uepInstallPasswordResetButtons08167(){
+  if(state?.activePage!=='settings'||settingsPanel!=='security')return;
+  const cards=[...document.querySelectorAll('.setting-card')];
+  const targets=[
+    {needle:'민감정보 보안',kind:'sensitive'},
+    {needle:'선택과목 대외비 보안',kind:'subject'}
+  ];
+  for(const t of targets){
+    const card=cards.find(c=>String(c.textContent||'').includes(t.needle));
+    if(!card||card.querySelector(`[data-uep-reset-password08167="${t.kind}"]`))continue;
+    const area=card.querySelector('.connection-actions,.modal-actions')||card;
+    const btn=document.createElement('button');btn.type='button';btn.className='btn danger secondary';btn.textContent='비밀번호 초기화';btn.dataset.uepResetPassword08167=t.kind;
+    area.appendChild(btn);
+  }
+}
+document.addEventListener('click',event=>{
+  const btn=event.target.closest?.('[data-uep-reset-password08167]');if(!btn)return;
+  event.preventDefault();event.stopPropagation();uepResetSharedPassword08167(btn.dataset.uepResetPassword08167);
+});
+const __uepRender08167=render;
+render=function(...args){const out=__uepRender08167.apply(this,args);setTimeout(uepInstallPasswordResetButtons08167,50);return out;};
+setTimeout(uepInstallPasswordResetButtons08167,300);
+
+
+
+
+/* UEP_08173_CURRICULUM_WORKSPACE_START */
+(function(){
+  if(typeof window==='undefined'||window.__UEP08173CurriculumWorkspaceInstalled)return;
+  window.__UEP08173CurriculumWorkspaceInstalled=true;
+  const DECISION_KEY='uep.curriculum.courseDecision.v1';
+  const RELEASE_KEY='uep.releaseNotes.seen';
+  const RELEASE_VERSION='0.81.73';
+  const LABELS=['교육과정 편성표','학생신청','문이과 교차오류','과목별 신청현황'];
+  const META={
+    '교육과정 편성표':{icon:'▦',desc:'학년·학기별 교육과정과 과목 편성을 확인합니다.',foot:'6개 학기 · 2026 입학생'},
+    '학생신청':{icon:'◎',desc:'학생별 선택과목 신청 내역과 변경 상태를 확인합니다.',foot:'학생별 신청내역 · 보기 ›'},
+    '문이과 교차오류':{icon:'⇄',desc:'계열 교차·중복·위계 등 선택과목 오류를 점검합니다.',foot:'보안영역 · 분석 보기 ›',lock:true},
+    '과목별 신청현황':{icon:'▤',desc:'과목별 신청인원·예상 분반과 성적 분포를 분석합니다.',foot:'보안영역 · 과목 보기 ›',lock:true}
+  };
+  const css='\n<style id="uep-curriculum-workspace-style-08173">\n.uep-curr-status-08173{display:flex;align-items:center;gap:10px;margin:18px 0 14px;padding:14px 18px;border:1px solid #cfe6df;border-radius:16px;background:#eef9f6;color:#176c5d;font-weight:700}.uep-curr-status-08173 small{margin-left:auto;color:#607975;font-weight:600}.uep-curr-launcher-08173{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin:14px 0 24px}.uep-curr-launch-card-08173{position:relative;min-height:190px;padding:24px 24px 18px;border:1px solid #d6e5e2;border-radius:22px;background:#fff;text-align:left;box-shadow:0 8px 22px rgba(31,86,78,.05);cursor:pointer;transition:.18s ease}.uep-curr-launch-card-08173:hover{transform:translateY(-2px);border-color:#70c6b5;box-shadow:0 12px 28px rgba(31,86,78,.10)}.uep-curr-launch-card-08173.active{background:#edf9f6;border-color:#38ad97}.uep-curr-launch-icon-08173{display:flex;width:46px;height:46px;align-items:center;justify-content:center;margin-bottom:16px;border-radius:15px;background:#eaf6f3;color:#147867;font-size:23px}.uep-curr-launch-card-08173 h3{margin:0 0 9px;font-size:22px;color:#17252b}.uep-curr-launch-card-08173 p{margin:0;min-height:48px;color:#667b80;line-height:1.55}.uep-curr-launch-foot-08173{display:flex;align-items:center;margin-top:18px;padding-top:14px;border-top:1px solid #edf2f1;color:#445d62;font-weight:700;font-size:13px}.uep-curr-lock-08173{position:absolute;right:18px;top:18px;width:30px;height:30px;display:flex;align-items:center;justify-content:center;border-radius:10px;background:#fff4e7;color:#a86516;font-size:16px}.uep-course-decision-08173{display:flex;gap:6px;align-items:center;margin-top:8px;position:relative;z-index:3}.uep-course-decision-08173 select{max-width:126px;padding:5px 7px;border:1px solid #d4e2df;border-radius:9px;background:#fff;font-size:12px}.uep-course-auto-08173{display:inline-flex;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:800}.uep-course-auto-08173.risk{background:#fff0ed;color:#b84632}.uep-course-auto-08173.safe{background:#eaf8f3;color:#16745f}.uep-course-auto-08173.keep{background:#edf4ff;color:#335e9b}.uep-course-auto-08173.closed{background:#f4e9ea;color:#9a3341}.uep-roster-print-08173{padding:8px 12px;border:1px solid #58ae9e;border-radius:10px;background:#fff;color:#147665;font-weight:800;cursor:pointer}\n@media(max-width:1200px){.uep-curr-launcher-08173{grid-template-columns:repeat(2,minmax(0,1fr))}}\n</style>';
+  function ensureStyle(){if(!document.getElementById('uep-curriculum-workspace-style-08173'))document.head.insertAdjacentHTML('beforeend',css);}
+  function buttons(){return [...document.querySelectorAll('.curriculum-final-tabs button,.curriculum-final-tabs [role="button"]')];}
+  function byLabel(label){return buttons().find(b=>String(b.textContent||'').trim()===label);}
+  function decisions(){try{return JSON.parse(localStorage.getItem(DECISION_KEY)||'{}')||{}}catch{return{}}}
+  function saveDecision(k,v){const d=decisions();if(v)d[k]=v;else delete d[k];localStorage.setItem(DECISION_KEY,JSON.stringify(d));}
+  function currentTerm(){try{if(typeof curriculumTermFilter!=='undefined'&&curriculumTermFilter)return String(curriculumTermFilter)}catch{}const active=[...document.querySelectorAll('button,.card')].find(x=>/^[23]학년\s*[12]학기$/.test(String(x.textContent||'').trim())&&(x.classList.contains('active')||x.getAttribute('aria-selected')==='true'));const m=String(active?.textContent||'').match(/([23])학년\s*([12])학기/);return m?m[1]+'-'+m[2]:'';}
+  function allCandidateObjects(){let rows=[];try{if(typeof uepSelectionDataset==='function'){const d=uepSelectionDataset();if(Array.isArray(d?.rows
+---
+th><th>학년</th><th>반</th><th>번호</th><th>학번</th><th>성명</th></tr></thead><tbody>'+body+'</tbody></table><script>setTimeout(()=>window.print(),250)<\/script></body></html>');w.document.close();}
+  function enhanceRosterPanel(){
+    const panel=findRosterPanel();if(!panel)return false;ensureStyle();
+    const sortButtons=rosterSortButtons(panel);const anchor=sortButtons.find(b=>/반.?번호순/.test(String(b.textContent||'')))||sortButtons[0];if(!anchor)return false;
+    const host=anchor.parentElement||panel;let btn=panel.querySelector('.uep-roster-print-08173');
+    if(!btn){btn=document.createElement('button');btn.type='button';btn.className='uep-roster-print-08173';btn.textContent='신청명단 출력';btn.title='성적정보 없이 학년·반·번호순으로 출력';btn.addEventListener('click',e=>{e.stopPropagation();printRoster(panel)});}
+    if(btn.parentElement!==host||btn!==anchor.nextElementSibling)anchor.insertAdjacentElement('afterend',btn);
+    return true;
+  }
+  function retryRosterPanel(){
+    const waits=[0,80,200,450,900,1500];
+    waits.forEach(ms=>setTimeout(()=>{try{enhanceRosterPanel();}catch(err){console.warn('[UEP 0.81.73] roster refresh skipped',err);}},ms));
+  }
+  function installRosterRefresh(){
+    if(window.__UEP08173RosterRefreshInstalled)return;window.__UEP08173RosterRefreshInstalled=true;
+    document.addEventListener('click',e=>{
+      if(!isCurriculumPage())return;
+      const target=e.target?.closest?.('button,[role="button"],article,.subject-card,.course-card');if(!target)return;
+      const t=String(target.innerText||target.textContent||'');
+      if(/신청\s*\d+명/.test(t)||/^(예상성적순|반.?번호순)$/.test(String(target.textContent||'').trim()))retryRosterPanel();
+    },true);
+  }
+  installRosterRefresh();
+  retryRosterPanel();
+  function releaseNotes(){if(localStorage.getItem(RELEASE_KEY)===RELEASE_VERSION)return;const mask=document.createElement('div');mask.style.cssText='position:fixed;inset:0;z-index:2147483600;background:rgba(14,30,34,.38);display:flex;align-items:center;justify-content:center;padding:24px';mask.innerHTML='<div style="width:min(560px,94vw);background:#fff;border-radius:22px;padding:28px;box-shadow:0 22px 70px rgba(0,0,0,.22)"><div style="color:#16816e;font-weight:800;font-size:13px">UEP '+RELEASE_VERSION+' 업데이트</div><h2 style="margin:8px 0 16px">이번 버전에서 달라진 점</h2><ul style="line-height:1.9;color:#40565b"><li>교육과정을 프로그램 페이지형 4카드 UX로 정리했습니다.</li><li>문이과 교차오류·과목별 신청현황의 기존 비밀번호 보호를 그대로 유지합니다.</li><li>25명 이하 과목을 폐강대상으로 표시하고 개설 유지·폐강 확정을 기록할 수 있습니다.</li><li>과목별 신청학생 명단을 성적 없이 학년·반·번호순으로 출력할 수 있습니다.</li></ul><button data-release-ok style="float:right;margin-top:10px;padding:10px 18px;border:0;border-radius:11px;background:#16816e;color:#fff;font-weight:800">확인</button><div style="clear:both"></div></div>';mask.querySelector('[data-release-ok]').addEventListener('click',()=>{localStorage.setItem(RELEASE_KEY,RELEASE_VERSION);mask.remove()});document.body.appendChild(mask);}
+  window.__uepCurriculumWorkspace08173=function(){const nav=document.querySelector('.curriculum-final-tabs');if(!nav)return;launchCards(nav);if(byLabel('과목별 신청현황')?.classList.contains('active')){enhanceCourseCards();enhanceRosterPanel();}};
+  setTimeout(releaseNotes,1200);
+})();
+
+/* UEP_08173_CURRICULUM_BOUNDARY_WRAPPER */
+try{
+  const __uepCurriculumWorkspace08173Original=window.__uepCurriculumWorkspace08173;
+  window.__uepCurriculumWorkspace08173=(...args)=>{
+    try{return __uepCurriculumWorkspace08173Original?.(...args);}
+    catch(e){console.warn('[UEP 0.81.73] curriculum enhancement skipped',e);}
+  };
+}catch(e){console.warn('[UEP 0.81.73] curriculum boundary skipped',e);}
+/* UEP_08173_CURRICULUM_WORKSPACE_END */
+
+
+
+// __UEP_08174_TRANSFER_STUDENT_SUPPORT__
+function uepCurrentEnrollment08174(value){
+  const row=value||{}, student=row.__student||row;
+  const status=String(student?.status||student?.enrollmentStatus||row?.['학적상태']||'').trim();
+  if(/전출|자퇴|퇴학|제적|졸업/.test(status))return false;
+  return !status||status==='재학'||status==='재학생'||status==='전입';
+}
+function uepTransferStudent08174(value){
+  const row=value||{}, student=row.__student||row;
+  return String(student?.status||student?.enrollmentStatus||row?.['학적상태']||'').trim()==='전입';
+}
+function uepTransferDate08174(student){
+  const raw=student?.transferDate||student?.enrollmentDate||student?.startDate||student?.entryDate||student?.affiliationStartDate||student?.['전입일']||student?.['시작일']||'';
+  const text=String(raw||'').trim();
+  const m=text.match(/(20\d{2})[^0-9]?(\d{1,2})[^0-9]?(\d{1,2})/);
+  return m?m[1]+'-'+String(m[2]).padStart(2,'0')+'-'+String(m[3]).padStart(2,'0'):text;
+}
+function uepStudentSort08174(a,b){
+  return String(a?.studentNo||'').localeCompare(String(b?.studentNo||''),'ko',{numeric:true})||String(a?.name||'').localeCompare(String(b?.name||''),'ko');
+}
+
+// 학생 존재는 학생마스터를 기준으로 한다. 선택과목행이 아직 없어도 현재 재학생/전입생은 목록에 남긴다.
+uepActiveSelectionRows=function(){
+  const students=(readonlyCache?.students||[]).filter(uepCurrentEnrollment08174).slice().sort(uepStudentSort08174);
+  const source=readonlyCache?.selectionStudentRows||[];
+  const byId=new Map(),byNo=new Map();
+  source.forEach(row=>{
+    const id=String(row?.['학생ID']||'').trim(), no=String(row?.['학번']||'').replace(/\.0$/,'').trim();
+    if(id&&!byId.has(id))byId.set(id,row);
+    if(no&&!byNo.has(no))byNo.set(no,row);
+  });
+  return students.map(student=>{
+    const id=String(student?.id||'').trim(),no=String(student?.studentNo||'').replace(/\.0$/,'').trim();
+    const found=byId.get(id)||byNo.get(no)||null;
+    const row=found?{...found}:{};
+    const status=String(student?.status||student?.enrollmentStatus||row?.['학적상태']||'재학').trim();
+    return {...row,
+      '학생ID':row['학생ID']||id,
+      '학번':row['학번']||no,
+      '성명':row['성명']||student?.name||'',
+      '학적상태':row['학적상태']||status,
+      __student:student,
+      __status:status,
+      __selectionDataMissing:!found
+    };
+  });
+};
+uepSelectionActiveRow08129=function(row){return
+---
+{try{enhanceRosterPanel();}catch(err){console.warn('[UEP 0.81.73] roster refresh skipped',err);}},ms));
+  }
+  function installRosterRefresh(){
+    if(window.__UEP08173RosterRefreshInstalled)return;window.__UEP08173RosterRefreshInstalled=true;
+    document.addEventListener('click',e=>{
+      if(!isCurriculumPage())return;
+      const target=e.target?.closest?.('button,[role="button"],article,.subject-card,.course-card');if(!target)return;
+      const t=String(target.innerText||target.textContent||'');
+      if(/신청\s*\d+명/.test(t)||/^(예상성적순|반.?번호순)$/.test(String(target.textContent||'').trim()))retryRosterPanel();
+    },true);
+  }
+  installRosterRefresh();
+  retryRosterPanel();
+  function releaseNotes(){if(localStorage.getItem(RELEASE_KEY)===RELEASE_VERSION)return;const mask=document.createElement('div');mask.style.cssText='position:fixed;inset:0;z-index:2147483600;background:rgba(14,30,34,.38);display:flex;align-items:center;justify-content:center;padding:24px';mask.innerHTML='<div style="width:min(560px,94vw);background:#fff;border-radius:22px;padding:28px;box-shadow:0 22px 70px rgba(0,0,0,.22)"><div style="color:#16816e;font-weight:800;font-size:13px">UEP '+RELEASE_VERSION+' 업데이트</div><h2 style="margin:8px 0 16px">이번 버전에서 달라진 점</h2><ul style="line-height:1.9;color:#40565b"><li>교육과정을 프로그램 페이지형 4카드 UX로 정리했습니다.</li><li>문이과 교차오류·과목별 신청현황의 기존 비밀번호 보호를 그대로 유지합니다.</li><li>25명 이하 과목을 폐강대상으로 표시하고 개설 유지·폐강 확정을 기록할 수 있습니다.</li><li>과목별 신청학생 명단을 성적 없이 학년·반·번호순으로 출력할 수 있습니다.</li></ul><button data-release-ok style="float:right;margin-top:10px;padding:10px 18px;border:0;border-radius:11px;background:#16816e;color:#fff;font-weight:800">확인</button><div style="clear:both"></div></div>';mask.querySelector('[data-release-ok]').addEventListener('click',()=>{localStorage.setItem(RELEASE_KEY,RELEASE_VERSION);mask.remove()});document.body.appendChild(mask);}
+  window.__uepCurriculumWorkspace08173=function(){const nav=document.querySelector('.curriculum-final-tabs');if(!nav)return;launchCards(nav);if(byLabel('과목별 신청현황')?.classList.contains('active')){enhanceCourseCards();enhanceRosterPanel();}};
+  setTimeout(releaseNotes,1200);
+})();
+
+/* UEP_08173_CURRICULUM_BOUNDARY_WRAPPER */
+try{
+  const __uepCurriculumWorkspace08173Original=window.__uepCurriculumWorkspace08173;
+  window.__uepCurriculumWorkspace08173=(...args)=>{
+    try{return __uepCurriculumWorkspace08173Original?.(...args);}
+    catch(e){console.warn('[UEP 0.81.73] curriculum enhancement skipped',e);}
+  };
+}catch(e){console.warn('[UEP 0.81.73] curriculum boundary skipped',e);}
+/* UEP_08173_CURRICULUM_WORKSPACE_END */
+
+
+
+// __UEP_08174_TRANSFER_STUDENT_SUPPORT__
+function uepCurrentEnrollment08174(value){
+  const row=value||{}, student=row.__student||row;
+  const status=String(student?.status||student?.enrollmentStatus||row?.['학적상태']||'').trim();
+  if(/전출|자퇴|퇴학|제적|졸업/.test(status))return false;
+  return !status||status==='재학'||status==='재학생'||status==='전입';
+}
+function uepTransferStudent08174(value){
+  const row=value||{}, student=row.__student||row;
+  return String(student?.status||student?.enrollmentStatus||row?.['학적상태']||'').trim()==='전입';
+}
+function uepTransferDate08174(student){
+  const raw=student?.transferDate||student?.enrollmentDate||student?.startDate||student?.entryDate||student?.affiliationStartDate||student?.['전입일']||student?.['시작일']||'';
+  const text=String(raw||'').trim();
+  const m=text.match(/(20\d{2})[^0-9]?(\d{1,2})[^0-9]?(\d{1,2})/);
+  return m?m[1]+'-'+String(m[2]).padStart(2,'0')+'-'+String(m[3]).padStart(2,'0'):text;
+}
+function uepStudentSort08174(a,b){
+  return String(a?.studentNo||'').localeCompare(String(b?.studentNo||''),'ko',{numeric:true})||String(a?.name||'').localeCompare(String(b?.name||''),'ko');
+}
+
+// 학생 존재는 학생마스터를 기준으로 한다. 선택과목행이 아직 없어도 현재 재학생/전입생은 목록에 남긴다.
+uepActiveSelectionRows=function(){
+  const students=(readonlyCache?.students||[]).filter(uepCurrentEnrollment08174).slice().sort(uepStudentSort08174);
+  const source=readonlyCache?.selectionStudentRows||[];
+  const byId=new Map(),byNo=new Map();
+  source.forEach(row=>{
+    const id=String(row?.['학생ID']||'').trim(), no=String(row?.['학번']||'').replace(/\.0$/,'').trim();
+    if(id&&!byId.has(id))byId.set(id,row);
+    if(no&&!byNo.has(no))byNo.set(no,row);
+  });
+  return students.map(student=>{
+    const id=String(student?.id||'').trim(),no=String(student?.studentNo||'').replace(/\.0$/,'').trim();
+    const found=byId.get(id)||byNo.get(no)||null;
+    const row=found?{...found}:{};
+    const status=String(student?.status||student?.enrollmentStatus||row?.['학적상태']||'재학').trim();
+    return {...row,
+      '학생ID':row['학생ID']||id,
+      '학번':row['학번']||no,
+      '성명':row['성명']||student?.name||'',
+      '학적상태':row['학적상태']||status,
+      __student:student,
+      __status:status,
+      __selectionDataMissing:!found
+    };
+  });
+};
+uepSelectionActiveRow08129=function(row){return uepCurrentEnrollment08174(row);};
+
+const __uepSelectionErrors08174=uepSelectionErrors08105;
+uepSelectionErrors08105=function(row){
+  const terms=['2-1','2-2','3-1','3-2'];
+  const count=terms.reduce((n,term)=>n+uepSelectionTermSubjects(row,term).length,0);
+  if(uepTransferStudent08174(row)&&count===0){
+    return [{type:'전입생 · 선택과목 자료 없음',term:'',detail:'리로스쿨 원본이 연결되면 이 학생의 선택과목이 자동 반영됩니다.',severity:'안내',informational:true}];
+  }
+  return __uepSelectionErrors08174(row);
+};
+
+function uepScoreNoDataText08174(student,mode,period,exam){
+  const transfer=uepTransferStudent08174(student),date=uepTransferDate08174(student);
+  const type=mode==='mock'?'모의고사':mode==='internal'?'내신':'성적';
+  if(transfer){
+    const when=date?(' · 전입일 '+date):'';
+    return {title:'전입생 · '+type+' 자료 없음',detail:'전입 이전 자료는 성적 통계에 포함하지 않습니다'+when+'. 실제 자료가 연결되면 자동으로 표시됩니다.'};
+  }
+  return {title:'조회 결과가 없습니다.',detail:(period==='all'?'전체 누적':scorePeriodLabel(period))+(exam?' · '+exam:'')+' 자료를 확인하세요.'};
+}
+function uepScoreMissingClassStudents08174(
+---
+
+
+===== NEEDLE 업데이트 내역 =====
+
+
+===== NEEDLE releaseNotes =====
+    uepUpsertLocalSharedSetting08166?.(key,'',`${label} 비밀번호 초기화`);
+  }
+  toast(`${label} 비밀번호를 초기화했습니다. 새 비밀번호를 설정해 주세요.`);
+  if(state.activePage==='settings')render('settings');
+  setTimeout(uepInstallPasswordResetButtons08167,80);
+  return true;
+}
+function uepInstallPasswordResetButtons08167(){
+  if(state?.activePage!=='settings'||settingsPanel!=='security')return;
+  const cards=[...document.querySelectorAll('.setting-card')];
+  const targets=[
+    {needle:'민감정보 보안',kind:'sensitive'},
+    {needle:'선택과목 대외비 보안',kind:'subject'}
+  ];
+  for(const t of targets){
+    const card=cards.find(c=>String(c.textContent||'').includes(t.needle));
+    if(!card||card.querySelector(`[data-uep-reset-password08167="${t.kind}"]`))continue;
+    const area=card.querySelector('.connection-actions,.modal-actions')||card;
+    const btn=document.createElement('button');btn.type='button';btn.className='btn danger secondary';btn.textContent='비밀번호 초기화';btn.dataset.uepResetPassword08167=t.kind;
+    area.appendChild(btn);
+  }
+}
+document.addEventListener('click',event=>{
+  const btn=event.target.closest?.('[data-uep-reset-password08167]');if(!btn)return;
+  event.preventDefault();event.stopPropagation();uepResetSharedPassword08167(btn.dataset.uepResetPassword08167);
+});
+const __uepRender08167=render;
+render=function(...args){const out=__uepRender08167.apply(this,args);setTimeout(uepInstallPasswordResetButtons08167,50);return out;};
+setTimeout(uepInstallPasswordResetButtons08167,300);
+
+
+
+
+/* UEP_08173_CURRICULUM_WORKSPACE_START */
+(function(){
+  if(typeof window==='undefined'||window.__UEP08173CurriculumWorkspaceInstalled)return;
+  window.__UEP08173CurriculumWorkspaceInstalled=true;
+  const DECISION_KEY='uep.curriculum.courseDecision.v1';
+  const RELEASE_KEY='uep.releaseNotes.seen';
+  const RELEASE_VERSION='0.81.73';
+  const LABELS=['교육과정 편성표','학생신청','문이과 교차오류','과목별 신청현황'];
+  const META={
+    '교육과정 편성표':{icon:'▦',desc:'학년·학기별 교육과정과 과목 편성을 확인합니다.',foot:'6개 학기 · 2026 입학생'},
+    '학생신청':{icon:'◎',desc:'학생별 선택과목 신청 내역과 변경 상태를 확인합니다.',foot:'학생별 신청내역 · 보기 ›'},
+    '문이과 교차오류':{icon:'⇄',desc:'계열 교차·중복·위계 등 선택과목 오류를 점검합니다.',foot:'보안영역 · 분석 보기 ›',lock:true},
+    '과목별 신청현황':{icon:'▤',desc:'과목별 신청인원·예상 분반과 성적 분포를 분석합니다.',foot:'보안영역 · 과목 보기 ›',lock:true}
+  };
+  const css='\n<style id="uep-curriculum-workspace-style-08173">\n.uep-curr-status-08173{display:flex;align-items:center;gap:10px;margin:18px 0 14px;padding:14px 18px;border:1px solid #cfe6df;border-radius:16px;background:#eef9f6;color:#176c5d;font-weight:700}.uep-curr-status-08173 small{margin-left:auto;color:#607975;font-weight:600}.uep-curr-launcher-08173{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin:14px 0 24px}.uep-curr-launch-card-08173{position:relative;min-height:190px;padding:24px 24px 18px;border:1px solid #d6e5e2;border-radius:22px;background:#fff;text-align:left;box-shadow:0 8px 22px rgba(31,86,78,.05);cursor:pointer;transition:.18s ease}.uep-curr-launch-card-08173:hover{transform:translateY(-2px);border-color:#70c6b5;box-shadow:0 12px 28px rgba(31,86,78,.10)}.uep-curr-launch-card-08173.active{background:#edf9f6;border-color:#38ad97}.uep-curr-launch-icon-08173{display:flex;width:46px;height:46px;align-items:center;justify-content:center;margin-bottom:16px;border-radius:15px;background:#eaf6f3;color:#147867;font-size:23px}.uep-curr-launch-card-08173 h3{margin:0 0 9px;font-size:22px;color:#17252b}.uep-curr-launch-card-08173 p{margin:0;min-height:48px;color:#667b80;line-height:1.55}.uep-curr-launch-foot-08173{display:flex;align-items:center;margin-top:18px;padding-top:14px;border-top:1px solid #edf2f1;color:#445d62;font-weight:700;font-size:13px}.uep-curr-lock-08173{position:absolute;right:18px;top:18px;width:30px;height:30px;display:flex;align-items:center;justify-content:center;border-radius:10px;background:#fff4e7;color:#a86516;font-size:16px}.uep-course-decision-08173{display:flex;gap:6px;align-items:center;margin-top:8px;position:relative;z-index:3}.uep-course-decision-08173 select{max-width:126px;padding:5px 7px;border:1px solid #d4e2df;border-radius:9px;background:#fff;font-size:12px}.uep-course-auto-08173{display:inline-flex;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:800}.uep-course-auto-08173.risk{background:#fff0ed;color:#b84632}.uep-course-auto-08173.safe{background:#eaf8f3;color:#16745f}.uep-course-auto-08173.keep{background:#edf4ff;color:#335e9b}.uep-course-auto-08173.closed{background:#f4e9ea;color:#9a3341}.uep-roster-print-08173{padding:8px 12px;border:1px solid #58ae9e;border-radius:10px;background:#fff;color:#147665;font-weight:800;cursor:pointer}\n@media(max-width:1200px){.uep-curr-launcher-08173{grid-template-columns:repeat(2,minmax(0,1fr))}}\n</style>';
+  function ensureStyle(){if(!document.getElementById('uep-curriculum-workspace-style-08173'))document.head.insertAdjacentHTML('beforeend',css);}
+  function buttons(){return [...document.querySelectorAll('.curriculum-final-tabs button,.curriculum-final-tabs [role="button"]')];}
+  function byLabel(label){return buttons().find(b=>String(b.textContent||'').trim()===label);}
+  function decisions(){try{return JSON.parse(localStorage.getItem(DECISION_KEY)||'{}')||{}}catch{return{}}}
+  function saveDecision(k,v){const d=decisions();if(v)d[k]=v;else delete d[k];localStorage.setItem(DECISION_KEY,JSON.stringify(d));}
+  function currentTerm(){try{if(typeof curriculumTermFilter!=='undefined'&&curriculumTermFilter)return String(curriculumTermFilter)}catch{}const active=[...document.querySelectorAll('button,.card')].find(x=>/^[23]학년\s*[12]학기$/.test(String(x.textContent||'').trim())&&(x.classList.contains('active')||x.getAttribute('aria-selected')==='true'));const m=String(active?.textContent||'').match(/([23])학년\s*([12])학기/);return m?m[1]+'-'+m[2]:'';}
+  function allCandidateObjects(){let rows=[];try{if(typeof uepSelectionDataset==='function'){const d=uepSelectionDataset();if(Array.isArray(d?.rows))rows=d.rows}}ca
+---
++time+'</div><table><thead><tr><th>순번</th><th>학년</th><th>반</th><th>번호</th><th>학번</th><th>성명</th></tr></thead><tbody>'+body+'</tbody></table><script>setTimeout(()=>window.print(),250)<\/script></body></html>');w.document.close();}
+  function enhanceRosterPanel(){
+    const panel=findRosterPanel();if(!panel)return false;ensureStyle();
+    const sortButtons=rosterSortButtons(panel);const anchor=sortButtons.find(b=>/반.?번호순/.test(String(b.textContent||'')))||sortButtons[0];if(!anchor)return false;
+    const host=anchor.parentElement||panel;let btn=panel.querySelector('.uep-roster-print-08173');
+    if(!btn){btn=document.createElement('button');btn.type='button';btn.className='uep-roster-print-08173';btn.textContent='신청명단 출력';btn.title='성적정보 없이 학년·반·번호순으로 출력';btn.addEventListener('click',e=>{e.stopPropagation();printRoster(panel)});}
+    if(btn.parentElement!==host||btn!==anchor.nextElementSibling)anchor.insertAdjacentElement('afterend',btn);
+    return true;
+  }
+  function retryRosterPanel(){
+    const waits=[0,80,200,450,900,1500];
+    waits.forEach(ms=>setTimeout(()=>{try{enhanceRosterPanel();}catch(err){console.warn('[UEP 0.81.73] roster refresh skipped',err);}},ms));
+  }
+  function installRosterRefresh(){
+    if(window.__UEP08173RosterRefreshInstalled)return;window.__UEP08173RosterRefreshInstalled=true;
+    document.addEventListener('click',e=>{
+      if(!isCurriculumPage())return;
+      const target=e.target?.closest?.('button,[role="button"],article,.subject-card,.course-card');if(!target)return;
+      const t=String(target.innerText||target.textContent||'');
+      if(/신청\s*\d+명/.test(t)||/^(예상성적순|반.?번호순)$/.test(String(target.textContent||'').trim()))retryRosterPanel();
+    },true);
+  }
+  installRosterRefresh();
+  retryRosterPanel();
+  function releaseNotes(){if(localStorage.getItem(RELEASE_KEY)===RELEASE_VERSION)return;const mask=document.createElement('div');mask.style.cssText='position:fixed;inset:0;z-index:2147483600;background:rgba(14,30,34,.38);display:flex;align-items:center;justify-content:center;padding:24px';mask.innerHTML='<div style="width:min(560px,94vw);background:#fff;border-radius:22px;padding:28px;box-shadow:0 22px 70px rgba(0,0,0,.22)"><div style="color:#16816e;font-weight:800;font-size:13px">UEP '+RELEASE_VERSION+' 업데이트</div><h2 style="margin:8px 0 16px">이번 버전에서 달라진 점</h2><ul style="line-height:1.9;color:#40565b"><li>교육과정을 프로그램 페이지형 4카드 UX로 정리했습니다.</li><li>문이과 교차오류·과목별 신청현황의 기존 비밀번호 보호를 그대로 유지합니다.</li><li>25명 이하 과목을 폐강대상으로 표시하고 개설 유지·폐강 확정을 기록할 수 있습니다.</li><li>과목별 신청학생 명단을 성적 없이 학년·반·번호순으로 출력할 수 있습니다.</li></ul><button data-release-ok style="float:right;margin-top:10px;padding:10px 18px;border:0;border-radius:11px;background:#16816e;color:#fff;font-weight:800">확인</button><div style="clear:both"></div></div>';mask.querySelector('[data-release-ok]').addEventListener('click',()=>{localStorage.setItem(RELEASE_KEY,RELEASE_VERSION);mask.remove()});document.body.appendChild(mask);}
+  window.__uepCurriculumWorkspace08173=function(){const nav=document.querySelector('.curriculum-final-tabs');if(!nav)return;launchCards(nav);if(byLabel('과목별 신청현황')?.classList.contains('active')){enhanceCourseCards();enhanceRosterPanel();}};
+  setTimeout(releaseNotes,1200);
+})();
+
+/* UEP_08173_CURRICULUM_BOUNDARY_WRAPPER */
+try{
+  const __uepCurriculumWorkspace08173Original=window.__uepCurriculumWorkspace08173;
+  window.__uepCurriculumWorkspace08173=(...args)=>{
+    try{return __uepCurriculumWorkspace08173Original?.(...args);}
+    catch(e){console.warn('[UEP 0.81.73] curriculum enhancement skipped',e);}
+  };
+}catch(e){console.warn('[UEP 0.81.73] curriculum boundary skipped',e);}
+/* UEP_08173_CURRICULUM_WORKSPACE_END */
+
+
+
+// __UEP_08174_TRANSFER_STUDENT_SUPPORT__
+function uepCurrentEnrollment08174(value){
+  const row=value||{}, student=row.__student||row;
+  const status=String(student?.status||student?.enrollmentStatus||row?.['학적상태']||'').trim();
+  if(/전출|자퇴|퇴학|제적|졸업/.test(status))return false;
+  return !status||status==='재학'||status==='재학생'||status==='전입';
+}
+function uepTransferStudent08174(value){
+  const row=value||{}, student=row.__student||row;
+  return String(student?.status||student?.enrollmentStatus||row?.['학적상태']||'').trim()==='전입';
+}
+function uepTransferDate08174(student){
+  const raw=student?.transferDate||student?.enrollmentDate||student?.startDate||student?.entryDate||student?.affiliationStartDate||student?.['전입일']||student?.['시작일']||'';
+  const text=String(raw||'').trim();
+  const m=text.match(/(20\d{2})[^0-9]?(\d{1,2})[^0-9]?(\d{1,2})/);
+  return m?m[1]+'-'+String(m[2]).padStart(2,'0')+'-'+String(m[3]).padStart(2,'0'):text;
+}
+function uepStudentSort08174(a,b){
+  return String(a?.studentNo||'').localeCompare(String(b?.studentNo||''),'ko',{numeric:true})||String(a?.name||'').localeCompare(String(b?.name||''),'ko');
+}
+
+// 학생 존재는 학생마스터를 기준으로 한다. 선택과목행이 아직 없어도 현재 재학생/전입생은 목록에 남긴다.
+uepActiveSelectionRows=function(){
+  const students=(readonlyCache?.students||[]).filter(uepCurrentEnrollment08174).slice().sort(uepStudentSort08174);
+  const source=readonlyCache?.selectionStudentRows||[];
+  const byId=new Map(),byNo=new Map();
+  source.forEach(row=>{
+    const id=String(row?.['학생ID']||'').trim(), no=String(row?.['학번']||'').replace(/\.0$/,'').trim();
+    if(id&&!byId.has(id))byId.set(id,row);
+    if(no&&!byNo.has(no))byNo.set(no,row);
+  });
+  return students.map(student=>{
+    const id=String(student?.id||'').trim(),no=String(student?.studentNo||'').replace(/\.0$/,'').trim();
+    const found=byId.get(id)||byNo.get(no)||null;
+    const row=found?{...found}:{};
+    const status=String(student?.status||student?.enrollmentStatus||row?.['학적상태']||'재학').trim();
+    return {...row,
+      '학생ID':row['학생ID']||id,
+      '학번':row['학번']||no,
+      '성명':row['성명']||student?.name||'',
+      '학적상태':row['학적상태']||status,
+      __student:student,
+      __status:status,
+      __selectionDataMissing:!found
+    };
+  });
+};
+uepSelec
+---
+const target=e.target?.closest?.('button,[role="button"],article,.subject-card,.course-card');if(!target)return;
+      const t=String(target.innerText||target.textContent||'');
+      if(/신청\s*\d+명/.test(t)||/^(예상성적순|반.?번호순)$/.test(String(target.textContent||'').trim()))retryRosterPanel();
+    },true);
+  }
+  installRosterRefresh();
+  retryRosterPanel();
+  function releaseNotes(){if(localStorage.getItem(RELEASE_KEY)===RELEASE_VERSION)return;const mask=document.createElement('div');mask.style.cssText='position:fixed;inset:0;z-index:2147483600;background:rgba(14,30,34,.38);display:flex;align-items:center;justify-content:center;padding:24px';mask.innerHTML='<div style="width:min(560px,94vw);background:#fff;border-radius:22px;padding:28px;box-shadow:0 22px 70px rgba(0,0,0,.22)"><div style="color:#16816e;font-weight:800;font-size:13px">UEP '+RELEASE_VERSION+' 업데이트</div><h2 style="margin:8px 0 16px">이번 버전에서 달라진 점</h2><ul style="line-height:1.9;color:#40565b"><li>교육과정을 프로그램 페이지형 4카드 UX로 정리했습니다.</li><li>문이과 교차오류·과목별 신청현황의 기존 비밀번호 보호를 그대로 유지합니다.</li><li>25명 이하 과목을 폐강대상으로 표시하고 개설 유지·폐강 확정을 기록할 수 있습니다.</li><li>과목별 신청학생 명단을 성적 없이 학년·반·번호순으로 출력할 수 있습니다.</li></ul><button data-release-ok style="float:right;margin-top:10px;padding:10px 18px;border:0;border-radius:11px;background:#16816e;color:#fff;font-weight:800">확인</button><div style="clear:both"></div></div>';mask.querySelector('[data-release-ok]').addEventListener('click',()=>{localStorage.setItem(RELEASE_KEY,RELEASE_VERSION);mask.remove()});document.body.appendChild(mask);}
+  window.__uepCurriculumWorkspace08173=function(){const nav=document.querySelector('.curriculum-final-tabs');if(!nav)return;launchCards(nav);if(byLabel('과목별 신청현황')?.classList.contains('active')){enhanceCourseCards();enhanceRosterPanel();}};
+  setTimeout(releaseNotes,1200);
+})();
+
+/* UEP_08173_CURRICULUM_BOUNDARY_WRAPPER */
+try{
+  const __uepCurriculumWorkspace08173Original=window.__uepCurriculumWorkspace08173;
+  window.__uepCurriculumWorkspace08173=(...args)=>{
+    try{return __uepCurriculumWorkspace08173Original?.(...args);}
+    catch(e){console.warn('[UEP 0.81.73] curriculum enhancement skipped',e);}
+  };
+}catch(e){console.warn('[UEP 0.81.73] curriculum boundary skipped',e);}
+/* UEP_08173_CURRICULUM_WORKSPACE_END */
+
+
+
+// __UEP_08174_TRANSFER_STUDENT_SUPPORT__
+function uepCurrentEnrollment08174(value){
+  const row=value||{}, student=row.__student||row;
+  const status=String(student?.status||student?.enrollmentStatus||row?.['학적상태']||'').trim();
+  if(/전출|자퇴|퇴학|제적|졸업/.test(status))return false;
+  return !status||status==='재학'||status==='재학생'||status==='전입';
+}
+function uepTransferStudent08174(value){
+  const row=value||{}, student=row.__student||row;
+  return String(student?.status||student?.enrollmentStatus||row?.['학적상태']||'').trim()==='전입';
+}
+function uepTransferDate08174(student){
+  const raw=student?.transferDate||student?.enrollmentDate||student?.startDate||student?.entryDate||student?.affiliationStartDate||student?.['전입일']||student?.['시작일']||'';
+  const text=String(raw||'').trim();
+  const m=text.match(/(20\d{2})[^0-9]?(\d{1,2})[^0-9]?(\d{1,2})/);
+  return m?m[1]+'-'+String(m[2]).padStart(2,'0')+'-'+String(m[3]).padStart(2,'0'):text;
+}
+function uepStudentSort08174(a,b){
+  return String(a?.studentNo||'').localeCompare(String(b?.studentNo||''),'ko',{numeric:true})||String(a?.name||'').localeCompare(String(b?.name||''),'ko');
+}
+
+// 학생 존재는 학생마스터를 기준으로 한다. 선택과목행이 아직 없어도 현재 재학생/전입생은 목록에 남긴다.
+uepActiveSelectionRows=function(){
+  const students=(readonlyCache?.students||[]).filter(uepCurrentEnrollment08174).slice().sort(uepStudentSort08174);
+  const source=readonlyCache?.selectionStudentRows||[];
+  const byId=new Map(),byNo=new Map();
+  source.forEach(row=>{
+    const id=String(row?.['학생ID']||'').trim(), no=String(row?.['학번']||'').replace(/\.0$/,'').trim();
+    if(id&&!byId.has(id))byId.set(id,row);
+    if(no&&!byNo.has(no))byNo.set(no,row);
+  });
+  return students.map(student=>{
+    const id=String(student?.id||'').trim(),no=String(student?.studentNo||'').replace(/\.0$/,'').trim();
+    const found=byId.get(id)||byNo.get(no)||null;
+    const row=found?{...found}:{};
+    const status=String(student?.status||student?.enrollmentStatus||row?.['학적상태']||'재학').trim();
+    return {...row,
+      '학생ID':row['학생ID']||id,
+      '학번':row['학번']||no,
+      '성명':row['성명']||student?.name||'',
+      '학적상태':row['학적상태']||status,
+      __student:student,
+      __status:status,
+      __selectionDataMissing:!found
+    };
+  });
+};
+uepSelectionActiveRow08129=function(row){return uepCurrentEnrollment08174(row);};
+
+const __uepSelectionErrors08174=uepSelectionErrors08105;
+uepSelectionErrors08105=function(row){
+  const terms=['2-1','2-2','3-1','3-2'];
+  const count=terms.reduce((n,term)=>n+uepSelectionTermSubjects(row,term).length,0);
+  if(uepTransferStudent08174(row)&&count===0){
+    return [{type:'전입생 · 선택과목 자료 없음',term:'',detail:'리로스쿨 원본이 연결되면 이 학생의 선택과목이 자동 반영됩니다.',severity:'안내',informational:true}];
+  }
+  return __uepSelectionErrors08174(row);
+};
+
+function uepScoreNoDataText08174(student,mode,period,exam){
+  const transfer=uepTransferStudent08174(student),date=uepTransferDate08174(student);
+  const type=mode==='mock'?'모의고사':mode==='internal'?'내신':'성적';
+  if(transfer){
+    const when=date?(' · 전입일 '+date):'';
+    return {title:'전입생 · '+type+' 자료 없음',detail:'전입 이전 자료는 성적 통계에 포함하지 않습니다'+when+'. 실제 자료가 연결되면 자동으로 표시됩니다.'};
+  }
+  return {title:'조회 결과가 없습니다.',detail:(period==='all'?'전체 누적':scorePeriodLabel(period))+(exam?' · '+exam:'')+' 자료를 확인하세요.'};
+}
+function uepScoreMissingClassStudents08174(classNo,rows){
+  const ids=new Set((rows||[]).map(r=>String(r?.studentId||'')));
+  return (readonlyCache?.students||[]).filter(s=>uepCurrentEnrollment08174(s)&&classNumberOf(s)===String(classNo)&&!ids.has(String(s.id||''))).sort(uepStudentSort08174);
+}
+function uepScoreMissingMarkup08174(students,mode){
+  if(!students.length)ret
+---
