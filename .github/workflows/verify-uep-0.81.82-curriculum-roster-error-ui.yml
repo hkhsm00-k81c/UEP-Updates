@@ -1,0 +1,50 @@
+name: Verify UEP 0.81.82 Curriculum Roster Error UI
+on:
+  push:
+    branches:
+      - build/0.81.82-curriculum-roster-error-ui
+    paths:
+      - verify-uep-0.81.82.trigger
+      - scripts/patch-uep-08182-curriculum-roster-error-ui.js
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download 0.81.81 stable baseline
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,verify | Out-Null
+          gh release download v0.81.81 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+          if(!(Test-Path app/UEP.exe)){throw '0.81.81 baseline UEP.exe missing'}
+      - name: Apply and syntax check 0.81.82 patch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check scripts/patch-uep-08182-curriculum-roster-error-ui.js
+          node scripts/patch-uep-08182-curriculum-roster-error-ui.js app
+          node --check app/resources/app/gyomuon.js
+          $pkg=Get-Content app/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json
+          if($pkg.version -ne '0.81.82'){throw 'package version mismatch'}
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          foreach($m in @('const APP_VERSION = "0.81.82";','UEP_08182_CURRICULUM_ROSTER_ERROR_UI_START','다른 과학선택','roster-eight-08182','uep-grade-errors-08182','uep.updateNotes.lastShownVersion','UEP 0.81.82 업데이트')){if(!$g.Contains($m)){throw "marker missing: $m"}}
+          foreach($keep in @('UEP_08181_SELECTION_ROSTER_ERROR_NOTICE_START','function uepSelectionErrors08129','문이과 교차오류','과학과목 위계오류','과목별 신청현황')){if(!$g.Contains($keep)){throw "baseline feature missing: $keep"}}
+      - name: Package reopen verification
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Compress-Archive -Path app/* -DestinationPath UEP-update-test.zip -CompressionLevel Optimal
+          Expand-Archive UEP-update-test.zip verify -Force
+          node --check verify/resources/app/gyomuon.js
+          $pkg=Get-Content verify/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json
+          if($pkg.version -ne '0.81.82'){throw 'reopened package version mismatch'}
+          $g=Get-Content verify/resources/app/gyomuon.js -Raw -Encoding UTF8
+          if(!$g.Contains('UEP_08182_CURRICULUM_ROSTER_ERROR_UI_END')){throw 'reopened package patch marker missing'}
+          Write-Host 'UEP 0.81.82 verification PASS'
