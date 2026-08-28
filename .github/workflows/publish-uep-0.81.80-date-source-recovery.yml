@@ -97,15 +97,22 @@ jobs:
           - 버전 표시 및 업데이트 정보 일치
           '@
           $notes|Set-Content release-notes.md -Encoding UTF8
-          gh release create v0.81.80 UEP-update.zip --repo $env:GITHUB_REPOSITORY --title 'UEP v0.81.80 안정화 복구' --notes-file release-notes.md
+          gh release view v0.81.80 --repo $env:GITHUB_REPOSITORY *> $null
+          if($LASTEXITCODE -eq 0){
+            gh release upload v0.81.80 UEP-update.zip --repo $env:GITHUB_REPOSITORY --clobber
+            gh release edit v0.81.80 --repo $env:GITHUB_REPOSITORY --title 'UEP v0.81.80 안정화 복구' --notes-file release-notes.md
+          }else{
+            $global:LASTEXITCODE=0
+            gh release create v0.81.80 UEP-update.zip --repo $env:GITHUB_REPOSITORY --title 'UEP v0.81.80 안정화 복구' --notes-file release-notes.md
+          }
           $url='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.80/UEP-update.zip'
           $message='UEP 0.81.80 날짜 원본 복구 · 공통활동·방과후·학사외출 정상화 · 야자연계 N 제외'
           function PutJson($path,$obj){
             $tmp=Join-Path $env:RUNNER_TEMP ($path-replace'/','_')
             $obj|ConvertTo-Json -Depth 50|Set-Content $tmp -Encoding UTF8
-            $sha=(gh api "repos/$env:GITHUB_REPOSITORY/contents/$path?ref=main" --jq .sha)
+            $sha=(gh api "repos/${env:GITHUB_REPOSITORY}/contents/${path}?ref=main" --jq .sha)
             $b64=[Convert]::ToBase64String([IO.File]::ReadAllBytes($tmp))
-            @{message="release: promote $path to UEP 0.81.80";content=$b64;sha=$sha;branch='main'}|ConvertTo-Json|gh api --method PUT "repos/$env:GITHUB_REPOSITORY/contents/$path" --input -|Out-Null
+            @{message="release: promote $path to UEP 0.81.80";content=$b64;sha=$sha;branch='main'}|ConvertTo-Json|gh api --method PUT "repos/${env:GITHUB_REPOSITORY}/contents/${path}" --input -|Out-Null
           }
           $policy=Get-Content uep-policy.json -Raw|ConvertFrom-Json
           $policy.latestVersion='0.81.80';$policy.downloadUrl=$url;$policy.sha256=$env:UEP_SHA256;$policy.message=$message;$policy.forceUpdate=$false
