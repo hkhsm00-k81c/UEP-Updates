@@ -1,0 +1,104 @@
+name: Publish UEP 0.81.80 Date Source Recovery
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - publish-uep-0.81.80.trigger
+      - release-0.81.80.patch
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-uep-0.81.80
+  cancel-in-progress: false
+
+jobs:
+  build-test-publish:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download verified 0.81.79 baseline
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,work,verify | Out-Null
+          gh release download v0.81.79 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip work -Force
+          if(!(Test-Path work/UEP.exe)){throw '0.81.79 root UEP.exe missing'}
+
+      - name: Apply date-source recovery payload
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          git apply --check --directory=work release-0.81.80.patch
+          git apply --directory=work release-0.81.80.patch
+
+      - name: Syntax and A-D regression tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check work/resources/app/electron/google-data.cjs
+          node --check work/resources/app/electron/main.cjs
+          node --check work/resources/app/gyomuon.js
+          node tests/date-regression-0.81.80.cjs work/resources/app
+          node tests/range-mapping-0.81.80.cjs work/resources/app
+          $all=(Get-Content work/resources/app/electron/google-data.cjs -Raw)+(Get-Content work/resources/app/electron/main.cjs -Raw)
+          foreach($bad in @('nextCalendarDate','summerAfterSchoolTime','restoreSchoolReadTime','SCHOOL_READ_OFFICIAL_DATE_SHIFT')){if($all.Contains($bad)){throw "obsolete date compensation remains: $bad"}}
+
+      - name: Package and reopen verification
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Compress-Archive -Path work/* -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          Expand-Archive UEP-update.zip verify -Force
+          node tests/date-regression-0.81.80.cjs verify/resources/app
+          node tests/range-mapping-0.81.80.cjs verify/resources/app
+          $pkg=Get-Content verify/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json
+          $ui=Get-Content verify/resources/app/gyomuon.js -Raw -Encoding UTF8
+          if($pkg.version-ne'0.81.80'){throw 'package version mismatch'}
+          if(!$ui.Contains('const APP_VERSION = "0.81.80";')){throw 'UI version mismatch'}
+          if(Test-Path verify/resources/app/electron/school-read-normalize.cjs){throw 'obsolete normalization module packaged'}
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "UEP_SHA256=$sha"|Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Publish release and promote update metadata
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $notes=@'
+          UEP 0.81.80 안정화 복구
+
+          - 프로그램 일정 수정 과정에서 발생한 날짜 표시 회귀 복구
+          - 공통활동 및 학사외출 날짜 정상화
+          - 방과후학교 일정의 날짜·시간 처리 범위를 School Read API로 분리
+          - 야자연계되지 않은 방과후 프로그램의 야간시간표 오표시 방지
+          - 버전 표시 및 업데이트 정보 일치
+          '@
+          $notes|Set-Content release-notes.md -Encoding UTF8
+          gh release create v0.81.80 UEP-update.zip --repo $env:GITHUB_REPOSITORY --title 'UEP v0.81.80 안정화 복구' --notes-file release-notes.md
+          $url='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.80/UEP-update.zip'
+          $message='UEP 0.81.80 날짜 원본 복구 · 공통활동·방과후·학사외출 정상화 · 야자연계 N 제외'
+          function PutJson($path,$obj){
+            $tmp=Join-Path $env:RUNNER_TEMP ($path-replace'/','_')
+            $obj|ConvertTo-Json -Depth 50|Set-Content $tmp -Encoding UTF8
+            $sha=(gh api "repos/$env:GITHUB_REPOSITORY/contents/$path?ref=main" --jq .sha)
+            $b64=[Convert]::ToBase64String([IO.File]::ReadAllBytes($tmp))
+            @{message="release: promote $path to UEP 0.81.80";content=$b64;sha=$sha;branch='main'}|ConvertTo-Json|gh api --method PUT "repos/$env:GITHUB_REPOSITORY/contents/$path" --input -|Out-Null
+          }
+          $policy=Get-Content uep-policy.json -Raw|ConvertFrom-Json
+          $policy.latestVersion='0.81.80';$policy.downloadUrl=$url;$policy.sha256=$env:UEP_SHA256;$policy.message=$message;$policy.forceUpdate=$false
+          PutJson 'uep-policy.json' $policy
+          $manifest=[ordered]@{version='0.81.80';channel='stable';downloadUrl=$url;notes=$message;sha256=$env:UEP_SHA256}
+          PutJson 'uep-update.json' $manifest
+          PutJson 'uep-version.json' $manifest
+          $legacy=[ordered]@{latestVersion='0.81.80';downloadUrl=$url;sha256=$env:UEP_SHA256;forceUpdate=$false;message=$message}
+          PutJson 'policy.json' $legacy

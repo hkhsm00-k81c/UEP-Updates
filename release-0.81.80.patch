@@ -1,0 +1,219 @@
+--- a/resources/app/electron/google-data.cjs
++++ b/resources/app/electron/google-data.cjs
+@@ -286,9 +286,6 @@
+   return match ? `${match[1].padStart(2, "0")}:${match[2]}` : text;
+ }
+ 
+-// __UEP_08179_VISIBLE_VALUE_ROUTE_ONLY__
+-function nextCalendarDate(value){const text=String(value||"").trim(),m=text.match(/^(\d{4})-(\d{2})-(\d{2})$/);if(!m)return text;const d=new Date(Date.UTC(+m[1],+m[2]-1,+m[3]+1));return d.getUTCFullYear()+"-"+String(d.getUTCMonth()+1).padStart(2,"0")+"-"+String(d.getUTCDate()).padStart(2,"0");}
+-function summerAfterSchoolTime(value){const text=localTime(value),m=text.match(/^(\d{2}):(\d{2})$/);if(!m||+m[1]>=6)return text;const minutes=(+m[1]*60 + +m[2]+388)%1440;return String(Math.floor(minutes/60)).padStart(2,"0")+":"+String(minutes%60).padStart(2,"0");}
+ function classNumberSafe(value) { return String(value || "").replace(/[^0-9]/g, ""); }
+ 
+ function parseGoogleSheetData(sheetMatrices) {
+@@ -427,7 +424,7 @@
+         id: String(valueByHeader(row, "외출ID", "외출기록ID", "기록ID", "응답ID") || `outing-${index}`).trim(),
+         studentId: enteredId || String(master?.id || ""),
+         studentNo: enteredNo || String(master?.studentNo || ""),
+-        date: nextCalendarDate(localDate(valueByHeader(row, "외출일자", "신청일자", "운영일", "일자", "날짜", "적용일자"))),
++        date: localDate(valueByHeader(row, "외출일자", "신청일자", "운영일", "일자", "날짜", "적용일자")),
+         className: enteredClass || classNumberSafe(master?.className),
+         number: String(valueByHeader(row, "번호", "출석번호") || master?.number || "").replace(/\.0$/, ""),
+         name: enteredName || String(master?.name || ""),
+@@ -698,10 +695,8 @@
+       const sessionId = String(session["차시ID"] || `AFTER-SESSION-${index+1}`).trim();
+       const actualTitle = String(row["프로그램명"] || row["강좌명"] || "방과후학교").trim();
+       const studentsForProgram = participantRows(programId, sessionId);
+-      const isSummer=/여름방학/.test(String(row["운영기간구분"]||""));
+-      const startTime=isSummer?summerAfterSchoolTime(session["시작시각"]||row["시작시간"]):localTime(session["시작시각"]||row["시작시간"]);
+-      const endTime=isSummer?summerAfterSchoolTime(session["종료시각"]||row["종료시간"]):localTime(session["종료시각"]||row["종료시간"]);
+-      const displayDate=isSummer?nextCalendarDate(session.__date):session.__date;
++      const startTime=localTime(session["시작시각"]||row["시작시간"]);
++      const endTime=localTime(session["종료시각"]||row["종료시간"]);
+       const attendedCount = studentsForProgram.filter(student => /출석|지각|공결|참여/.test(String(student.result || ""))).length;
+       return {
+         id:`after-session-${sessionId}`,
+@@ -711,8 +706,8 @@
+         sessionId,
+         sessionNo:computedSessionNo.get(sessionId) || String(session["차시번호"] || "").trim(),
+         sourceSessionNo:String(session["차시번호"] || "").trim(),
+-        date:displayDate,
+-        plannedDate:isSummer?nextCalendarDate(localDate(session["예정일"] || session["운영일자"])):localDate(session["예정일"] || session["운영일자"]),
++        date:session.__date,
++        plannedDate:localDate(session["예정일"] || session["운영일자"]),
+         title:actualTitle,
+         actualTitle,
+         recordTitle:"생활기록부 기록 대상 아님",
+@@ -736,7 +731,7 @@
+         affectsAttendance:truthyFlag(row["야자연계여부"] || row["야자영향"] || "Y"),
+         status:session.__status || "예정",
+         changeType:String(session["변경유형"] || "").trim(),
+-        originalDate:isSummer?nextCalendarDate(localDate(session["원예정일"])):localDate(session["원예정일"]),
++        originalDate:localDate(session["원예정일"]),
+         changeReason:String(session["변경사유"] || "").trim(),
+         attendanceConfirmed:truthyFlag(session["출석확정"]),
+         nightSlots:(()=>{
+@@ -748,20 +743,19 @@
+           return [];
+         })(),
+         memo:String(session["비고"] || row["비고"] || "").trim(),
+-        endDate:displayDate
++        endDate:session.__date
+       };
+     });
+   const afterMasterPrograms = [...afterMasterById.entries()].map(([programId,row],index)=>{
+     const studentsForProgram=participantRows(programId);
+-    const isSummer=/여름방학/.test(String(row["운영기간구분"]||""));
+-    const rawStartDate=localDate(row["운영시작일"]||row["시작일"]||row["운영일자"]),rawEndDate=localDate(row["운영종료일"]||row["종료일"]||rawStartDate);
+-    const startDate=isSummer?nextCalendarDate(rawStartDate):rawStartDate,endDate=isSummer?nextCalendarDate(rawEndDate):rawEndDate;
++    const startDate=localDate(row["운영시작일"]||row["시작일"]||row["운영일자"]);
++    const endDate=localDate(row["운영종료일"]||row["종료일"]||startDate);
+     const actualTitle=String(row["프로그램명"]||row["강좌명"]||"방과후학교").trim();
+     return {
+       id:`after-master-${programId}`,source:"11_방과후학교 + 13_출석부",programId,courseId:programId,sessionId:"",sessionNo:"",
+       date:startDate,endDate,title:actualTitle,actualTitle,recordTitle:"생활기록부 기록 대상 아님",
+       type:String(row["운영기간구분"]||"방과후학교").trim(),kind:"after",
+-      time:[isSummer?summerAfterSchoolTime(row["시작시간"]):localTime(row["시작시간"]),isSummer?summerAfterSchoolTime(row["종료시간"]):localTime(row["종료시간"])].filter(Boolean).join("~")||String(row["요일"]||"시간 미등록"),
++      time:[localTime(row["시작시간"]),localTime(row["종료시간"])].filter(Boolean).join("~")||String(row["요일"]||"시간 미등록"),
+       place:String(row["장소"]||"").trim(),teacher:String(row["담당교사"]||"").trim(),students:studentsForProgram,
+       attendedCount:studentsForProgram.filter(student=>/출석|지각|공결|참여|등록|신청/.test(String(student.result||""))).length,
+       subject:String(row["교과"]||"").trim(),department:String(row["담당부서"]||"").trim(),
+--- a/resources/app/electron/main.cjs
++++ b/resources/app/electron/main.cjs
+@@ -651,6 +651,28 @@
+   return (await response.json()).valueRanges || [];
+ }
+ 
++function sheetNameFromA1Range(range="") {
++  const prefix=String(range||"").split("!")[0].trim();
++  return prefix.replace(/^'/,"").replace(/'$/,"").replace(/''/g,"'");
++}
++
++function assignValueRangesByRange(target, entries, valueRanges) {
++  const logicalBySheet=new Map(entries.map(([logicalName,range])=>[sheetNameFromA1Range(range),logicalName]));
++  const assigned=new Set();
++  (Array.isArray(valueRanges)?valueRanges:[]).forEach((item,index)=>{
++    const responseSheet=sheetNameFromA1Range(item?.range);
++    // Sheets batchGet may omit empty ranges or return them in a different order.
++    // A response that names its range must only be assigned to that sheet; index is
++    // retained solely for legacy responses that contain no range metadata at all.
++    const logicalName=responseSheet?logicalBySheet.get(responseSheet):entries[index]?.[0];
++    if(!logicalName)return;
++    target[logicalName]=item?.values||[];
++    assigned.add(logicalName);
++  });
++  entries.forEach(([logicalName])=>{if(!assigned.has(logicalName)&&!target[logicalName])target[logicalName]=[];});
++  return target;
++}
++
+ async function updateSheetValues(token, spreadsheetId, range, values, attempt=0) {
+   const url = new URL(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`);
+   url.searchParams.set("valueInputOption", "USER_ENTERED");
+@@ -1436,13 +1458,10 @@
+ async function fetchOperationalData({credentials=null}={}){
+   if(!liveDataCache)return {ok:false,requiresFullSync:true,reason:'전체 캐시가 아직 준비되지 않았습니다.'};
+   const auth=await getReadonlySheetsAuth(credentials),token=auth.token;
+-  const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,UEP_OPERATIONAL_RANGE_NAMES.map(name=>SHEET_RANGES[name]));
+-  const matrices={};UEP_OPERATIONAL_RANGE_NAMES.forEach((name,index)=>{matrices[name]=result?.[index]?.values||[];});
++  const operationalEntries=UEP_OPERATIONAL_RANGE_NAMES.map(name=>[name,SHEET_RANGES[name]]);
++  const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,operationalEntries.map(([,range])=>range));
++  const matrices={};assignValueRangesByRange(matrices,operationalEntries,result);
+   const partial=parseGoogleSheetData(matrices);
+-  if(auth?.mode==='school_read_api'&&Array.isArray(partial?.officialAttendance)){
+-    const addCalendarDay=value=>{const key=String(value||'').slice(0,10);if(!/^\d{4}-\d{2}-\d{2}$/.test(key))return value;const d=new Date(key+'T00:00:00Z');d.setUTCDate(d.getUTCDate()+1);return d.toISOString().slice(0,10);};
+-    partial.officialAttendance=partial.officialAttendance.map(row=>({...row,date:addCalendarDay(row?.date)}));
+-  }
+   const patch={officialAttendance:partial.officialAttendance||[],lateAttendance:partial.lateAttendance||[],notices:partial.notices||[],noticeReceipts:partial.noticeReceipts||[],lunchDuties:partial.lunchDuties||[],nightSupervisors:partial.nightSupervisors||[]};
+   const operationalSyncedAt=new Date().toISOString();liveDataCache={...liveDataCache,...patch,operationalSyncedAt};liveDataFetchedAt=Date.now();
+   return {ok:true,operationalSyncedAt,syncedAt:operationalSyncedAt,patch};
+@@ -1465,10 +1484,7 @@
+   await mapWithConcurrency(chunks, 1, async ({ offset, chunk }) => {
+     try {
+       const valueRanges = await readSheetBatch(token, UEP_SPREADSHEET_ID, chunk.map(([, range]) => range));
+-      valueRanges.forEach((item, index) => {
+-        const fallbackName = chunk[index]?.[0];
+-        matrices[fallbackName] = item.values || [];
+-      });
++      assignValueRangesByRange(matrices,chunk,valueRanges);
+     } catch (chunkError) {
+       console.warn(`[UEP] 기본정보 묶음 조회 실패(${offset + 1}~${offset + chunk.length}), 개별 재시도`, chunkError?.message || chunkError);
+       await mapWithConcurrency(chunk, 1, async ([logicalName, range]) => {
+@@ -1500,7 +1516,7 @@
+   ];
+   try {
+     const result = await readSheetBatch(token, UEP_PROCESSING_SPREADSHEET_ID, processingRanges.map(([,range])=>range));
+-    processingRanges.forEach(([logicalName],index)=>{matrices[logicalName]=result?.[index]?.values||[];});
++    assignValueRangesByRange(matrices,processingRanges,result);
+   } catch(error) {
+     // 한 탭의 일시 오류가 보고서·학사외출·선택과목 등 정상 탭까지 모두 비우지 않도록
+     // 묶음 조회 실패 시 각 탭을 독립적으로 재시도합니다. 평상시에는 1회 batchGet으로 quota를 보호합니다.
+@@ -1538,10 +1554,7 @@
+   const ruleEntries = Object.entries(RULE_SHEET_RANGES);
+   try {
+     const ruleValueRanges = await readSheetBatch(token, UEP_RULES_SPREADSHEET_ID, ruleEntries.map(([, range]) => range));
+-    ruleValueRanges.forEach((item, index) => {
+-      const logicalName = ruleEntries[index]?.[0];
+-      matrices[logicalName] = item.values || [];
+-    });
++    assignValueRangesByRange(matrices,ruleEntries,ruleValueRanges);
+     ruleEntries.forEach(([name]) => { if (!matrices[name]) matrices[name] = []; });
+   } catch (error) {
+     console.warn("[UEP] 규칙로그 묶음 조회 실패 - 개별 복구 시도", error?.message || error);
+@@ -1607,18 +1620,6 @@
+ 
+   const data = parseGoogleSheetData(matrices);
+ 
+-  if(auth?.mode==='school_read_api' && Array.isArray(data?.officialAttendance)){
+-    // __UEP_08163_SCHOOL_READ_OFFICIAL_DATE_SHIFT__
+-    const addCalendarDay=(value)=>{
+-      const key=String(value||'').slice(0,10);
+-      if(!/^\d{4}-\d{2}-\d{2}$/.test(key))return value;
+-      const d=new Date(key+'T00:00:00Z');
+-      d.setUTCDate(d.getUTCDate()+1);
+-      return d.toISOString().slice(0,10);
+-    };
+-    data.officialAttendance=data.officialAttendance.map(row=>({...row,date:addCalendarDay(row?.date)}));
+-  }
+-
+   {
+     const sourceMatrix=matrices["__INPUT_CENTER_SOURCE"]||[];
+     const sourceHeaders=(sourceMatrix[2]||[]).map(v=>String(v||'').trim());
+--- a/resources/app/gyomuon.js
++++ b/resources/app/gyomuon.js
+@@ -313,7 +313,7 @@
+ const studentSensitiveRevealKeys = new Set();
+ let studentAlertMode = "all";
+ let studentAlertClass = "all";
+-const APP_VERSION = "0.81.79";
++const APP_VERSION = "0.81.80";
+ const SUBJECT_REAPPLICATION_FORM_URL = "https://docs.google.com/forms/d/e/1FAIpQLSd7_E_Kb8HGEgjyEqtXs_Ykvy5L_c96ILIQ06OBV-MV_1dc0A/viewform?usp=dialog";
+ const samples = {
+   students: [
+@@ -13764,3 +13764,6 @@
+ 
+ // __UEP_08179_VISIBLE_VALUE_RECOVERY__
+ const UEP_RELEASE_NOTES_08179={version:'0.81.79',title:'UEP 0.81.79 일정 표시 복구',items:['학사외출 금요일 퇴소·일요일 입소 표시 복구','여름방학 방과후 운영기간·16개 차시 날짜 복구','오전 수업시간 08:40~10:30 복구','학생정보 참여이력 운영기간 동기화','야자연계 N 제외 유지']};
++
++// __UEP_08180_DATE_SOURCE_RECOVERY__
++const UEP_RELEASE_NOTES_08180={version:'0.81.80',title:'UEP 0.81.80 날짜 원본 복구',items:['School Read API의 한국 달력 날짜·시각 보존','공통활동·방과후·학사외출 날짜 원본 일치','여름방학 방과후 임시 +1일·+388분 보정 제거','공결 날짜 중복 보정 제거','시트 batch 응답을 실제 range 기준으로 연결']};
+--- a/resources/app/package.json
++++ b/resources/app/package.json
+@@ -1,7 +1,7 @@
+ {
+   "name": "unho-education-platform",
+   "productName": "UEP",
+-  "version": "0.81.79",
++  "version": "0.81.80",
+   "private": true,
+   "description": "UNHO Education Platform",
+   "main": "electron/main.cjs"
+--- a/resources/app/electron/school-read-normalize.cjs
++++ /dev/null
+@@ -1,8 +0,0 @@
+-"use strict";
+-const TARGETS=Object.freeze({"02_학사외출_일자별":{dates:["외출일자","신청일자","운영일","일자","날짜","적용일자"],times:[]},"11_방과후학교":{dates:["운영시작일","시작일","운영종료일","종료일","운영일자"],times:["시작시간","종료시간"]},"12_차시일정":{dates:["실제수업일","운영일자","예정일","원예정일"],times:["시작시각","종료시각","시작시간","종료시간"]}});
+-function sheetNameFromRange(range){const text=String(range||""),bang=text.indexOf("!");return(bang>=0?text.slice(0,bang):text).replace(/^'/,"").replace(/'$/,"");}
+-function addCalendarDay(value){const m=String(value??"").trim().match(/^(\d{4})-(\d{2})-(\d{2})(.*)$/);if(!m)return value;const d=new Date(Date.UTC(+m[1],+m[2]-1,+m[3]+1));return d.getUTCFullYear()+"-"+String(d.getUTCMonth()+1).padStart(2,"0")+"-"+String(d.getUTCDate()).padStart(2,"0")+m[4];}
+-function restoreSchoolReadTime(value){const m=String(value??"").trim().match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);if(!m||+m[1]>=6)return value;const total=(+m[1]*60 + +m[2]+388)%1440;return String(Math.floor(total/60)).padStart(2,"0")+":"+String(total%60).padStart(2,"0")+(m[3]?":"+m[3]:"");}
+-function normalizeSchoolReadValueRange(vr,requested){const source=vr&&typeof vr==="object"?vr:{},target=TARGETS[sheetNameFromRange(source.range||requested)];if(!target||!Array.isArray(source.values))return source;const wanted=new Set([...target.dates,...target.times]);let h=null;for(let i=0;i<Math.min(source.values.length,12);i++){const headers=(source.values[i]||[]).map(v=>String(v??"").replace(/\s+/g,"").trim());if(headers.some(x=>wanted.has(x))){h={i,headers};break;}}if(!h)return source;const dc=new Set(h.headers.map((x,i)=>target.dates.includes(x)?i:-1).filter(i=>i>=0)),tc=new Set(h.headers.map((x,i)=>target.times.includes(x)?i:-1).filter(i=>i>=0));return{...source,values:source.values.map((r,ri)=>!Array.isArray(r)||ri<=h.i?(Array.isArray(r)?r.slice():r):r.map((v,ci)=>dc.has(ci)?addCalendarDay(v):tc.has(ci)?restoreSchoolReadTime(v):v))};}
+-function normalizeSchoolReadBatch(vrs,ranges){return(Array.isArray(vrs)?vrs:[]).map((vr,i)=>normalizeSchoolReadValueRange(vr,ranges?.[i]));}
+-module.exports={addCalendarDay,restoreSchoolReadTime,normalizeSchoolReadValueRange,normalizeSchoolReadBatch};
