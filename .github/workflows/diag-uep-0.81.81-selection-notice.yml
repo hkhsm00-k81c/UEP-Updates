@@ -1,0 +1,51 @@
+name: Diagnose UEP 0.81.80 Selection and Notice
+on:
+  push:
+    branches:
+      - build/0.81.81-selection-roster-error-notice
+    paths:
+      - diag-uep-0.81.81.trigger
+permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download 0.81.80 baseline
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,diag | Out-Null
+          gh release download v0.81.80 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+      - name: Extract relevant runtime snippets
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $f='app/resources/app/gyomuon.js'
+          $text=Get-Content $f -Raw -Encoding UTF8
+          $patterns=@('function uepOpenSubjectModal08128','function uepCrossTrackRows08161','uepCrossTrackView08161','오류유형','uep.releaseNotes.seen','RELEASE_KEY','releaseNotes','업데이트 내역','APP_VERSION')
+          $out=New-Object System.Collections.Generic.List[string]
+          foreach($p in $patterns){
+            $out.Add("`n===== $p =====")
+            $start=0
+            while(($idx=$text.IndexOf($p,$start,[StringComparison]::OrdinalIgnoreCase)) -ge 0){
+              $a=[Math]::Max(0,$idx-2500);$len=[Math]::Min(9000,$text.Length-$a)
+              $out.Add($text.Substring($a,$len))
+              $start=$idx+$p.Length
+              if($start -ge $text.Length){break}
+            }
+          }
+          $out -join "`n" | Set-Content diag/08181-selection-notice-runtime.txt -Encoding UTF8
+      - name: Commit diagnostics
+        shell: pwsh
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add diag/08181-selection-notice-runtime.txt
+          git commit -m 'diag: inspect 0.81.80 selection and update notice runtime'
+          git push
