@@ -1,4 +1,4 @@
-name: Diagnose UEP 0.81.80 Selection and Notice
+name: Diagnose UEP 0.81.80 Selection Error UI
 on:
   push:
     branches:
@@ -22,22 +22,22 @@ jobs:
           New-Item -ItemType Directory -Force source,app,diag | Out-Null
           gh release download v0.81.80 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
           Expand-Archive source/UEP-update.zip app -Force
-      - name: Extract focused runtime diagnostics
+      - name: Extract only error view and error engine
         shell: pwsh
         run: |
           @'
           const fs=require('fs');
-          const text=fs.readFileSync('app/resources/app/gyomuon.js','utf8');
-          function around(needle,before=6000,after=12000){let out='',p=0,c=0;while((p=text.indexOf(needle,p))>=0&&c<5){out+='===== '+needle+' #'+(c+1)+' =====\n'+text.slice(Math.max(0,p-before),Math.min(text.length,p+after))+'\n\n';p+=needle.length;c++;}return out||'MISSING '+needle;}
-          fs.writeFileSync('diag/08181-error-ui.txt',around('data-curriculum-error-type')+'\n'+around('오류유형'),'utf8');
-          fs.writeFileSync('diag/08181-update-notice.txt',around('uep.releaseNotes.seen')+'\n'+around('RELEASE_KEY')+'\n'+around('업데이트 내역'),'utf8');
-          '@ | Set-Content extract-focused-08181.cjs -Encoding UTF8
-          node extract-focused-08181.cjs
+          const t=fs.readFileSync('app/resources/app/gyomuon.js','utf8');
+          function around(n,b=2500,a=6500){const p=t.indexOf(n);return p<0?'MISSING '+n:t.slice(Math.max(0,p-b),Math.min(t.length,p+a));}
+          function fn(name){const s=t.indexOf('function '+name+'(');if(s<0)return 'MISSING '+name;const b=t.indexOf('{',s);let d=0,q='',e=false;for(let i=b;i<t.length;i++){const c=t[i];if(q){if(e){e=false;continue}if(c==='\\'){e=true;continue}if(c===q)q='';continue}if(c==='"'||c==="'"){q=c;continue}if(c==='{')d++;else if(c==='}'){d--;if(!d)return t.slice(s,i+1)}}return'UNTERM '+name;}
+          fs.writeFileSync('diag/08181-error-min.txt',around('오류유형')+'\n\n===== ENGINE =====\n'+fn('uepSelectionErrors08105'),'utf8');
+          '@ | Set-Content extract-min-08181.cjs -Encoding UTF8
+          node extract-min-08181.cjs
       - name: Commit diagnostics
         shell: pwsh
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add diag/08181-error-ui.txt diag/08181-update-notice.txt
-          git commit -m 'diag: focus 0.81.80 error UI and update notice runtime'
+          git add diag/08181-error-min.txt
+          git commit -m 'diag: isolate 0.81.80 error view and engine'
           git push
