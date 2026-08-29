@@ -1,0 +1,33 @@
+name: Diagnose UEP 0.81.89 curriculum and error filters
+on:
+  push:
+    branches: [main]
+    paths:
+      - diag-uep-0.81.89-curriculum-errors.trigger
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download stable 0.81.88
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p /tmp/uep && gh release download v0.81.88 --repo "$GITHUB_REPOSITORY" --pattern UEP-update.zip --dir /tmp/uep
+          unzip -q /tmp/uep/UEP-update.zip -d /tmp/app
+      - name: Inspect relevant runtime code
+        run: |
+          node <<'NODE'
+          const fs=require('fs');
+          const g=fs.readFileSync('/tmp/app/resources/app/gyomuon.js','utf8');
+          const needles=['2학년 오류학생','3학년 오류학생','2·3학년 오류학생','오류학생만 보기','curriculum','uepUpdateNotes','이번 버전에서 달라진 점','uepSelectionDataset','학생신청'];
+          for(const n of needles){
+            console.log('\n===== '+n+' =====');
+            let from=0,count=0;
+            while(count<8){const i=g.indexOf(n,from); if(i<0)break; console.log(g.slice(Math.max(0,i-1800),Math.min(g.length,i+2600)).replace(/\r/g,'')); console.log('\n---'); from=i+n.length; count++;}
+            if(!count) console.log('(not found)');
+          }
+          NODE
