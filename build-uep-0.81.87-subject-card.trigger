@@ -1,1 +1,1 @@
-build subject-card candidate 2026-08-30
+rebuild subject-card candidate accuracy-track 2026-08-30 01:36 KST
