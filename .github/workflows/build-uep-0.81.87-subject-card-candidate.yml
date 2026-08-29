@@ -1,0 +1,76 @@
+name: Build UEP 0.81.87 Subject Card Candidate
+on:
+  push:
+    branches: [main]
+    paths:
+      - build-uep-0.81.87-subject-card.trigger
+permissions:
+  contents: write
+concurrency:
+  group: build-uep-0.81.87-subject-card
+  cancel-in-progress: false
+jobs:
+  build-test-release:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download stable 0.81.86 baseline
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,work,verify | Out-Null
+          gh release download v0.81.86 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip work -Force
+          if(!(Test-Path work/UEP.exe)){throw '0.81.86 baseline UEP.exe missing'}
+      - name: Apply subject-card insight patch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check scripts/patch-uep-08187-subject-card-insight.js
+          node scripts/patch-uep-08187-subject-card-insight.js work
+          node --check work/resources/app/gyomuon.js
+          $pkg=Get-Content work/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json
+          if($pkg.version -ne '0.81.87'){throw 'package version mismatch'}
+          $g=Get-Content work/resources/app/gyomuon.js -Raw -Encoding UTF8
+          foreach($m in @('const APP_VERSION = "0.81.87";','UEP_08187_SUBJECT_CARD_INSIGHT_START','OPEN_LINE=21','현재 성적대 분포','선택가능','2-2 동일과목','평균','중앙')){if(!$g.Contains($m)){throw "marker missing: $m"}}
+          foreach($keep in @('UEP_08186_GRADE_TRANSFER_START','function uepOpenSubjectModal08128','function uepSelectionErrors08129','UEP_08185_CURRICULUM_STABLE_CORE_START')){if(!$g.Contains($keep)){throw "existing feature missing: $keep"}}
+      - name: Package and reopen verify
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Compress-Archive -Path work/* -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          Expand-Archive UEP-update.zip verify -Force
+          node --check verify/resources/app/gyomuon.js
+          $pkg=Get-Content verify/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json
+          if($pkg.version -ne '0.81.87'){throw 'reopened package version mismatch'}
+          $g=Get-Content verify/resources/app/gyomuon.js -Raw -Encoding UTF8
+          if(!$g.Contains('UEP_08187_SUBJECT_CARD_INSIGHT_END')){throw 'reopened patch marker missing'}
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "UEP_SHA256=$sha"|Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Publish candidate release only
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $tag='v0.81.87-candidate'
+          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+          if($LASTEXITCODE -eq 0){gh release delete $tag --repo $env:GITHUB_REPOSITORY --yes --cleanup-tag}
+          $global:LASTEXITCODE=0
+          $notes=@'
+          UEP 0.81.87 선택과목 신청현황 카드 분석 후보판
+
+          - 기존 선택과목 신청·필터·오류검사·학생명단 로직 유지
+          - 모든 과목 카드에 1학기말 성적 분포 미니곡선 표시
+          - 2-2·3-1 과학 위계과목은 규칙로그 과학위계 규칙에서 선수과목 풀을 계산
+          - 3-1 동일과목은 2-2 동일과목 선택인원을 제외한 현재 선택가능인원 표시
+          - 개설 기준 21명과 현재 신청인원의 차이 표시
+          - 2-1·2-2 국·영·수 선택과목은 평균·중앙등급 표시
+          - 안정판 자동업데이트 메타데이터는 변경하지 않음
+          '@
+          $notes|Set-Content release-notes-08187.md -Encoding UTF8
+          gh release create $tag UEP-update.zip --repo $env:GITHUB_REPOSITORY --title 'UEP v0.81.87 Candidate · 선택과목 카드 분석' --notes-file release-notes-08187.md --prerelease
+          "0.81.87 candidate SHA256 $env:UEP_SHA256"|Set-Content build-08187-status.txt -Encoding UTF8
