@@ -1,0 +1,14 @@
+const fs=require('fs'),path=require('path');
+const root=process.argv[2]||'app';
+const gFile=path.join(root,'resources','app','gyomuon.js');
+let g=fs.readFileSync(gFile,'utf8');
+const A=(c,m)=>{if(!c)throw new Error(m)};
+A(g.includes('const APP_VERSION = "0.81.89";'),'0.81.89 anchor missing');
+const r74="if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(()=>uepOpenReleaseNotes08174(false),1400));else setTimeout(()=>uepOpenReleaseNotes08174(false),1400);";
+const r77="if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(()=>uepOpenReleaseNotes08177(false),1400));else setTimeout(()=>uepOpenReleaseNotes08177(false),1400);";
+A(g.includes(r74),'0.81.74 popup launcher missing');
+A(g.includes(r77),'0.81.77 popup launcher missing');
+g=g.replace(r74,'/* UEP_08189_DISABLE_08174_RELEASE_POPUP */');
+g=g.replace(r77,'/* UEP_08189_DISABLE_08177_RELEASE_POPUP */');
+fs.writeFileSync(gFile,g,'utf8');
+console.log('disabled legacy 0.81.74 and 0.81.77 startup release popups');
