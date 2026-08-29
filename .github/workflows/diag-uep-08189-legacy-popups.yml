@@ -1,0 +1,32 @@
+name: Diagnose UEP 0.81.89 legacy popups
+on:
+  push:
+    paths:
+      - 'diag-uep-08189-legacy-popups.trigger'
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          rm -rf /tmp/uep /tmp/app
+          mkdir -p /tmp/uep
+          gh release download v0.81.89-candidate --repo "$GITHUB_REPOSITORY" --pattern UEP-update.zip --dir /tmp/uep
+          unzip -q /tmp/uep/UEP-update.zip -d /tmp/app
+      - name: Inspect 0.81.74 and 0.81.77 popup code
+        run: |
+          node <<'NODE'
+          const fs=require('fs');
+          const g=fs.readFileSync('/tmp/app/resources/app/gyomuon.js','utf8');
+          for(const n of ['0.81.74','0.81.77','08174','08177','releaseNotes','showNote','updateNotes']){
+            console.log('\n===== '+n+' =====');
+            let from=0,count=0;
+            while(count<12){const i=g.indexOf(n,from);if(i<0)break;console.log(g.slice(Math.max(0,i-1200),Math.min(g.length,i+2200)).replace(/\r/g,''));console.log('\n---');from=i+n.length;count++;}
+            if(!count)console.log('(not found)');
+          }
+          NODE
