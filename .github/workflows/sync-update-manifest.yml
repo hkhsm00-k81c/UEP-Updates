@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to sync (example: v0.80.65)"
+        description: "Stable release tag to sync (example: v0.81.88)"
         required: true
         type: string
 
@@ -19,10 +19,10 @@ concurrency:
 
 jobs:
   sync-manifest:
-    if: ${{ github.event_name == 'workflow_dispatch' || !endsWith(github.event.release.tag_name, '-homeroom') }}
+    if: ${{ github.event_name == 'workflow_dispatch' || (!github.event.release.prerelease && !endsWith(github.event.release.tag_name, '-homeroom') && !contains(github.event.release.tag_name, 'candidate')) }}
     runs-on: ubuntu-latest
     steps:
-      - name: Resolve release tag
+      - name: Resolve stable release tag
         id: tag
         shell: bash
         run: |
@@ -33,25 +33,25 @@ jobs:
             TAG="${{ github.event.release.tag_name }}"
           fi
           test -n "$TAG"
+          case "$TAG" in
+            *candidate*|*-homeroom) echo "Refusing non-stable tag: $TAG"; exit 1 ;;
+          esac
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
-      - name: Download UEP update asset
+      - name: Download and verify update asset
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.tag.outputs.tag }}
         shell: bash
         run: |
           set -euo pipefail
+          rm -rf /tmp/uep-release
           mkdir -p /tmp/uep-release
-          gh release download "$TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --pattern "UEP-update.zip" \
-            --dir /tmp/uep-release
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "UEP-update.zip" --dir /tmp/uep-release
           test -f /tmp/uep-release/UEP-update.zip
 
-      - name: Build manifest
-        id: meta
+      - name: Build stable manifests and policy
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.tag.outputs.tag }}
@@ -60,41 +60,75 @@ jobs:
         run: |
           set -euo pipefail
           SHA256="$(sha256sum /tmp/uep-release/UEP-update.zip | awk '{print $1}')"
-          DOWNLOAD_URL="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[] | select(.name=="UEP-update.zip") | .url')"
+          DOWNLOAD_URL="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/UEP-update.zip"
           NOTES="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq '.body // ""' | head -c 1000)"
-          if [ -z "$NOTES" ]; then
-            NOTES="UEP ${TAG#v} 업데이트"
-          fi
+          if [ -z "$NOTES" ]; then NOTES="UEP $VERSION 업데이트"; fi
+
           jq -n \
             --arg version "$VERSION" \
             --arg channel "stable" \
             --arg downloadUrl "$DOWNLOAD_URL" \
             --arg sha256 "$SHA256" \
             --arg notes "$NOTES" \
-            '{version:$version, channel:$channel, downloadUrl:$downloadUrl, sha256:$sha256, notes:$notes}' \
+            '{version:$version, channel:$channel, downloadUrl:$downloadUrl, notes:$notes, sha256:$sha256}' \
             > /tmp/uep-update.json
-          cat /tmp/uep-update.json
+          cp /tmp/uep-update.json /tmp/uep-version.json
+          printf '%s\n' "$TAG" > /tmp/release-tag.txt
 
-      - name: Update uep-update.json via GitHub API
+          gh api "repos/$GITHUB_REPOSITORY/contents/uep-policy.json?ref=main" --jq '.content' | tr -d '\n' | base64 -d > /tmp/uep-policy-current.json
+          jq \
+            --arg version "$VERSION" \
+            --arg downloadUrl "$DOWNLOAD_URL" \
+            --arg sha256 "$SHA256" \
+            --arg message "UEP $VERSION 업데이트가 준비되었습니다." \
+            '.latestVersion=$version | .downloadUrl=$downloadUrl | .sha256=$sha256 | .message=$message | .updateEnabled=true' \
+            /tmp/uep-policy-current.json > /tmp/uep-policy.json
+
+          echo "Stable sync: $TAG / $SHA256"
+
+      - name: Atomically point updater metadata at stable release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.tag.outputs.tag }}
         shell: bash
         run: |
           set -euo pipefail
-          CURRENT_SHA="$(gh api "repos/$GITHUB_REPOSITORY/contents/uep-update.json?ref=main" --jq '.sha')"
-          CURRENT_CONTENT="$(gh api "repos/$GITHUB_REPOSITORY/contents/uep-update.json?ref=main" --jq '.content' | tr -d '\n' | base64 -d)"
-          NEW_CONTENT="$(cat /tmp/uep-update.json)"
-          if [ "$CURRENT_CONTENT" = "$NEW_CONTENT" ]; then
-            echo "Manifest already up to date."
-            exit 0
-          fi
-          ENCODED="$(base64 -w 0 /tmp/uep-update.json)"
-          gh api \
-            --method PUT \
-            -H "Accept: application/vnd.github+json" \
-            "repos/$GITHUB_REPOSITORY/contents/uep-update.json" \
-            -f message="Sync update manifest for $TAG" \
-            -f content="$ENCODED" \
-            -f sha="$CURRENT_SHA" \
-            -f branch="main"
+          update_file() {
+            local path="$1"
+            local source="$2"
+            local current_sha
+            current_sha="$(gh api "repos/$GITHUB_REPOSITORY/contents/$path?ref=main" --jq '.sha')"
+            local encoded
+            encoded="$(base64 -w 0 "$source")"
+            gh api --method PUT -H "Accept: application/vnd.github+json" \
+              "repos/$GITHUB_REPOSITORY/contents/$path" \
+              -f message="Sync stable updater metadata for $TAG: $path" \
+              -f content="$encoded" \
+              -f sha="$current_sha" \
+              -f branch="main" >/dev/null
+          }
+
+          update_file "uep-update.json" "/tmp/uep-update.json"
+          update_file "uep-version.json" "/tmp/uep-version.json"
+          update_file "uep-policy.json" "/tmp/uep-policy.json"
+          update_file "release-tag.txt" "/tmp/release-tag.txt"
+
+      - name: Verify remote updater metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.tag.outputs.version }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in {1..6}; do
+            POLICY="$(curl -fsSL "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/uep-policy.json?ts=$RANDOM" || true)"
+            MANIFEST="$(curl -fsSL "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/uep-update.json?ts=$RANDOM" || true)"
+            if [ "$(jq -r '.latestVersion // empty' <<<"$POLICY")" = "$VERSION" ] && [ "$(jq -r '.version // empty' <<<"$MANIFEST")" = "$VERSION" ]; then
+              echo "Remote updater metadata verified at $VERSION"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "Remote updater metadata did not converge to $VERSION" >&2
+          exit 1
