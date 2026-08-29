@@ -1,0 +1,58 @@
+name: Promote UEP 0.81.88 Stable
+on:
+  push:
+    branches: [main]
+    paths:
+      - promote-uep-0.81.88-stable.trigger
+permissions:
+  contents: write
+concurrency:
+  group: promote-uep-0.81.88-stable
+  cancel-in-progress: false
+jobs:
+  verify-promote:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download tested 0.81.88 candidate
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force candidate,verify | Out-Null
+          gh release download v0.81.88-candidate --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir candidate
+          if(!(Test-Path candidate/UEP-update.zip)){throw 'candidate asset missing'}
+          $sha=(Get-FileHash candidate/UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          if($sha -ne '8df6bbe71049363a094a75e5e36744ea28899d8308aa72da3624e69bd69c3417'){throw "candidate SHA mismatch: $sha"}
+          Expand-Archive candidate/UEP-update.zip verify -Force
+          if(!(Test-Path verify/UEP.exe)){throw 'UEP.exe missing'}
+          $pkg=Get-Content verify/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json
+          if($pkg.version -ne '0.81.88'){throw 'package version mismatch'}
+          $g=Get-Content verify/resources/app/gyomuon.js -Raw -Encoding UTF8
+          foreach($m in @('const APP_VERSION = "0.81.88";','UEP_08188_SUBJECT_CARD_PERFORMANCE_START','신청자 계열 구성','신청 정상','선택가능','현재 성적대 분포')){if(!$g.Contains($m)){throw "marker missing: $m"}}
+          foreach($remove in @('UEP_08187_SUBJECT_CARD_INSIGHT_START','UEP_08187_SUBJECT_CARD_ACCURACY_START')){if($g.Contains($remove)){throw "old heavy wrapper present: $remove"}}
+      - name: Publish stable automatic-update release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $tag='v0.81.88'
+          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+          if($LASTEXITCODE -eq 0){throw 'stable v0.81.88 already exists; refusing to replace'}
+          $global:LASTEXITCODE=0
+          $notes=@'
+          UEP 0.81.88 선택과목 분석 · 성능개선
+
+          - 과학 위계과목을 학생ID 집합 기준으로 계산하여 선수과목 정상/오류 인원을 분리 표시
+          - 3-1은 2-2 정상 동일과목 학생만 제외하여 실제 선택가능인원을 계산
+          - 2-1·2-2 국어·영어 및 사회탐구 과목에 문과·이과·미분류 구성 인원과 비율 표시
+          - 모든 과목 카드에 1학기말 성적분포와 개설 기준 21명 표시
+          - 교육과정 탭 진입 시 과목카드 전수분석 제거
+          - 과목별 신청현황을 열 때만 분석하고 학생집합·계열분류 결과를 캐시해 속도 개선
+          - 0.81.87의 중복 데이터셋 래퍼 구조 제거
+          '@
+          $notes|Set-Content release-notes-08188-stable.md -Encoding UTF8
+          gh release create $tag candidate/UEP-update.zip --repo $env:GITHUB_REPOSITORY --title 'UEP v0.81.88 선택과목 분석 · 성능개선' --notes-file release-notes-08188-stable.md --latest
