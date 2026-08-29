@@ -1,0 +1,80 @@
+name: Publish UEP 0.81.86 Grade Transfer
+on:
+  push:
+    branches: [main]
+    paths:
+      - publish-uep-0.81.86.trigger
+permissions:
+  contents: write
+concurrency:
+  group: publish-uep-0.81.86
+  cancel-in-progress: false
+jobs:
+  build-test-publish:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download verified 0.81.85 baseline
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,work,verify | Out-Null
+          gh release download v0.81.85 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip work -Force
+          if(!(Test-Path work/UEP.exe)){throw '0.81.85 baseline UEP.exe missing'}
+      - name: Apply 0.81.86 grade transfer fix
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check scripts/patch-uep-08186-grade-transfer.js
+          node scripts/patch-uep-08186-grade-transfer.js work
+          node --check work/resources/app/gyomuon.js
+          $pkg=Get-Content work/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json
+          if($pkg.version -ne '0.81.86'){throw 'package version mismatch'}
+          $g=Get-Content work/resources/app/gyomuon.js -Raw -Encoding UTF8
+          foreach($m in @('const APP_VERSION = "0.81.86";','UEP_08186_GRADE_TRANSFER_START','1학기말 평균등급','전입교','전입생 · 성적자료 없음','expectedRank=null')){if(!$g.Contains($m)){throw "marker missing: $m"}}
+          foreach($keep in @('UEP_08185_CURRICULUM_STABLE_CORE_START','uep-roster-08185','refreshRosterUntilStable')){if(!$g.Contains($keep)){throw "existing feature missing: $keep"}}
+      - name: Package and reopen verification
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Compress-Archive -Path work/* -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          Expand-Archive UEP-update.zip verify -Force
+          node --check verify/resources/app/gyomuon.js
+          $pkg=Get-Content verify/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json
+          if($pkg.version -ne '0.81.86'){throw 'reopened package version mismatch'}
+          $g=Get-Content verify/resources/app/gyomuon.js -Raw -Encoding UTF8
+          if(!$g.Contains('UEP_08186_GRADE_TRANSFER_END')){throw 'reopened marker missing'}
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "UEP_SHA256=$sha"|Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Publish release and promote update metadata
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $notes=@'
+          UEP 0.81.86 1학기말 내신 · 전입생 성적 출처
+
+          - 교육과정 과목별 신청현황의 1학년 내신평균을 2026학년도 1학기 학기말 최종등급 평균으로 변경
+          - 1차고사·2차고사·학기말고사를 섞어 평균내던 기존 선택과목 분석값 제거
+          - 최종등급 평균을 기준으로 과목별 예상등수·예상등급 재산출
+          - 전입생의 1학기 성적이 연결되어 있으면 전입교 성적으로 표시
+          - 전입생 성적자료가 없으면 자료 없음으로 표시하고 예상등수·예상등급 산출에서 제외
+          - 모의고사 출처·비교 로직은 변경하지 않음
+          - 0.81.85 과학 신청명단 폭·동일학기/교차학기 표시 기능 유지
+          '@
+          $notes|Set-Content release-notes.md -Encoding UTF8
+          gh release view v0.81.86 --repo $env:GITHUB_REPOSITORY *> $null
+          if($LASTEXITCODE -eq 0){throw 'v0.81.86 release already exists'}
+          $global:LASTEXITCODE=0
+          gh release create v0.81.86 UEP-update.zip --repo $env:GITHUB_REPOSITORY --title 'UEP v0.81.86 1학기말 내신 · 전입생 성적 출처' --notes-file release-notes.md
+          $url='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.86/UEP-update.zip'
+          $message='UEP 0.81.86 1학기말 내신 기준 · 전입생 성적출처 표시 · 예상등급 재산출'
+          function PutJson($path,$obj){$tmp=Join-Path $env:RUNNER_TEMP ($path-replace'/','_');$obj|ConvertTo-Json -Depth 50|Set-Content $tmp -Encoding UTF8;$sha=(gh api "repos/${env:GITHUB_REPOSITORY}/contents/${path}?ref=main" --jq .sha);$b64=[Convert]::ToBase64String([IO.File]::ReadAllBytes($tmp));@{message="release: promote $path to UEP 0.81.86";content=$b64;sha=$sha;branch='main'}|ConvertTo-Json|gh api --method PUT "repos/${env:GITHUB_REPOSITORY}/contents/${path}" --input -|Out-Null}
+          $policy=Get-Content uep-policy.json -Raw|ConvertFrom-Json;$policy.latestVersion='0.81.86';$policy.downloadUrl=$url;$policy.sha256=$env:UEP_SHA256;$policy.message=$message;$policy.forceUpdate=$false;PutJson 'uep-policy.json' $policy
+          $manifest=[ordered]@{version='0.81.86';channel='stable';downloadUrl=$url;notes=$message;sha256=$env:UEP_SHA256};PutJson 'uep-update.json' $manifest;PutJson 'uep-version.json' $manifest
+          $legacy=[ordered]@{latestVersion='0.81.86';downloadUrl=$url;sha256=$env:UEP_SHA256;forceUpdate=$false;message=$message};PutJson 'policy.json' $legacy
