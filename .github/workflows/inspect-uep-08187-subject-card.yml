@@ -3,18 +3,17 @@ on:
   push:
     branches:
       - main
-      - build/0.81.87-subject-card-distribution
     paths:
       - inspect-uep-0.81.87-subject-card.trigger
 permissions:
-  contents: read
+  contents: write
 jobs:
   inspect:
     runs-on: windows-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - name: Download 0.81.86 and inspect selection cards / dorm cards / grade helpers
+      - name: Download 0.81.86 and persist focused inspection report
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -26,10 +25,31 @@ jobs:
           $g='app/resources/app/gyomuon.js'
           node --check $g
           $text=Get-Content $g -Raw -Encoding UTF8
-          foreach($needle in @('function uepSelectionDataset','function uepOpenSubjectModal08128','function uepSelectionErrors08129','과목별 신청현황','학사생','expectedRank','expectedGrade','1학기말 평균등급','science','선택과목')){
-            Write-Host "===== $needle ====="
+          $needles=@(
+            'function uepSelectionDataset',
+            'function uepOpenSubjectModal08128',
+            'function uepSelectionErrors08129',
+            '과목별 신청현황',
+            '학사생',
+            'expectedRank',
+            'expectedGrade',
+            '1학기말 평균등급',
+            'UEP_08185_CURRICULUM_STABLE_CORE_START',
+            'UEP_08186_GRADE_TRANSFER_START'
+          )
+          $sb=New-Object System.Text.StringBuilder
+          [void]$sb.AppendLine('UEP 0.81.86 SUBJECT CARD INSPECTION')
+          foreach($needle in $needles){
+            [void]$sb.AppendLine("`n===== $needle =====")
             $idx=$text.IndexOf($needle)
-            if($idx -lt 0){ Write-Host 'NOT FOUND'; continue }
-            $start=[Math]::Max(0,$idx-6500); $len=[Math]::Min(28000,$text.Length-$start)
-            Write-Host $text.Substring($start,$len)
+            if($idx -lt 0){ [void]$sb.AppendLine('NOT FOUND'); continue }
+            $start=[Math]::Max(0,$idx-9000)
+            $len=[Math]::Min(36000,$text.Length-$start)
+            [void]$sb.AppendLine($text.Substring($start,$len))
           }
+          New-Item -ItemType Directory -Force inspection | Out-Null
+          [IO.File]::WriteAllText('inspection/uep-08186-subject-card-report.txt',$sb.ToString(),[Text.UTF8Encoding]::new($false))
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add inspection/uep-08186-subject-card-report.txt
+          if(-not (git diff --cached --quiet)){ git commit -m 'inspection: persist 0.81.86 subject-card report'; git push }
