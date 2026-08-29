@@ -1,0 +1,78 @@
+name: Build UEP 0.81.88 Performance Candidate
+on:
+  push:
+    branches: [main]
+    paths:
+      - build-uep-0.81.88-performance.trigger
+permissions:
+  contents: write
+concurrency:
+  group: build-uep-0.81.88-performance
+  cancel-in-progress: false
+jobs:
+  build-test-release:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download stable 0.81.86 baseline
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,work,verify | Out-Null
+          gh release download v0.81.86 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip work -Force
+          if(!(Test-Path work/UEP.exe)){throw '0.81.86 baseline UEP.exe missing'}
+      - name: Apply optimized subject-card patch only
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check scripts/patch-uep-08188-subject-card-performance.js
+          node scripts/patch-uep-08188-subject-card-performance.js work
+          node --check work/resources/app/gyomuon.js
+          $pkg=Get-Content work/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json
+          if($pkg.version -ne '0.81.88'){throw 'package version mismatch'}
+          $g=Get-Content work/resources/app/gyomuon.js -Raw -Encoding UTF8
+          foreach($m in @('const APP_VERSION = "0.81.88";','UEP_08188_SUBJECT_CARD_PERFORMANCE_START','buildAnalysis','신청자 계열 구성','신청 정상','선택가능','현재 성적대 분포','교육과정 진입 시 과목카드 분석을 미리 전수계산하던 구조를 제거')){if(!$g.Contains($m)){throw "marker missing: $m"}}
+          foreach($keep in @('UEP_08186_GRADE_TRANSFER_START','function uepOpenSubjectModal08128','function uepSelectionErrors08129','UEP_08185_CURRICULUM_STABLE_CORE_START')){if(!$g.Contains($keep)){throw "existing feature missing: $keep"}}
+          foreach($remove in @('UEP_08187_SUBJECT_CARD_INSIGHT_START','UEP_08187_SUBJECT_CARD_ACCURACY_START')){if($g.Contains($remove)){throw "old heavy wrapper unexpectedly present: $remove"}}
+      - name: Package and reopen verify
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Compress-Archive -Path work/* -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          Expand-Archive UEP-update.zip verify -Force
+          node --check verify/resources/app/gyomuon.js
+          $pkg=Get-Content verify/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json
+          if($pkg.version -ne '0.81.88'){throw 'reopened package version mismatch'}
+          $g=Get-Content verify/resources/app/gyomuon.js -Raw -Encoding UTF8
+          if(!$g.Contains('UEP_08188_SUBJECT_CARD_PERFORMANCE_END')){throw 'reopened performance marker missing'}
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "UEP_SHA256=$sha"|Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Publish candidate release only
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $tag='v0.81.88-candidate'
+          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+          if($LASTEXITCODE -eq 0){gh release delete $tag --repo $env:GITHUB_REPOSITORY --yes --cleanup-tag}
+          $global:LASTEXITCODE=0
+          $notes=@'
+          UEP 0.81.88 선택과목 카드 성능개선 후보판
+
+          - 0.81.87의 카드 디자인과 분석정보를 유지
+          - 교육과정 탭 진입 시 선택과목 카드용 전수분석을 수행하지 않도록 변경
+          - 과목별 신청현황 탭을 실제로 열 때만 분석 실행
+          - 과목별 학생집합을 1회 인덱싱하고 과학위계 계산에서 재사용
+          - 문과·이과 판정을 학생당 1회만 계산해 모든 카드에서 재사용
+          - 0.81.87에서 중복으로 겹쳐 있던 데이터셋 래퍼 2단 구조 제거
+          - 과학위계 정상/오류, 실제 선택가능인원, 계열구성, 성적분포, 개설선 21명 표시 유지
+          - 안정판 자동업데이트 메타데이터는 변경하지 않음
+          '@
+          $notes|Set-Content release-notes-08188.md -Encoding UTF8
+          gh release create $tag UEP-update.zip --repo $env:GITHUB_REPOSITORY --title 'UEP v0.81.88 Candidate · 선택과목 카드 성능개선' --notes-file release-notes-08188.md --prerelease
+          "0.81.88 candidate SHA256 $env:UEP_SHA256"|Set-Content build-08188-status.txt -Encoding UTF8
