@@ -1,0 +1,70 @@
+name: Build UEP 0.81.89 Curriculum Candidate
+on:
+  push:
+    branches: [main]
+    paths:
+      - build-uep-0.81.89-curriculum.trigger
+permissions:
+  contents: write
+concurrency:
+  group: build-uep-0.81.89-curriculum-candidate
+  cancel-in-progress: false
+jobs:
+  build-test-release:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download stable 0.81.88 baseline
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force baseline,app,out,verify | Out-Null
+          gh release download v0.81.88 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir baseline
+          Expand-Archive baseline/UEP-update.zip app -Force
+          if(!(Test-Path app/UEP.exe)){throw 'UEP.exe missing'}
+      - name: Apply 0.81.89 patch
+        shell: pwsh
+        run: node scripts/patch-uep-08189-curriculum-fast-error-filter.js app
+      - name: Static verification
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check app/resources/app/gyomuon.js
+          $pkg=Get-Content app/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json
+          if($pkg.version -ne '0.81.89'){throw 'package version mismatch'}
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          foreach($m in @('const APP_VERSION = "0.81.89";','UEP_08189_CURRICULUM_FAST_ERROR_FILTER_START','data-error-grade-scope-08189','2학년 오류학생','3학년 오류학생','2·3학년 오류학생','UEP_08189_DISABLE_LEGACY_RELEASE_NOTES','UEP_08189_NATIVE_ERROR_FILTER')){if(!$g.Contains($m)){throw "marker missing: $m"}}
+          if($g.Contains('setTimeout(releaseNotes,1200);')){throw 'legacy 0.81.73 popup still active'}
+      - name: Pack and reopen
+        shell: pwsh
+        run: |
+          Compress-Archive -Path app/* -DestinationPath out/UEP-update.zip -CompressionLevel Optimal
+          Expand-Archive out/UEP-update.zip verify -Force
+          $pkg=Get-Content verify/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json
+          if($pkg.version -ne '0.81.89'){throw 'repacked package version mismatch'}
+          node --check verify/resources/app/gyomuon.js
+          (Get-FileHash out/UEP-update.zip -Algorithm SHA256).Hash.ToLower() | Set-Content out/sha256.txt
+      - name: Publish candidate release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $tag='v0.81.89-candidate'
+          gh release delete $tag --repo $env:GITHUB_REPOSITORY --yes --cleanup-tag 2>$null
+          $global:LASTEXITCODE=0
+          $notes=@'
+          UEP 0.81.89 교육과정 진입 · 오류학생 필터 후보판
+
+          - 교육과정 첫 진입은 무거운 학생신청 분석 대신 정적 교육과정 편성표부터 표시해 초기 진입 속도 개선
+          - 기존 0.81.73 변경내역 시작 팝업 제거
+          - 기존 2학년 오류학생 / 3학년 오류학생 / 2·3학년 오류학생 버튼을 DOM 숨김 방식이 아니라 실제 오류 학생ID 집합 기반 필터로 변경
+          - 오류학생 버튼 클릭 시 전체반 기준 해당 학생만 데이터 단계에서 다시 렌더
+          - 기존 오류유형, 반별 조회, 학생 상세, 과목별 신청현황, 0.81.88 과목카드 분석은 유지
+          - 안정판 자동업데이트 메타데이터는 변경하지 않음
+          '@
+          $notes|Set-Content out/release-notes.md -Encoding UTF8
+          gh release create $tag out/UEP-update.zip out/sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.81.89 Candidate · 교육과정 속도 · 오류학생 필터' --notes-file out/release-notes.md --prerelease
