@@ -1,1 +1,1 @@
-inspect subject-card distribution v1
+inspect subject-card distribution v2
