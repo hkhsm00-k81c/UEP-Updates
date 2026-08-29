@@ -1,1 +1,1 @@
-rebuild 0.81.89 candidate: disable 0.81.74 and 0.81.77 startup popups
+rebuild 0.81.89 candidate: direct 2/3 grade error filters, active state, grade labels, remove error type dropdown
