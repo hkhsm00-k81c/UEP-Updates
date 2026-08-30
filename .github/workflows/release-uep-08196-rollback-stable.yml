@@ -1,0 +1,116 @@
+name: Release UEP 0.81.96 Rollback Stable
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - release-uep-08196-rollback.trigger
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download known-good 0.81.94 package
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,out,verify | Out-Null
+          gh release download v0.81.94 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+          if(!(Test-Path app/UEP.exe)){throw 'UEP.exe missing'}
+
+      - name: Version-only bump to 0.81.96
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $pkgPath='app/resources/app/package.json'
+          $pkg=Get-Content $pkgPath -Raw -Encoding UTF8 | ConvertFrom-Json
+          $pkg.version='0.81.96'
+          $pkg | ConvertTo-Json -Depth 20 | Set-Content $pkgPath -Encoding UTF8
+          $gy='app/resources/app/gyomuon.js'
+          $g=Get-Content $gy -Raw -Encoding UTF8
+          $g=$g.Replace('const APP_VERSION = "0.81.94";','const APP_VERSION = "0.81.96";')
+          Set-Content $gy $g -Encoding UTF8
+
+      - name: Verify rollback package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check app/resources/app/gyomuon.js
+          node --check app/resources/app/electron/main.cjs
+          node --check app/resources/app/electron/preload.cjs
+          $pkg=Get-Content app/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json
+          if($pkg.version -ne '0.81.96'){throw 'package version mismatch'}
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          if(!$g.Contains('const APP_VERSION = "0.81.96";')){throw 'APP_VERSION mismatch'}
+          if($g.Contains('UEP_08195_SELECTION_OUTPUT_BACKEND_START')){throw '0.81.95 selection output patch unexpectedly present'}
+          if($g.Contains('UEP_08195_SELECTION_PERSISTENCE_DIAGNOSTIC_START')){throw 'diagnostic patch unexpectedly present'}
+
+      - name: Pack update ZIP
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Compress-Archive -Path app/* -DestinationPath out/UEP-update.zip -CompressionLevel Optimal
+          Expand-Archive out/UEP-update.zip verify -Force
+          $pkg=Get-Content verify/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json
+          if($pkg.version -ne '0.81.96'){throw 'repacked version mismatch'}
+          node --check verify/resources/app/gyomuon.js
+          $sha=(Get-FileHash out/UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          $sha | Set-Content out/sha256.txt
+          "SHA256=$sha" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Publish 0.81.96 release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          gh release view v0.81.96 --repo $env:GITHUB_REPOSITORY *> $null
+          if($LASTEXITCODE -eq 0){throw 'v0.81.96 already exists; refusing overwrite'}
+          $notes=@"
+          UEP v0.81.96 긴급 안정 복구판
+
+          - 검증된 0.81.94 실사용 패키지를 기준으로 복구
+          - 학생신청 버튼 동작 복구
+          - 2·3학년 문이과 교차오류 버튼 동작 복구
+          - 과목별 신청현황 버튼 동작 복구
+          - 0.81.95 선택과목 저장/진단 패치는 제외
+          - 51·52 직접 저장 개선은 후속 버전에서 재검증
+          "@
+          gh release create v0.81.96 out/UEP-update.zip out/sha256.txt --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title 'UEP v0.81.96' --notes $notes
+
+      - name: Promote automatic update to 0.81.96
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $p=Get-Content uep-policy.json -Raw -Encoding UTF8|ConvertFrom-Json
+          $p.latestVersion='0.81.96'
+          $p.updateEnabled=$true
+          $p.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.96/UEP-update.zip'
+          $p.sha256=$env:SHA256
+          $p.message='UEP 0.81.96 긴급 안정 복구 · 학생신청/문이과교차오류/과목별신청현황 버튼 정상판'
+          $p|ConvertTo-Json -Depth 20|Set-Content uep-policy.json -Encoding UTF8
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add uep-policy.json
+          git commit -m 'Promote UEP 0.81.96 rollback stable policy'
+          git push origin HEAD:main
+
+      - name: Final verification
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          gh release view v0.81.96 --repo $env:GITHUB_REPOSITORY --json tagName,name,isDraft,isPrerelease,url
+          $p=Get-Content uep-policy.json -Raw -Encoding UTF8|ConvertFrom-Json
+          if($p.latestVersion -ne '0.81.96'){throw 'policy version mismatch'}
+          if($p.sha256 -ne $env:SHA256){throw 'policy sha mismatch'}
