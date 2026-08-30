@@ -1,0 +1,78 @@
+name: Build UEP 0.81.95 Selection Test Candidate
+'on':
+  push:
+    branches:
+      - candidate/0.81.95-selection-normalizer
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Download official 0.81.94 package
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,out,verify | Out-Null
+          gh release download v0.81.94 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+          $gy = Get-ChildItem -Path app -Recurse -Filter 'gyomuon.js' | Where-Object { $_.FullName -match 'resources[\\/]app[\\/]gyomuon\.js$' } | Select-Object -First 1
+          if (-not $gy) { throw 'resources/app/gyomuon.js not found in official package' }
+          $appDir = Split-Path $gy.FullName -Parent
+          $resourcesDir = Split-Path $appDir -Parent
+          $root = Split-Path $resourcesDir -Parent
+          "UEP_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "UEP root: $root"
+      - name: Apply 0.81.95 native selection patches
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node scripts/patch-uep-08195-selection-normalizer.js "$env:UEP_ROOT"
+          if($LASTEXITCODE -ne 0){throw 'normalizer patch failed'}
+          node scripts/patch-uep-08195-selection-output.js "$env:UEP_ROOT"
+          if($LASTEXITCODE -ne 0){throw 'output patch failed'}
+      - name: Verify 0.81.95 candidate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node scripts/verify-uep-08195-selection-normalizer.js "$env:UEP_ROOT"
+          if($LASTEXITCODE -ne 0){throw 'candidate verifier failed'}
+          foreach($f in @("$env:UEP_ROOT/resources/app/gyomuon.js","$env:UEP_ROOT/resources/app/electron/main.cjs","$env:UEP_ROOT/resources/app/electron/preload.cjs")){
+            node --check $f
+            if($LASTEXITCODE -ne 0){throw "syntax failed: $f"}
+          }
+      - name: Package candidate ZIP
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Compress-Archive -Path "$env:UEP_ROOT/*" -DestinationPath out/UEP-update-0.81.95-selection-test.zip -CompressionLevel Optimal
+          Expand-Archive out/UEP-update-0.81.95-selection-test.zip verify -Force
+          foreach($f in @('verify/resources/app/gyomuon.js','verify/resources/app/electron/main.cjs','verify/resources/app/electron/preload.cjs')){
+            node --check $f
+            if($LASTEXITCODE -ne 0){throw "archive syntax failed: $f"}
+          }
+          $sha=(Get-FileHash out/UEP-update-0.81.95-selection-test.zip -Algorithm SHA256).Hash.ToLower()
+          @(
+            'candidate=0.81.95-selection-test',
+            'base=0.81.94-official',
+            'release=no',
+            'normalizer=UEP-native',
+            'rules=41-direct-write',
+            'errors=51-direct-regenerate',
+            'status=52-direct-regenerate',
+            'apps-script=not-required-for-selection-normalization',
+            "sha256=$sha"
+          ) | Set-Content out/UEP-0.81.95-selection-test-report.txt -Encoding UTF8
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UEP-0.81.95-selection-test
+          path: out/*
+          retention-days: 7
