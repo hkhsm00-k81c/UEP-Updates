@@ -15,7 +15,10 @@ if(processIdName){
 /* UEP_08195_SELECTION_OUTPUT_BACKEND_START */
 async function persistSelectionNormalization08195(payload={}){
   const errorRows=Array.isArray(payload.errorRows)?payload.errorRows:[],statusRows=Array.isArray(payload.statusRows)?payload.statusRows:[];
-  const auth=await getReadonlySheetsAuth(),token=auth.token;
+  if(!statusRows.length)throw new Error('선택과목 현황 생성 결과가 비어 있어 51/52 기존 데이터를 교체하지 않습니다.');
+  const auth=(typeof getWritableSheetsAuth==='function')?await getWritableSheetsAuth():(typeof getSheetsAuth==='function')?await getSheetsAuth():(typeof getGoogleSheetsAuth==='function')?await getGoogleSheetsAuth():await getReadonlySheetsAuth();
+  if(!auth?.token)throw new Error('Sheets write auth token missing');
+  const token=auth.token;
   await clearSheetValues(token,${processIdName},"'51_선택과목오류_정규화'!A4:V5000");
   await clearSheetValues(token,${processIdName},"'52_선택과목현황_정규화'!A4:AI5000");
   if(errorRows.length)await updateSheetValues(token,${processIdName},"'51_선택과목오류_정규화'!A4:V"+(errorRows.length+3),errorRows);
