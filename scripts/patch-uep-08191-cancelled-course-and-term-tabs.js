@@ -10,12 +10,26 @@ A(g.includes('data-error-grade-scope-08190'),'0.81.90 native error filter missin
 A(g.includes('function uepStudentApplicationView()'),'student application view missing');
 g=g.replace('const APP_VERSION = "0.81.90";','const APP_VERSION = "0.81.91";');
 
-// Make subject-term tabs native and deterministic inside bindPage.
-// This is deliberately bound to the page nodes, not document/global navigation.
-const bindAnchor="$$('[data-error-grade-scope-08190]').forEach(b=>b.onclick=()=>{curriculumErrorOnly=true;curriculumErrorGradeScope=b.dataset.errorGradeScope08190||'all';recordClassNo='all';recordStudentId='';render('records');});";
-A(g.includes(bindAnchor),'08190 native grade-scope binder missing');
-const termBinder="$$('[data-curriculum-term]').forEach(b=>b.onclick=e=>{e.preventDefault();e.stopPropagation();const next=b.dataset.curriculumTerm||'2-1';if(curriculumTermFilter===next)return;curriculumTermFilter=next;curriculumSubjectKey='';render('records');});";
-g=g.replace(bindAnchor,bindAnchor+termBinder+'/* UEP_08191_NATIVE_TERM_TAB_BINDER */');
+function functionRange(src,name){
+  const start=src.indexOf('function '+name+'('); A(start>=0,'function missing: '+name);
+  const brace=src.indexOf('{',start); let depth=0,quote=null,esc=false;
+  for(let i=brace;i<src.length;i++){
+    const c=src[i];
+    if(quote){if(esc){esc=false;continue;}if(c==='\\'){esc=true;continue;}if(c===quote)quote=null;continue;}
+    if(c==='"'||c==="'"||c==='`'){quote=c;continue;}
+    if(c==='{')depth++; else if(c==='}'&&--depth===0)return [start,i+1];
+  }
+  throw new Error('unterminated function '+name);
+}
+
+// Make subject-term tabs deterministic inside the native bindPage function.
+// Do not add a document/global navigation listener.
+const [bpStart,bpEnd]=functionRange(g,'bindPage');
+let bp=g.slice(bpStart,bpEnd);
+const termBinder="$$('[data-curriculum-term]').forEach(b=>{b.onclick=e=>{e.preventDefault();e.stopPropagation();const next=b.dataset.curriculumTerm||'2-1';if(curriculumTermFilter===next)return;curriculumTermFilter=next;curriculumSubjectKey='';render('records');};});/* UEP_08191_NATIVE_TERM_TAB_BINDER */";
+A(!bp.includes('UEP_08191_NATIVE_TERM_TAB_BINDER'),'08191 term binder already present');
+bp=bp.slice(0,-1)+termBinder+'}';
+g=g.slice(0,bpStart)+bp+g.slice(bpEnd);
 
 // Add confirmed cancelled-course applications to the same error dataset used by
 // student list counts, split 2nd/3rd-grade error columns, and student detail popup.
@@ -57,4 +71,4 @@ g+='\n'+cancelledBlock+'\n';
 
 fs.writeFileSync(gFile,g,'utf8');
 const pkg=JSON.parse(fs.readFileSync(pFile,'utf8'));pkg.version='0.81.91';fs.writeFileSync(pFile,JSON.stringify(pkg,null,2)+'\n','utf8');
-console.log('patched UEP 0.81.91: native subject term tabs + cancelled-course application errors');
+console.log('patched UEP 0.81.91: bindPage term tabs + cancelled-course application errors');
