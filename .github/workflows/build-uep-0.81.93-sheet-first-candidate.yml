@@ -1,0 +1,68 @@
+name: Build UEP 0.81.93 Sheet First Candidate
+on:
+  push:
+    branches:
+      - candidate/0.81.93-sheet-first
+    paths:
+      - scripts/patch-uep-08193-sheet-first.js
+      - .github/workflows/build-uep-0.81.93-sheet-first-candidate.yml
+      - build-uep-0.81.93-sheet-first.trigger
+permissions:
+  contents: write
+concurrency:
+  group: build-uep-0.81.93-sheet-first-candidate
+  cancel-in-progress: false
+jobs:
+  build-test:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download stable 0.81.88 baseline
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force baseline,app,out,verify | Out-Null
+          gh release download v0.81.88 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir baseline
+          Expand-Archive baseline/UEP-update.zip app -Force
+          if(!(Test-Path app/UEP.exe)){throw 'UEP.exe missing'}
+      - name: Apply 0.81.90 clean curriculum recovery
+        shell: pwsh
+        run: node scripts/patch-uep-08190-curriculum-native-clean.js app
+      - name: Apply 0.81.93 sheet-first selection patch
+        shell: pwsh
+        run: node scripts/patch-uep-08193-sheet-first.js app
+      - name: Static verification
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check app/resources/app/gyomuon.js
+          $pkg=Get-Content app/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json
+          if($pkg.version -ne '0.81.93'){throw 'package version mismatch'}
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          foreach($m in @('const APP_VERSION = "0.81.93";','UEP_08193_NATIVE_TERM_TAB_BINDER','UEP_08193_SHEET_FIRST_SELECTION_ERRORS_START','51_선택과목오류_정규화','2학년 오류종류','3학년 오류종류')){if(!$g.Contains($m)){throw "marker missing: $m"}}
+          if($g.Contains('UEP_08191_CANCELLED_COURSE_ERROR_START')){throw '08191 hardcoded cancellation block returned'}
+          if($g.Contains('UEP_08192_FOCUSED_ERROR_DERIVATION_START')){throw '08192 localStorage error derivation returned'}
+          if($g.Contains('<label>오류유형<select data-curriculum-error-type>')){throw 'error-type dropdown returned'}
+      - name: Pack and reopen verification
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Compress-Archive -Path app/* -DestinationPath out/UEP-update.zip -CompressionLevel Optimal
+          Expand-Archive out/UEP-update.zip verify -Force
+          node --check verify/resources/app/gyomuon.js
+          $pkg=Get-Content verify/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json
+          if($pkg.version -ne '0.81.93'){throw 'repacked version mismatch'}
+          $g=Get-Content verify/resources/app/gyomuon.js -Raw -Encoding UTF8
+          foreach($m in @('UEP_08193_SHEET_FIRST_SELECTION_ERRORS_START','51_선택과목오류_정규화')){if(!$g.Contains($m)){throw "repacked marker missing: $m"}}
+          (Get-FileHash out/UEP-update.zip -Algorithm SHA256).Hash.ToLower() | Set-Content out/sha256.txt
+      - name: Upload candidate artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: UEP-0.81.93-sheet-first-candidate
+          path: |
+            out/UEP-update.zip
+            out/sha256.txt
+          retention-days: 7
