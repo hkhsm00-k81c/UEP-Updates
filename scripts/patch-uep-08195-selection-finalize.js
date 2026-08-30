@@ -11,13 +11,20 @@ A(m.includes('UEP_RULES_SPREADSHEET_ID'),'rules spreadsheet identifier missing')
 A(m.includes('UEP_PROCESSING_SPREADSHEET_ID'),'processing spreadsheet identifier missing');
 
 // 0.81.73 localStorage was only a temporary UI store. 0.81.95 makes 41 the sole authority.
-const oldDecision=`function decisions(){try{return JSON.parse(localStorage.getItem(DECISION_KEY)||'{}')||{}}catch{return{}}}\n  function saveDecision(k,v){const d=decisions();if(v)d[k]=v;else delete d[k];localStorage.setItem(DECISION_KEY,JSON.stringify(d));}`;
-const newDecision=`function decisions(){const out={};try{for(const r of (readonlyCache?.selectionRules||[])){if(String(r?.['규칙유형']||'').trim()!=='관리자결정')continue;const term=String(r?.['학기']||'').trim(),subject=String(r?.['대상과목']||'').trim(),d=String(r?.['관리자결정']||'').trim();if(!term||!subject)continue;out[term+'::'+subject]=d==='폐강확정'?'closed':d==='개설유지'?'keep':''}}catch{}return out}\n  async function saveDecision(k,v){const p=String(k||'').split('::'),term=p.shift()||'',subject=p.join('::'),decision=v==='closed'?'폐강확정':v==='keep'?'개설유지':'자동판정';if(typeof window.saveSelectionCourseDecision08195==='function')return window.saveSelectionCourseDecision08195(term,subject,decision);return {ok:false,reason:'41 관리자결정 저장함수가 없습니다.'}}`;
-A(g.includes(oldDecision),'legacy localStorage decision functions changed');
-g=g.replace(oldDecision,newDecision);
+const legacyDecisionKey="const DECISION_KEY='uep.curriculum.courseDecision.v1';";
+A(g.includes(legacyDecisionKey),'legacy decision key not found');
+g=g.replace(legacyDecisionKey,"const DECISION_KEY='UEP_08195_DISABLED_LOCAL_DECISION_STORE';");
+const decisionsPattern=/function\s+decisions\(\)\s*\{try\{return\s+JSON\.parse\(localStorage\.getItem\(DECISION_KEY\)\|\|'\{\}'\)\|\|\{\}\}catch\{return\{\}\}\}/;
+const saveDecisionPattern=/function\s+saveDecision\(k,v\)\s*\{const\s+d=decisions\(\);if\(v\)d\[k\]=v;else\s+delete\s+d\[k\];localStorage\.setItem\(DECISION_KEY,JSON\.stringify\(d\)\);\}/;
+A(decisionsPattern.test(g),'legacy decisions() function changed');
+A(saveDecisionPattern.test(g),'legacy saveDecision() function changed');
+const newDecisions="function decisions(){const out={};try{for(const r of (readonlyCache?.selectionRules||[])){if(String(r?.['규칙유형']||'').trim()!=='관리자결정')continue;const term=String(r?.['학기']||'').trim(),subject=String(r?.['대상과목']||'').trim(),d=String(r?.['관리자결정']||'').trim();if(!term||!subject)continue;out[term+'::'+subject]=d==='폐강확정'?'closed':d==='개설유지'?'keep':''}}catch{}return out}";
+const newSaveDecision="async function saveDecision(k,v){const p=String(k||'').split('::'),term=p.shift()||'',subject=p.join('::'),decision=v==='closed'?'폐강확정':v==='keep'?'개설유지':'자동판정';if(typeof window.saveSelectionCourseDecision08195==='function')return window.saveSelectionCourseDecision08195(term,subject,decision);return {ok:false,reason:'41 관리자결정 저장함수가 없습니다.'}}";
+g=g.replace(decisionsPattern,newDecisions).replace(saveDecisionPattern,newSaveDecision);
 g=g.replace("saveDecision(key,sel.value);applyCourseStatus(sel,sel.value,count)","Promise.resolve(saveDecision(key,sel.value)).then(r=>{if(r?.ok!==false)applyCourseStatus(sel,sel.value,count);else if(typeof toast==='function')toast(r?.reason||'개설결정 저장 실패')})");
-// Remove the literal legacy storage key so it cannot become authoritative again.
-g=g.replace("const DECISION_KEY='uep.curriculum.courseDecision.v1';","const DECISION_KEY='UEP_08195_DISABLED_LOCAL_DECISION_STORE';");
+A(!g.includes('uep.curriculum.courseDecision.v1'),'legacy decision key remains');
+A(!g.includes('localStorage.getItem(DECISION_KEY)'),'legacy local decision read remains');
+A(!g.includes('localStorage.setItem(DECISION_KEY'),'legacy local decision write remains');
 
 if(!m.includes('UEP_08195_SELECTION_DECISION_BACKEND_START')){
 const backend=String.raw`
