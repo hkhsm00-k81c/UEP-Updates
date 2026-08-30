@@ -1,0 +1,138 @@
+name: Release UEP 0.81.95 Live
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - release-uep-08195-live.trigger
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout main policy
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout verified 0.81.95 candidate source
+        uses: actions/checkout@v4
+        with:
+          ref: 397bb30a66f293948c9a70aeecc04d6b79c0a57a
+          path: candidate-src
+          fetch-depth: 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Download official 0.81.94 package
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,out,verify | Out-Null
+          gh release download v0.81.94 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+          $gy = Get-ChildItem -Path app -Recurse -Filter 'gyomuon.js' | Where-Object { $_.FullName -match 'resources[\\/]app[\\/]gyomuon\.js$' } | Select-Object -First 1
+          if (-not $gy) { throw 'resources/app/gyomuon.js not found in official package' }
+          $appDir = Split-Path $gy.FullName -Parent
+          $resourcesDir = Split-Path $appDir -Parent
+          $root = Split-Path $resourcesDir -Parent
+          "UEP_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Apply verified 0.81.95 selection chain
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $s='candidate-src/scripts'
+          node "$s/patch-uep-08195-selection-normalizer.js" "$env:UEP_ROOT"
+          node "$s/patch-uep-08195-selection-priorterm-fix.js" "$env:UEP_ROOT"
+          node "$s/patch-uep-08195-selection-output.js" "$env:UEP_ROOT"
+          node "$s/patch-uep-08195-selection-finalize.js" "$env:UEP_ROOT"
+          node "$s/patch-uep-08195-selection-finalize-writefix.js" "$env:UEP_ROOT"
+          node "$s/patch-uep-08195-selection-sync-regenerate.js" "$env:UEP_ROOT"
+
+      - name: Verify live package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node candidate-src/scripts/verify-uep-08195-selection-normalizer.js "$env:UEP_ROOT"
+          $pkg=Get-Content "$env:UEP_ROOT/resources/app/package.json" -Raw -Encoding UTF8 | ConvertFrom-Json
+          if($pkg.version -ne '0.81.95'){throw "package version mismatch: $($pkg.version)"}
+          $gy=Get-Content "$env:UEP_ROOT/resources/app/gyomuon.js" -Raw -Encoding UTF8
+          foreach($marker in @('UEP_08195_SELECTION_SYNC_REGENERATE_START','persistSelectionNormalizationNow08195')){
+            if(!$gy.Contains($marker)){throw "marker missing: $marker"}
+          }
+          foreach($f in @("$env:UEP_ROOT/resources/app/gyomuon.js","$env:UEP_ROOT/resources/app/electron/main.cjs","$env:UEP_ROOT/resources/app/electron/preload.cjs")){
+            node --check $f
+            if($LASTEXITCODE -ne 0){throw "syntax failed: $f"}
+          }
+
+      - name: Pack update ZIP
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Compress-Archive -Path "$env:UEP_ROOT/*" -DestinationPath out/UEP-update.zip -CompressionLevel Optimal
+          Expand-Archive out/UEP-update.zip verify -Force
+          $pkg=Get-Content verify/resources/app/package.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          if($pkg.version -ne '0.81.95'){throw 'repacked version mismatch'}
+          foreach($f in @('verify/resources/app/gyomuon.js','verify/resources/app/electron/main.cjs','verify/resources/app/electron/preload.cjs')){
+            node --check $f
+            if($LASTEXITCODE -ne 0){throw "archive syntax failed: $f"}
+          }
+          $sha=(Get-FileHash out/UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          $sha | Set-Content out/sha256.txt
+          "SHA256=$sha" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Publish 0.81.95 update release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          gh release view v0.81.95 --repo $env:GITHUB_REPOSITORY *> $null
+          if($LASTEXITCODE -eq 0){throw 'v0.81.95 already exists; refusing overwrite'}
+          $notes=@"
+          UEP v0.81.95 실사용 업데이트
+
+          - 2학년·3학년 선택과목 오류 버튼 및 오류학생 흐름 유지
+          - 선택과목 신청/조회 실사용 흐름 유지
+          - 0.81.94 정식판을 기준으로 검증된 0.81.95 선택과목 패치 체인 적용
+          - 51·52 정규화 저장은 실사용과 병행하여 별도 검증을 계속 진행
+          "@
+          gh release create v0.81.95 out/UEP-update.zip out/sha256.txt --repo $env:GITHUB_REPOSITORY --target 397bb30a66f293948c9a70aeecc04d6b79c0a57a --title 'UEP v0.81.95' --notes $notes
+
+      - name: Enable automatic update to 0.81.95
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $p=Get-Content uep-policy.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          $p.latestVersion='0.81.95'
+          $p.updateEnabled=$true
+          $p.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.95/UEP-update.zip'
+          $p.sha256=$env:SHA256
+          $p.message='UEP 0.81.95 선택과목 실사용 업데이트 · 2·3학년 오류버튼 및 과목신청 흐름 유지'
+          $p | ConvertTo-Json -Depth 10 | Set-Content uep-policy.json -Encoding UTF8
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add uep-policy.json
+          git commit -m 'Promote UEP 0.81.95 automatic update'
+          git push origin HEAD:main
+
+      - name: Final verification
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          gh release view v0.81.95 --repo $env:GITHUB_REPOSITORY --json tagName,name,isDraft,isPrerelease,url
+          $p=Get-Content uep-policy.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          if($p.latestVersion -ne '0.81.95'){throw 'policy version mismatch'}
+          if($p.sha256 -ne $env:SHA256){throw 'policy sha mismatch'}
+          if(!$p.updateEnabled){throw 'automatic update disabled'}
