@@ -1,0 +1,55 @@
+name: Diagnose UEP 0.81.97 Targets
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - diag-uep-08197-targets.trigger
+
+permissions:
+  contents: read
+
+jobs:
+  diag:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download 0.81.96 package
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,out | Out-Null
+          gh release download v0.81.96 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+      - name: Extract target snippets
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $files=Get-ChildItem app/resources/app -Recurse -File | Where-Object { $_.Extension -in '.js','.cjs','.html','.json' }
+          $terms=@('공결 조회일','공결','실행메뉴','빠른열기','빠른 열기','quick','launcher','shortcut','localStorage','userData')
+          $out=@()
+          foreach($f in $files){
+            try{$lines=Get-Content $f.FullName -Encoding UTF8}catch{continue}
+            for($i=0;$i -lt $lines.Count;$i++){
+              foreach($term in $terms){
+                if($lines[$i] -match [regex]::Escape($term)){
+                  $s=[Math]::Max(0,$i-4);$e=[Math]::Min($lines.Count-1,$i+4)
+                  $rel=$f.FullName.Substring((Resolve-Path app).Path.Length+1)
+                  $out += "===== $rel : line $($i+1) : $term ====="
+                  for($j=$s;$j -le $e;$j++){$out += ('{0,6}: {1}' -f ($j+1),$lines[$j])}
+                  $out += ''
+                  break
+                }
+              }
+            }
+          }
+          $out | Set-Content out/targets.txt -Encoding UTF8
+          Get-Content out/targets.txt -Encoding UTF8 | Select-Object -First 1200
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uep-08197-target-snippets
+          path: out/targets.txt
+          retention-days: 2
