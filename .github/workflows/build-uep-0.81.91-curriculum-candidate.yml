@@ -1,0 +1,82 @@
+name: Build UEP 0.81.91 Curriculum Candidate
+on:
+  push:
+    branches: [main]
+    paths:
+      - build-uep-0.81.91-curriculum.trigger
+permissions:
+  contents: write
+concurrency:
+  group: build-uep-0.81.91-curriculum-candidate
+  cancel-in-progress: false
+jobs:
+  build-test-release:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download clean stable 0.81.88 baseline
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force baseline,app,out,verify | Out-Null
+          gh release download v0.81.88 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir baseline
+          Expand-Archive baseline/UEP-update.zip app -Force
+          if(!(Test-Path app/UEP.exe)){throw 'UEP.exe missing'}
+      - name: Apply clean 0.81.90 curriculum recovery
+        shell: pwsh
+        run: node scripts/patch-uep-08190-curriculum-native-clean.js app
+      - name: Apply 0.81.91 cancellation and term-tab fix
+        shell: pwsh
+        run: node scripts/patch-uep-08191-cancelled-course-and-term-tabs.js app
+      - name: Static verification
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check app/resources/app/gyomuon.js
+          $pkg=Get-Content app/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json
+          if($pkg.version -ne '0.81.91'){throw 'package version mismatch'}
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          foreach($m in @('const APP_VERSION = "0.81.91";','UEP_08191_NATIVE_TERM_TAB_BINDER','UEP_08191_CANCELLED_COURSE_ERROR_START','폐강과목 신청오류','역학과에너지','물질과에너지','한문고전읽기','언어생활과한자','문학과영상','미디어영어','독서토론과글쓰기','세계문화와영어','2학년 오류종류','3학년 오류종류')){if(!$g.Contains($m)){throw "marker missing: $m"}}
+          if($g.Contains('<label>오류유형<select data-curriculum-error-type>')){throw 'error-type dropdown returned'}
+          if($g.Contains("document.addEventListener('click',e=>{const b=e.target.closest?.('[data-error-grade-scope-08190]')")){throw 'global grade listener returned'}
+          if($g.Contains('setTimeout(releaseNotes,1200);')){throw '08173 popup active'}
+          if($g.Contains("setTimeout(()=>uepOpenReleaseNotes08174(false),1400)")){throw '08174 popup active'}
+          if($g.Contains("setTimeout(()=>uepOpenReleaseNotes08177(false),1400)")){throw '08177 popup active'}
+      - name: Pack and reopen verification
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Compress-Archive -Path app/* -DestinationPath out/UEP-update.zip -CompressionLevel Optimal
+          Expand-Archive out/UEP-update.zip verify -Force
+          node --check verify/resources/app/gyomuon.js
+          $pkg=Get-Content verify/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json
+          if($pkg.version -ne '0.81.91'){throw 'repacked version mismatch'}
+          $g=Get-Content verify/resources/app/gyomuon.js -Raw -Encoding UTF8
+          foreach($m in @('UEP_08191_NATIVE_TERM_TAB_BINDER','UEP_08191_CANCELLED_COURSE_ERROR_START','폐강과목 신청오류')){if(!$g.Contains($m)){throw "repacked marker missing: $m"}}
+          (Get-FileHash out/UEP-update.zip -Algorithm SHA256).Hash.ToLower() | Set-Content out/sha256.txt
+      - name: Publish candidate only
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $tag='v0.81.91-candidate'
+          gh release delete $tag --repo $env:GITHUB_REPOSITORY --yes --cleanup-tag 2>$null
+          $global:LASTEXITCODE=0
+          $notes=@'
+          UEP 0.81.91 교육과정 보완 후보판
+
+          - 0.81.90 네이티브 교육과정 복구 구조와 빠른 진입 유지
+          - 과목별 신청현황의 2-1 / 2-2 / 3-1 / 3-2 학기 버튼을 페이지 내부 이벤트로 직접 연결
+          - 학기 버튼 클릭이 전역 라우팅으로 새지 않도록 preventDefault/stopPropagation 적용
+          - 최종 폐강과목 신청 학생을 '폐강과목 신청오류'로 오류 데이터에 추가
+          - 폐강오류는 학생목록의 2학년 오류종류 / 3학년 오류종류와 학생 상세 오류카드에 함께 반영
+          - 현재 반영 폐강과목: 2-1 독서토론과 글쓰기, 세계문화와 영어 / 2-2 문학과 영상, 미디어 영어 / 3-1 역학과 에너지, 물질과 에너지, 한문고전읽기 / 3-2 언어생활과한자
+          - 0.81.88 과목카드 성적분포·위계 분석과 0.81.90 오류학생 네이티브 필터 유지
+          - 정식 자동업데이트 메타데이터 변경 없음
+          '@
+          $notes|Set-Content out/release-notes.md -Encoding UTF8
+          gh release create $tag out/UEP-update.zip out/sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.81.91 Candidate · 폐강오류 · 학기탭' --notes-file out/release-notes.md --prerelease
