@@ -12,34 +12,35 @@ const A=(c,msg)=>{if(!c)throw new Error(msg)};
 A(g.includes('const APP_VERSION = "0.81.90";'),'0.81.90 baseline anchor missing');
 g=g.replace('const APP_VERSION = "0.81.90";','const APP_VERSION = "0.81.94";');
 
-// 1) Repair two selector-list bindings broken by String.replace replacement semantics ($$ -> $).
+// 1) Repair grade-scope binding broken by replacement-string $$ semantics.
 const badGrade="$('[data-error-grade-scope-08190]').forEach";
 const goodGrade="$$('[data-error-grade-scope-08190]').forEach";
 A(g.includes(badGrade),'broken grade-scope binding anchor missing');
-g=g.replace(badGrade,goodGrade);
+g=g.replace(badGrade,()=>goodGrade);
 
+// 2) Make curriculum term buttons deterministic and keep them inside the native page binder.
 const nativeTerm="$$('[data-curriculum-term]').forEach(b=>b.onclick=()=>{curriculumTermFilter=b.dataset.curriculumTerm;curriculumSubjectKey='';render('records');});";
 A(g.includes(nativeTerm),'native curriculum term binder anchor missing');
 const safeTerm="$$('[data-curriculum-term]').forEach(b=>{b.onclick=e=>{e.preventDefault();e.stopPropagation();curriculumTermFilter=b.dataset.curriculumTerm||'2-1';curriculumSubjectKey='';render('records');};});/* UEP_08194_TERM_BINDER */";
 g=g.replace(nativeTerm,()=>safeTerm);
 
-// 2) Make 41 rule rows complete through Z (manager decision fields live after Q).
+// 3) Make 41 rule rows complete through Z (manager decision fields live after Q).
 const oldRule='"41_선택과목규칙": "\'41_선택과목규칙\'!A1:Q1000"';
 const newRule='"41_선택과목규칙": "\'41_선택과목규칙\'!A1:Z1000"';
 A(gd.includes(oldRule),'41 rule range anchor missing');
 gd=gd.replace(oldRule,newRule);
 
-// 3) Load 51 normalized selection-error rows from processing spreadsheet during normal readonly sync.
+// 4) Load 51 normalized selection-error rows from processing spreadsheet during normal readonly sync.
 const procAnchor='["41_학교캘린더", "\'41_학교캘린더\'!A1:W3000"],';
 A(m.includes(procAnchor),'processing range anchor missing');
-m=m.replace(procAnchor,procAnchor+'\n    ["51_선택과목오류_정규화", "\'51_선택과목오류_정규화\'!A1:V5000"],');
+m=m.replace(procAnchor,()=>procAnchor+'\r\n    ["51_선택과목오류_정규화", "\'51_선택과목오류_정규화\'!A1:V5000"],');
 
-// 4) Expose raw 51 rows in readonly cache.
-const returnAnchor='selectionRules: rowsFrom("41_선택과목규칙"),\n    selectionSubjectErrors,';
-A(gd.includes(returnAnchor),'selection return anchor missing');
-gd=gd.replace(returnAnchor,'selectionRules: rowsFrom("41_선택과목규칙"),\n    selectionErrorRows: rowsFrom("51_선택과목오류_정규화"),\n    selectionSubjectErrors,');
+// 5) Expose raw 51 rows in readonly cache. Use regex so CRLF/LF both work.
+const returnRx=/(selectionRules:\s*rowsFrom\("41_선택과목규칙"\),\r?\n\s*)(selectionSubjectErrors,)/;
+A(returnRx.test(gd),'selection return anchor missing');
+gd=gd.replace(returnRx,'$1selectionErrorRows: rowsFrom("51_선택과목오류_정규화"),\r\n    $2');
 
-// 5) Replace legacy selection error dataset with 51 when 51 is present.
+// 6) Replace legacy selection error dataset with 51 when 51 is present.
 const block=String.raw`
 /* UEP_08194_SELECTION_ERROR_SOURCE_START */
 (function(){
