@@ -1,0 +1,60 @@
+name: Build UEP 0.81.95 Sheet Write Probe
+'on':
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/build-uep-0.81.95-sheet-write-probe.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: candidate/0.81.95-selection-normalizer
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Download official 0.81.94 package
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,out | Out-Null
+          gh release download v0.81.94 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+          $gy = Get-ChildItem -Path app -Recurse -Filter 'gyomuon.js' | Where-Object { $_.FullName -match 'resources[\\/]app[\\/]gyomuon\.js$' } | Select-Object -First 1
+          if (-not $gy) { throw 'resources/app/gyomuon.js not found' }
+          $appDir = Split-Path $gy.FullName -Parent
+          $resourcesDir = Split-Path $appDir -Parent
+          $root = Split-Path $resourcesDir -Parent
+          "UEP_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Apply isolated write probe only
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node scripts/patch-uep-08195-sheet-write-probe.js "$env:UEP_ROOT"
+          $gy="$env:UEP_ROOT/resources/app/gyomuon.js"
+          $main="$env:UEP_ROOT/resources/app/electron/main.cjs"
+          $pre="$env:UEP_ROOT/resources/app/electron/preload.cjs"
+          foreach($f in @($gy,$main,$pre)){node --check $f;if($LASTEXITCODE -ne 0){throw "syntax failed: $f"}}
+          if((Get-Content $main -Raw) -notmatch 'UEP_08195_SHEET_WRITE_PROBE_START'){throw 'probe backend missing'}
+          if((Get-Content $pre -Raw) -notmatch 'sheetWriteProbe08195'){throw 'probe preload bridge missing'}
+          if((Get-Content $gy -Raw) -notmatch 'UEP_08195_SHEET_WRITE_PROBE_RENDERER_START'){throw 'probe renderer missing'}
+      - name: Package probe candidate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Compress-Archive -Path "$env:UEP_ROOT/*" -DestinationPath out/UEP-update-0.81.95-sheet-write-probe.zip -CompressionLevel Optimal
+          $sha=(Get-FileHash out/UEP-update-0.81.95-sheet-write-probe.zip -Algorithm SHA256).Hash.ToLower()
+          @('base=0.81.94-official','change=isolated-52-A4-write-read-clear-probe','selection-ui-change=no','normalizer-change=no',"sha256=$sha") | Set-Content out/UEP-0.81.95-sheet-write-probe-report.txt -Encoding UTF8
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UEP-0.81.95-sheet-write-probe
+          path: out/*
+          retention-days: 7
