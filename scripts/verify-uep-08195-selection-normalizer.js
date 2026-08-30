@@ -18,6 +18,8 @@ A(g.includes("hier?'':trackMarkup(m.comp)"),'ordinary-card track composition mis
 A(g.includes("const stat=st.graded?"),'all-card average/median stats missing');
 A(g.includes('현재 성적대 분포'),'all-card grade distribution missing');
 A(g.includes('UEP_08195_SELECTION_DECISION_UI_START'),'decision UI bridge missing');
+A(g.includes('UEP_08195_SELECTION_OUTPUT_START'),'51/52 output scheduler missing');
+A(g.includes('persistSelectionNormalizationNow08195'),'manual normalization persistence hook missing');
 A(!g.includes('uep.curriculum.courseDecision.v1'),'localStorage decision authority must not return');
 A(!g.includes("new Set(['독서토론과글쓰기'"),'hardcoded cancelled-course list must not return');
 if(main.includes('UEP_08195_SELECTION_DECISION_BACKEND_START')){
@@ -25,7 +27,12 @@ if(main.includes('UEP_08195_SELECTION_DECISION_BACKEND_START')){
   A(main.includes("['자동판정','개설유지','폐강확정']"),'allowed decision values missing');
   A(main.includes('관리자결정'),'manager decision column handling missing');
   A(pre.includes('saveSelectionCourseDecision'),'preload decision bridge missing');
-}else{
-  console.warn('WARN: rule spreadsheet identifier was not discoverable; backend decision bridge was intentionally not installed by patch.');
-}
+}else console.warn('WARN: rule spreadsheet identifier was not discoverable; backend decision bridge was intentionally not installed by patch.');
+if(main.includes('UEP_08195_SELECTION_OUTPUT_BACKEND_START')){
+  A(main.includes('51_선택과목오류_정규화'),'51 direct output target missing');
+  A(main.includes('52_선택과목현황_정규화'),'52 direct output target missing');
+  A(main.includes('clearSheetValues'),'direct normalization clear helper missing');
+  A(main.includes('updateSheetValues'),'direct normalization write helper missing');
+  A(pre.includes('persistSelectionNormalization'),'preload normalization bridge missing');
+}else console.warn('WARN: processing spreadsheet identifier was not discoverable; 51/52 persistence bridge was intentionally not installed by patch.');
 console.log('verified UEP 0.81.95 selection normalizer candidate');
