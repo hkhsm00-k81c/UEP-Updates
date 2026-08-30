@@ -1,0 +1,73 @@
+name: Build UEP 0.81.94 Selection Runtime Fix
+on:
+  push:
+    branches:
+      - candidate/0.81.93-sheet-first
+    paths:
+      - scripts/patch-uep-08194-selection-runtime-fix.js
+      - .github/workflows/build-uep-0.81.94-selection-runtime-fix.yml
+permissions:
+  contents: write
+concurrency:
+  group: build-uep-0.81.94-selection-runtime-fix
+  cancel-in-progress: false
+jobs:
+  build-test:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download stable 0.81.88 baseline
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force baseline,app,out,verify | Out-Null
+          gh release download v0.81.88 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir baseline
+          Expand-Archive baseline/UEP-update.zip app -Force
+          if(!(Test-Path app/UEP.exe)){throw 'UEP.exe missing'}
+      - name: Apply 0.81.90 clean curriculum recovery
+        shell: pwsh
+        run: node scripts/patch-uep-08190-curriculum-native-clean.js app
+      - name: Apply 0.81.94 selection runtime fix
+        shell: pwsh
+        run: node scripts/patch-uep-08194-selection-runtime-fix.js app
+      - name: Static verification
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check app/resources/app/gyomuon.js
+          node --check app/resources/app/electron/google-data.cjs
+          node --check app/resources/app/electron/main.cjs
+          $pkg=Get-Content app/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json
+          if($pkg.version -ne '0.81.94'){throw 'package version mismatch'}
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          $gd=Get-Content app/resources/app/electron/google-data.cjs -Raw -Encoding UTF8
+          $m=Get-Content app/resources/app/electron/main.cjs -Raw -Encoding UTF8
+          foreach($marker in @('const APP_VERSION = "0.81.94";','UEP_08194_TERM_BINDER','UEP_08194_SELECTION_ERROR_SOURCE_START','2학년 오류종류','3학년 오류종류')){if(!$g.Contains($marker)){throw "renderer marker missing: $marker"}}
+          if($g.Contains("$('[data-error-grade-scope-08190]').forEach")){throw 'grade binding still broken'}
+          if(!$g.Contains("$$('[data-error-grade-scope-08190]').forEach")){throw 'grade binding not repaired'}
+          if(!$gd.Contains("'41_선택과목규칙'!A1:Z1000")){throw '41 range not expanded'}
+          if(!$gd.Contains('selectionErrorRows: rowsFrom("51_선택과목오류_정규화")')){throw '51 cache field missing'}
+          if(!$m.Contains("'51_선택과목오류_정규화'!A1:V5000")){throw '51 processing read missing'}
+      - name: Pack and reopen verification
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Compress-Archive -Path app/* -DestinationPath out/UEP-update.zip -CompressionLevel Optimal
+          Expand-Archive out/UEP-update.zip verify -Force
+          node --check verify/resources/app/gyomuon.js
+          node --check verify/resources/app/electron/google-data.cjs
+          node --check verify/resources/app/electron/main.cjs
+          $pkg=Get-Content verify/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json
+          if($pkg.version -ne '0.81.94'){throw 'repacked version mismatch'}
+          (Get-FileHash out/UEP-update.zip -Algorithm SHA256).Hash.ToLower() | Set-Content out/sha256.txt
+      - name: Upload candidate artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: UEP-0.81.94-selection-runtime-fix
+          path: |
+            out/UEP-update.zip
+            out/sha256.txt
+          retention-days: 7
