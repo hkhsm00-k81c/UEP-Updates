@@ -1,0 +1,31 @@
+const fs=require('fs'),path=require('path');
+const root=process.argv[2]||'app';
+const g=fs.readFileSync(path.join(root,'resources','app','gyomuon.js'),'utf8');
+const p=JSON.parse(fs.readFileSync(path.join(root,'resources','app','package.json'),'utf8'));
+const main=fs.readFileSync(path.join(root,'resources','app','electron','main.cjs'),'utf8');
+const pre=fs.readFileSync(path.join(root,'resources','app','electron','preload.cjs'),'utf8');
+const A=(c,m)=>{if(!c)throw new Error(m)};
+A(g.includes('const APP_VERSION = "0.81.95";'),'renderer version is not 0.81.95');
+A(String(p.version)==='0.81.95','package version is not 0.81.95');
+A(g.includes('UEP_08195_SELECTION_NORMALIZER_START'),'native normalizer missing');
+A(g.includes("__selectionErrorSource='UEP-native-08195'"),'native error authority missing');
+A(g.includes("cardType:hierarchy?'과학위계':'일반'"),'card type normalization missing');
+A(g.includes("['2-2','3-1'].includes(group.term)"),'2-2/3-1 hierarchy scope missing');
+A(g.includes("group.term==='3-1'"),'3-1 prior-normal subtraction missing');
+A(g.includes("selectable=minus(source,priorNormal)"),'3-1 selectable set subtraction missing');
+A(g.includes("stats(hierarchy?normalStudents:(group.students||[]))"),'hierarchy normal-applicant grade distribution missing');
+A(g.includes("hier?'':trackMarkup(m.comp)"),'ordinary-card track composition missing');
+A(g.includes("const stat=st.graded?"),'all-card average/median stats missing');
+A(g.includes('현재 성적대 분포'),'all-card grade distribution missing');
+A(g.includes('UEP_08195_SELECTION_DECISION_UI_START'),'decision UI bridge missing');
+A(!g.includes('uep.curriculum.courseDecision.v1'),'localStorage decision authority must not return');
+A(!g.includes("new Set(['독서토론과글쓰기'"),'hardcoded cancelled-course list must not return');
+if(main.includes('UEP_08195_SELECTION_DECISION_BACKEND_START')){
+  A(main.includes('41_선택과목규칙'),'41 decision write target missing');
+  A(main.includes("['자동판정','개설유지','폐강확정']"),'allowed decision values missing');
+  A(main.includes('관리자결정'),'manager decision column handling missing');
+  A(pre.includes('saveSelectionCourseDecision'),'preload decision bridge missing');
+}else{
+  console.warn('WARN: rule spreadsheet identifier was not discoverable; backend decision bridge was intentionally not installed by patch.');
+}
+console.log('verified UEP 0.81.95 selection normalizer candidate');
