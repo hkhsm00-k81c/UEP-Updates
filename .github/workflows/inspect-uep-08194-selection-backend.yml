@@ -1,0 +1,31 @@
+name: Inspect UEP 0.81.94 selection backend
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - candidate/0.81.95-selection-normalizer
+    paths:
+      - .github/workflows/inspect-uep-08194-selection-backend.yml
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download official 0.81.94 package
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri 'https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.94/UEP-update.zip' -OutFile 'UEP-update-0.81.94.zip'
+          Expand-Archive -Path 'UEP-update-0.81.94.zip' -DestinationPath 'unpacked' -Force
+      - name: Inspect anchors
+        shell: pwsh
+        run: |
+          $gy = Get-ChildItem unpacked -Recurse -Filter gyomuon.js | Where-Object {$_.FullName -match 'resources[\\/]app[\\/]gyomuon\.js$'} | Select-Object -First 1
+          $app = Split-Path $gy.FullName -Parent
+          $main = Join-Path $app 'electron/main.cjs'
+          $gd = Join-Path $app 'electron/google-data.cjs'
+          Write-Host '--- main spreadsheet/selection anchors ---'
+          Select-String -Path $main -Pattern 'spreadsheet|SPREADSHEET|selectionRules|readSheetBatch|updateSheetValues|clearSheetValues|appendSheetValues|RULE|PROCESS' | ForEach-Object {$_.Line} | Select-Object -First 160
+          Write-Host '--- google-data spreadsheet/selection anchors ---'
+          Select-String -Path $gd -Pattern 'spreadsheet|SPREADSHEET|selectionRules|41_선택과목규칙|51_선택과목오류|updateSheetValues|clearSheetValues|appendSheetValues' | ForEach-Object {$_.Line} | Select-Object -First 160
+          Write-Host '--- legacy decision authority occurrences ---'
+          Select-String -Path $gy.FullName -Pattern 'uep.curriculum.courseDecision.v1' -Context 2,3 | ForEach-Object { $_.Context.PreContext; $_.Line; $_.Context.PostContext }
