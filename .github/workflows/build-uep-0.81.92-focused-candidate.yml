@@ -1,0 +1,88 @@
+name: Build UEP 0.81.92 Focused Curriculum Candidate
+on:
+  push:
+    branches: [main]
+    paths:
+      - build-uep-0.81.92-focused.trigger
+permissions:
+  contents: write
+concurrency:
+  group: build-uep-0.81.92-focused-candidate
+  cancel-in-progress: false
+jobs:
+  build-test-release:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download clean stable 0.81.88 baseline
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force baseline,app,out,verify | Out-Null
+          gh release download v0.81.88 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir baseline
+          Expand-Archive baseline/UEP-update.zip app -Force
+          if(!(Test-Path app/UEP.exe)){throw 'UEP.exe missing'}
+      - name: Apply 0.81.90 clean curriculum recovery
+        shell: pwsh
+        run: node scripts/patch-uep-08190-curriculum-native-clean.js app
+      - name: Apply 0.81.91 term tabs
+        shell: pwsh
+        run: node scripts/patch-uep-08191-cancelled-course-and-term-tabs.js app
+      - name: Apply focused 0.81.92 error derivation
+        shell: pwsh
+        run: node scripts/patch-uep-08192-missing-grade-and-decision-cancel.js app
+      - name: Static verification
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check app/resources/app/gyomuon.js
+          $pkg=Get-Content app/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json
+          if($pkg.version -ne '0.81.92'){throw 'package version mismatch'}
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          foreach($m in @('const APP_VERSION = "0.81.92";','UEP_08191_NATIVE_TERM_TAB_BINDER','UEP_08192_REMOVE_HARDCODED_CANCELLATION','UEP_08192_FOCUSED_ERROR_DERIVATION_START','uep.curriculum.courseDecision.v1','2학년 선택과목이 모두 미선택 상태입니다.','3학년 선택과목이 모두 미선택 상태입니다.','폐강과목 신청오류','2학년 오류종류','3학년 오류종류')){if(!$g.Contains($m)){throw "marker missing: $m"}}
+          if($g.Contains('UEP_08191_CANCELLED_COURSE_ERROR_START')){throw 'hardcoded cancellation block still active'}
+          if($g.Contains('<label>오류유형<select data-curriculum-error-type>')){throw 'error-type dropdown returned'}
+          if($g.Contains("document.addEventListener('click',e=>{const b=e.target.closest?.('[data-error-grade-scope-08190]')")){throw 'global grade listener returned'}
+          if($g.Contains('setTimeout(releaseNotes,1200);')){throw '08173 popup active'}
+          if($g.Contains("setTimeout(()=>uepOpenReleaseNotes08174(false),1400)")){throw '08174 popup active'}
+          if($g.Contains("setTimeout(()=>uepOpenReleaseNotes08177(false),1400)")){throw '08177 popup active'}
+      - name: Pack and reopen verification
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Compress-Archive -Path app/* -DestinationPath out/UEP-update.zip -CompressionLevel Optimal
+          Expand-Archive out/UEP-update.zip verify -Force
+          node --check verify/resources/app/gyomuon.js
+          $pkg=Get-Content verify/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json
+          if($pkg.version -ne '0.81.92'){throw 'repacked version mismatch'}
+          $g=Get-Content verify/resources/app/gyomuon.js -Raw -Encoding UTF8
+          foreach($m in @('UEP_08192_FOCUSED_ERROR_DERIVATION_START','uep.curriculum.courseDecision.v1','폐강과목 신청오류')){if(!$g.Contains($m)){throw "repacked marker missing: $m"}}
+          if($g.Contains('UEP_08191_CANCELLED_COURSE_ERROR_START')){throw 'repacked hardcoded cancellation returned'}
+          (Get-FileHash out/UEP-update.zip -Algorithm SHA256).Hash.ToLower() | Set-Content out/sha256.txt
+      - name: Publish candidate only
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $tag='v0.81.92-candidate'
+          gh release delete $tag --repo $env:GITHUB_REPOSITORY --yes --cleanup-tag 2>$null
+          $global:LASTEXITCODE=0
+          $notes=@'
+          UEP 0.81.92 선택과목 오류 보완 후보판
+
+          - 0.81.90의 빠른 교육과정 진입과 학년별 오류종류 분리 구조 유지
+          - 0.81.91 학기 전환 버튼 보완 유지
+          - 학기 정보가 없던 미선택 오류를 실제 신청내역으로 판별하여 2학년/3학년 오류종류에 귀속
+          - 2-1·2-2가 모두 비어 있으면 2학년 미선택 오류, 3-1·3-2가 모두 비어 있으면 3학년 미선택 오류로 표시
+          - 특정 폐강과목명을 코드에 고정하던 0.81.91 방식 제거
+          - 과목별 신청현황에서 관리자가 저장한 개설상태(uep.curriculum.courseDecision.v1)를 폐강오류의 유일한 기준으로 사용
+          - 과목을 폐강 확정하면 해당 신청학생에게 폐강과목 신청오류를 자동 생성하고, 개설 유지/자동판정으로 되돌리면 해당 오류도 자동 소멸
+          - 오류학생보기 버튼은 추가 수정하지 않음
+          - 정식 자동업데이트 메타데이터 변경 없음
+          '@
+          $notes|Set-Content out/release-notes.md -Encoding UTF8
+          gh release create $tag out/UEP-update.zip out/sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.81.92 Candidate · 미선택 귀속 · 폐강확정 연동' --notes-file out/release-notes.md --prerelease
