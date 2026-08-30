@@ -45,12 +45,18 @@ jobs:
           if($LASTEXITCODE -ne 0){throw 'finalize patch failed'}
           node scripts/patch-uep-08195-selection-finalize-writefix.js "$env:UEP_ROOT"
           if($LASTEXITCODE -ne 0){throw 'decision writefix failed'}
+          node scripts/patch-uep-08195-selection-sync-regenerate.js "$env:UEP_ROOT"
+          if($LASTEXITCODE -ne 0){throw 'selection sync regeneration patch failed'}
       - name: Verify 0.81.95 candidate
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
           node scripts/verify-uep-08195-selection-normalizer.js "$env:UEP_ROOT"
           if($LASTEXITCODE -ne 0){throw 'candidate verifier failed'}
+          $gy="$env:UEP_ROOT/resources/app/gyomuon.js"
+          $text=Get-Content $gy -Raw
+          if($text -notmatch 'UEP_08195_SELECTION_SYNC_REGENERATE_START'){throw 'sync regeneration marker missing'}
+          if($text -notmatch 'persistSelectionNormalizationNow08195'){throw 'sync regeneration persist hook missing'}
           foreach($f in @("$env:UEP_ROOT/resources/app/gyomuon.js","$env:UEP_ROOT/resources/app/electron/main.cjs","$env:UEP_ROOT/resources/app/electron/preload.cjs")){
             node --check $f
             if($LASTEXITCODE -ne 0){throw "syntax failed: $f"}
@@ -75,6 +81,7 @@ jobs:
             'rules=41-direct-write',
             'errors=51-direct-regenerate',
             'status=52-direct-regenerate',
+            'sync=06-full-refresh-then-51-52-regenerate',
             'apps-script=not-required-for-selection-normalization',
             "sha256=$sha"
           ) | Set-Content out/UEP-0.81.95-selection-test-report.txt -Encoding UTF8
