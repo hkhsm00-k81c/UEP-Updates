@@ -1,1 +1,1 @@
-rebuild 0.81.89 candidate: direct 2/3 grade error filters, active state, grade labels, remove error type dropdown
+rebuild 0.81.89 candidate: no startup popups, one-click 2/3 filters, split real error kinds by grade
