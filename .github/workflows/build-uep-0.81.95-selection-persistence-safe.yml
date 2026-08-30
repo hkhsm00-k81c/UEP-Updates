@@ -1,0 +1,81 @@
+name: Build UEP 0.81.95 Selection Persistence Safe
+'on':
+  push:
+    branches:
+      - candidate/0.81.95-selection-normalizer
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Download official 0.81.94 package
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,out,verify | Out-Null
+          gh release download v0.81.94 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+          $gy = Get-ChildItem -Path app -Recurse -Filter 'gyomuon.js' | Where-Object { $_.FullName -match 'resources[\\/]app[\\/]gyomuon\.js$' } | Select-Object -First 1
+          if (-not $gy) { throw 'resources/app/gyomuon.js not found in official package' }
+          $appDir = Split-Path $gy.FullName -Parent
+          $resourcesDir = Split-Path $appDir -Parent
+          $root = Split-Path $resourcesDir -Parent
+          "UEP_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Apply selection engine without UI event rewiring
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node scripts/patch-uep-08195-selection-normalizer.js "$env:UEP_ROOT"
+          node scripts/patch-uep-08195-selection-priorterm-fix.js "$env:UEP_ROOT"
+          node scripts/patch-uep-08195-selection-output.js "$env:UEP_ROOT"
+          node scripts/patch-uep-08195-selection-finalize.js "$env:UEP_ROOT"
+          node scripts/patch-uep-08195-selection-finalize-writefix.js "$env:UEP_ROOT"
+          node scripts/patch-uep-08195-selection-persistence-safe.js "$env:UEP_ROOT"
+          if($LASTEXITCODE -ne 0){throw 'safe persistence patch failed'}
+      - name: Verify UI preserved and persistence installed
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node scripts/verify-uep-08195-selection-normalizer.js "$env:UEP_ROOT"
+          $gy="$env:UEP_ROOT/resources/app/gyomuon.js"
+          $main="$env:UEP_ROOT/resources/app/electron/main.cjs"
+          $pre="$env:UEP_ROOT/resources/app/electron/preload.cjs"
+          $gt=Get-Content $gy -Raw
+          $mt=Get-Content $main -Raw
+          $pt=Get-Content $pre -Raw
+          if($gt -notmatch 'UEP_08195_SELECTION_PERSISTENCE_BOOTSTRAP_START'){throw 'safe persistence bootstrap missing'}
+          if($mt -notmatch 'persisted and verified'){throw 'readback verification backend missing'}
+          if($pt -notmatch 'persistSelectionNormalization:'){throw 'preload bridge missing'}
+          if($gt -match 'UEP_08195_SELECTION_SYNC_REGENERATE_START'){throw 'unsafe workspace event rewiring must not be included'}
+          foreach($f in @($gy,$main,$pre)){node --check $f;if($LASTEXITCODE -ne 0){throw "syntax failed: $f"}}
+      - name: Package test candidate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Compress-Archive -Path "$env:UEP_ROOT/*" -DestinationPath out/UEP-update-0.81.95-selection-persistence-safe.zip -CompressionLevel Optimal
+          Expand-Archive out/UEP-update-0.81.95-selection-persistence-safe.zip verify -Force
+          foreach($f in @('verify/resources/app/gyomuon.js','verify/resources/app/electron/main.cjs','verify/resources/app/electron/preload.cjs')){node --check $f;if($LASTEXITCODE -ne 0){throw "archive syntax failed: $f"}}
+          $sha=(Get-FileHash out/UEP-update-0.81.95-selection-persistence-safe.zip -Algorithm SHA256).Hash.ToLower()
+          @(
+            'candidate=0.81.95-selection-persistence-safe',
+            'base=0.81.94-official',
+            'ui-event-rewire=no',
+            '51-write=direct+readback',
+            '52-write=direct+readback',
+            'apps-script=not-required-for-selection-normalization',
+            "sha256=$sha"
+          ) | Set-Content out/UEP-0.81.95-selection-persistence-safe-report.txt -Encoding UTF8
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UEP-0.81.95-selection-persistence-safe
+          path: out/*
+          retention-days: 7
