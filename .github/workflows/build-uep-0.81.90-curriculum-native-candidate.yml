@@ -1,0 +1,88 @@
+name: Build UEP 0.81.90 Native Curriculum Candidate
+on:
+  push:
+    branches: [main]
+    paths:
+      - build-uep-0.81.90-curriculum.trigger
+permissions:
+  contents: write
+concurrency:
+  group: build-uep-0.81.90-native-curriculum-candidate
+  cancel-in-progress: false
+jobs:
+  build-test-release:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download clean stable 0.81.88 baseline
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force baseline,app,out,verify | Out-Null
+          gh release download v0.81.88 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir baseline
+          Expand-Archive baseline/UEP-update.zip app -Force
+          if(!(Test-Path app/UEP.exe)){throw 'UEP.exe missing'}
+      - name: Apply one clean native patch
+        shell: pwsh
+        run: |
+          node scripts/patch-uep-08190-curriculum-native-clean.js app
+      - name: Static verification
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check app/resources/app/gyomuon.js
+          $pkg=Get-Content app/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json
+          if($pkg.version -ne '0.81.90'){throw 'package version mismatch'}
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          $h=Get-Content app/resources/app/index.html -Raw -Encoding UTF8
+          foreach($m in @('const APP_VERSION = "0.81.90";','curriculumErrorGradeScope','data-error-grade-scope-08190','2학년 오류종류','3학년 오류종류','UEP_08190_DISABLE_08185_ERROR_CLICK_SHIM','UEP_08190_DISABLE_08185_RENDER_SHIM','UEP_08190_DISABLE_08185_STARTUP_SHIM','UEP_08190_DISABLE_08173_RELEASE_POPUP','UEP_08190_DISABLE_08174_RELEASE_POPUP','UEP_08190_DISABLE_08177_RELEASE_POPUP')){if(!$g.Contains($m)){throw "marker missing: $m"}}
+          if(!$h.Contains('uep-08190-curriculum-error-style')){throw '08190 css missing'}
+          if($g.Contains('<label>오류유형<select data-curriculum-error-type>')){throw 'error-type dropdown markup still present'}
+          if($g.Contains("document.addEventListener('click',e=>{const b=e.target.closest?.('[data-error-grade-scope-08190]')")){throw 'new grade filter incorrectly uses document listener'}
+          if($g.Contains("document.addEventListener('click',e=>{const b=e.target.closest?.('[data-error-grade-scope-08185]')")){throw 'legacy 08185 grade listener still active'}
+          if($g.Contains('setTimeout(releaseNotes,1200);')){throw '08173 popup active'}
+          if($g.Contains("setTimeout(()=>uepOpenReleaseNotes08174(false),1400)")){throw '08174 popup active'}
+          if($g.Contains("setTimeout(()=>uepOpenReleaseNotes08177(false),1400)")){throw '08177 popup active'}
+          if(!$g.Contains("if(recordMode==='curriculum')curriculumWorkspaceMode='plan'")){throw 'fast curriculum entry missing'}
+      - name: Pack and reopen verification
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Compress-Archive -Path app/* -DestinationPath out/UEP-update.zip -CompressionLevel Optimal
+          Expand-Archive out/UEP-update.zip verify -Force
+          node --check verify/resources/app/gyomuon.js
+          $pkg=Get-Content verify/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json
+          if($pkg.version -ne '0.81.90'){throw 'repacked version mismatch'}
+          $g=Get-Content verify/resources/app/gyomuon.js -Raw -Encoding UTF8
+          foreach($m in @('data-error-grade-scope-08190','2학년 오류종류','3학년 오류종류','UEP_08190_DISABLE_08185_ERROR_CLICK_SHIM')){if(!$g.Contains($m)){throw "repacked marker missing: $m"}}
+          if($g.Contains('<label>오류유형<select data-curriculum-error-type>')){throw 'repacked dropdown returned'}
+          (Get-FileHash out/UEP-update.zip -Algorithm SHA256).Hash.ToLower() | Set-Content out/sha256.txt
+      - name: Publish candidate only
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $tag='v0.81.90-candidate'
+          gh release delete $tag --repo $env:GITHUB_REPOSITORY --yes --cleanup-tag 2>$null
+          $global:LASTEXITCODE=0
+          $notes=@'
+          UEP 0.81.90 교육과정 네이티브 복구 후보판
+
+          - 정식 0.81.88을 깨끗한 기준으로 사용하고 0.81.89 오류 UI 덧씌우기 코드는 사용하지 않음
+          - 교육과정 상위 탭 진입 시 가벼운 교육과정 편성표부터 표시하여 빠른 진입 유지
+          - 2학년 오류학생 / 3학년 오류학생 / 2·3학년 오류학생 버튼을 기존 bindPage 흐름에 직접 연결
+          - 오류학생 버튼 클릭 시 대시보드 이동을 만들던 새 전역 클릭 리스너를 사용하지 않음
+          - 선택 버튼 활성색 및 aria-pressed 적용
+          - 학생목록에 2학년 오류종류 / 3학년 오류종류를 별도 칼럼으로 표시하고 실제 오류명 출력
+          - 오류유형 드롭다운 제거
+          - 0.81.73 / 0.81.74 / 0.81.77 시작 변경내역 팝업 제거
+          - 0.81.85의 과학 신청자 상세 개선은 유지하고 DOM 후처리 오류학생 필터 부분만 비활성화
+          - 0.81.88 과목별 신청현황 성능/분포/위계 분석 유지
+          - 정식 자동업데이트 메타데이터 변경 없음
+          '@
+          $notes|Set-Content out/release-notes.md -Encoding UTF8
+          gh release create $tag out/UEP-update.zip out/sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.81.90 Candidate · 교육과정 네이티브 복구' --notes-file out/release-notes.md --prerelease
