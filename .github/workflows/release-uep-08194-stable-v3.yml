@@ -1,0 +1,126 @@
+name: Release UEP 0.81.94 Stable v3
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - release-uep-08194-v3.trigger
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download stable 0.81.88 baseline
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force baseline,app,out,verify | Out-Null
+          gh release download v0.81.88 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir baseline
+          Expand-Archive baseline/UEP-update.zip app -Force
+          if(!(Test-Path app/UEP.exe)){throw 'UEP.exe missing'}
+
+      - name: Apply verified 0.81.94 patch chain
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node scripts/patch-uep-08190-curriculum-native-clean.js app
+          node scripts/patch-uep-08194-selection-runtime-fix.js app
+
+      - name: Static verification
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check app/resources/app/gyomuon.js
+          node --check app/resources/app/electron/google-data.cjs
+          node --check app/resources/app/electron/main.cjs
+          $pkg=Get-Content app/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json
+          if($pkg.version -ne '0.81.94'){throw 'package version mismatch'}
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          $gd=Get-Content app/resources/app/electron/google-data.cjs -Raw -Encoding UTF8
+          $m=Get-Content app/resources/app/electron/main.cjs -Raw -Encoding UTF8
+          foreach($marker in @('const APP_VERSION = "0.81.94";','UEP_08194_TERM_BINDER','UEP_08194_SELECTION_ERROR_SOURCE_START','2학년 오류종류','3학년 오류종류')){if(!$g.Contains($marker)){throw "renderer marker missing: $marker"}}
+          if(!$g.Contains('$$(''[data-error-grade-scope-08190]'').forEach')){throw 'grade binding not repaired'}
+          if($g.Contains('UEP_08191_CANCELLED_COURSE_ERROR_START')){throw 'hardcoded cancellation survived'}
+          if(!$gd.Contains("'41_선택과목규칙'!A1:Z1000")){throw '41 range not expanded'}
+          if(!$gd.Contains('selectionErrorRows: rowsFrom("51_선택과목오류_정규화")')){throw '51 cache field missing'}
+          if(!$m.Contains("'51_선택과목오류_정규화'!A1:V5000")){throw '51 processing read missing'}
+
+      - name: Pack and reopen verification
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Compress-Archive -Path app/* -DestinationPath out/UEP-update.zip -CompressionLevel Optimal
+          Expand-Archive out/UEP-update.zip verify -Force
+          node --check verify/resources/app/gyomuon.js
+          node --check verify/resources/app/electron/google-data.cjs
+          node --check verify/resources/app/electron/main.cjs
+          $pkg=Get-Content verify/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json
+          if($pkg.version -ne '0.81.94'){throw 'repacked version mismatch'}
+          $sha=(Get-FileHash out/UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          $sha | Set-Content out/sha256.txt
+          "SHA256=$sha" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "SHA256=$sha"
+
+      - name: Publish official release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          gh release view v0.81.94 --repo $env:GITHUB_REPOSITORY *> $null
+          if($LASTEXITCODE -eq 0){throw 'v0.81.94 already exists; refusing overwrite'}
+          $notes=@"
+          UEP v0.81.94 정식 안정판
+
+          - 데이터처리 51_선택과목오류_정규화 결과를 선택과목 오류의 우선 판정원으로 연결
+          - 규칙로그 41_선택과목규칙 A:Z 전체 참조
+          - 2학년·3학년 오류학생 필터 및 과목 학기 전환 안정화
+          - 임시 하드코딩 폐강과목 판정 미포함
+
+          ※ 폐강확정 버튼 → 41 시트 저장은 이번 판에 포함하지 않습니다.
+          "@
+          gh release create v0.81.94 out/UEP-update.zip out/sha256.txt --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title 'UEP v0.81.94' --notes $notes
+
+      - name: Promote automatic update policy
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $p=Get-Content uep-policy.json -Raw -Encoding UTF8|ConvertFrom-Json
+          $v='0.81.94'
+          $p.latestStableVersion=$v
+          $p.recommendedMinimumVersion=$v
+          $p.archiveBeforeVersion=$v
+          $p.defaultChannel='stable'
+          $p.installPackage.type='zip-folder-replacement'
+          $p.installPackage.url="https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v$v/UEP-update.zip"
+          $p.installPackage.sha256=$env:SHA256
+          $p.installPackage.releasePageUrl="https://github.com/hkhsm00-k81c/UEP-Updates/releases/tag/v$v"
+          $p.messages=@([pscustomobject]@{id='archive-pre-08194';severity='warning';title='공식 안정판 갱신 안내';message='0.81.94 이전 버전은 공식 배포 기준에서 제외되었습니다. 선택과목 오류 정규화 연동이 반영된 0.81.94 이상으로 업데이트해 주세요.';minVersionInclusive=$p.allowAutoUpdateFromVersion;maxVersionExclusive=$v;dismissible=$false;showUntil=''})
+          $p|ConvertTo-Json -Depth 10|Set-Content uep-policy.json -Encoding UTF8
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add uep-policy.json
+          git commit -m 'Promote UEP 0.81.94 to stable policy'
+          git push origin HEAD:main
+
+      - name: Final verification
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          gh release view v0.81.94 --repo $env:GITHUB_REPOSITORY --json tagName,name,isDraft,isPrerelease,url
+          $p=Get-Content uep-policy.json -Raw -Encoding UTF8|ConvertFrom-Json
+          if($p.latestStableVersion -ne '0.81.94'){throw 'policy version mismatch'}
+          if($p.installPackage.sha256 -ne $env:SHA256){throw 'policy sha mismatch'}
+          Write-Host "DEPLOYED_SHA256=$env:SHA256"
