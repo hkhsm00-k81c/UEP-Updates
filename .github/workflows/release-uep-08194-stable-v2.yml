@@ -1,0 +1,105 @@
+name: Release UEP 0.81.94 Stable v2
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - release-uep-08194-v2.trigger
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prepare official baseline
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/uep08194 /tmp/base-download /tmp/UEP-update.zip
+          mkdir -p /tmp/uep08194 /tmp/base-download
+          gh release download v0.81.88 --repo "$GITHUB_REPOSITORY" --pattern 'UEP-update.zip' --dir /tmp/base-download
+          unzip -q /tmp/base-download/UEP-update.zip -d /tmp/uep08194
+          APP_PKG="$(find /tmp/uep08194 -path '*/resources/app/package.json' -print -quit)"
+          test -n "$APP_PKG"
+          APP_ROOT="$(dirname "$(dirname "$(dirname "$APP_PKG")")")"
+          echo "APP_ROOT=$APP_ROOT" >> "$GITHUB_ENV"
+
+      - name: Apply official patch chain
+        run: |
+          set -euo pipefail
+          node scripts/patch-uep-08190-curriculum-native-clean.js "$APP_ROOT"
+          node scripts/patch-uep-08191-cancelled-course-and-term-tabs.js "$APP_ROOT"
+          node scripts/patch-uep-08194-sheet-first-official-v2.js "$APP_ROOT"
+
+      - name: Verify package
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs=require('fs'),path=require('path'),r=process.env.APP_ROOT;
+          const read=p=>fs.readFileSync(path.join(r,'resources','app',p),'utf8');
+          const g=read('gyomuon.js'),gd=read('electron/google-data.cjs'),m=read('electron/main.cjs'),pkg=JSON.parse(read('package.json'));
+          const A=(c,x)=>{if(!c)throw new Error(x)};
+          A(pkg.version==='0.81.94','package version');
+          A(g.includes('const APP_VERSION = "0.81.94";'),'APP version');
+          A(g.includes('UEP_08194_SELECTION_ERROR_SOURCE_START'),'sheet-first source');
+          A(g.includes("b.getAttribute('data-error-grade-scope-08190')||'all'"),'grade binder');
+          A(g.includes('UEP_08194_TERM_BINDER'),'term binder');
+          A(!g.includes('UEP_08191_CANCELLED_COURSE_ERROR_START'),'hardcoded cancellation');
+          A(gd.includes("\"41_선택과목규칙\": \"'41_선택과목규칙'!A1:Z1000\""),'41 range');
+          A(gd.includes('selectionErrorRows: rowsFrom("51_선택과목오류_정규화")'),'51 payload');
+          A(m.includes('["51_선택과목오류_정규화", "\'51_선택과목오류_정규화\'!A1:V5000"]'),'51 processing');
+          console.log('Static verification passed');
+          NODE
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          (cd "$APP_ROOT" && zip -qr /tmp/UEP-update.zip .)
+          SHA256="$(sha256sum /tmp/UEP-update.zip | awk '{print $1}')"
+          echo "SHA256=$SHA256" >> "$GITHUB_ENV"
+          echo "$SHA256  UEP-update.zip" > /tmp/UEP-update.sha256
+          ls -lh /tmp/UEP-update.zip
+          cat /tmp/UEP-update.sha256
+
+      - name: Publish stable release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          ! gh release view v0.81.94 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1
+          gh release create v0.81.94 /tmp/UEP-update.zip /tmp/UEP-update.sha256 --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title 'UEP v0.81.94' --notes $'UEP v0.81.94 정식 안정판\n\n- 데이터처리 51_선택과목오류_정규화 결과를 선택과목 오류의 우선 판정원으로 연결\n- 규칙로그 41_선택과목규칙 A:Z 전체 참조\n- 2학년·3학년 오류학생 필터 및 과목 학기 전환 안정화\n- 임시 하드코딩 폐강과목 판정 제거\n\n※ 폐강확정 버튼 → 41 시트 저장은 이번 판에 포함하지 않습니다.'
+
+      - name: Promote stable policy
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs=require('fs'),f='uep-policy.json',p=JSON.parse(fs.readFileSync(f,'utf8'));
+          const v='0.81.94',sha=process.env.SHA256;
+          if(!/^[a-f0-9]{64}$/.test(sha||''))throw new Error('bad sha');
+          p.latestStableVersion=v;p.recommendedMinimumVersion=v;p.archiveBeforeVersion=v;p.defaultChannel='stable';
+          p.installPackage={type:'zip-folder-replacement',url:`https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v${v}/UEP-update.zip`,sha256:sha,releasePageUrl:`https://github.com/hkhsm00-k81c/UEP-Updates/releases/tag/v${v}`};
+          p.messages=[{id:'archive-pre-08194',severity:'warning',title:'공식 안정판 갱신 안내',message:'0.81.94 이전 버전은 공식 배포 기준에서 제외되었습니다. 선택과목 오류 정규화 연동이 반영된 0.81.94 이상으로 업데이트해 주세요.',minVersionInclusive:p.allowAutoUpdateFromVersion||'0.81.82',maxVersionExclusive:v,dismissible:false,showUntil:''}];
+          fs.writeFileSync(f,JSON.stringify(p,null,2)+'\n');
+          NODE
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add uep-policy.json
+          git commit -m 'Promote UEP 0.81.94 to stable policy'
+          git push origin HEAD:main
+
+      - name: Verify release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release view v0.81.94 --repo "$GITHUB_REPOSITORY" --json tagName,name,isDraft,isPrerelease,url
+          grep -q '"latestStableVersion": "0.81.94"' uep-policy.json
+          grep -q "$SHA256" uep-policy.json
+          echo "DEPLOYED_SHA256=$SHA256"
