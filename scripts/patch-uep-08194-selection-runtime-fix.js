@@ -18,6 +18,14 @@ const goodGrade="$$('[data-error-grade-scope-08190]').forEach";
 A(g.includes(badGrade),'broken grade-scope binding anchor missing');
 g=g.replace(badGrade,()=>goodGrade);
 
+// The HTML attribute is data-error-grade-scope-08190. DOM dataset camel-casing would require
+// errorGradeScope08190, not errorGradeScope08190's former misspelled variant. Read the attribute
+// explicitly so these buttons cannot silently fall back to 'all'.
+const badGradeValue="curriculumErrorGradeScope=b.dataset.errorGradeScope08190||'all';";
+const goodGradeValue="curriculumErrorGradeScope=b.getAttribute('data-error-grade-scope-08190')||'all';";
+A(g.includes(badGradeValue),'grade scope value anchor missing');
+g=g.replace(badGradeValue,()=>goodGradeValue);
+
 // 2) Make curriculum term buttons deterministic and keep them inside the native page binder.
 const nativeTerm="$$('[data-curriculum-term]').forEach(b=>b.onclick=()=>{curriculumTermFilter=b.dataset.curriculumTerm;curriculumSubjectKey='';render('records');});";
 A(g.includes(nativeTerm),'native curriculum term binder anchor missing');
