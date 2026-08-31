@@ -1,0 +1,119 @@
+name: Release UEP 0.81.98 Recommended Track Errors
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - release-uep-08198-recommended-track-errors.trigger
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Validate patch script
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check scripts/patch-uep-08198-recommended-track-errors.js
+      - name: Download official 0.81.97 package
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,out,verify | Out-Null
+          gh release download v0.81.97 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+          if(!(Test-Path app/UEP.exe)){throw 'UEP.exe missing'}
+      - name: Apply 0.81.98 recommended-track fix
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node scripts/patch-uep-08198-recommended-track-errors.js app
+      - name: Static verification
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check app/resources/app/gyomuon.js
+          node --check app/resources/app/electron/main.cjs
+          node --check app/resources/app/electron/preload.cjs
+          $pkg=Get-Content app/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json
+          if($pkg.version -ne '0.81.98'){throw 'package version mismatch'}
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          $m=Get-Content app/resources/app/electron/main.cjs -Raw -Encoding UTF8
+          foreach($marker in @('const APP_VERSION = "0.81.98";','UEP_08198_RECOMMENDED_TRACK_ERRORS','studentCareerSupportBase_','문이과 교차오류','UEP_08197_ATTENDANCE_DATE_SHIFT')){if(!$g.Contains($marker)){throw "renderer marker missing: $marker"}}
+          foreach($marker in @('UEP_08197_QUICK_LAUNCH_PERSISTENCE','quick-launch-settings.json')){if(!$m.Contains($marker)){throw "main marker missing: $marker"}}
+          if($g.Contains('UEP_08195_SELECTION_PERSISTENCE_DIAGNOSTIC')){throw '0.81.95 diagnostic contamination detected'}
+      - name: Pack and reopen verification
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Compress-Archive -Path app/* -DestinationPath out/UEP-update.zip -CompressionLevel Optimal
+          Expand-Archive out/UEP-update.zip verify -Force
+          node --check verify/resources/app/gyomuon.js
+          node --check verify/resources/app/electron/main.cjs
+          node --check verify/resources/app/electron/preload.cjs
+          $pkg=Get-Content verify/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json
+          if($pkg.version -ne '0.81.98'){throw 'repacked version mismatch'}
+          $g=Get-Content verify/resources/app/gyomuon.js -Raw -Encoding UTF8
+          if(!$g.Contains('UEP_08198_RECOMMENDED_TRACK_ERRORS')){throw 'repacked track marker missing'}
+          $sha=(Get-FileHash out/UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          $sha | Set-Content out/sha256.txt
+          "SHA256=$sha" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "SHA256=$sha"
+      - name: Publish 0.81.98 release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          gh release view v0.81.98 --repo $env:GITHUB_REPOSITORY *> $null
+          if($LASTEXITCODE -eq 0){throw 'v0.81.98 already exists; refusing overwrite'}
+          $notes=@"
+          UEP v0.81.98 선택과목 계열오류 기준 수정
+
+          - 학생 선택과목으로 문·이과를 다시 추정하지 않고 학생정보 대시보드의 추천 계열을 그대로 사용
+          - 추천 계열 문과 학생의 과학계열 선택, 추천 계열 이과 학생의 사회계열 선택을 문이과 교차오류로 표시
+          - 추천 계열 예체능·혼합은 사회/과학 교차를 임의 판정하지 않아 오탐 방지
+          - 기존 51 오류자료가 있어도 새 추천계열 교차오류를 화면 오류목록에 병합
+          - 0.81.97 출결 날짜 이동·실행메뉴 영속화 및 선택과목 UI 유지
+          "@
+          gh release create v0.81.98 out/UEP-update.zip out/sha256.txt --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title 'UEP v0.81.98' --notes $notes
+      - name: Enable automatic update to 0.81.98
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          git pull --rebase origin main
+          $p=Get-Content uep-policy.json -Raw -Encoding UTF8|ConvertFrom-Json
+          $p.latestVersion='0.81.98'
+          $p.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.81.98/UEP-update.zip'
+          $p.sha256=$env:SHA256
+          $p.message='UEP 0.81.98 학생정보 추천 계열 기반 문이과 교차오류 수정'
+          $p|ConvertTo-Json -Depth 10|Set-Content uep-policy.json -Encoding UTF8
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add uep-policy.json
+          git commit -m 'Promote UEP 0.81.98 automatic update'
+          git push origin HEAD:main
+      - name: Final verification
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          gh release view v0.81.98 --repo $env:GITHUB_REPOSITORY --json tagName,name,isDraft,isPrerelease,url
+          git pull --rebase origin main
+          $p=Get-Content uep-policy.json -Raw -Encoding UTF8|ConvertFrom-Json
+          if($p.latestVersion -ne '0.81.98'){throw 'policy version mismatch'}
+          if($p.sha256 -ne $env:SHA256){throw 'policy sha mismatch'}
+          Write-Host "DEPLOYED_SHA256=$env:SHA256"
