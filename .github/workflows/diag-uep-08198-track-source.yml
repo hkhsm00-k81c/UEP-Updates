@@ -1,0 +1,36 @@
+name: Diagnose UEP 0.81.98 Track Source
+on:
+  push:
+    paths:
+      - 'diag-uep-08198-track-source.trigger'
+permissions:
+  contents: read
+jobs:
+  diag:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download 0.81.97
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.81.97 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+      - name: Find track source and cross error logic
+        shell: pwsh
+        run: |
+          $f='app/resources/app/gyomuon.js'
+          $terms=@('추천 계열','추천계열','진로희망계열','진로희망전공','문이과','교차오류','계열오류','careerTrack','recommended','recommendTrack','track')
+          $lines=Get-Content $f -Encoding UTF8
+          foreach($term in $terms){
+            Write-Host "===== $term ====="
+            for($i=0;$i -lt $lines.Count;$i++){
+              if($lines[$i] -like "*$term*"){
+                $s=[Math]::Max(0,$i-12);$e=[Math]::Min($lines.Count-1,$i+20)
+                for($j=$s;$j -le $e;$j++){Write-Host ('{0,6}: {1}' -f ($j+1),$lines[$j])}
+                Write-Host ''
+              }
+            }
+          }
