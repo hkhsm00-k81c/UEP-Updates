@@ -1,0 +1,25 @@
+name: Validate UEP 0.82.02 Patch
+on:
+  push:
+    branches: [main]
+    paths: [validate-uep-08202-patch.trigger]
+permissions:
+  contents: write
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - uses: actions/setup-node@v4
+        with: {node-version: '20'}
+      - shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.82.01 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+          try { node scripts/patch-uep-08202-bundle.js app 2>&1 | Out-String | Set-Content validate-08202.txt; node --check app/resources/app/gyomuon.js 2>&1 | Add-Content validate-08202.txt; node --check app/resources/app/electron/main.cjs 2>&1 | Add-Content validate-08202.txt; 'SUCCESS' | Add-Content validate-08202.txt } catch { ('FAIL: '+$_.Exception.Message) | Set-Content validate-08202.txt }
+          git config user.name 'github-actions[bot]'; git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add validate-08202.txt; git commit -m 'Record UEP 0.82.02 patch validation'; git push origin HEAD:main
