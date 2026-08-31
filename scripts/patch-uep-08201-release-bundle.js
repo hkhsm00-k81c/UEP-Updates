@@ -1,0 +1,11 @@
+const fs=require('fs'),path=require('path');
+const root=process.argv[2]||'app';
+const gFile=path.join(root,'resources','app','gyomuon.js');
+const pFile=path.join(root,'resources','app','package.json');
+let g=fs.readFileSync(gFile,'utf8');
+if(!g.includes('const APP_VERSION = "0.82.00";'))throw new Error('0.82.00 base missing');
+if(!g.includes('UEP_PENDING_51_LIVE_SOURCE_OF_TRUTH'))throw new Error('51 live-source patch missing');
+g=g.replace('const APP_VERSION = "0.82.00";','const APP_VERSION = "0.82.01";');
+fs.writeFileSync(gFile,g,'utf8');
+const pkg=JSON.parse(fs.readFileSync(pFile,'utf8'));pkg.version='0.82.01';fs.writeFileSync(pFile,JSON.stringify(pkg,null,2)+'\n','utf8');
+console.log('UEP 0.82.01 release bundle version applied');
