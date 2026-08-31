@@ -14,12 +14,8 @@ const newMerge="data.errors=(data.errors||[]).map(x=>{if(String(x?.type||'').tri
 g=once(g,oldMerge,newMerge,'selection 51-only');
 g=g.replaceAll('문이과 교차오류','진로계열 교차선택');
 
-// Weekday-specific supervisor headings. Keep the existing filtering and identity-only list.
 must(g.includes('const sunday=outingViewDate.getDay()===0;'),'outing sunday marker missing');
 g=g.replace('const sunday=outingViewDate.getDay()===0;',"const weekday=outingViewDate.getDay(),sunday=weekday===0,friday=weekday===5;");
-const bodyNeedle="const body=[...groups.entries()].sort((a,b)=>a[0].localeCompare(b[0])).map(([time,list])=>'■ '+time+' '+(sunday?'입소':'이동')+'\\\n'+list.sort((a,b)=>String(outingStudentNo(a)).localeCompare(String(outingStudentNo(b)))).map(item=>outingStudentNo(item)+' '+item.name).join('\\\n')).join('\\\n\\\n');";
-must(g.includes(bodyNeedle),'outing body marker missing');
-g=g.replace(bodyNeedle,"const action=sunday?'입소':friday?'퇴소':'외출';\\n    const body=[...groups.entries()].sort((a,b)=>a[0].localeCompare(b[0])).map(([time,list])=>'■ '+time+' '+action+'\\\n'+list.sort((a,b)=>String(outingStudentNo(a)).localeCompare(String(outingStudentNo(b)))).map(item=>outingStudentNo(item)+' '+item.name).join('\\\n')).join('\\\n\\\n');".replace('\\n    ','\n    '));
 const titleNeedle="const title=sunday?'[오늘의 1학년 학사 입소 및 늦은 입소 현황]':'[오늘의 1학년 학사 외출 및 퇴소 현황]';const empty=sunday?'금일 늦은 입소 학생 없음':'금일 학사 외출·퇴소 학생 없음';";
 must(g.includes(titleNeedle),'outing title marker missing');
 g=g.replace(titleNeedle,"const title=sunday?'[늦은 입소 안내]':friday?'[조기 퇴소 안내]':'[외출 안내]';const empty=sunday?'금일 늦은 입소 학생 없음':friday?'금일 조기 퇴소 학생 없음':'금일 외출 학생 없음';");
