@@ -1,0 +1,31 @@
+name: Inspect UEP 0.82.03 Focused Targets
+on:
+  push:
+    branches: [main]
+    paths: [inspect-08203-2.trigger]
+permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.82.02 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+          $g='app/resources/app/gyomuon.js'; $m='app/resources/app/electron/main.cjs'
+          $lines=Get-Content $g
+          function AddRange($label,$start,$end){ "===== $label =====" | Add-Content inspect-08203-2.txt; for($i=$start;$i -le $end;$i++){ if($i -ge 1 -and $i -le $lines.Count){ ('{0}: {1}' -f $i,$lines[$i-1]) | Add-Content inspect-08203-2.txt } } }
+          '' | Set-Content inspect-08203-2.txt
+          AddRange 'GRADE_TRANSFER' 13830 13925
+          AddRange 'UPDATE_NOTES_08188' 13925 14030
+          $hits=Select-String -Path $g -Pattern 'const title=sunday|outingStudentNo\(item\)|returnToDormAfterOuting|individualOutingAllowed|학원 외출|복귀형|일회성 복귀형|정기 복귀형' -Context 4,8
+          '===== OUTING =====' | Add-Content inspect-08203-2.txt; $hits | Out-String -Width 600 | Add-Content inspect-08203-2.txt
+          '===== MAIN VERSION =====' | Add-Content inspect-08203-2.txt; Select-String -Path $m,$g -Pattern 'APP_VERSION|0.82.02|version' -Context 1,2 | Select-Object -First 80 | Out-String -Width 500 | Add-Content inspect-08203-2.txt
+          git config user.name 'github-actions[bot]'; git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add inspect-08203-2.txt; git commit -m 'Record focused UEP 0.82.03 source inspection'; git push origin HEAD:main
