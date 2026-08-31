@@ -1,0 +1,50 @@
+name: Validate Pending 51 Live Source
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - scripts/patch-uep-pending-51-live-source.js
+      - .github/workflows/validate-pending-51-live-source.yml
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Validate patch syntax
+        shell: pwsh
+        run: node --check scripts/patch-uep-pending-51-live-source.js
+      - name: Download current official 0.82.00 package
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.82.00 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+          if(!(Test-Path app/UEP.exe)){throw 'UEP.exe missing'}
+      - name: Apply pending 51 live-source patch
+        shell: pwsh
+        run: node scripts/patch-uep-pending-51-live-source.js app
+      - name: Static verification
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check app/resources/app/gyomuon.js
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          foreach($marker in @('UEP_08194_SELECTION_ERROR_SOURCE_START','UEP_08200_TERM_SCOPED_CROSS_ERRORS','UEP_PENDING_51_LIVE_SOURCE_OF_TRUTH_START','refreshSelection51FromSheet')){if(!$g.Contains($marker)){throw "marker missing: $marker"}}
+          $pkg=Get-Content app/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json
+          if($pkg.version -ne '0.82.00'){throw 'pending patch must not bump version'}
+          if($g.Contains('UEP_08195_SELECTION_PERSISTENCE_DIAGNOSTIC')){throw '0.81.95 diagnostic contamination detected'}
+      - name: Report
+        shell: pwsh
+        run: Write-Host 'Pending 51 live-source patch validated against official v0.82.00 without release/version change.'
