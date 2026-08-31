@@ -7,7 +7,7 @@ on:
       - inspect-uep-08201-bundle.trigger
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   inspect:
@@ -15,6 +15,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Download and inspect official 0.82.01 package
         shell: pwsh
         env:
@@ -26,18 +28,24 @@ jobs:
           Expand-Archive source/UEP-update.zip app -Force
           $files=@('app/resources/app/gyomuon.js','app/resources/app/electron/main.cjs','app/resources/app/electron/preload.cjs')
           $patterns=@('문이과','문·이과','교차오류','학사외출','외출 안내','늦은 입소','조기 퇴소','사감','학원','야자감독','급식지도','담임','night','supervisor','outing','academy')
+          $out = New-Object System.Collections.Generic.List[string]
           foreach($file in $files){
-            Write-Host "===== FILE: $file ====="
+            $out.Add("===== FILE: $file =====")
             if(!(Test-Path $file)){continue}
             $lines=Get-Content $file -Encoding UTF8
             for($i=0;$i -lt $lines.Count;$i++){
-              $line=$lines[$i]
               $matched=$false
-              foreach($p in $patterns){if($line -match [regex]::Escape($p)){$matched=$true;break}}
+              foreach($p in $patterns){if($lines[$i] -match [regex]::Escape($p)){$matched=$true;break}}
               if($matched){
-                $from=[Math]::Max(0,$i-2); $to=[Math]::Min($lines.Count-1,$i+2)
-                Write-Host "--- $file lines $($from+1)-$($to+1) hit $($i+1) ---"
-                for($j=$from;$j -le $to;$j++){Write-Host (("{0}: {1}" -f ($j+1),$lines[$j]))}
+                $from=[Math]::Max(0,$i-3); $to=[Math]::Min($lines.Count-1,$i+3)
+                $out.Add("--- lines $($from+1)-$($to+1) hit $($i+1) ---")
+                for($j=$from;$j -le $to;$j++){$out.Add(("{0}: {1}" -f ($j+1),$lines[$j]))}
               }
             }
           }
+          $out | Set-Content inspection-08201.txt -Encoding UTF8
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add inspection-08201.txt
+          git commit -m 'Capture UEP 0.82.01 inspection snippets'
+          git push origin HEAD:main
