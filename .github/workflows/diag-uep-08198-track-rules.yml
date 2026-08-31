@@ -1,0 +1,36 @@
+name: Diagnose UEP 0.81.98 Track Rules
+on:
+  push:
+    paths:
+      - 'diag-uep-08198-track-rules.trigger'
+permissions:
+  contents: read
+jobs:
+  diag:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download 0.81.97
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.81.97 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+      - name: Extract exact track-rule snippets
+        shell: pwsh
+        run: |
+          $f='app/resources/app/gyomuon.js'
+          $lines=Get-Content $f -Encoding UTF8
+          $terms=@('function inferDesiredTrack','function trackErrorsForRow','scienceGroups','socialGroups','artsGroups','subjectGroup','예체능','careerRecommendFields08190')
+          foreach($term in $terms){
+            Write-Host "===== $term ====="
+            for($i=0;$i -lt $lines.Count;$i++){
+              if($lines[$i] -like "*$term*"){
+                $s=[Math]::Max(0,$i-25);$e=[Math]::Min($lines.Count-1,$i+60)
+                for($j=$s;$j -le $e;$j++){Write-Host ('{0,6}: {1}' -f ($j+1),$lines[$j])}
+                Write-Host ''
+              }
+            }
+          }
