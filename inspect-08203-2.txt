@@ -1,0 +1,629 @@
+
+===== GRADE_TRANSFER =====
+13830: /* UEP_08186_GRADE_TRANSFER_START */
+13831: (function install08186(){
+13832:   if(typeof window==='undefined'||window.__UEP08186GradeTransferInstalled)return;
+13833:   window.__UEP08186GradeTransferInstalled=true;
+13834:   const V='0.81.86',SEEN='uep.updateNotes.lastShownVersion';
+13835:   const oldDataset=uepSelectionDataset,oldOpenSubject=uepOpenSubjectModal08128;
+13836:   function norm(v){return String(v??'').trim()}
+13837:   function sameStudentScore(row,student){
+13838:     const sid=norm(student?.id),sno=norm(student?.studentNo);
+13839:     const rid=norm(row?.studentId||row?.['학생ID']),rno=norm(row?.studentNo||row?.['학번']);
+13840:     return (!!sid&&!!rid&&sid===rid)||!!sno&&!!rno&&sno===rno;
+13841:   }
+13842:   function finalGradeRows(student){
+13843:     const rows=(readonlyCache?.scoreRecords||[]).filter(r=>sameStudentScore(r,student)&&norm(r?.scoreType||r?.['성적구분']||'내신')==='내신');
+13844:     const exact=rows.filter(r=>norm(r?.schoolYear||r?.['학년도'])==='2026'&&norm(r?.semester||r?.['학기']).replace(/[^0-9]/g,'')==='1'&&norm(r?.exam||r?.['고사구분'])==='학기말고사');
+13845:     if(exact.length)return exact;
+13846:     const sem1=rows.filter(r=>norm(r?.schoolYear||r?.['학년도'])==='2026'&&norm(r?.semester||r?.['학기']).replace(/[^0-9]/g,'')==='1');
+13847:     const finals=sem1.filter(r=>norm(r?.exam||r?.['고사구분'])==='학기말고사');
+13848:     return finals.length?finals:[];
+13849:   }
+13850:   function finalGradeAverage(student){
+13851:     const levels=finalGradeRows(student).map(r=>Number(r?.level??r?.grade??r?.['등급'])).filter(Number.isFinite);
+13852:     return levels.length?levels.reduce((a,b)=>a+b,0)/levels.length:null;
+13853:   }
+13854:   function isTransfer(row,student){
+13855:     const state=norm(row?.['학적상태']||student?.enrollmentStatus||student?.status);
+13856:     if(/전입/.test(state))return true;
+13857:     return !!norm(student?.transferDate||student?.transferInDate||student?.entryDate||student?.['전입일']||row?.['전입일']);
+13858:   }
+13859:   function sourceLabel(row,student,avg){return isTransfer(row,student)?(avg==null?'전입생 · 성적자료 없음':'전입교'):''}
+13860:   uepSelectionDataset=function(){
+13861:     const base=oldDataset.apply(this,arguments);
+13862:     const cache=new Map();
+13863:     const valueFor=student=>{
+13864:       const key=norm(student?.id||student?.studentNo);
+13865:       if(!cache.has(key))cache.set(key,finalGradeAverage(student));
+13866:       return cache.get(key);
+13867:     };
+13868:     for(const app of base?.applications||[]){
+13869:       app.avg=valueFor(app.student);
+13870:       app.gradeSource=sourceLabel(app.row,app.student,app.avg);
+13871:     }
+13872:     for(const group of base?.subjects||[]){
+13873:       for(const app of group.students||[]){
+13874:         app.avg=valueFor(app.student);
+13875:         app.gradeSource=sourceLabel(app.row,app.student,app.avg);
+13876:       }
+13877:       group.students.sort((a,b)=>(a.avg??99)-(b.avg??99)||String(a.student?.studentNo||'').localeCompare(String(b.student?.studentNo||'')));
+13878:       const graded=group.students.filter(x=>x.avg!=null).length;
+13879:       let rank=0;
+13880:       for(const app of group.students){
+13881:         if(app.avg==null){app.expectedRank=null;app.expectedGrade='-';continue}
+13882:         rank+=1;app.expectedRank=rank;app.expectedGrade=uepExpectedGrade(rank,graded);
+13883:       }
+13884:     }
+13885:     return base;
+13886:   };
+13887:   function ensureStyle(){
+13888:     if(document.getElementById('uep-style-08186'))return;
+13889:     const s=document.createElement('style');s.id='uep-style-08186';
+13890:     s.textContent='.uep-grade-source-08186{display:block;margin-top:3px;font-size:10px;font-weight:800;color:#28786d;line-height:1.15}.uep-grade-source-08186.missing{color:#b56a22}.uep-grade-header-note-08186{white-space:normal!important;line-height:1.2!important}#uepUpdateNotes08186{position:fixed;inset:0;z-index:2147483006;background:rgba(20,31,35,.38);display:flex;align-items:center;justify-content:center;padding:24px}#uepUpdateNotes08186 .d{width:min(650px,92vw);background:#fff;border-radius:22px;padding:24px;box-shadow:0 26px 70px rgba(0,0,0,.22)}#uepUpdateNotes08186 button{float:right;border:0;border-radius:12px;background:#167866;color:#fff;padding:10px 18px;font-weight:900;cursor:pointer}';
+13891:     document.head.appendChild(s);
+13892:   }
+13893:   function decorateGradeSource(key){
+13894:     try{
+13895:       const data=uepSelectionDataset(),selected=(data?.subjects||[]).find(x=>x.key===key);
+13896:       const roster=document.querySelector('.subject-roster-modal .selection-roster'),head=roster?.querySelector('.selection-roster-head');
+13897:       if(!selected||!roster||!head)return false;
+13898:       ensureStyle();
+13899:       const heads=[...head.children];
+13900:       let avgIndex=heads.findIndex(x=>/1학년\s*내신평균|1학기말\s*평균등급/.test(norm(x.textContent)));
+13901:       if(avgIndex<0)return false;
+13902:       heads[avgIndex].textContent='1학기말 평균등급';heads[avgIndex].classList.add('uep-grade-header-note-08186');
+13903:       const rows=[...(selected.students||[])].sort(curriculumRosterSort==='class'?((a,b)=>String(a.student?.studentNo||'').localeCompare(String(b.student?.studentNo||''))):((a,b)=>(a.avg??99)-(b.avg??99)||String(a.student?.studentNo||'').localeCompare(String(b.student?.studentNo||''))));
+13904:       const articles=[...roster.querySelectorAll(':scope > article')];
+13905:       articles.forEach((article,i)=>{
+13906:         article.querySelectorAll('[data-uep-grade-source-08186]').forEach(x=>x.remove());
+13907:         const app=rows[i],cell=article.children[avgIndex];if(!app||!cell)return;
+13908:         if(app.gradeSource){const small=document.createElement('small');small.dataset.uepGradeSource08186='1';small.className='uep-grade-source-08186'+(app.avg==null?' missing':'');small.textContent=app.gradeSource;cell.appendChild(small)}
+13909:       });
+13910:       roster.dataset.uepGradeSource08186=String(key)+'|'+rows.map(x=>[x.student?.studentNo,x.avg,x.gradeSource].join(':')).join(';');
+13911:       return true;
+13912:     }catch(e){console.warn('[UEP 0.81.86 grade source]',e);return false}
+13913:   }
+13914:   function refreshGradeSource(key){let n=0,last='';const tick=()=>{n++;decorateGradeSource(key);const r=document.querySelector('.subject-roster-modal .selection-roster'),sig=r?.dataset.uepGradeSource08186||'';if(sig&&sig===last&&n>5)return;last=sig;if(n<45)requestAnimationFrame(tick)};requestAnimationFrame(tick)}
+13915:   uepOpenSubjectModal08128=function(key){const out=oldOpenSubject.apply(this,arguments);refreshGradeSource(key);return out};
+13916:   function closeNote(){document.getElementById('uepUpdateNotes08186')?.remove();try{localStorage.setItem(SEEN,V);localStorage.setItem('uep.releaseNotes.seen',V)}catch{}}
+13917:   function showNote(){
+13918:     try{if(String(APP_VERSION)!==V||localStorage.getItem(SEEN)===V)return}catch{return}
+13919:     ensureStyle();document.getElementById('uepUpdateNotes08185')?.remove();
+13920:     const l=document.createElement('div');l.id='uepUpdateNotes08186';l.innerHTML='<div class="d"><h2>UEP 0.81.86 업데이트</h2><ul><li>과목별 신청현황의 내신 기준을 1차·2차·학기말 혼합평균에서 1학기 학기말 최종등급 평균으로 바로잡았습니다.</li><li>전입생은 1학기 성적이 연결되면 전입교 성적으로 표시하고, 아직 없으면 성적자료 없음으로 구분합니다.</li><li>성적자료가 없는 학생은 예상등수·예상등급 산출에서 제외합니다.</li></ul><button type="button">확인</button><div style="clear:both"></div></div>';document.body.appendChild(l);l.querySelector('button').onclick=closeNote;
+13921:   }
+13922:   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(showNote,900),{once:true});else setTimeout(showNote,900);
+13923: })();
+13924: /* UEP_08186_GRADE_TRANSFER_END */
+13925: 
+===== UPDATE_NOTES_08188 =====
+13925: 
+13926: /* UEP_08188_SUBJECT_CARD_PERFORMANCE_START */
+13927: (function install08188(){
+13928:   if(typeof window==='undefined'||window.__UEP08188SubjectCardPerformanceInstalled)return;
+13929:   window.__UEP08188SubjectCardPerformanceInstalled=true;
+13930:   const V='0.81.88',OPEN_LINE=21,SEEN='uep.updateNotes.lastShownVersion';
+13931:   const norm=v=>String(v??'').normalize('NFKC').replace(/\s+/g,'').replace(/\*/g,'').trim();
+13932:   const esc=v=>typeof escapeHtml==='function'?escapeHtml(v):String(v??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#39;'}[ch]));
+13933:   const sid=x=>String(x?.student?.id||x?.student?.studentNo||x?.__student?.id||x?.__student?.studentNo||x?.id||x?.studentNo||'').trim();
+13934:   const setOf=rows=>new Set((rows||[]).map(sid).filter(Boolean));
+13935:   const intersect=(a,b)=>new Set([...a].filter(x=>b.has(x)));
+13936:   const minus=(a,b)=>new Set([...a].filter(x=>!b.has(x)));
+13937:   const gradeStats=students=>{const vals=(students||[]).map(x=>Number(x?.avg)).filter(Number.isFinite).map(x=>Math.max(1,Math.min(5,x))),bins=[0,0,0,0,0];vals.forEach(v=>bins[Math.max(0,Math.min(4,Math.round(v)-1))]++);const sorted=[...vals].sort((a,b)=>a-b),avg=vals.length?vals.reduce((a,b)=>a+b,0)/vals.length:null,median=!sorted.length?null:(sorted.length%2?sorted[(sorted.length-1)/2]:(sorted[sorted.length/2-1]+sorted[sorted.length/2])/2);return{bins,graded:vals.length,avg,median};};
+13938:   const curve=stats=>{const bins=stats?.bins||[0,0,0,0,0],max=Math.max(1,...bins),xs=[8,31,54,77,100],ys=bins.map(v=>30-(v/max)*22),points=xs.map((x,i)=>x+','+ys[i].toFixed(1)).join(' ');return '<div class="uep-grade-curve-08188" title="1~5등급 분포 · 성적자료 '+stats.graded+'명"><svg viewBox="0 0 108 42" preserveAspectRatio="none"><path d="M8 31H100"/><polyline points="'+points+'"/>'+xs.map((x,i)=>'<circle cx="'+x+'" cy="'+ys[i].toFixed(1)+'" r="1.8"/>').join('')+'</svg><div><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span></div></div>';};
+13939:   function buildAnalysis(data){
+13940:     const appIndex=new Map(),trackIndex=new Map(),rules=(typeof uepSelectionRules08129==='function'?uepSelectionRules08129():[]).filter(r=>String(r?.['규칙유형']||'')==='과학위계');
+13941:     for(const app of data?.applications||[]){const k=app.term+'|'+norm(app.subject);if(!appIndex.has(k))appIndex.set(k,new Set());const id=sid(app);if(id)appIndex.get(k).add(id);}
+13942:     for(const row of data?.rows||[]){const student=row?.__student||{},id=sid(row);if(!id)continue;const explicit=String(row?.['희망계열']||student?.careerTrack||student?.track||'').trim(),major=String(row?.['희망전공']||student?.desiredMajor||'').trim(),text=(explicit+' '+major).replace(/\s+/g,'');let track='미분류';if(/자연|이과|공학|의학|의예|치의|한의|약학|수의|간호|보건|과학|수학|컴퓨터|소프트웨어|AI|인공지능/.test(text))track='이과';else if(/인문|문과|사회|상경|경영|경제|법|행정|정치|언론|미디어|어문|국어|영어|역사|지리|교육/.test(text))track='문과';else{let sci=0,soc=0;for(const term of ['2-1','2-2'])for(const subject of (typeof uepSelectionTermSubjects==='function'?uepSelectionTermSubjects(row,term):[])){const cg=String(typeof uepSelectionCurriculumGroup08129==='function'?uepSelectionCurriculumGroup08129(subject):'');if(/과학/.test(cg)||/물리|화학|생명|지구|역학|전자기|세포|물질대사|유전|행성우주/.test(subject))sci++;else if(/사회/.test(cg)||/세계사|윤리|지리|정치|경제|사회|역사/.test(subject))soc++;}if(sci>soc)track='이과';else if(soc>sci)track='문과';}trackIndex.set(id,track);}
+13943:     const hierFor=group=>{if(!group||uepSubjectGroup08128(group.subject)!=='과학'||!['2-2','3-1'].includes(group.term))return null;const target=norm(group.subject);for(const rule of rules){const raw=String(rule?.['학기']||''),parts=raw.split(/→|->/).map(x=>x.trim()),fromTerm=parts[0],toTerm=String(rule?.['연계학기']||parts[1]||'').trim(),basic=String(rule?.['선수과목']||'').trim(),advanced=String(rule?.['후속·심화과목']||'').split('|').map(x=>x.trim()).filter(Boolean);if(!fromTerm||toTerm!==group.term||!basic||!advanced.some(x=>norm(x)===target))continue;const sourceSet=appIndex.get(fromTerm+'|'+norm(basic))||new Set(),currentSet=setOf(group.students||[]),validCurrent=intersect(currentSet,sourceSet),invalidCurrent=minus(currentSet,sourceSet);let validPrior=new Set(),invalidPrior=new Set(),selectable=new Set(sourceSet);if(group.term==='3-1'){const priorSet=appIndex.get('2-2|'+target)||new Set();validPrior=intersect(priorSet,sourceSet);invalidPrior=minus(priorSet,sourceSet);selectable=minus(sourceSet,validPrior);}return{basic,maxPool:sourceSet.size,validCurrent,invalidCurrent,validPrior,invalidPrior,selectable};}return null;};
+13944:     const showTrack=group=>{if(!['2-1','2-2'].includes(group.term))return false;const broad=uepSubjectGroup08128(group.subject),cg=String(typeof uepSelectionCurriculumGroup08129==='function'?uepSelectionCurriculumGroup08129(group.subject):''),x=String(group.subject||''),ke=/국어|영어/.test(cg)||/독서|문학|언어|화법|작문|영어|미디어 영어|세계 문화와 영어/.test(x);return (broad==='국·영·수'&&ke)||broad==='사회';};
+13945:     for(const group of data?.subjects||[]){const hier=hierFor(group),stats=gradeStats(group.students),actual=group.students.length,validActual=hier?hier.validCurrent.size:actual;let comp=null;if(showTrack(group)){comp={문과:0,이과:0,미분류:0};for(const app of group.students||[])comp[trackIndex.get(sid(app))||'미분류']++;}group.uep08188={hier,stats,actual,validActual,delta:validActual-OPEN_LINE,comp};}
+13946:     return data;
+13947:   }
+13948:   uepSubjectStatus=function(group){const m=group?.uep08188,n=m?.validActual??group?.students?.length??0;if(n<OPEN_LINE)return '<i class="subject-risk watch">개설선 '+(OPEN_LINE-n)+'명 부족</i>';if(Math.ceil(n/Math.max(1,group.sectionCount||1))>30)return '<i class="subject-risk crowd">과밀가능</i>';return '<i class="subject-risk stable">개설선 +'+(n-OPEN_LINE)+'명</i>';};
+13949:   const trackMarkup=comp=>{if(!comp)return '';const total=comp.문과+comp.이과+comp.미분류||1,pct=n=>Math.round(n*100/total);return '<div class="uep-trackmix-08188"><small>신청자 계열 구성</small><div><span>문과 <b>'+comp.문과+'</b><em>'+pct(comp.문과)+'%</em></span><span>이과 <b>'+comp.이과+'</b><em>'+pct(comp.이과)+'%</em></span><span>미분류 <b>'+comp.미분류+'</b><em>'+pct(comp.미분류)+'%</em></span></div></div>';};
+13950:   function extra(group){const m=group.uep08188,isKEM=uepSubjectGroup08128(group.subject)==='국·영·수'&&['2-1','2-2'].includes(group.term);let h='';if(m.hier){h=group.term==='3-1'?'<div class="uep-subject-flow-08188"><span>선수 풀 <b>'+m.hier.maxPool+'</b></span><span>2-2 정상 <b>'+m.hier.validPrior.size+'</b> / 오류 <b>'+m.hier.invalidPrior.size+'</b></span><span>선택가능 <b>'+m.hier.selectable.size+'</b></span><span>신청 정상 <b>'+m.hier.validCurrent.size+'</b> / 오류 <b>'+m.hier.invalidCurrent.size+'</b></span></div>':'<div class="uep-subject-flow-08188"><span>'+esc(m.hier.basic)+' 선수 풀 <b>'+m.hier.maxPool+'</b></span><span>신청 정상 <b>'+m.hier.validCurrent.size+'</b> / 오류 <b>'+m.hier.invalidCurrent.size+'</b></span></div>';}const stat=isKEM&&m.stats.graded?'<div class="uep-subject-kem-08188"><span>평균 <b>'+m.stats.avg.toFixed(2)+'</b></span><span>중앙 <b>'+m.stats.median.toFixed(2)+'</b></span></div>':'';return h+trackMarkup(m.comp)+stat+'<div class="uep-subject-distribution-08188"><small>현재 성적대 분포</small>'+curve(m.stats)+'</div><div class="uep-openline-08188 '+(m.delta<0?'under':'over')+'">개설 기준 '+OPEN_LINE+'명 · '+(m.delta>=0?'+':'')+m.delta+'명'+(m.hier?' (정상 신청 기준)':'')+'</div>';}
+13951:   uepSubjectApplicationView=function(){const data=buildAnalysis(uepSelectionDataset()),terms=['2-1','2-2','3-1','3-2'],groups=data.subjects.filter(x=>x.term===curriculumTermFilter),order=['국·영·수','사회','과학','음·미·체','일본어·중국어·한문·정보','기타'],bucket=new Map(order.map(x=>[x,[]]));groups.forEach(g=>bucket.get(uepSubjectGroup08128(g.subject))?.push(g));const counts=new Map(terms.map(t=>[t,0]));for(const g of data.subjects||[])counts.set(g.term,(counts.get(g.term)||0)+1);const style='<style id="uep-style-08188">.subject-card-grid>button{min-height:238px;align-content:start}.uep-subject-flow-08188{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px;margin-top:8px}.uep-subject-flow-08188 span,.uep-subject-kem-08188 span{padding:5px 6px;border-radius:8px;background:#f1f7f5;font-size:10px;line-height:1.2;color:#52645f}.uep-subject-flow-08188 b,.uep-subject-kem-08188 b{font-size:12px;color:#173f36}.uep-subject-kem-08188{display:flex;gap:6px;margin-top:8px}.uep-trackmix-08188{margin-top:8px;padding:7px;border:1px solid #e1ebe8;border-radius:10px;background:#f8fbfa}.uep-trackmix-08188>small,.uep-subject-distribution-08188>small{display:block;text-align:left;font-size:9px;color:#667b75;margin-bottom:4px}.uep-trackmix-08188>div{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}.uep-trackmix-08188 span{font-size:9px;text-align:left}.uep-trackmix-08188 b{display:block;font-size:13px}.uep-trackmix-08188 em{display:block;font-size:8px;font-style:normal;color:#7b8b86}.uep-subject-distribution-08188{margin-top:8px;padding:6px 7px;border:1px solid #e1ebe8;border-radius:10px;background:#fbfdfc}.uep-grade-curve-08188 svg{width:100%;height:34px;overflow:visible}.uep-grade-curve-08188 path{stroke:#d7e2df;stroke-width:1;fill:none}.uep-grade-curve-08188 polyline{stroke:currentColor;stroke-width:2;fill:none;vector-effect:non-scaling-stroke}.uep-grade-curve-08188 circle{fill:currentColor}.uep-grade-curve-08188>div{display:grid;grid-template-columns:repeat(5,1fr);font-size:8px;color:#83928e;text-align:center;margin-top:-2px}.uep-openline-08188{margin-top:6px;font-size:10px;font-weight:800;text-align:left}.uep-openline-08188.over{color:#287565}.uep-openline-08188.under{color:#b45b43}</style>';return style+'<div class="term-picker-cards">'+terms.map(t=>'<button data-curriculum-term="'+t+'" class="'+(curriculumTermFilter===t?'active':'')+'"><b>'+t.replace('-','학년 ')+'학기</b><span>'+counts.get(t)+'과목</span></button>').join('')+'</div>'+order.filter(k=>bucket.get(k).length).map(k=>'<section class="subject-group-section group-'+k.replace(/[^가-힣A-Za-z0-9]/g,'')+'"><header><h3>'+k+'</h3><span>'+bucket.get(k).length+'과목</span></header><div class="subject-card-grid">'+bucket.get(k).sort((a,b)=>a.subject.localeCompare(b.subject,'ko')).map(g=>'<button data-curriculum-subject="'+esc(g.key)+'"><small>'+g.term+'</small><b>'+esc(g.subject)+'</b><span>신청 '+g.students.length+'명 · 예상 '+g.sectionCount+'분반</span>'+extra(g)+uepSubjectStatus(g)+'</button>').join('')+'</div></section>').join('');};
+13952:   function closeNote(){document.getElementById('uepUpdateNotes08188')?.remove();try{localStorage.setItem(SEEN,V);localStorage.setItem('uep.releaseNotes.seen',V)}catch{}}
+13953:   function showNote(){try{if(String(APP_VERSION)!==V||localStorage.getItem(SEEN)===V)return}catch{return}document.getElementById('uepUpdateNotes08186')?.remove();const l=document.createElement('div');l.id='uepUpdateNotes08188';l.style.cssText='position:fixed;inset:0;z-index:2147483007;background:rgba(20,31,35,.38);display:flex;align-items:center;justify-content:center;padding:24px';l.innerHTML='<div style="width:min(680px,92vw);background:#fff;border-radius:22px;padding:24px;box-shadow:0 26px 70px rgba(0,0,0,.22)"><h2>UEP 0.81.88 선택과목 카드 성능개선</h2><ul><li>교육과정 진입 시 과목카드 분석을 미리 전수계산하던 구조를 제거했습니다.</li><li>과목별 신청현황을 열 때만 학생집합·계열구성·성적분포를 1회 계산합니다.</li><li>학생별 계열 판정과 과목별 신청집합을 인덱스로 재사용해 반복 탐색을 줄였습니다.</li><li>0.81.87의 정상/오류·선택가능·문이과 구성·성적분포 표시는 그대로 유지합니다.</li></ul><button type="button" style="float:right;border:0;border-radius:12px;background:#167866;color:#fff;padding:10px 18px;font-weight:900;cursor:pointer">확인</button><div style="clear:both"></div></div>';document.body.appendChild(l);l.querySelector('button').onclick=closeNote;}
+13954:   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(showNote,900),{once:true});else setTimeout(showNote,900);
+13955: })();
+13956: /* UEP_08188_SUBJECT_CARD_PERFORMANCE_END */
+13957: 
+13958: 
+13959: /* UEP_08194_SELECTION_ERROR_SOURCE_START */
+13960: (function(){
+13961:   if(typeof window==='undefined'||window.__UEP08194SelectionErrorSourceInstalled)return;
+13962:   window.__UEP08194SelectionErrorSourceInstalled=true;
+13963:   const base=window.uepSelectionDataset||uepSelectionDataset;
+13964:   if(typeof base!=='function')return;
+13965:   const sid=v=>String(v??'').trim();
+13966:   const mapRows=(rows,data)=>{
+13967:     const students=new Map();
+13968:     for(const r of data?.rows||[]){const s=r?.__student;if(!s)continue;for(const k of [s.id,s.studentNo,s.no])if(sid(k))students.set(sid(k),s);}
+13969:     const out=[];
+13970:     for(const r of rows||[]){
+13971:       const student=students.get(sid(r?.['학생ID']))||students.get(sid(r?.['학번']));
+13972:       if(!student)continue;
+13973:       const grade=sid(r?.['대상학년']);
+13974:       const rawTerm=sid(r?.['학기']);
+13975:       const terms=/^[23]-[12]$/.test(rawTerm)?[rawTerm]:(grade==='2'?['2-1','2-2']:grade==='3'?['3-1','3-2']:[]);
+13976:       const term=/^[23]-[12]$/.test(rawTerm)?rawTerm:(terms[0]||'');
+13977:       const subject=sid(r?.['과목명']);
+13978:       const detail=sid(r?.['오류상세']);
+13979:       out.push({student,type:sid(r?.['오류유형'])||'오류',term,terms,subject,subjects:subject?[subject]:[],detail,message:detail,path:rawTerm||grade+'학년',ruleId:sid(r?.['규칙ID']),severity:sid(r?.['심각도'])||'오류',decision:sid(r?.['관리자결정']),__source:'51_선택과목오류_정규화'});
+13980:     }
+13981:     return out;
+13982:   };
+13983:   /* UEP_08198_RECOMMENDED_TRACK_ERRORS */
+13984:   const recommendedTrack08198=student=>{
+13985:     try{
+13986:       const bundle=typeof studentRecordBundle==='function'?studentRecordBundle(student):undefined;
+13987:       const info=typeof studentCareerSupportBase_==='function'?studentCareerSupportBase_(student,bundle):null;
+13988:       return String(info?.recommendation||'').trim();
+13989:     }catch{return '';}
+13990:   };
+13991:   /* UEP_08200_TERM_SCOPED_CROSS_ERRORS */
+13992:   const crossErrors08198=data=>{
+13993:     const out=[];
+13994:     for(const row of data?.rows||[]){
+13995:       const student=row?.__student;if(!student)continue;
+13996:       for(const term of ['2-1','2-2']){
+13997:         const selected=[];
+13998:         const subjects=typeof uepSelectionTermSubjects==='function'?(uepSelectionTermSubjects(row,term)||[]):[];
+13999:         for(const subject of subjects){
+14000:           const group=typeof uepSubjectGroup08128==='function'?uepSubjectGroup08128(subject):'';
+14001:           if(group==='사회'||group==='과학')selected.push({term,subject,group});
+14002:         }
+14003:         const social=selected.filter(x=>x.group==='사회');
+14004:         const science=selected.filter(x=>x.group==='과학');
+14005:         if(!social.length||!science.length)continue;
+14006:         const socialNames=[...new Set(social.map(x=>x.subject))];
+14007:         const scienceNames=[...new Set(science.map(x=>x.subject))];
+14008:         const detail=term+' 학기 내에서 사회계열 ['+socialNames.join(', ')+']과 과학계열 ['+scienceNames.join(', ')+']을 함께 선택했습니다.';
+14009:         for(const x of selected){
+14010:           out.push({student,type:'진로계열 교차선택',term,terms:[term],subject:x.subject,subjects:[x.subject],detail,message:detail,path:term,severity:'확인',recommendedTrack:recommendedTrack08198(student),__source:'UEP-08200-term-scoped-cross'});
+14011:         }
+14012:       }
+14013:     }
+14014:     return out;
+14015:   };
+14016:   const mergeCross08198=(errors,cross)=>{
+14017:     const out=[...(errors||[])],seen=new Set(out.map(x=>[String(x?.student?.id||x?.student?.studentNo||''),String(x?.type||''),String(x?.term||''),String(x?.subject||'')].join('|')));
+14018:     for(const x of cross||[]){const k=[String(x?.student?.id||x?.student?.studentNo||''),String(x?.type||''),String(x?.term||''),String(x?.subject||'')].join('|');if(!seen.has(k)){seen.add(k);out.push(x);}}
+14019:     return out;
+14020:   };
+14021:   const wrapped=function(){
+14022:     const data=base.apply(this,arguments);
+14023:     if(!data||!Array.isArray(data.rows))return data;
+14024:     const rows=Array.isArray(readonlyCache?.selectionErrorRows)?readonlyCache.selectionErrorRows:[];
+14025:     if(rows.length){data.errors=mapRows(rows,data);data.__selectionErrorSource='51_선택과목오류_정규화';data.__selectionErrorRows=rows.length;}
+14026:     else data.__selectionErrorSource='legacy-fallback';
+14027:     data.errors=(data.errors||[]).map(x=>{if(String(x?.type||'').trim()!=='진로계열 교차선택')return x;const detail=String(x?.detail||'').trim();return {...x,type:'진로계열 교차선택',detail:detail+(detail&&!/진로.*확인/.test(detail)?' 진로계획과 맞는 선택인지 확인이 필요합니다.':'')};});
+14028:     data.__selectionCrossRule='51-source-only-0.82.02';
+14029:     data.__selectionRecommendedTrackErrors='reference-only';
+14030:     return data;
+===== OUTING =====
+
+  app\resources\app\gyomuon.js:1692:    {id:'period-s2',category:'period',name:'2026-2학기',start:'2026-08-18T00:00',end:'2026-12-30T23:59',days:'전체',effect:'운영기간',priority:10,active:true,note:'2학기 학교 운영기간.',operationState:'운영'},
+  app\resources\app\gyomuon.js:1693:    {id:'period-winter',category:'period',name:'2026 겨울방학',start:'2026-12-31T00:00',end:'2027-02-28T23:59',days:'전체',effect:'운영기간',priority:10,active:true,note:'겨울방학에도 학사를 운영합니다. 실제 미운영기간은 학년 협의 후 별도 등록합니다.',operationState:'운영'},
+  app\resources\app\gyomuon.js:1694:    {id:'closure-summer-2026',category:'closure',name:'여름방학 학사 미운영',start:'2026-08-08T00:00',end:'2026-08-17T18:59',days:'전체',effect:'학사 미운영',priority:40,active:true,note:'이 기간 외출은 원본은 보존하되 빠른열기·운영통계에서는 제외합니다.',operationState:'미운영'},
+  app\resources\app\gyomuon.js:1695:    {id:'entry-20260817',category:'exception',name:'2학기 개학 전 재입소',start:'2026-08-17T19:00',end:'2026-08-17T22:30',days:'월',effect:'입소 변경',entryTime:'19:00',lateEntry:'22:30',reason:'학원',priority:50,active:true,note:'정상 입소 19:00. 학원 사유 학생은 22:30까지 늦은 입소 허용.',operationState:'입퇴소변경',actualReentry:'2026-08-17T19:00',formRequired:true},
+> app\resources\app\gyomuon.js:1696:    {id:'base-weekly-2026',category:'base',name:'기본 주간 입·퇴소 규칙',start:'2026-03-01T00:00',end:'2027-02-28T23:59',days:'금,토,일',effect:'기본 입퇴소',entryTime:'일 19:00',exitTime:'토 08:30',lateEntry:'입소일 22:30',earlyExit:'금 일과후',reason:'학원',priority:20,active:true,note:'평상시 학원 외출은 불가. 금요일 야간 학원 후 바로 귀가 가능(개인신청). 토요일 08:30 퇴소. 입소일 19:00 기본 입소, 입소일 학원 사유 학생은 개인신청 시 22:30까지 늦은 입소 허용.',operationState:'운영',priorNightAcademyHome:true,formRequired:true},
+  app\resources\app\gyomuon.js:1697:    {id:'expected-20260924-chuseok',category:'exception',name:'추석연휴 입·퇴소 변경',start:'2026-09-24T15:30',end:'2026-09-27T19:00',days:'목,금,토,일',effect:'연휴 전체퇴소·재입소 변경',priority:5,active:true,note:'추석연휴는 전날 일과 종료 후 15:30 전체 퇴소하고 연휴 마지막 날 19:00 재입소합니다.',operationState:'입퇴소변경',actualExit:'2026-09-24T15:30',actualReentry:'2026-09-27T19:00'},
+> app\resources\app\gyomuon.js:1698:    {id:'expected-20260908-exam1',category:'exam',name:'1차 정기고사 외출허용',start:'2026-09-08T00:00',end:'2026-10-02T23:59',days:'월,화,수,목',effect:'시험 대비·시험일 야간 학원외출 허용',lateEntry:'22:30',reason:'학원',priority:30,active:true,note:'1차 정기고사 대비기간: 시험 3주 전부터 시험 마지막 날까지 월~목 학원외출을 허용합니다. 개인 신청으로 확정합니다.',operationState:'개인외출허용',formRequired:true,individualOutingAllowed:true},
+  app\resources\app\gyomuon.js:1699:    {id:'expected-20261005-holiday',category:'exception',name:'개천절 대체휴일 입·퇴소 변경',start:'2026-10-03T08:30',end:'2026-10-05T17:00',days:'금,토,일,월',effect:'재입소일 변경',entryTime:'월 17:00',exitTime:'토 08:30',lateEntry:'입소일 22:30',earlyExit:'금 일과후',reason:'학원',priority:5,active:true,note:'퇴소는 기본규칙과 동일하게 토요일 08:30. 금요일 야간 학원 후 귀가 가능(개인 신청). 재입소만 월요일 17:00로 
+변경합니다.',operationState:'입퇴소변경',actualExit:'2026-10-03T08:30',actualReentry:'2026-10-05T17:00',priorNightAcademyHome:true,formRequired:true},
+  app\resources\app\gyomuon.js:1700:    {id:'expected-20261009-holiday',category:'exception',name:'한글날 입·퇴소 변경',start:'2026-10-09T08:30',end:'2026-10-11T22:30',days:'금,토,일',effect:'금요일 아침 퇴소·일요일 재입소',entryTime:'일 19:00',exitTime:'금 08:30',lateEntry:'입소일 22:30',reason:'학원',priority:5,active:true,note:'한글날 금요일 08:30 전체 퇴소. 전날 학원 후 귀가는 허용하지 않습니다. 일요일 19:00 재입소, 학원 사유는 22:30까지 늦은 입소를 허용합니다.',operationState:'입퇴소변경',actualExit:'2026-10-09T08:30',actualReentry:'2026-10-11T19:00',formRequired:true},
+> app\resources\app\gyomuon.js:1701:    {id:'expected-20261116-exam2',category:'exam',name:'2차 정기고사 외출허용',start:'2026-11-16T00:00',end:'2026-12-11T23:59',days:'월,화,수,목',effect:'시험 대비·시험일 야간 학원외출 허용',lateEntry:'22:30',reason:'학원',priority:30,active:true,note:'2차 정기고사 대비기간: 시험 3주 전부터 시험 마지막 날까지 월~목 학원외출을 허용합니다. 개인 신청으로 확정합니다.',operationState:'개인외출허용',formRequired:true,individualOutingAllowed:true},
+  app\resources\app\gyomuon.js:1702:    {id:'expected-20261225-christmas',category:'exception',name:'크리스마스 입·퇴소 변경',start:'2026-12-25T08:30',end:'2026-12-27T22:30',days:'금,토,일',effect:'금요일 아침 퇴소·일요일 재입소',entryTime:'일 19:00',exitTime:'금 08:30',lateEntry:'입소일 22:30',reason:'학원',priority:5,active:true,note:'크리스마스 금요일 08:30 전체 퇴소. 전날 학원 후 귀가는 허용하지 않습니다. 일요일 19:00 재입소, 학원 사유는 22:30까지 늦은 입소를 허용합니다.',operationState:'입퇴소변경',actualExit:'2026-12-25T08:30',actualReentry:'2026-12-27T19:00',formRequired:true},
+> app\resources\app\gyomuon.js:1703:    {id:'expected-20261230-break',category:'vacation',name:'겨울방학 중 학원외출 허용',start:'2026-12-31T00:00',end:'2027-02-28T23:59',days:'월,화,수,목,금',effect:'방학 중 학원외출 특별허용(월~금 복귀형 + 금요일 귀가형)',lateEntry:'22:30',earlyExit:'금요일 야간 학원 후 귀가 가능',reason:'학원',priorNightAcademyHome:true,priority:30,active:true,note:'12/30 방학식 후 겨울방학 학사운영으로 전환. 실제 겨울방학 미운영기간은 학년 협의 후 별도 등록하세요.',operationState:'개인외출허용',formRequired:true,individualOutingAllowed:true},
+> app\resources\app\gyomuon.js:1704:    {id:'DORM-RULE-1786567642135',category:'vacation',name:'여름방학 중 학원외출 허용',start:'2026-07-22T08:30',end:'2026-08-07T23:59',days:'월,화,수,목,금',effect:'방학 중 학원외출 특별허용(월~금 복귀형 + 금요일 귀가형)',lateEntry:'22:30',earlyExit:'금요일 야간 학원 후 귀가 가능',reason:'학원',priorNightAcademyHome:true,priority:30,active:true,note:'',operationState:'개인외출허용',formRequired:true,individualOutingAllowed:true}
+> app\resources\app\gyomuon.js:1705:  ].map(x=>({entryTime:'',exitTime:'',lateEntry:'',earlyExit:'',reason:'',locked:false,actualExit:'',actualReentry:'',priorNightAcademyHome:false,formRequired:false,individualOutingAllowed:false,...x,source:'규칙로그 검증 미러(v0.76.99)'}));
+  app\resources\app\gyomuon.js:1706:}
+  app\resources\app\gyomuon.js:1707:function dormRuleHistory(){
+  app\resources\app\gyomuon.js:1708:  const sheetRules=Array.isArray(readonlyCache?.dormRules)?readonlyCache.dormRules:[];
+  app\resources\app\gyomuon.js:1709:  if(sheetRules.length) return sheetRules.map(x=>({...x,active:x.active!==false}));
+  app\resources\app\gyomuon.js:1710:  return dormDefaultRules().map(x=>({...x,active:x.active!==false,source:'UEP 기본값(시트 연결 대기)'}));
+  app\resources\app\gyomuon.js:1711:}
+  app\resources\app\gyomuon.js:1712:function setDormRuleCache(rules){
+  app\resources\app\gyomuon.js:1713:  readonlyCache=readonlyCache||{};
+  app\resources\app\gyomuon.js:1796:  const rules=dormRuleHistory(), original=rules.find(x=>String(x.id)===String(ruleId))||null;
+  app\resources\app\gyomuon.js:1797:  const existing=copyMode?null:original;
+  app\resources\app\gyomuon.js:1798:  const rule=copyMode&&original
+  app\resources\app\gyomuon.js:1799:    ? {...original,id:`DORM-RULE-${Date.now()}`,name:`${original.name} - 복사본`,modifiedAt:'',source:'UEP 규칙센터 복사'}
+> app\resources\app\gyomuon.js:1800:    : (existing||{id:`DORM-RULE-${Date.now()}`,category:'exception',name:'',start:'',end:'',days:'전체',effect:'입·퇴소 변경 검토',entryTime:'',exitTime:'',lateEntry:'',earlyExit:'',reason:'',priority:50,note:'',active:true,source:'UEP 규칙센터',operationState:'',actualExit:'',actualReentry:'',priorNightAcademyHome:false,formRequired:false,individualOutingAllowed:false});
+  app\resources\app\gyomuon.js:1801:  $("#drawerKicker").textContent='DORMITORY · RULE';
+  app\resources\app\gyomuon.js:1802:  $("#drawerTitle").textContent=copyMode?'학사운영규칙 복사':existing?'학사운영규칙 수정':'학사운영규칙 추가';
+  app\resources\app\gyomuon.js:1803:  const opt=(v)=>String(rule.category)===v?'selected':'';
+  app\resources\app\gyomuon.js:1804:  $("#drawerBody").innerHTML=`<form id="dormRuleEditorForm" class="dorm-rule-editor">
+  app\resources\app\gyomuon.js:1805:    <div class="dorm-rule-editor-grid">
+  app\resources\app\gyomuon.js:1806:      <label>규칙 구분<select id="dormRuleCategory"><option value="period" ${opt('period')}>학교 운영기간</option><option value="closure" ${opt('closure')}>학사 미운영</option><option value="exception" ${opt('exception')}>공휴일·연휴 / 입·퇴소 변경</option><option value="exam" ${opt('exam')}>시험기간 학원외출 허용</option><option value="base" ${opt('base')}>기본 입·퇴소</option><option value="vacation" ${opt('vacation')}>방학 중 학원외출 허용</option></select></label>
+  app\resources\app\gyomuon.js:1807:      <label>규칙명<input id="dormRuleName" value="${escapeHtml(rule.name||'')}" required></label>
+  app\resources\app\gyomuon.js:1808:      <label data-dorm-rule-field="start">적용 시작일시<input type="datetime-local" id="dormRuleStart" value="${escapeHtml(dormRuleNormalizeDateTime(rule.start))}" required></label>
+  app\resources\app\gyomuon.js:1817:      <label data-dorm-rule-field="actualExit">퇴소 일자·시간<input type="datetime-local" id="dormRuleActualExit" value="${escapeHtml(dormRuleNormalizeDateTime(rule.actualExit))}"></label>
+  app\resources\app\gyomuon.js:1818:      <label data-dorm-rule-field="actualReentry">입소 일자·시간<input type="datetime-local" id="dormRuleActualReentry" value="${escapeHtml(dormRuleNormalizeDateTime(rule.actualReentry))}"></label>
+  app\resources\app\gyomuon.js:1819:      <label data-dorm-rule-field="priorHome" class="dorm-rule-check"><input type="checkbox" id="dormRulePriorNightAcademyHome" ${rule.priorNightAcademyHome?'checked':''}> 전날 야간 학원 후 귀가 허용</label>
+  app\resources\app\gyomuon.js:1820:      <label data-dorm-rule-field="form" class="dorm-rule-check"><input type="checkbox" id="dormRuleFormRequired" ${rule.formRequired?'checked':''}> 개인 구글폼 신청 필요</label>
+> app\resources\app\gyomuon.js:1821:      <label data-dorm-rule-field="individual" class="dorm-rule-check"><input type="checkbox" id="dormRuleIndividualOutingAllowed" ${rule.individualOutingAllowed?'checked':''}> 개인 외출 허용</label>
+  app\resources\app\gyomuon.js:1822:      <label data-dorm-rule-field="priority">우선순위<input type="number" id="dormRulePriority" value="${Number(rule.priority||({exception:50,closure:40,exam:30,vacation:25,base:20,period:10}[rule.category]||5))}" min="1" max="100"></label>
+  app\resources\app\gyomuon.js:1823:      <label data-dorm-rule-field="note" class="span-two">비고<textarea id="dormRuleNote" rows="4">${escapeHtml(rule.note||'')}</textarea></label>
+  app\resources\app\gyomuon.js:1824:    </div>
+  app\resources\app\gyomuon.js:1825:    <label class="dorm-rule-active"><input type="checkbox" id="dormRuleActive" ${rule.active!==false?'checked':''}> 현재 판정에 사용</label>
+  app\resources\app\gyomuon.js:1826:    <p class="drawer-note">규칙 종류에 맞는 사실만 입력합니다. 저장 내용은 <b>40_학사운영규칙</b>에 즉시 반영됩니다.</p>
+  app\resources\app\gyomuon.js:1827:    <div class="drawer-actions"><button type="button" class="btn secondary" id="dormRuleCancel">취소</button><button class="btn primary">${copyMode?'복사본 저장':existing?'수정 저장':'규칙 추가'}</button></div>
+  app\resources\app\gyomuon.js:1828:  </form>`;
+  app\resources\app\gyomuon.js:1829:  $('#dormRuleCancel').onclick=closeDrawer;
+  app\resources\app\gyomuon.js:1848:      operationState:dormRuleOperationStateForCategory($('#dormRuleCategory').value),
+  app\resources\app\gyomuon.js:1849:      actualExit:$('#dormRuleActualExit')?.value||'',actualReentry:$('#dormRuleActualReentry')?.value||'',
+  app\resources\app\gyomuon.js:1850:      priorNightAcademyHome:$('#dormRulePriorNightAcademyHome').checked,
+  app\resources\app\gyomuon.js:1851:      formRequired:$('#dormRuleFormRequired').checked,
+> app\resources\app\gyomuon.js:1852:      individualOutingAllowed:$('#dormRuleIndividualOutingAllowed').checked,
+  app\resources\app\gyomuon.js:1853:      writer:currentLoginTeacherName()||'UEP',source:copyMode?'UEP 규칙센터 복사':existing?'UEP 규칙센터 수정':'UEP 규칙센터 추가'
+  app\resources\app\gyomuon.js:1854:    };
+  app\resources\app\gyomuon.js:1855:    const button=event.submitter||$('#dormRuleEditorForm .btn.primary');if(button){button.disabled=true;button.textContent='시트 저장 중…';}
+  app\resources\app\gyomuon.js:1856:    try{
+  app\resources\app\gyomuon.js:1857:      const result=await window.schoolBoard?.saveDormRule?.(out);
+  app\resources\app\gyomuon.js:1858:      if(!result?.ok) throw new Error(result?.reason||'학사외출 규칙 저장 실패');
+  app\resources\app\gyomuon.js:1859:      const saved=result.record||{...out,id:result.id||out.id};
+  app\resources\app\gyomuon.js:1860:      const next=(Array.isArray(readonlyCache?.dormRules)?readonlyCache.dormRules:rules).filter(x=>String(x.id)!==String(saved.id));
+  app\resources\app\gyomuon.js:1921:    vacation:'여름·겨울방학 중 학사를 운영하면서 허용할 외출 조건과 시간을 등록합니다.'
+  app\resources\app\gyomuon.js:1922:  };
+  app\resources\app\gyomuon.js:1923:  const sections=grouped.map(category=>{
+  app\resources\app\gyomuon.js:1924:    const rows=rules.filter(x=>x.category===category);
+> app\resources\app\gyomuon.js:1925:    return `<section class="data-card dorm-rule-category"><div class="card-head"><div><strong>${dormRuleCategoryLabel(category)}</strong><small>${categoryHelp[category]}</small></div><button class="btn secondary" data-dorm-rule-add="${category}">+ 추가</button></div><div class="dorm-rule-list">${rows.length?rows.map(rule=>`<article class="dorm-rule-row ${rule.active?'active':'inactive'}"><div class="dorm-rule-title"><b>${escapeHtml(rule.name)}</b><small>${escapeHtml(rule.effect||dormRuleCategoryLabel(category))}${rule.active?'':' · 사용 안 
+함'}</small></div><span>${escapeHtml(dormRuleDateText(rule.start))}<br>~ ${escapeHtml(dormRuleDateText(rule.end))}</span><div class="dorm-rule-detail"><p>${escapeHtml(rule.note||'')}</p><small>${escapeHtml([rule.days&&`요일 ${rule.days}`,rule.entryTime&&`입소 ${rule.entryTime}`,rule.exitTime&&`퇴소 ${rule.exitTime}`,rule.lateEntry&&`늦은입소 ${rule.lateEntry}`,rule.earlyExit&&`이른퇴소 ${rule.earlyExit}`,rule.reason&&`사유 ${rule.reason}`,rule.operationState&&`상태 ${rule.operationState}`,rule.actualExit&&`실제퇴소 ${dormRuleDateText(rule.actualExit)}`,rule.actualReentry&&`재입소 
+${dormRuleDateText(rule.actualReentry)}`,rule.priorNightAcademyHome&&'전날 학원후귀가 허용',rule.formRequired&&'개인신청 필요',rule.individualOutingAllowed&&'개인외출 허용'].filter(Boolean).join(' · '))}</small></div><div class="dorm-rule-actions">${!rule.active?`<button class="btn primary" data-dorm-rule-confirm="${escapeHtml(rule.id)}">활성화</button>`:""}<button class="btn secondary" data-dorm-rule-edit="${escapeHtml(rule.id)}">수정</button><button class="btn secondary" data-dorm-rule-copy="${escapeHtml(rule.id)}">복사</button><button class="btn danger" 
+data-dorm-rule-delete="${escapeHtml(rule.id)}">삭제</button></div></article>`).join(''):'<div class="query-empty compact"><b>등록된 규칙이 없습니다.</b><span>필요한 규칙을 직접 추가할 수 있습니다.</span></div>'}</div></section>`;
+  app\resources\app\gyomuon.js:1926:  }).join('');
+  app\resources\app\gyomuon.js:1927:  const closed=outings.filter(x=>dormOutingExcludedByRule(x)).length;
+  app\resources\app\gyomuon.js:1928:  const directState=''?`<div class="setting-card warn"><h3>규칙로그 권한 연결 필요 · 검증 미러 ${rules.length}건 표시 중</h3><p>${escapeHtml('')} · 상단의 ‘권한 연결’을 눌러 서비스계정 이메일을 편집자로 공유하면 원본 양방향 연결로 전환됩니다.</p></div>`:'';
+  app\resources\app\gyomuon.js:1929:  return `<div class="dorm-rule-page"><div class="module-intro pastel-mint"><span>03</span><div><h3>학사운영규칙</h3><p>학사 전체 운영변경과 학원외출 예외를 관리합니다. 병원 외출은 운영규칙과 무관하게 신청 가능하며, 신청이 있으면 오늘의 학사외출현황에 항상 표시됩니다. 실제 학생 외출기록은 구글폼 신청으로 생성됩니다.</p></div><div class="module-intro-actions"><button class="btn primary" id="dormOutingStatusOpen">학사외출현황</button><button class="btn secondary" id="dormRuleReload">규칙 동기화 확인</button><span class="state positive">규칙로그 · 
+40_학사운영규칙</span></div></div>
+  app\resources\app\gyomuon.js:1930:  <div class="student-summary"><span><b>${currentStudents.length}</b> 현재 학사생</span><span><b>${rules.length}</b> 전체 규칙</span><span><b>${rules.filter(x=>x.active).length}</b> 사용중 규칙</span><span><b>${outings.length}</b> 원본 외출기록</span><span><b>${closed}</b> 미운영기간 기록</span></div>
+  app\resources\app\gyomuon.js:1931:  ${directState}<div class="dorm-rule-priority-guide"><b>판정 우선순위</b><span>특정 날짜 입·퇴소 변경 → 학사 미운영기간 → 시험 외출허용 → 방학 중 외출허용 → 기본 입·퇴소 → 학교 운영기간</span><small>더 구체적인 예외 규칙이 일반 규칙보다 우선합니다.</small></div>
+  app\resources\app\gyomuon.js:1932:  ${sections}
+  app\resources\app\gyomuon.js:1933:  <div class="setting-card pastel-mint"><h3>다음 단계: 학생용 학사외출 Google Form</h3><p>규칙은 규칙로그 시트에 영구 저장됩니다. 다음 단계에서는 정규화된 학사외출 응답을 이 규칙으로 판정한 뒤 빠른열기 학사외출에 연결합니다.</p></div></div>`;
+  app\resources\app\gyomuon.js:11820:    if (!classDigits || !numberDigits) return "-";
+  app\resources\app\gyomuon.js:11821:    return `${classDigits}${numberDigits.padStart(2, "0")}`;
+  app\resources\app\gyomuon.js:11822:  };
+  app\resources\app\gyomuon.js:11823:  const outingEmail=(item)=>String(item.email||item.studentEmail||outingMasterStudent(item)?.email||"").trim();
+> app\resources\app\gyomuon.js:11824:  const rows = (list) => list.length ? list.map((item) => `<div class="outing-row"><time>${item.date.slice(5).replace("-", "/")}</time><span><b>${escapeHtml(outingStudentNo(item))} ${escapeHtml(item.name)}</b><small>${escapeHtml(item.className)}반 ${escapeHtml(item.number)}번 · ${dormOutingIsMedical(item)?'<b class="state positive">병원</b> ':''}${escapeHtml(item.category || "외출")}</small></span><time>${escapeHtml(item.outTime || "-")}</time><time>${escapeHtml(item.returnTime || "-")}</time><span><b>${escapeHtml(item.reason || 
+"-")}</b><small>${escapeHtml(item.destination || "-")}</small></span><span class="state">${escapeHtml(item.status || "예정")}</span></div>`).join("") : `<div class="outing-empty">표시할 학사외출 기록이 없습니다.</div>`;
+  app\resources\app\gyomuon.js:11825:  const weekDays = Array.from({ length: 7 }, (_, index) => {
+  app\resources\app\gyomuon.js:11826:    const date = new Date(monday);
+  app\resources\app\gyomuon.js:11827:    date.setDate(date.getDate() + index);
+  app\resources\app\gyomuon.js:11828:    const key = dateKey(date);
+  app\resources\app\gyomuon.js:11829:    const list = weekItems.filter((item) => item.date === key);
+  app\resources\app\gyomuon.js:11830:    return `<section><header><b>${["월", "화", "수", "목", "금","토","일"][index]}</b><span>${key.slice(5).replace("-", "/")}</span><em>${list.length}명</em></header>${list.length ? list.map((item) => `<div class="outing-week-item"><time>${escapeHtml(item.outTime || "-")}–${escapeHtml(item.returnTime || "-")}</time><b>${escapeHtml(item.name)}</b><small>${escapeHtml(item.className)}반 ${escapeHtml(item.number)}번 · ${dormOutingIsMedical(item)?'<b class="state positive">병원</b> ':''}${escapeHtml(item.category || 
+"외출")}</small><span>${escapeHtml(item.reason || "-")}</span></div>`).join("") : "<p>신청 없음</p>"}</section>`;
+  app\resources\app\gyomuon.js:11831:  }).join("");
+  app\resources\app\gyomuon.js:11832:  const smsText=(item)=>{const late=/늦은 입소/.test(item.category||'');return late?`${item.name} 학생에게 안내합니다.\n[운호고등학교 학사 입소 안내]\n${displayDate} 늦은 입소 신청이 확인되었습니다.\n도착 예정: ${item.returnTime||"-"}\n확인정보: ${[item.reason,item.destination].filter(Boolean).join(" / ")||"-"}\n신청한 입소시간을 준수해 주세요.`:`${item.name} 학생에게 안내합니다.\n[운호고등학교 학사외출 안내]\n${displayDate} 학사외출이 확인되었습니다.\n외출: ${item.outTime||"-"} / 복귀·귀가: ${item.returnTime||"-"}\n확인정보: 
+${[item.reason,item.destination].filter(Boolean).join(" / ")||"-"}\n복귀시간을 반드시 준수하고, 복귀 후 담당 선생님께 확인받기 바랍니다.`};
+  app\resources\app\gyomuon.js:11833:  const supervisorReportText=()=>{
+  app\resources\app\gyomuon.js:11834:    const weekday=outingViewDate.getDay(),sunday=weekday===0,friday=weekday===5;
+  app\resources\app\gyomuon.js:11835:    const reportItems=sunday?items.filter(item=>/늦은\s*입소|재입소|입소|복귀/.test(String(item.category||item.type||item.outingType||''))):items.filter(item=>/외출|퇴소|귀가/.test(String(item.category||item.type||item.outingType||'')));
+  app\resources\app\gyomuon.js:11836:    const groups=new Map();reportItems.forEach(item=>{const time=String((sunday?(item.returnTime||item.outTime):(item.outTime||item.returnTime))||'시간 미정');if(!groups.has(time))groups.set(time,[]);groups.get(time).push(item);});
+> app\resources\app\gyomuon.js:11837:    const body=[...groups.entries()].sort((a,b)=>a[0].localeCompare(b[0])).map(([time,list])=>'■ '+time+' '+(sunday?'입소':'이동')+'\n'+list.sort((a,b)=>String(outingStudentNo(a)).localeCompare(String(outingStudentNo(b)))).map(item=>outingStudentNo(item)+' '+item.name).join('\n')).join('\n\n');
+> app\resources\app\gyomuon.js:11838:    const title=sunday?'[늦은 입소 안내]':friday?'[조기 퇴소 안내]':'[외출 안내]';const empty=sunday?'금일 늦은 입소 학생 없음':friday?'금일 조기 퇴소 학생 없음':'금일 외출 학생 없음';return title+'\n'+displayDate+'\n\n'+(body||empty)+'\n\n이상입니다.';
+> app\resources\app\gyomuon.js:11839:  };  const smsCards=items.length?items.map(item=>`<article class="outing-message-card"><div><b>${escapeHtml(outingStudentNo(item))} ${escapeHtml(item.name)}</b><small>${escapeHtml(item.phone||item.studentPhone||"학생 연락처 확인")} · ${escapeHtml(item.outTime||"-")}~${escapeHtml(item.returnTime||"-")}</small></div><textarea readonly>${escapeHtml(smsText(item))}</textarea><div class="outing-message-actions"><button class="btn secondary" data-outing-copy="${escapeHtml(item.id)}">학생 문자 복사</button>${outingEmail(item)?`<button class="btn secondary" 
+data-outing-email="${escapeHtml(item.id)}">학생 메일 작성</button>`:""}</div></article>`).join(""):'<div class="outing-empty">오늘 발송할 학사외출 안내가 없습니다.</div>';
+  app\resources\app\gyomuon.js:11840:  const breakNotice=(viewKey>='2026-08-08'&&viewKey<='2026-08-17')?'<div class="outing-operation-notice"><b>학사 방학 · 운영 제외기간</b><span>2026.8.8 ~ 8.17 19:00 전 외출은 운영현황·통계에서 제외합니다. 원본 기록은 보존됩니다.</span></div>':'';
+  app\resources\app\gyomuon.js:11841:  $("#drawerBody").innerHTML = `${breakNotice}<div class="outing-date"><button data-outing-day="-1" title="이전 날짜">‹</button><strong>${displayDate}</strong><span data-outing-today>오늘</span><button data-outing-day="1" title="다음 날짜">›</button></div><div class="outing-summary"><span><b>${items.length}</b>오늘</span><span><b>${weekItems.length}</b>이번 주</span><span><b>${readonlyCache?.summary?.dormRosterCount ?? "-"}</b>학사생</span></div><div class="outing-action-bar"><button class="btn primary" data-outing-teacher-add>+ 외출 추가</button><button 
+class="btn primary" data-outing-print>오늘 명단 출력</button><button class="btn secondary" data-outing-supervisor-copy>전문사감 보고문 확인</button><button class="btn secondary" data-outing-supervisor-email>전문사감 메일 작성</button><button class="btn secondary" data-outing-copy-all>전체 문자내용 확인</button><button class="btn secondary" data-outing-email-all>전체 학생 메일 작성</button></div><h4 class="sync-section-title">오늘 명단</h4><div class="outing-table"><div 
+class="outing-head"><span>날짜</span><span>학생·구분</span><span>외출·입소</span><span>복귀·귀가</span><span>확인정보</span><span>상태</span></div>${rows(items)}</div><h4 class="sync-section-title">학생 문자발송 메시지</h4><div class="outing-message-list">${smsCards}</div><h4 class="sync-section-title">이번 주 월–일</h4><div class="outing-week-grid">${weekDays}</div><p class="drawer-note">${readonlyCache ? `${formatSyncTime(readonlyCache.syncedAt)} 기준 구글시트 조회자료입니다.` : "설정에서 Google 연결 인증을 먼저 등록하세요."} 원본 구글시트는 변경하지 않습니다.</p>`;
+  app\resources\app\gyomuon.js:11842:  $("#drawer").classList.add("outing-expanded");
+  app\resources\app\gyomuon.js:11843:  $("#drawer").classList.remove("hidden");
+  app\resources\app\gyomuon.js:11844:  $("#drawerBackdrop").classList.remove("hidden");
+  app\resources\app\gyomuon.js:11845:  $$("[data-outing-day]").forEach((button) => {
+  app\resources\app\gyomuon.js:11846:    button.onclick = () => {
+  app\resources\app\gyomuon.js:11847:      outingViewDate.setDate(outingViewDate.getDate() + Number(button.dataset.outingDay));
+  app\resources\app\gyomuon.js:11856:  $("[data-outing-print]")?.addEventListener("click",()=>{
+  app\resources\app\gyomuon.js:11857:    if(!items.length)return toast("출력할 오늘 학사외출 명단이 없습니다.");
+  app\resources\app\gyomuon.js:11858:    const popup=window.open("","_blank","width=1100,height=800");
+  app\resources\app\gyomuon.js:11859:    if(!popup)return toast("팝업 차단을 해제해 주세요.");
+> app\resources\app\gyomuon.js:11860:    popup.document.write(`<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>오늘의 학사외출</title><style>body{font-family:'Malgun Gothic',sans-serif;margin:32px;color:#172033}h1{font-size:25px;margin:0 0 6px}p{margin:0 0 22px;color:#5c667a}table{width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed}th,td{border:1px solid 
+#cfd6df;padding:9px;text-align:center;vertical-align:middle}th{background:#eef6f5}th:nth-child(1){width:12%}th:nth-child(2){width:14%}th:nth-child(3){width:13%}th:nth-child(4),th:nth-child(5){width:11%}td:nth-child(2),td:nth-child(6){text-align:left;white-space:nowrap}td:nth-child(6){white-space:normal}@media print{button{display:none}}</style></head><body><h1>오늘의 학사외출 명단</h1><p>${escapeHtml(displayDate)} · 총 ${items.length}명 · 출처: 데이터처리 · 
+02_학사외출_일자별</p><table><thead><tr><th>학번</th><th>이름</th><th>구분</th><th>외출</th><th>복귀·귀가</th><th>사유·목적지</th></tr></thead><tbody>${items.map(item=>`<tr><td>${escapeHtml(outingStudentNo(item))}</td><td>${escapeHtml(item.name||"")}</td><td>${escapeHtml(item.category||"외출")}</td><td>${escapeHtml(item.outTime||"-")}</td><td>${escapeHtml(item.returnTime||"-")}</td><td>${escapeHtml([item.reason,item.destination].filter(Boolean).join(" · ")||"-")}</td></tr>`).join("")}</tbody></table><script>window.onload=()=>window.print()<\/script></body></html>`);
+  app\resources\app\gyomuon.js:11861:    popup.document.close();
+  app\resources\app\gyomuon.js:11862:  });
+  app\resources\app\gyomuon.js:11863:  $$("[data-outing-copy]").forEach(button=>button.onclick=async()=>{
+  app\resources\app\gyomuon.js:11864:    const item=items.find(row=>String(row.id)===String(button.dataset.outingCopy));
+  app\resources\app\gyomuon.js:11865:    if(!item)return;
+  app\resources\app\gyomuon.js:11866:    try{await navigator.clipboard.writeText(smsText(item));toast(`${item.name} 학생 문자내용을 복사했습니다.`);}catch{toast("문자내용을 복사하지 못했습니다.");}
+  app\resources\app\gyomuon.js:11867:  });
+  app\resources\app\gyomuon.js:11868:  $$('[data-outing-email]').forEach(button=>button.onclick=()=>{
+  app\resources\app\gyomuon.js:11878:  $("[data-outing-email-all]")?.addEventListener("click",()=>{
+  app\resources\app\gyomuon.js:11879:    const emails=[...new Set(items.map(outingEmail).filter(Boolean))];
+  app\resources\app\gyomuon.js:11880:    if(!emails.length)return toast("학생 이메일 정보가 없습니다.");
+  app\resources\app\gyomuon.js:11881:    const subject=encodeURIComponent(`[운호고등학교] ${displayDate} 학사외출 안내`);
+> app\resources\app\gyomuon.js:11882:    const body=encodeURIComponent(items.map(item=>`${outingStudentNo(item)} ${item.name}\n${smsText(item)}`).join("\n\n----------------\n\n"));
+  app\resources\app\gyomuon.js:11883:    window.open(`mailto:?bcc=${encodeURIComponent(emails.join(","))}&subject=${subject}&body=${body}`,'_self');
+  app\resources\app\gyomuon.js:11884:  });
+  app\resources\app\gyomuon.js:11885:  $("[data-outing-supervisor-copy]")?.addEventListener("click",()=>{
+  app\resources\app\gyomuon.js:11886:    if(!items.length)return toast("오늘 외출·퇴소 현황이 없습니다.");
+  app\resources\app\gyomuon.js:11887:    openDormOutingCopyPreview("전문사감 보고문", supervisorReportText(), "전문사감 선생님 보고용 문구를 복사했습니다.");
+  app\resources\app\gyomuon.js:11888:  });
+  app\resources\app\gyomuon.js:11889:  $("[data-outing-supervisor-email]")?.addEventListener("click",()=>{
+  app\resources\app\gyomuon.js:11890:    const text=supervisorReportText(),sunday=outingViewDate.getDay()===0,subject=encodeURIComponent(`[운호고등학교] ${displayDate} 1학년 ${sunday?"학사 입소 및 늦은 입소 현황":"학사 외출 및 퇴소 현황"}`),body=encodeURIComponent(text);
+  app\resources\app\gyomuon.js:11891:    window.open(`mailto:?subject=${subject}&body=${body}`,'_self');
+  app\resources\app\gyomuon.js:11892:  });  $("[data-outing-copy-all]")?.addEventListener("click",()=>{
+  app\resources\app\gyomuon.js:11893:    if(!items.length)return toast("확인할 문자내용이 없습니다.");
+> app\resources\app\gyomuon.js:11894:    const text=items.map(item=>`${outingStudentNo(item)} ${item.name}\n${smsText(item)}`).join("\n\n----------------\n\n");
+  app\resources\app\gyomuon.js:11895:    openDormOutingCopyPreview("전체 학생 문자내용", text, `오늘 학사외출 ${items.length}명의 문자내용을 복사했습니다.`);
+  app\resources\app\gyomuon.js:11896:  });
+  app\resources\app\gyomuon.js:11897:}
+  app\resources\app\gyomuon.js:11898:
+  app\resources\app\gyomuon.js:11899:function openDormOutingCopyPreview(title, text, copyToast) {
+  app\resources\app\gyomuon.js:11900:  $("#drawerKicker").textContent = "DORMITORY · OUTING · PREVIEW";
+  app\resources\app\gyomuon.js:11901:  $("#drawerTitle").textContent = `${title} · 원문 확인`;
+  app\resources\app\gyomuon.js:11902:  $("#drawerBody").innerHTML = `<div class="program-message-composer dorm-outing-copy-preview">
+
+
+===== MAIN VERSION =====
+
+  app\resources\app\electron\main.cjs:262:  const payload = {
+> app\resources\app\electron\main.cjs:263:    version: 1, algorithm: "aes-256-gcm",
+  app\resources\app\electron\main.cjs:264:    salt: salt.toString("base64"), iv: iv.toString("base64"),
+  app\resources\app\electron\main.cjs:265:    tag: cipher.getAuthTag().toString("base64"), data: encrypted.toString("base64")
+  app\resources\app\electron\main.cjs:272:  const payload = JSON.parse(await fs.readFile(credentialRecoveryPath(), "utf8"));
+> app\resources\app\electron\main.cjs:273:  if (!payload || payload.version !== 1 || payload.algorithm !== "aes-256-gcm") throw new Error("invalid recovery credential");
+  app\resources\app\electron\main.cjs:274:  const salt=Buffer.from(payload.salt,"base64"), iv=Buffer.from(payload.iv,"base64"), tag=Buffer.from(payload.tag,"base64"), data=Buffer.from(payload.data,"base64");
+  app\resources\app\electron\main.cjs:275:  const decipher = crypto.createDecipheriv("aes-256-gcm", recoveryKey(salt), iv);
+  app\resources\app\electron\main.cjs:415:  const encrypted=Buffer.concat([cipher.update(JSON.stringify(value),'utf8'),cipher.final()]);
+> app\resources\app\electron\main.cjs:416:  return {version:1,algorithm:'aes-256-gcm',salt:salt.toString('base64'),iv:iv.toString('base64'),tag:cipher.getAuthTag().toString('base64'),data:encrypted.toString('base64')};
+  app\resources\app\electron\main.cjs:417:}
+  app\resources\app\electron\main.cjs:418:function decodeGoogleUserOAuthRecovery(payload){
+> app\resources\app\electron\main.cjs:419:  if(!payload||payload.version!==1||payload.algorithm!=='aes-256-gcm')throw new Error('invalid OAuth recovery token');
+  app\resources\app\electron\main.cjs:420:  const salt=Buffer.from(payload.salt,'base64'),iv=Buffer.from(payload.iv,'base64'),tag=Buffer.from(payload.tag,'base64'),data=Buffer.from(payload.data,'base64');
+  app\resources\app\electron\main.cjs:421:  const decipher=crypto.createDecipheriv('aes-256-gcm',googleUserOAuthRecoveryKey(salt),iv);decipher.setAuthTag(tag);
+  app\resources\app\electron\main.cjs:2555:      const expectedSha256=String(payload.sha256||"").trim().toLowerCase();
+> app\resources\app\electron\main.cjs:2556:      const version=String(payload.version||"").trim();
+  app\resources\app\electron\main.cjs:2557:      if(!/^https:\/\//i.test(downloadUrl)) return {ok:false,reason:"HTTPS 업데이트 파일 주소가 필요합니다."};
+> app\resources\app\electron\main.cjs:2558:      if(!/^\d+\.\d+\.\d+/.test(version)) return {ok:false,reason:"업데이트 버전 정보가 올바르지 않습니다."};
+  app\resources\app\electron\main.cjs:2559:      if(!/^[a-f0-9]{64}$/.test(expectedSha256)) return {ok:false,reason:"안전한 자동 업데이트를 위해 SHA-256 값이 필요합니다."};
+> app\resources\app\electron\main.cjs:2560:      const updateRoot=path.join(stableUserDataRoot(),"updates",version);
+> app\resources\app\electron\main.cjs:2561:      const zipPath=path.join(updateRoot,`UEP-${version}.zip`);
+  app\resources\app\electron\main.cjs:2562:      const stagePath=path.join(updateRoot,"stage");
+  app\resources\app\electron\main.cjs:2563:      await fs.rm(updateRoot,{recursive:true,force:true}); await fs.mkdir(updateRoot,{recursive:true});
+  app\resources\app\electron\main.cjs:2572:          headers:{
+> app\resources\app\electron\main.cjs:2573:            "user-agent":`UEP/${app.getVersion()} AutoUpdate`,
+  app\resources\app\electron\main.cjs:2574:            "accept":"application/octet-stream",
+  app\resources\app\electron\main.cjs:2575:            "cache-control":"no-cache, no-store, max-age=0",
+  app\resources\app\electron\main.cjs:2601:      // normal same-drive Windows setup these directory operations are effectively instantaneous.
+> app\resources\app\electron\main.cjs:2602:      const backupDir=path.join(path.dirname(installDir),`${path.basename(installDir)}.__uep_backup_${version.replace(/[^0-9A-Za-z._-]/g,'_')}`);
+  app\resources\app\electron\main.cjs:2603:      const scriptPath=path.join(updateRoot,"apply-update.ps1");
+  app\resources\app\electron\main.cjs:2604:      const q=v=>String(v).replace(/'/g,"''");
+  app\resources\app\electron\main.cjs:2613:      updater.unref();
+> app\resources\app\electron\main.cjs:2614:      try { await appendShutdownLog(`update-updater-spawned:version=${version}:pid=${updater.pid||0}`); } catch {}
+  app\resources\app\electron\main.cjs:2615:      // Use the clean-shutdown path that was proven to release the UEP folder lock.
+  app\resources\app\electron\main.cjs:2616:      // This closes auxiliary BrowserWindows first, then quits Electron, with app.exit()
+  app\resources\app\electron\main.cjs:2623:      },300);
+> app\resources\app\electron\main.cjs:2624:      return {ok:true,installing:true,version};
+  app\resources\app\electron\main.cjs:2625:    } catch(error){return {ok:false,reason:error?.message||"업데이트 적용 준비 중 오류가 발생했습니다."};}
+  app\resources\app\electron\main.cjs:2626:  });
+  app\resources\app\electron\main.cjs:2636:      //   2) cache-bust non-API candidates,
+> app\resources\app\electron\main.cjs:2637:      //   3) read every reachable candidate and choose the HIGHEST semantic version.
+  app\resources\app\electron\main.cjs:2638:      const stamp=Date.now();
+  app\resources\app\electron\main.cjs:2639:      const candidates=[];
+  app\resources\app\electron\main.cjs:2662:
+> app\resources\app\electron\main.cjs:2663:      const parseVersion=v=>String(v||'').trim().split('.').slice(0,3).map(x=>Number(String(x).replace(/\D.*$/,''))||0);
+> app\resources\app\electron\main.cjs:2664:      const cmpVersion=(va,vb)=>{const a=parseVersion(va),b=parseVersion(vb);for(let i=0;i<3;i++){if((a[i]||0)!==(b[i]||0))return (a[i]||0)-(b[i]||0);}return 0;};
+  app\resources\app\electron\main.cjs:2665:      const successes=[];
+  app\resources\app\electron\main.cjs:2666:      let lastStatus=0,lastError='';
+  app\resources\app\electron\main.cjs:2671:          const response=await net.fetch(candidate.url,{headers:{
+> app\resources\app\electron\main.cjs:2672:            "user-agent":`UEP/${app.getVersion()} UpdateCheck`,
+  app\resources\app\electron\main.cjs:2673:            "cache-control":"no-cache, no-store, max-age=0",
+  app\resources\app\electron\main.cjs:2674:            "pragma":"no-cache",
+  app\resources\app\electron\main.cjs:2684:          }else data=await response.json();
+> app\resources\app\electron\main.cjs:2685:          const version=String(data?.version||data?.latestVersion||'').trim();
+> app\resources\app\electron\main.cjs:2686:          if(!/^\d+\.\d+\.\d+/.test(version)){lastError=`${candidate.kind}: version 없음`;continue;}
+> app\resources\app\electron\main.cjs:2687:          successes.push({data,version,source:candidate.kind,url:candidate.url});
+  app\resources\app\electron\main.cjs:2688:        }catch(error){lastError=`${candidate.kind}: ${String(error?.message||error)}`;}
+  app\resources\app\electron\main.cjs:2689:      }
+  app\resources\app\electron\main.cjs:2691:      if(!successes.length) return {ok:false,reason:`업데이트 정보 읽기 실패${lastStatus?` (${lastStatus})`:''}${lastError?` · ${lastError}`:''}`};
+> app\resources\app\electron\main.cjs:2692:      successes.sort((a,b)=>cmpVersion(b.version,a.version));
+  app\resources\app\electron\main.cjs:2693:      const chosen=successes[0];
+  app\resources\app\electron\main.cjs:2694:      const data=chosen.data;
+> app\resources\app\electron\main.cjs:2695:      const version=chosen.version;
+> app\resources\app\electron\main.cjs:2696:      const current=String(payload.currentVersion||"0.0.0");
+> app\resources\app\electron\main.cjs:2697:      const newer=cmpVersion(version,current)>0;
+  app\resources\app\electron\main.cjs:2698:      return {
+  app\resources\app\electron\main.cjs:2699:        ok:true,
+> app\resources\app\electron\main.cjs:2700:        version,
+  app\resources\app\electron\main.cjs:2701:        updateAvailable:newer,
+  app\resources\app\electron\main.cjs:2702:        downloadUrl:String(data.downloadUrl||data.url||""),
+  app\resources\app\electron\main.cjs:2705:        source:chosen.source,
+> app\resources\app\electron\main.cjs:2706:        checkedVersions:successes.map(x=>`${x.source}:${x.version}`)
+  app\resources\app\electron\main.cjs:2707:      };
+  app\resources\app\electron\main.cjs:2708:    } catch(error){return {ok:false,reason:error?.message||"업데이트 확인 중 오류가 발생했습니다."};}
+  app\resources\app\electron\main.cjs:2895:  const payload=JSON.parse(await fs.readFile(filePath,"utf8"));
+> app\resources\app\electron\main.cjs:2896:  if(!payload||payload.version!==1||payload.algorithm!=="aes-256-gcm")throw new Error("invalid recovery credential");
+  app\resources\app\electron\main.cjs:2897:  const salt=Buffer.from(payload.salt,"base64"),iv=Buffer.from(payload.iv,"base64"),tag=Buffer.from(payload.tag,"base64"),data=Buffer.from(payload.data,"base64");
+  app\resources\app\electron\main.cjs:2898:  const decipher=crypto.createDecipheriv("aes-256-gcm",recoveryKey(salt),iv);decipher.setAuthTag(tag);
+  app\resources\app\gyomuon.js:77:    setupCompleted: false,
+> app\resources\app\gyomuon.js:78:    setupCompletedVersion: "",
+  app\resources\app\gyomuon.js:79:    userProfile: {
+  app\resources\app\gyomuon.js:80:      name: "",
+  app\resources\app\gyomuon.js:214:    schema:'uep-school-read-diagnostic-v1',
+> app\resources\app\gyomuon.js:215:    appVersion:APP_VERSION,
+  app\resources\app\gyomuon.js:216:    exportedAt:new Date().toISOString(),
+  app\resources\app\gyomuon.js:217:    platform:navigator.platform,
+  app\resources\app\gyomuon.js:315:let studentAlertClass = "all";
+> app\resources\app\gyomuon.js:316:const APP_VERSION = "0.82.02";
+  app\resources\app\gyomuon.js:317:const SUBJECT_REAPPLICATION_FORM_URL = "https://docs.google.com/forms/d/e/1FAIpQLSd7_E_Kb8HGEgjyEqtXs_Ykvy5L_c96ILIQ06OBV-MV_1dc0A/viewform?usp=dialog";
+  app\resources\app\gyomuon.js:318:const samples = {
+  app\resources\app\gyomuon.js:3702:  const roleChip=document.getElementById("headerRoleChip");
+> app\resources\app\gyomuon.js:3703:  const versionChip=document.getElementById("headerVersionChip");
+  app\resources\app\gyomuon.js:3704:  const profileName=document.querySelector(".profile b");
+  app\resources\app\gyomuon.js:3705:  const profileMeta=document.querySelector(".profile small");
+  app\resources\app\gyomuon.js:3712:  }
+> app\resources\app\gyomuon.js:3713:  if(versionChip)versionChip.textContent=`v${APP_VERSION}`;
+  app\resources\app\gyomuon.js:3714:  const displayTeacherName=p.name||currentLoginTeacherName()||"사용자"; if(profileName) profileName.textContent=displayTeacherName;
+  app\resources\app\gyomuon.js:3715:  if(profileMeta) profileMeta.textContent=[p.department,currentRoleDisplay()].filter(Boolean).join(" · ");
+  app\resources\app\gyomuon.js:4060:    state.settings.setupCompleted=true;
+> app\resources\app\gyomuon.js:4061:    state.settings.setupCompletedVersion=APP_VERSION;
+  app\resources\app\gyomuon.js:4062:    save();
+  app\resources\app\gyomuon.js:4063:    refreshHeaderRoleBadge();
+  app\resources\app\gyomuon.js:4136:  const layer=document.createElement("div");layer.id="issueReportLayer";layer.className="issue-layer";
+> app\resources\app\gyomuon.js:4137:  layer.innerHTML=`<div class="issue-dialog"><header><div><small>UEP FEEDBACK</small><h3>오류 신고</h3></div><button type="button" data-issue-close>×</button></header><form id="issueReportForm"><label>발견한 화면<input id="issuePage" value="${escapeHtml(pageTitles[state.activePage]?.[0]||state.activePage||'')}" required></label><label>오류 유형<select id="issueType"><option>화면 표시</option><option>데이터 연결</option><option>기능 
+작동</option><option>속도·안정성</option><option>개선 제안</option></select></label><label>오류 내용<textarea id="issueDescription" rows="5" required placeholder="어떤 동작을 했을 때 무엇이 잘못 보였는지 적어주세요."></textarea></label><label>재현 방법<textarea id="issueSteps" rows="3" placeholder="예: 학생정보 → 1반 → 학생 클릭"></textarea></label><div class="issue-meta">버전 v${APP_VERSION} · ${escapeHtml(roleName(currentRoleId()))} · ${new Date().toLocaleString('ko-KR')}</div><div 
+class="modal-actions"><button type="button" class="btn secondary" data-issue-close>취소</button><button class="btn primary">신고 저장</button></div></form></div>`;
+  app\resources\app\gyomuon.js:4138:  document.body.appendChild(layer);
+  app\resources\app\gyomuon.js:4139:  layer.querySelectorAll('[data-issue-close]').forEach(b=>b.onclick=()=>layer.remove());
+  app\resources\app\gyomuon.js:4140:  layer.onclick=e=>{if(e.target===layer)layer.remove();};
+> app\resources\app\gyomuon.js:4141:  layer.querySelector('#issueReportForm').onsubmit=async e=>{e.preventDefault();state.issueReports.unshift({id:`ISS-${Date.now()}`,createdAt:new 
+Date().toISOString(),reporter:roleName(currentRoleId()),page:layer.querySelector('#issuePage').value.trim(),type:layer.querySelector('#issueType').value,description:layer.querySelector('#issueDescription').value.trim(),steps:layer.querySelector('#issueSteps').value.trim(),version:APP_VERSION,status:'new',adminNote:'',updatedAt:''});await save();layer.remove();toast('오류 신고를 이 PC에 저장했습니다. 관리자 화면에서 확인할 수 있습니다.');if(state.activePage==='settings')render('settings');};
+  app\resources\app\gyomuon.js:4142:  setTimeout(()=>layer.querySelector('#issueDescription')?.focus(),30);
+  app\resources\app\gyomuon.js:4143:}
+  app\resources\app\gyomuon.js:4146:  const reports=state.issueReports||[];const layer=document.createElement('div');layer.id='issueReportLayer';layer.className='issue-layer';
+> app\resources\app\gyomuon.js:4147:  layer.innerHTML=`<div class="issue-dialog issue-manager"><header><div><small>ADMIN CONSOLE</small><h3>오류 신고 관리</h3></div><button type="button" data-issue-close>×</button></header><div class="issue-summary"><b>전체 ${reports.length}건</b><span>접수 ${reports.filter(r=>r.status==='new').length} · 확인 중 ${reports.filter(r=>r.status==='checking').length} · 완료 ${reports.filter(r=>r.status==='fixed').length}</span></div><div 
+class="issue-list">${reports.length?reports.map(r=>`<article data-issue-id="${escapeHtml(r.id)}"><div class="issue-item-head"><span class="issue-state ${escapeHtml(r.status)}">${issueStatusLabel(r.status)}</span><b>${escapeHtml(r.page)} · ${escapeHtml(r.type)}</b><small>v${escapeHtml(r.version||'')} · ${escapeHtml(formatSyncTime(r.createdAt))}</small></div><p>${escapeHtml(r.description)}</p>${r.steps?`<small>재현: ${escapeHtml(r.steps)}</small>`:''}<div class="issue-admin-row"><select 
+data-issue-status><option value="new" ${r.status==='new'?'selected':''}>접수</option><option value="checking" ${r.status==='checking'?'selected':''}>확인 중</option><option value="fixed" ${r.status==='fixed'?'selected':''}>수정 완료</option><option value="hold" ${r.status==='hold'?'selected':''}>보류</option></select><input data-issue-note value="${escapeHtml(r.adminNote||'')}" placeholder="관리자 메모·수정 버전"><button class="btn primary" 
+data-issue-save>저장</button></div></article>`).join(''):`<div class="empty-box">접수된 오류 신고가 없습니다.</div>`}</div><div class="modal-actions"><button class="btn secondary" data-issue-close>닫기</button></div></div>`;
+  app\resources\app\gyomuon.js:4148:  document.body.appendChild(layer);layer.querySelectorAll('[data-issue-close]').forEach(b=>b.onclick=()=>layer.remove());
+  app\resources\app\gyomuon.js:4149:  layer.querySelectorAll('[data-issue-save]').forEach(button=>button.onclick=async()=>{const card=button.closest('[data-issue-id]');const item=reports.find(r=>r.id===card.dataset.issueId);if(!item)return;item.status=card.querySelector('[data-issue-status]').value;item.adminNote=card.querySelector('[data-issue-note]').value.trim();item.updatedAt=new Date().toISOString();await save();toast('신고 처리 상태를 저장했습니다.');layer.remove();openIssueManager();});
+  app\resources\app\gyomuon.js:4308:    <article class="setting-card release-readiness-card"><div class="connection-title"><div><h3>배포 준비 점검</h3><p>교사용 배포 전에 필수 연결·계정·권한·업데이트·API 보호 상태를 확인합니다.</p></div><span class="state ${releaseReadinessRows().every(row=>row.ok)?'connected':'warn'}">${releaseReadinessRows().every(row=>row.ok)?'배포 준비':'확인 필요'}</span></div><div class="health-list 
+release-health-list">${releaseReadinessRows().map(row=>`<div><span>${row.ok?'✓':'!'}</span><b>${escapeHtml(row.name)}</b><small>${escapeHtml(row.note)}</small></div>`).join('')}</div><div class="connection-actions"><button class="btn primary" type="button" data-access-control>권한 점검</button><button class="btn secondary" data-run-health-check>연결 다시 진단</button></div><p class="safe-note">자동 설치·롤백은 현재 비활성화되어 있습니다.</p></article>
+> app\resources\app\gyomuon.js:4309:    <article class="setting-card update-settings-card"><div class="connection-title"><div><h3>UEP 업데이트</h3><p>현재 버전 ${APP_VERSION} · 담임 배포판부터는 앱 내부 업데이트 채널을 사용합니다.</p></div><span class="state connected">업데이트 확인 작동</span></div><form id="updateSettingsForm" class="update-settings-form"><input id="updateManifestUrl" type="url" value="${escapeHtml(state.settings.updateManifestUrl||'')}" 
+placeholder="https://.../uep-update.json"><button class="btn secondary" type="submit">주소 저장</button><button class="btn primary" type="button" data-check-update>업데이트 확인</button></form><div class="update-roadmap"><span class="done">① 동일 빌드</span><span class="done">② 버전 확인</span><span class="done">③ 업데이트 채널</span><span class="done">④ 앱 내부 적용·롤백</span></div><div id="updateCheckResult" class="update-check-result"><small>새 버전 확인 → 무결성 검증 → 앱 내부 적용 → 실패 
+시 이전판 복구 방식입니다.</small></div></article>
+> app\resources\app\gyomuon.js:4310:    <article class="setting-card"><div class="connection-title"><div><h3>UEP 정보</h3><p>UNHO Education Platform · Connect Data. Grow Students.</p></div><span class="state">v${APP_VERSION}</span></div><div class="setting-row"><span><b>기준 데이터</b><small>표준 구글시트 연결</small></span><span>${escapeHtml(readonlyCache?.sourceName||'연결 확인')}</span></div></article>
+  app\resources\app\gyomuon.js:4311:  </div>`;
+  app\resources\app\gyomuon.js:4312:
+  app\resources\app\gyomuon.js:4973:  const actualDetailTable=`<div class="data-card"><div class="card-head"><div><strong>석차 기반 실제 9등급</strong></div><small>석차 ÷ 수강자수 누적비율 기준</small></div><div class="data-head actual-nine-grid"><span>과목</span><span>원점수</span><span>5등급</span><span>석차/수강자</span><span>상위비율</span><span>실제 9등급</span></div>${base.actualDetails.map(({row,result})=>`<div class="data-row 
+actual-nine-grid"><b>${escapeHtml(row.subject)}</b><span>${scoreDisplay(row.rawScore)}</span><span>${scoreDisplay(row.level,2)}</span><span>${result.rank}/${result.enrollment}</span><span>${result.percentile.toFixed(1)}%</span><span class="state">${result.grade}등급</span></div>`).join("")||'<div class="query-empty"><b>석차·수강자수 자료가 없습니다.</b><span>산출제외 과목은 실제 9등급 계산에서 제외합니다.</span></div>'}</div>`;
+> app\resources\app\gyomuon.js:4974:  const conversion=`<div class="query-summary"><span><b>${base.avg5==null?"-":base.avg5.toFixed(2)}</b>5등급제 평균</span><span><b>${base.actual9==null?"-":base.actual9.toFixed(2)}</b>실제 9등급 평균</span><span><b>${base.actualDetails.length}</b>산출과목</span><span><b>${escapeHtml(base.preferred||"-")}</b>기준고사</span></div>${actualDetailTable}`;
+  app\resources\app\gyomuon.js:4975:  const cutRows=cuts.map(cut=>({...cut,diff:base.actual9==null?null:base.actual9-Number(cut.cut)})).filter(item=>item.diff==null||Number.isFinite(item.diff)).sort((a,b)=>Math.abs(a.diff??99)-Math.abs(b.diff??99)).slice(0,100);
+  app\resources\app\gyomuon.js:4976:  const cutsHtml=`<div class="query-summary"><span><b>${base.actual9==null?"-":base.actual9.toFixed(2)}</b>실제 9등급 평균</span><span><b>${cuts.length}</b>입결자료</span><span><b>${universityInput?escapeHtml(universityInput):"전체"}</b>대학범위</span><span><b>${cutRows.length}</b>표시자료</span></div><div class="data-card"><div class="card-head"><div><strong>대학별 입결 비교</strong></div><small>실제 9등급 평균과 가까운 순</small></div><div class="data-head 
+admission-cut-grid"><span>대학</span><span>모집단위</span><span>전형</span><span>입결</span><span>차이</span><span>판정</span></div>${cutRows.map(row=>`<div class="data-row admission-cut-grid"><b>${escapeHtml(row.university)}</b><span>${escapeHtml(row.unit)}</span><span>${escapeHtml(row.name)}</span><span>${Number(row.cut).toFixed(2)}</span><span>${row.diff==null?"-":row.diff.toFixed(2)}</span><span class="state 
+${row.diff!=null&&row.diff>0.7?"warn":""}">${row.diff==null?"판단대기":row.diff<=0?"범위내":row.diff<=0.7?"도전":"상향"}</span></div>`).join("")||'<div class="query-empty"><b>입결 자료가 없습니다.</b></div>'}</div>`;
+  app\resources\app\gyomuon.js:4977:  const minimum=minimumAllExamsMarkup(student,rules);
+> app\resources\app\gyomuon.js:4978:  if(admissionMode==="conversion") target.innerHTML=head+conversion;
+  app\resources\app\gyomuon.js:4979:  else if(admissionMode==="minimum") target.innerHTML=head+minimum;
+  app\resources\app\gyomuon.js:4980:  else if(admissionMode==="cuts") target.innerHTML=head+cutsHtml;
+  app\resources\app\gyomuon.js:4981:  else if(admissionMode==="mock") target.innerHTML=head+minimum+cutsHtml;
+> app\resources\app\gyomuon.js:4982:  else target.innerHTML=head+conversion+minimum+cutsHtml;
+  app\resources\app\gyomuon.js:4983:}
+  app\resources\app\gyomuon.js:4984:
+  app\resources\app\gyomuon.js:5121:  const mockMode=admissionMode==="mock";
+> app\resources\app\gyomuon.js:5122:  const label={growth:"성장관리센터",conversion:"등급환산",minimum:"수능최저",cuts:"대학별 입결",combined:"종합분석",mock:"모의고사 입시분석",inseoul:"인서울 관리",regional:"지거국 관리"}[admissionMode]||'성장관리센터';
+  app\resources\app\gyomuon.js:5123:  const needsUniversity=["minimum","cuts","combined"].includes(admissionMode);
+> app\resources\app\gyomuon.js:5124:  const allowUniversityScope=!growthMode&&!managementMode&&admissionMode!=="conversion";
+  app\resources\app\gyomuon.js:5125:  const universities=admissionUniversities();
+> app\resources\app\gyomuon.js:5126:  const tabs=`<div class="module-tabs admission-growth-tabs"><button data-admission-mode="growth" class="${growthMode?"active":""}">01 성장관리센터</button><button data-admission-mode="inseoul" class="${admissionMode==="inseoul"?"active":""}">02 인서울관리</button><button data-admission-mode="regional" class="${admissionMode==="regional"?"active":""}">03 지거국관리</button><button data-admission-mode="combined" 
+class="${admissionMode==="combined"?"active":""}">04 종합분석</button><button data-admission-mode="mock" class="${mockMode?"active":""}">05 모의고사</button><button data-admission-mode="minimum" class="${admissionMode==="minimum"?"active":""}">06 수능최저</button><button data-admission-mode="cuts" class="${admissionMode==="cuts"?"active":""}">대학별 입결</button><button data-admission-mode="conversion" class="${admissionMode==="conversion"?"active":""}">등급환산</button></div>`;
+  app\resources\app\gyomuon.js:5127:  if(mockMode){
+  app\resources\app\gyomuon.js:5128:    return `<div class="module-page admission-mock-page"><div class="module-intro pastel-lilac"><span>05</span><div><h3>모의고사 입시분석</h3><p>학생의 누적 모의고사를 내신·수능최저·대학입결과 연결해 입시 상담 기준으로 분석합니다.</p></div></div>${tabs}<div class="query-panel admission-query-panel admission-query-v418"><label>반 필터<select class="filter" id="admissionClass"><option value="">전체 반</option>${classes.map(c=>`<option 
+value="${c}">${c}반</option>`).join("")}</select></label><label>학생<select class="filter" id="admissionStudent"><option value="">학생 선택</option>${optionStudents("")}</select></label><button class="btn primary" id="admissionQueryButton">입시 모의분석 조회</button><button class="btn secondary" id="admissionCounselButton">상담 기록</button><button class="btn secondary" id="admissionQueryReset">초기화</button></div><div id="admissionQueryResult"><div class="query-empty"><span>◎</span><b>입시 
+분석할 학생을 선택하세요.</b><small>누적 모의고사와 내신·수능최저·대학입결을 함께 연결합니다.</small></div></div></div>`;
+  app\resources\app\gyomuon.js:10957:  $$('[data-inline-access-user]').forEach(row=>{const id=row.dataset.inlineAccessUser,account=(readonlyCache?.userAccounts||[]).find(a=>String(a.id)===String(id));if(!account)return;row.querySelector('[data-inline-access-toggle]')?.addEventListener('click',async()=>{const p=currentUserProfile();if(account.active!==false&&String(account.id)===String(p.id))return toast('현재 로그인한 관리자 계정은 자기 자신을 중지할 수 없습니다.');const 
+active=account.active===false;const result=await window.schoolBoard?.updateUserAccount?.({id,active});if(!result?.ok)return toast(result?.reason||'사용자 승인 상태를 저장하지 못했습니다.');const refreshed=await window.schoolBoard?.readReadonlyCache?.();if(refreshed?.ok)readonlyCache=refreshed.data;render('settings');toast(active?'사용 승인을 완료했습니다.':'사용을 중지했습니다.');});row.querySelector('[data-inline-access-save]')?.addEventListener('click',async()=>{const 
+role=row.querySelector('[data-inline-access-role]')?.value||'',grade=row.querySelector('[data-inline-access-grade]')?.value||'1',classNo=row.querySelector('[data-inline-access-class]')?.value||'';const admin=role==='관리자';const result=await window.schoolBoard?.updateUserAccount?.({id,role:admin?'관리자':role,admin,grade,classNo,active:account.active!==false});if(!result?.ok)return toast(result?.reason||'권한을 저장하지 못했습니다.');const refreshed=await 
+window.schoolBoard?.readReadonlyCache?.();if(refreshed?.ok)readonlyCache=refreshed.data;render('settings');toast('사용자 권한을 저장했습니다.');});});
+> app\resources\app\gyomuon.js:10958:  $$('[data-check-update]').forEach(button=>button.onclick=async()=>{const url=$("#updateManifestUrl")?.value.trim()||state.settings.updateManifestUrl||"";if(!url)return toast("업데이트 정보 JSON 주소를 먼저 입력하세요.");button.disabled=true;button.textContent="확인 중…";const result=await window.schoolBoard?.checkUpdate?.(url,APP_VERSION);button.disabled=false;button.textContent="업데이트 확인";const 
+box=$("#updateCheckResult");if(!result?.ok){if(box)box.innerHTML=`<b>확인 실패</b><small>${escapeHtml(result?.reason||'업데이트 정보를 읽지 못했습니다.')}</small>`;return;}if(box)box.innerHTML=result.updateAvailable?`<b>새 버전 ${escapeHtml(result.version)} 사용 가능</b><small>${escapeHtml(result.notes||'새 버전이 있습니다.')} · 확인경로 ${escapeHtml(result.source||'자동')}</small><button class="btn primary" data-apply-update>업데이트 적용</button>`:`<b>최신 버전입니다</b><small>현재 
+${APP_VERSION} · 확인경로 ${escapeHtml(result.source||'자동')}</small>`;const apply=$("[data-apply-update]");if(apply)apply.onclick=async()=>{if(!result.sha256)return toast("업데이트 정보에 SHA-256이 없어 자동 적용할 수 없습니다.");if(!confirm(`UEP ${result.version} 업데이트를 적용할까요?\n\n현재 설정·인증·연결 정보는 그대로 유지됩니다. 적용 후 UEP가 자동으로 다시 실행됩니다.`))return;apply.disabled=true;apply.textContent="다운로드·검증 중…";const applied=await 
+window.schoolBoard?.applyUpdate?.({version:result.version,downloadUrl:result.downloadUrl,sha256:result.sha256});if(!applied?.ok){apply.disabled=false;apply.textContent="업데이트 적용";return toast(applied?.reason||"업데이트 적용에 실패했습니다.");}toast("업데이트 검증 완료 · UEP를 재시작하여 적용합니다.");};});
+  app\resources\app\gyomuon.js:10959:  const timetableForm = $("#timetableNeisForm");
+  app\resources\app\gyomuon.js:10960:  if (timetableForm) timetableForm.onsubmit = async (event) => {
+  app\resources\app\gyomuon.js:11403:  const rowXml=(cells)=>`<Row>${cells.map(cell=>`<Cell><Data ss:Type=\"String\">${xmlEscape(cell)}</Data></Cell>`).join("")}</Row>`;
+> app\resources\app\gyomuon.js:11404:  const xml=`<?xml version=\"1.0\"?><Workbook xmlns=\"urn:schemas-microsoft-com:office:spreadsheet\" xmlns:ss=\"urn:schemas-microsoft-com:office:spreadsheet\"><Worksheet ss:Name=\"출석부\"><Table>${meta.map(rowXml).join("")}<Row></Row>${rowXml(["번호","학번","이름","반","출석","비고"])}${rows.map(rowXml).join("")}</Table></Worksheet></Workbook>`;
+  app\resources\app\gyomuon.js:11405:  const blob=new Blob(["\ufeff",xml],{type:"application/vnd.ms-excel"}); const url=URL.createObjectURL(blob); const a=document.createElement("a"); a.href=url; a.download=`${safeFileName(program.actualTitle||program.title)}_출석부.xls`; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),1000); toast("출석부 Excel 파일을 생성했습니다.");
+  app\resources\app\gyomuon.js:11406:}
+  app\resources\app\gyomuon.js:11728:      "UEP 기능 상태",
+> app\resources\app\gyomuon.js:11729:      `<div class="app-version-card"><span>UEP · SCHOOL OPERATIONS</span><b>v${APP_VERSION}</b><small>배포 준비 · 학생발굴 이동경로 정밀화 · 관리자 ZIP/교사용 단일 EXE 동일 빌드</small></div>
+  app\resources\app\gyomuon.js:11730:       <div class="drawer-section"><h4>현재 실제 작동</h4>${[
+  app\resources\app\gyomuon.js:11731:        `UEP 구글시트|${googleLabel}`,
+  app\resources\app\gyomuon.js:13230:(()=>{
+> app\resources\app\gyomuon.js:13231:  const UPDATE_MANIFEST='https://raw.githubusercontent.com/hkhsm00-k81c/UEP-Updates/main/uep-version.json';
+> app\resources\app\gyomuon.js:13232:  const versionParts=v=>String(v||'').replace(/^v/i,'').split('.').map(n=>Number(n)||0);
+> app\resources\app\gyomuon.js:13233:  const newer=(a,b)=>{const x=versionParts(a),y=versionParts(b);for(let i=0;i<Math.max(x.length,y.length);i++){if((x[i]||0)!==(y[i]||0))return (x[i]||0)>(y[i]||0);}return false;};
+  app\resources\app\gyomuon.js:13234:  const decorate=latest=>{
+> app\resources\app\gyomuon.js:13235:    if(!newer(latest,APP_VERSION))return;
+> app\resources\app\gyomuon.js:13236:    [...document.querySelectorAll('button,span,div')].filter(el=>el.children.length===0&&el.textContent.trim()===`v${APP_VERSION}`).forEach(el=>{
+> app\resources\app\gyomuon.js:13237:      el.textContent=`v${APP_VERSION} · 업데이트 v${latest}`;
+  app\resources\app\gyomuon.js:13238:      el.title=`새 버전 v${latest}이 있습니다. UEP를 다시 시작하면 자동 적용됩니다.`;
+  app\resources\app\gyomuon.js:13239:      el.style.boxShadow='0 0 0 2px rgba(245,158,11,.45)';
+  app\resources\app\gyomuon.js:13242:  };
+> app\resources\app\gyomuon.js:13243:  const check=async()=>{try{const r=await fetch(UPDATE_MANIFEST,{cache:'no-store'});if(!r.ok)return;const m=await r.json();decorate(m.version||m.latestVersion);}catch(_){}};
+  app\resources\app\gyomuon.js:13244:  addEventListener('DOMContentLoaded',()=>setTimeout(check,1200),{once:true});
+  app\resources\app\gyomuon.js:13245:  setInterval(check,10*60*1000);
+  app\resources\app\gyomuon.js:13528:  const RELEASE_KEY='uep.releaseNotes.seen';
+> app\resources\app\gyomuon.js:13529:  const RELEASE_VERSION='0.81.73';
+  app\resources\app\gyomuon.js:13530:  const LABELS=['교육과정 편성표','학생신청','진로계열 교차선택','과목별 신청현황'];
+  app\resources\app\gyomuon.js:13531:  const META={
+  app\resources\app\gyomuon.js:13611:  retryRosterPanel();
+> app\resources\app\gyomuon.js:13612:  function releaseNotes(){if(localStorage.getItem(RELEASE_KEY)===RELEASE_VERSION)return;const mask=document.createElement('div');mask.style.cssText='position:fixed;inset:0;z-index:2147483600;background:rgba(14,30,34,.38);display:flex;align-items:center;justify-content:center;padding:24px';mask.innerHTML='<div style="width:min(560px,94vw);background:#fff;border-radius:22px;padding:28px;box-shadow:0 22px 70px rgba(0,0,0,.22)"><div 
+style="color:#16816e;font-weight:800;font-size:13px">UEP '+RELEASE_VERSION+' 업데이트</div><h2 style="margin:8px 0 16px">이번 버전에서 달라진 점</h2><ul style="line-height:1.9;color:#40565b"><li>교육과정을 프로그램 페이지형 4카드 UX로 정리했습니다.</li><li>진로계열 교차선택·과목별 신청현황의 기존 비밀번호 보호를 그대로 유지합니다.</li><li>25명 이하 과목을 폐강대상으로 표시하고 개설 유지·폐강 확정을 기록할 수 있습니다.</li><li>과목별 신청학생 명단을 성적 없이 학년·반·번호순으로 출력할 수 
+있습니다.</li></ul><button data-release-ok style="float:right;margin-top:10px;padding:10px 18px;border:0;border-radius:11px;background:#16816e;color:#fff;font-weight:800">확인</button><div style="clear:both"></div></div>';mask.querySelector('[data-release-ok]').addEventListener('click',()=>{localStorage.setItem(RELEASE_KEY,RELEASE_VERSION);mask.remove()});document.body.appendChild(mask);}
+  app\resources\app\gyomuon.js:13613:  window.__uepCurriculumWorkspace08173=function(){const nav=document.querySelector('.curriculum-final-tabs');if(!nav)return;launchCards(nav);if(byLabel('과목별 신청현황')?.classList.contains('active')){enhanceCourseCards();enhanceRosterPanel();}};
+  app\resources\app\gyomuon.js:13614:  /* UEP_08190_DISABLE_08173_RELEASE_POPUP */
+  app\resources\app\gyomuon.js:13737:// __UEP_08174_RELEASE_NOTES_POPUP__
+> app\resources\app\gyomuon.js:13738:const UEP_RELEASE_NOTES_08174={version:'0.81.74',title:'전출입 학생 처리 개선',items:[
+  app\resources\app\gyomuon.js:13739:  '전입생도 학생마스터 기준으로 교육과정 학생선택 목록에 계속 표시됩니다.',
+  app\resources\app\gyomuon.js:13740:  '선택과목이 아직 없는 전입생은 자료 없음으로 구분하고 과목별 신청인원에는 포함하지 않습니다.',
+  app\resources\app\gyomuon.js:13744:]};
+> app\resources\app\gyomuon.js:13745:function uepReleaseNotesKey08174(){return 'uep_release_notes_seen_'+UEP_RELEASE_NOTES_08174.version;}
+  app\resources\app\gyomuon.js:13746:function uepOpenReleaseNotes08174(force=false){
+  app\resources\app\gyomuon.js:13747:  try{if(!force&&localStorage.getItem(uepReleaseNotesKey08174())==='Y')return;}catch{}
+  app\resources\app\gyomuon.js:13750:  const layer=document.createElement('div');layer.id='uepReleaseNotes08174';
+> app\resources\app\gyomuon.js:13751:  layer.innerHTML='<div class="uep-release-dialog-08174"><header><small>UEP UPDATE · v'+escapeHtml(UEP_RELEASE_NOTES_08174.version)+'</small><h3>'+escapeHtml(UEP_RELEASE_NOTES_08174.title)+'</h3></header><div class="body"><ul>'+UEP_RELEASE_NOTES_08174.items.map(x=>'<li>'+escapeHtml(x)+'</li>').join('')+'</ul></div><div class="actions"><button type="button" class="btn primary" data-release-notes-ok>확인</button></div></div>';
+  app\resources\app\gyomuon.js:13752:  document.body.appendChild(layer);
+  app\resources\app\gyomuon.js:13753:  layer.querySelector('[data-release-notes-ok]')?.addEventListener('click',()=>{try{localStorage.setItem(uepReleaseNotesKey08174(),'Y');}catch{}layer.remove();});
+  app\resources\app\gyomuon.js:13758:// __UEP_08177_STABILITY_RECOVERY__
+> app\resources\app\gyomuon.js:13759:const UEP_RELEASE_NOTES_08177={version:'0.81.77',title:'UEP 0.81.77 안정화 복구',items:[
+  app\resources\app\gyomuon.js:13760:  '프로그램 일정 수정 과정에서 발생한 날짜 표시 회귀를 복구했습니다.',
+  app\resources\app\gyomuon.js:13761:  '학사외출 날짜를 v0.81.74 안정 기준으로 정상화했습니다.',
+  app\resources\app\gyomuon.js:13765:]};
+> app\resources\app\gyomuon.js:13766:function uepReleaseNotesKey08177(){return 'uep_release_notes_seen_'+UEP_RELEASE_NOTES_08177.version;}
+  app\resources\app\gyomuon.js:13767:function uepOpenReleaseNotes08177(force=false){
+  app\resources\app\gyomuon.js:13768:  try{if(!force&&localStorage.getItem(uepReleaseNotesKey08177())==='Y')return;}catch{}
+  app\resources\app\gyomuon.js:13771:  layer.style.cssText='position:fixed;inset:0;z-index:9901;background:rgba(15,23,42,.52);display:flex;align-items:center;justify-content:center;padding:24px';
+> app\resources\app\gyomuon.js:13772:  layer.innerHTML='<div class="uep-release-dialog-08174"><header><small>UEP UPDATE · v'+escapeHtml(UEP_RELEASE_NOTES_08177.version)+'</small><h3>'+escapeHtml(UEP_RELEASE_NOTES_08177.title)+'</h3></header><div class="body"><ul>'+UEP_RELEASE_NOTES_08177.items.map(x=>'<li>'+escapeHtml(x)+'</li>').join('')+'</ul></div><div class="actions"><button type="button" class="btn primary" data-release-notes-ok>확인</button></div></div>';
+  app\resources\app\gyomuon.js:13773:  document.body.appendChild(layer);
+  app\resources\app\gyomuon.js:13774:  layer.querySelector('[data-release-notes-ok]')?.addEventListener('click',()=>{try{localStorage.setItem(uepReleaseNotesKey08177(),'Y');}catch{}layer.remove();});
+  app\resources\app\gyomuon.js:13778:// __UEP_08178_REAL_DATA_PATH_RECOVERY__
+> app\resources\app\gyomuon.js:13779:const UEP_RELEASE_NOTES_08178={version:'0.81.78',title:'UEP 0.81.78 실제 데이터 경로 복구',items:['학사외출의 금요일 퇴소·일요일 입소 날짜를 원본 일정과 일치시켰습니다.','여름방학 방과후 운영일·차시일·수업시간을 기본정보연결시트 값과 일치시켰습니다.','학생 참여이력의 여름방학 방과후 기간을 동일한 원본 일정으로 표시합니다.','야자연계=N인 방과후 수업은 오후자습·야자1·야자2에 표시하지 않습니다.']};
+  app\resources\app\gyomuon.js:13780:
+  app\resources\app\gyomuon.js:13781:// __UEP_08179_VISIBLE_VALUE_RECOVERY__
+> app\resources\app\gyomuon.js:13782:const UEP_RELEASE_NOTES_08179={version:'0.81.79',title:'UEP 0.81.79 일정 표시 복구',items:['학사외출 금요일 퇴소·일요일 입소 표시 복구','여름방학 방과후 운영기간·16개 차시 날짜 복구','오전 수업시간 08:40~10:30 복구','학생정보 참여이력 운영기간 동기화','야자연계 N 제외 유지']};
+  app\resources\app\gyomuon.js:13783:
+  app\resources\app\gyomuon.js:13784:// __UEP_08180_DATE_SOURCE_RECOVERY__
+> app\resources\app\gyomuon.js:13785:const UEP_RELEASE_NOTES_08180={version:'0.81.80',title:'UEP 0.81.80 날짜 원본 복구',items:['School Read API의 한국 달력 날짜·시각 보존','공통활동·방과후·학사외출 날짜 원본 일치','여름방학 방과후 임시 +1일·+388분 보정 제거','공결 날짜 중복 보정 제거','시트 batch 응답을 실제 range 기준으로 연결']};
+  app\resources\app\gyomuon.js:13786:
+  app\resources\app\gyomuon.js:13787:
+  app\resources\app\gyomuon.js:13791: if(typeof window==='undefined'||window.__UEP08185CurriculumInstalled)return;window.__UEP08185CurriculumInstalled=true;
+> app\resources\app\gyomuon.js:13792: const V='0.81.85',SEEN='uep.updateNotes.lastShownVersion';let gradeScope='all';
+  app\resources\app\gyomuon.js:13793: const originalOpenSubject=uepOpenSubjectModal08128,originalRender=render;
+  app\resources\app\gyomuon.js:13794: const normalizeStudentNo=s=>{const raw=String(s?.studentNo||s?.id||'').trim();const m=raw.match(/(\d{4})$/);return m?m[1]:raw};
+  app\resources\app\gyomuon.js:13824: function closeNote(){document.getElementById('uepUpdateNotes08185')?.remove();try{localStorage.setItem(SEEN,V);localStorage.setItem('uep.releaseNotes.seen',V)}catch{}}
+> app\resources\app\gyomuon.js:13825: function showNote(){try{if(String(APP_VERSION)!==V||localStorage.getItem(SEEN)===V)return}catch{return}ensureStyle();const l=document.createElement('div');l.id='uepUpdateNotes08185';l.innerHTML='<div class="d"><h2>UEP 0.81.85 업데이트</h2><ul><li>2학년·3학년 오류학생 카드가 실제 화면 학생행을 직접 필터링하도록 안정화했습니다.</li><li>과학 신청명단 팝업 폭을 화면에 맞춰 확대해 좌우 스크롤을 최소화했습니다.</li><li>2-2 과학 명단을 첫 클릭할 때도 
+동일학기·교차학기 과학선택을 최신 데이터로 다시 구성합니다.</li></ul><button type="button">확인</button><div style="clear:both"></div></div>';document.body.appendChild(l);l.querySelector('button').onclick=closeNote}
+  app\resources\app\gyomuon.js:13826: if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(showNote,900),{once:true});else setTimeout(showNote,900);/* UEP_08190_DISABLE_08185_STARTUP_SHIM */
+  app\resources\app\gyomuon.js:13827:})();
+  app\resources\app\gyomuon.js:13833:  window.__UEP08186GradeTransferInstalled=true;
+> app\resources\app\gyomuon.js:13834:  const V='0.81.86',SEEN='uep.updateNotes.lastShownVersion';
+  app\resources\app\gyomuon.js:13835:  const oldDataset=uepSelectionDataset,oldOpenSubject=uepOpenSubjectModal08128;
+  app\resources\app\gyomuon.js:13836:  function norm(v){return String(v??'').trim()}
+  app\resources\app\gyomuon.js:13917:  function showNote(){
+> app\resources\app\gyomuon.js:13918:    try{if(String(APP_VERSION)!==V||localStorage.getItem(SEEN)===V)return}catch{return}
+  app\resources\app\gyomuon.js:13919:    ensureStyle();document.getElementById('uepUpdateNotes08185')?.remove();
+  app\resources\app\gyomuon.js:13920:    const l=document.createElement('div');l.id='uepUpdateNotes08186';l.innerHTML='<div class="d"><h2>UEP 0.81.86 업데이트</h2><ul><li>과목별 신청현황의 내신 기준을 1차·2차·학기말 혼합평균에서 1학기 학기말 최종등급 평균으로 바로잡았습니다.</li><li>전입생은 1학기 성적이 연결되면 전입교 성적으로 표시하고, 아직 없으면 성적자료 없음으로 구분합니다.</li><li>성적자료가 없는 학생은 예상등수·예상등급 산출에서 제외합니다.</li></ul><button 
+type="button">확인</button><div style="clear:both"></div></div>';document.body.appendChild(l);l.querySelector('button').onclick=closeNote;
+  app\resources\app\gyomuon.js:13929:  window.__UEP08188SubjectCardPerformanceInstalled=true;
+> app\resources\app\gyomuon.js:13930:  const V='0.81.88',OPEN_LINE=21,SEEN='uep.updateNotes.lastShownVersion';
+  app\resources\app\gyomuon.js:13931:  const norm=v=>String(v??'').normalize('NFKC').replace(/\s+/g,'').replace(/\*/g,'').trim();
+  app\resources\app\gyomuon.js:13932:  const esc=v=>typeof escapeHtml==='function'?escapeHtml(v):String(v??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#39;'}[ch]));
+  app\resources\app\gyomuon.js:13952:  function closeNote(){document.getElementById('uepUpdateNotes08188')?.remove();try{localStorage.setItem(SEEN,V);localStorage.setItem('uep.releaseNotes.seen',V)}catch{}}
+> app\resources\app\gyomuon.js:13953:  function showNote(){try{if(String(APP_VERSION)!==V||localStorage.getItem(SEEN)===V)return}catch{return}document.getElementById('uepUpdateNotes08186')?.remove();const l=document.createElement('div');l.id='uepUpdateNotes08188';l.style.cssText='position:fixed;inset:0;z-index:2147483007;background:rgba(20,31,35,.38);display:flex;align-items:center;justify-content:center;padding:24px';l.innerHTML='<div 
+style="width:min(680px,92vw);background:#fff;border-radius:22px;padding:24px;box-shadow:0 26px 70px rgba(0,0,0,.22)"><h2>UEP 0.81.88 선택과목 카드 성능개선</h2><ul><li>교육과정 진입 시 과목카드 분석을 미리 전수계산하던 구조를 제거했습니다.</li><li>과목별 신청현황을 열 때만 학생집합·계열구성·성적분포를 1회 계산합니다.</li><li>학생별 계열 판정과 과목별 신청집합을 인덱스로 재사용해 반복 탐색을 줄였습니다.</li><li>0.81.87의 정상/오류·선택가능·문이과 구성·성적분포 표시는 그대로 
+유지합니다.</li></ul><button type="button" style="float:right;border:0;border-radius:12px;background:#167866;color:#fff;padding:10px 18px;font-weight:900;cursor:pointer">확인</button><div style="clear:both"></div></div>';document.body.appendChild(l);l.querySelector('button').onclick=closeNote;}
+  app\resources\app\gyomuon.js:13954:  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(showNote,900),{once:true});else setTimeout(showNote,900);
+  app\resources\app\gyomuon.js:13955:})();
+  app\resources\app\gyomuon.js:14027:    data.errors=(data.errors||[]).map(x=>{if(String(x?.type||'').trim()!=='진로계열 교차선택')return x;const detail=String(x?.detail||'').trim();return {...x,type:'진로계열 교차선택',detail:detail+(detail&&!/진로.*확인/.test(detail)?' 진로계획과 맞는 선택인지 확인이 필요합니다.':'')};});
+> app\resources\app\gyomuon.js:14028:    data.__selectionCrossRule='51-source-only-0.82.02';
+  app\resources\app\gyomuon.js:14029:    data.__selectionRecommendedTrackErrors='reference-only';
+  app\resources\app\gyomuon.js:14030:    return data;
+
+
