@@ -20,9 +20,12 @@ const titleNeedle="const title=sunday?'[오늘의 1학년 학사 입소 및 늦�
 must(g.includes(titleNeedle),'outing title marker missing');
 g=g.replace(titleNeedle,"const title=sunday?'[늦은 입소 안내]':friday?'[조기 퇴소 안내]':'[외출 안내]';const empty=sunday?'금일 늦은 입소 학생 없음':friday?'금일 조기 퇴소 학생 없음':'금일 외출 학생 없음';");
 
+const fn='async function saveNightSupervisor(payload={}) {';
+const fi=m.indexOf(fn);must(fi>=0,'saveNightSupervisor missing');
 const oldRoles="const allowedRoles=new Set(['admin','grade_head','grade_manager','homeroom','subject']);";
+const ri=m.indexOf(oldRoles,fi);must(ri>=fi && ri<fi+500,'night duty allowedRoles missing near function');
 const newRoles="const allowedRoles=new Set(['admin','grade_head','grade_manager','homeroom','subject','담임','담임교사']); /* UEP_08202_HOMEROOM_DUTY_WRITE */";
-m=once(m,oldRoles,newRoles,'night duty roles');
+m=m.slice(0,ri)+newRoles+m.slice(ri+oldRoles.length);
 
 must(g.includes("map(item=>outingStudentNo(item)+' '+item.name)"),'supervisor report minimal identity marker missing');
 g+='\n/* UEP_08202_BUNDLED_FIXES: 51-only cross | outing weekday labels | supervisor privacy | homeroom night-duty */\n';
