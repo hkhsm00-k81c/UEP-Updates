@@ -1,0 +1,116 @@
+name: Release UEP 0.82.01 Selection 51 Live Source
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - release-uep-08201-selection-51-live-source.trigger
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Download official 0.82.00 package
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,out,verify | Out-Null
+          gh release download v0.82.00 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+          if(!(Test-Path app/UEP.exe)){throw 'UEP.exe missing'}
+      - name: Apply live 51 source fix
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check scripts/patch-uep-pending-51-live-source.js
+          node scripts/patch-uep-pending-51-live-source.js app
+          $g='app/resources/app/gyomuon.js'
+          $x=Get-Content $g -Raw -Encoding UTF8
+          $x=$x.Replace('const APP_VERSION = "0.82.00";','const APP_VERSION = "0.82.01";')
+          Set-Content $g $x -Encoding UTF8
+          $pkg='app/resources/app/package.json'
+          $p=Get-Content $pkg -Raw -Encoding UTF8|ConvertFrom-Json
+          $p.version='0.82.01'
+          $p|ConvertTo-Json -Depth 20|Set-Content $pkg -Encoding UTF8
+      - name: Static verification
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check app/resources/app/gyomuon.js
+          node --check app/resources/app/electron/main.cjs
+          node --check app/resources/app/electron/preload.cjs
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          foreach($marker in @('const APP_VERSION = "0.82.01";','UEP_PENDING_51_LIVE_SOURCE_OF_TRUTH','UEP_08194_SELECTION_ERROR_SOURCE_START','UEP_08200_TERM_SCOPED_CROSS_ERRORS','UEP_08197_ATTENDANCE_DATE_SHIFT')){if(!$g.Contains($marker)){throw "renderer marker missing: $marker"}}
+          if($g.Contains('UEP_08195_SELECTION_PERSISTENCE_DIAGNOSTIC')){throw 'diagnostic contamination detected'}
+          $pkg=Get-Content app/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json
+          if($pkg.version -ne '0.82.01'){throw 'package version mismatch'}
+      - name: Pack and hash
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Compress-Archive -Path app/* -DestinationPath out/UEP-update.zip -CompressionLevel Optimal
+          Expand-Archive out/UEP-update.zip verify -Force
+          node --check verify/resources/app/gyomuon.js
+          $vg=Get-Content verify/resources/app/gyomuon.js -Raw -Encoding UTF8
+          if(!$vg.Contains('UEP_PENDING_51_LIVE_SOURCE_OF_TRUTH')){throw 'repacked live-51 marker missing'}
+          $vp=Get-Content verify/resources/app/package.json -Raw -Encoding UTF8|ConvertFrom-Json
+          if($vp.version -ne '0.82.01'){throw 'repacked version mismatch'}
+          $sha=(Get-FileHash out/UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          $sha | Set-Content out/sha256.txt
+          "SHA256=$sha" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Publish 0.82.01
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          gh release view v0.82.01 --repo $env:GITHUB_REPOSITORY *> $null
+          if($LASTEXITCODE -eq 0){throw 'v0.82.01 already exists; refusing overwrite'}
+          $notes=@"
+          UEP v0.82.01 선택과목 오류 연동 보강
+
+          - 51_선택과목오류_정규화 → UEP 화면 연결을 최신 시트 기준으로 보강
+          - 학생신청·문이과 교차오류·과목별 신청현황 진입 시 오래된 일반 캐시 때문에 51 최신 오류가 누락되는 문제 수정
+          - 0.82.00의 2-1·2-2 학기 내 문이과 교차오류 판정 유지
+          - 기존 출결 날짜 이동 및 실행메뉴 경로 영속화 유지
+          "@
+          gh release create v0.82.01 out/UEP-update.zip out/sha256.txt --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title 'UEP v0.82.01' --notes $notes
+      - name: Promote automatic update
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          git pull --rebase origin main
+          $p=Get-Content uep-policy.json -Raw -Encoding UTF8|ConvertFrom-Json
+          $p.latestVersion='0.82.01'
+          $p.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.01/UEP-update.zip'
+          $p.sha256=$env:SHA256
+          $p.message='UEP 0.82.01 선택과목 51 오류 정규화 최신값 화면 반영 보강'
+          $p|ConvertTo-Json -Depth 10|Set-Content uep-policy.json -Encoding UTF8
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add uep-policy.json
+          git commit -m 'Promote UEP 0.82.01 automatic update'
+          git push origin HEAD:main
+      - name: Final verification
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          gh release view v0.82.01 --repo $env:GITHUB_REPOSITORY --json tagName,name,isDraft,isPrerelease,url
+          git pull --rebase origin main
+          $p=Get-Content uep-policy.json -Raw -Encoding UTF8|ConvertFrom-Json
+          if($p.latestVersion -ne '0.82.01'){throw 'policy version mismatch'}
+          if($p.sha256 -ne $env:SHA256){throw 'policy sha mismatch'}
