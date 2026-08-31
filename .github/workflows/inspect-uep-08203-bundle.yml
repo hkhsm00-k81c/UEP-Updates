@@ -1,0 +1,32 @@
+name: Inspect UEP 0.82.03 Bundle Targets
+on:
+  push:
+    branches: [main]
+    paths: [inspect-08203.trigger]
+permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.82.02 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+          $files = Get-ChildItem app/resources/app -Recurse -File -Include *.js,*.cjs,*.html,*.json
+          $patterns = @('진로교','전입교','평균등급','release','notes','수정사항','업데이트','lastShown','localStorage','학사 복귀','returnToDorm','individualOutingAllowed','학원 외출','복귀형','퇴소 안내','조기 퇴소 안내')
+          '' | Set-Content inspect-08203.txt
+          foreach($p in $patterns){
+            "===== PATTERN: $p =====" | Add-Content inspect-08203.txt
+            $hits = $files | Select-String -Pattern $p -SimpleMatch -Context 2,3 | Select-Object -First 40
+            if($hits){ $hits | Out-String -Width 500 | Add-Content inspect-08203.txt } else { 'NO MATCH' | Add-Content inspect-08203.txt }
+          }
+          git config user.name 'github-actions[bot]'; git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add inspect-08203.txt
+          git commit -m 'Record UEP 0.82.03 target inspection'
+          git push origin HEAD:main
