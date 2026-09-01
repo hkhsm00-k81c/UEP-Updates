@@ -1,1 +1,2 @@
-diagnose 0.82.08 dashboard loaders and panel anchors
+diagnose bridge files and readonly sheet maps
+second pass
