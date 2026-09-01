@@ -1,0 +1,56 @@
+name: Build and Release UEP 0.82.09
+on:
+  push:
+    branches: [main]
+    paths: [release-08209.trigger]
+permissions:
+  contents: write
+jobs:
+  build-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - uses: actions/setup-node@v4
+        with: {node-version: '20'}
+      - shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check scripts/patch-uep-08209-dashboard-data.js
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.82.08 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+          node scripts/patch-uep-08209-dashboard-data.js app
+          node --check app/resources/app/gyomuon.js
+          $g=Get-Content app/resources/app/gyomuon.js -Raw
+          foreach($marker in @('const APP_VERSION = "0.82.09";','UEP_08209_DASHBOARD_DATA_FIX_START','52_대입기초','53_전형이해','56_대학입시마스터','학년공지','보고서 미제출 현황')){ if(-not $g.Contains($marker)){ throw "missing marker: $marker" } }
+          $c=Get-Content app/resources/app/gyomuon.css -Raw
+          if(-not $c.Contains('UEP_08209_DASHBOARD_DATA_FIX_CSS')){ throw 'missing 0.82.09 dashboard css marker' }
+          Remove-Item UEP-update.zip,sha256.txt -Force -ErrorAction SilentlyContinue
+          Compress-Archive -Path app\* -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "$sha  UEP-update.zip" | Set-Content sha256.txt -Encoding ascii
+          if(gh release view v0.82.09 --repo $env:GITHUB_REPOSITORY 2>$null){ gh release delete v0.82.09 --repo $env:GITHUB_REPOSITORY --yes --cleanup-tag }
+          $notes=@'
+          UEP v0.82.09
+
+          - 대입 기초 · 전형 이해 · 오늘의 대학 카드가 동기화 캐시의 52·53·56 데이터셋을 다시 읽어 카드/상세를 갱신
+          - 보고서 미제출 현황 관리자 화면을 1~9반 3×3 전체 표시로 보정
+          - 학년공지와 자동 마감공지를 단일 학년공지 영역으로 통합
+          - 자동 마감공지는 승인된 항목만 학년공지에 노출하도록 표시 규칙 보정
+          '@
+          gh release create v0.82.09 UEP-update.zip sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.09' --notes $notes --target $env:GITHUB_SHA
+          $policy=Get-Content uep-policy.json -Raw | ConvertFrom-Json
+          $policy.latestVersion='0.82.09'
+          $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.09/UEP-update.zip'
+          $policy.sha256=$sha
+          $policy.message='UEP 0.82.09 입시카드 데이터 연결 · 9개반 보고서 현황 · 학년공지 통합'
+          $policy | ConvertTo-Json -Depth 10 | Set-Content uep-policy.json -Encoding utf8
+          @("UEP 0.82.09 RELEASE SUCCESS","sha256=$sha","size=$((Get-Item UEP-update.zip).Length)","commit=$env:GITHUB_SHA") | Set-Content release-08209-status.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add uep-policy.json release-08209-status.txt
+          git commit -m 'Publish UEP 0.82.09 policy and status'
+          git push origin HEAD:main
