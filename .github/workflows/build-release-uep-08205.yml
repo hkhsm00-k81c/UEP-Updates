@@ -1,0 +1,57 @@
+name: Build and Release UEP 0.82.05
+on:
+  push:
+    branches: [main]
+    paths: [release-08205.trigger]
+permissions:
+  contents: write
+jobs:
+  build-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - uses: actions/setup-node@v4
+        with: {node-version: '20'}
+      - shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check scripts/patch-uep-08205-bundle.js
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.82.04 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+          node scripts/patch-uep-08205-bundle.js app
+          node --check app/resources/app/gyomuon.js
+          if(Test-Path app/resources/app/electron/main.cjs){ node --check app/resources/app/electron/main.cjs }
+          $g=Get-Content app/resources/app/gyomuon.js -Raw
+          foreach($marker in @('const APP_VERSION = "0.82.05";','programRequiresStudentReport(program,student,reports)','__courseRows:courseRows','afterschool-course-history','UEP_08205_RELEASE_NOTES_ONCE_START')){ if(-not $g.Contains($marker)){ throw "missing gyomuon marker: $marker" } }
+          $c=Get-Content app/resources/app/gyomuon.css -Raw
+          if(-not $c.Contains('UEP_08205_REPORT_AFTER_HISTORY')){ throw 'missing 0.82.05 css marker' }
+          Remove-Item UEP-update.zip,sha256.txt -Force -ErrorAction SilentlyContinue
+          Compress-Archive -Path app\* -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "$sha  UEP-update.zip" | Set-Content sha256.txt -Encoding ascii
+          if(gh release view v0.82.05 --repo $env:GITHUB_REPOSITORY 2>$null){ gh release delete v0.82.05 --repo $env:GITHUB_REPOSITORY --yes --cleanup-tag }
+          $notes=@'
+          UEP v0.82.05 묶음 업데이트
+
+          - 대시보드 학생 보고서: 실제 보고서 대상 프로그램만 완료/제출중/미제출 집계에 포함
+          - 보고서 집계 오류: reportRequired 미설정 선택활동을 일괄 미제출 대상으로 잡던 로직 제거
+          - 학생 방과후학교 이력: 날짜·차시 반복행을 강좌 단위로 묶어 표시
+          - 방과후 상세: 강좌 카드에서 운영기간·유형·담당·장소·차시별 출석상태를 펼쳐보기 제공
+          '@
+          gh release create v0.82.05 UEP-update.zip sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.05' --notes $notes --target $env:GITHUB_SHA
+          $policy=Get-Content uep-policy.json -Raw | ConvertFrom-Json
+          $policy.latestVersion='0.82.05'
+          $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.05/UEP-update.zip'
+          $policy.sha256=$sha
+          $policy.message='UEP 0.82.05 보고서 대상집계 보정 · 방과후 이력 강좌단위 그룹화'
+          $policy | ConvertTo-Json -Depth 10 | Set-Content uep-policy.json -Encoding utf8
+          @("UEP 0.82.05 RELEASE SUCCESS","sha256=$sha","size=$((Get-Item UEP-update.zip).Length)","commit=$env:GITHUB_SHA") | Set-Content release-08205-status.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add uep-policy.json release-08205-status.txt
+          git commit -m 'Publish UEP 0.82.05 policy and status'
+          git push origin HEAD:main
