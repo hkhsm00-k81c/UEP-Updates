@@ -1,0 +1,60 @@
+name: Build and Release UEP 0.82.04
+on:
+  push:
+    branches: [main]
+    paths: [release-08204.trigger]
+permissions:
+  contents: write
+jobs:
+  build-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - uses: actions/setup-node@v4
+        with: {node-version: '20'}
+      - shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.82.03 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+          node scripts/patch-uep-08204-bundle.js app
+          node --check app/resources/app/gyomuon.js
+          node --check app/resources/app/electron/google-data.cjs
+          node --check app/resources/app/electron/main.cjs
+          $g=Get-Content app/resources/app/gyomuon.js -Raw
+          $d=Get-Content app/resources/app/electron/google-data.cjs -Raw
+          $m=Get-Content app/resources/app/electron/main.cjs -Raw
+          foreach($marker in @('const APP_VERSION = "0.82.04";','dormExitBadge08204','dorm-exit-badge','UEP_08204_RELEASE_NOTES_ONCE_START')){ if(-not $g.Contains($marker)){ throw "missing gyomuon marker: $marker" } }
+          foreach($marker in @('trim() === "Y" &&','trim() === "재사"')){ if(-not $d.Contains($marker)){ throw "missing data marker: $marker" } }
+          foreach($marker in @('UEP_08204_SELECTED_REPORT_INTEGRITY_START','repairSelectedReportTailGaps08204','92_재처리대기')){ if(-not $m.Contains($marker)){ throw "missing main marker: $marker" } }
+          Remove-Item UEP-update.zip,sha256.txt -Force -ErrorAction SilentlyContinue
+          Compress-Archive -Path app\* -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "$sha  UEP-update.zip" | Set-Content sha256.txt -Encoding ascii
+          if(gh release view v0.82.04 --repo $env:GITHUB_REPOSITORY 2>$null){ gh release delete v0.82.04 --repo $env:GITHUB_REPOSITORY --yes --cleanup-tag }
+          $notes=@'
+          UEP v0.82.04 묶음 업데이트
+
+          - 학사생정보: 학기별 이력 카드는 유지하면서 퇴사자에게 `퇴사 M/D` 배지를 표시하고 카드를 약하게 구분
+          - 학사생 현재 판정: `현재여부=Y` 그리고 `학사상태=재사`를 모두 만족하는 학생만 현재 재사로 집계
+          - 선택활동 보고서: 구글폼 원본행과 21_선택보고서_정규화의 누락을 동기화 때 자동 감지·복구
+          - 보고서 무결성: 자동 복구 실패 시 데이터처리 92_재처리대기에 기록
+          - 대시보드 보고서: 공통·선택 정규화 원장을 단일 기준으로 유지
+          '@
+          gh release create v0.82.04 UEP-update.zip sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.04' --notes $notes --target $env:GITHUB_SHA
+          $policy=Get-Content uep-policy.json -Raw | ConvertFrom-Json
+          $policy.latestVersion='0.82.04'
+          $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.04/UEP-update.zip'
+          $policy.sha256=$sha
+          $policy.message='UEP 0.82.04 학사 퇴사배지 · 현재재사 판정 통일 · 선택보고서 누락 자동복구'
+          $policy | ConvertTo-Json -Depth 10 | Set-Content uep-policy.json -Encoding utf8
+          @("UEP 0.82.04 RELEASE SUCCESS","sha256=$sha","size=$((Get-Item UEP-update.zip).Length)","commit=$env:GITHUB_SHA") | Set-Content release-08204-status.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add uep-policy.json release-08204-status.txt
+          git commit -m 'Publish UEP 0.82.04 policy and status'
+          git push origin HEAD:main
