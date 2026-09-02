@@ -12,3 +12,4 @@ Release: v0.82.16 one-time changelog popup and four status summary cards in one 
 Retry: v0.82.16 release-note validation anchor fix
 Hotfix: v0.82.17 local-first login recovery for School Read API 404
 Recovery: v0.82.18 rebuild from last known good v0.82.14 base; keep popup + four status cards only
+Release: v0.82.19 connect admissions live sheets 52/53/53A/53B/54/55/56 on stable v0.82.18
