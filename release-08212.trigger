@@ -6,3 +6,4 @@ Retry: CRLF-safe embedded renderer extraction
 Retry: validate generated admission cards by native card definitions
 Hotfix: v0.82.13 preserve $$ multi-selector bindings in String.replace callback
 Retry: negative-lookbehind validation for standalone selector
+Release: v0.82.14 native official attendance ledger card
