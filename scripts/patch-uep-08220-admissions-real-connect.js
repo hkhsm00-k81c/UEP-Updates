@@ -10,7 +10,6 @@ const must=(ok,msg)=>{if(!ok)throw new Error(msg)};
 must(/const\s+APP_VERSION\s*=\s*["']0\.82\.19["'];/.test(g),'0.82.19 renderer base not found');
 g=g.replace(/const\s+APP_VERSION\s*=\s*["']0\.82\.19["'];/,'const APP_VERSION = "0.82.20";');
 
-// 1) REAL CACHE HANDOFF: 0.82.19 read 53A/53B but never exposed them to readonlyCache.
 const cacheAnchor="  data.admissionTypes=uep08210MatrixObjects(matrices['53_전형이해']);\n  data.universityAdmissions=uep08210MatrixObjects(matrices['56_대학입시마스터']);";
 must(m.includes(cacheAnchor),'admissions cache handoff anchor not found');
 m=m.replace(cacheAnchor,
@@ -27,8 +26,7 @@ m=m.replace(aliasAnchor,
 "  data['53B_전형유형별대학DB']=data.admissionStructures;\n"+
 "  data['56_대학입시마스터']=data.universityAdmissions;");
 
-// 2) 대입 기초: hard-coded lesson cards -> 52_대입기초 rows drive all visible cards.
-const basicsRe=/function openDashboardAdmissionBasics\(\)\{[\s\S]*?\n\}\nfunction dashboardAdmissionMethod/;
+const basicsRe=/function\s+openDashboardAdmissionBasics\s*\(\s*\)\s*\{[\s\S]*?function\s+dashboardAdmissionMethod/;
 must(basicsRe.test(g),'openDashboardAdmissionBasics block not found');
 const basicsFn=`function openDashboardAdmissionBasics(){
   const rows=dashboardAdmissionRows('admissionBasics','52_대입기초').filter(dashboardAdmissionEnabled).sort((a,b)=>dashboardAdmissionOrder(a)-dashboardAdmissionOrder(b));
@@ -41,8 +39,7 @@ const basicsFn=`function openDashboardAdmissionBasics(){
 function dashboardAdmissionMethod`;
 g=g.replace(basicsRe,basicsFn);
 
-// 3) 전형 이해: 53 broad concept + 53A detailed type + 53B actual university mappings.
-const typesRe=/function openDashboardAdmissionTypes\(\)\{[\s\S]*?\n\}\nfunction openDashboardUniversityDetail/;
+const typesRe=/function\s+openDashboardAdmissionTypes\s*\(\s*\)\s*\{[\s\S]*?function\s+openDashboardUniversityDetail/;
 must(typesRe.test(g),'openDashboardAdmissionTypes block not found');
 const typesFn=`function openDashboardAdmissionTypes(){
   const types=dashboardAdmissionRows('admissionTypes','53_전형이해').filter(dashboardAdmissionEnabled).sort((a,b)=>dashboardAdmissionOrder(a)-dashboardAdmissionOrder(b));
@@ -68,7 +65,6 @@ const typesFn=`function openDashboardAdmissionTypes(){
 function openDashboardUniversityDetail`;
 g=g.replace(typesRe,typesFn);
 
-// 4) University detail already joins 56 -> structures -> 54 -> 55. With real cache handoff above, 53B now reaches renderer.
 if(!g.includes('UEP_08220_ADMISSIONS_REAL_CONNECT'))g += `\n/* UEP_08220_ADMISSIONS_REAL_CONNECT: 52 -> basics, 53+53A+53B -> types, 56->53B->54->55 -> university */\n`;
 
 must(m.includes("data.admissionTypeDetails=uep08210MatrixObjects(matrices['53A_전형세부유형DB'])"),'53A cache mapping missing');
