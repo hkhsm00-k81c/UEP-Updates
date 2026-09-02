@@ -1,0 +1,41 @@
+name: Inspect UEP 0.82.18 admissions integration
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [inspect-08218-admissions.trigger]
+permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.82.18 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+          $p='app/resources/app/gyomuon.js'
+          $g=Get-Content $p -Raw
+          $keys=@('대입 기초','전형 이해','오늘의 대학','52_대입기초','53_전형이해','56_대학입시마스터','batch-read','readSheet','sheetName','dashboardStudentStatusCompactMarkup')
+          $out=@()
+          foreach($k in $keys){
+            $out += "===== $k ====="
+            $start=0;$n=0
+            while(($i=$g.IndexOf($k,$start,[StringComparison]::OrdinalIgnoreCase)) -ge 0 -and $n -lt 6){
+              $a=[Math]::Max(0,$i-1800);$len=[Math]::Min(4200,$g.Length-$a)
+              $out += $g.Substring($a,$len)
+              $out += "`n--- occurrence ---`n"
+              $start=$i+$k.Length;$n++
+            }
+          }
+          $out -join "`n" | Set-Content inspect-08218-admissions.txt -Encoding utf8
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add inspect-08218-admissions.txt
+          git commit -m 'Inspect 0.82.18 admissions and sheet read hooks'
+          git push origin HEAD:main
