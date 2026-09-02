@@ -24,7 +24,8 @@ function removeMarked(text,start,end){
 }
 g=removeMarked(g,'/* UEP_08210_DASHBOARD_INTEGRATION_START */','/* UEP_08210_DASHBOARD_INTEGRATION_END */');
 g=removeMarked(g,'/* UEP_08211_ADMISSIONS_COUNSELING_START */','/* UEP_08211_ADMISSIONS_COUNSELING_END */');
-css=removeMarked(css,'/* UEP_08210_DASHBOARD_INTEGRATION_CSS */','/* UEP_08211_ADMISSIONS_COUNSELING_CSS */');
+const legacyCssStart=css.indexOf('/* UEP_08210_DASHBOARD_INTEGRATION_CSS */');
+if(legacyCssStart>=0) css=css.slice(0,legacyCssStart).trimEnd()+'\n';
 const css08211=css.indexOf('/* UEP_08211_ADMISSIONS_COUNSELING_CSS */');
 if(css08211>=0)css=css.slice(0,css08211);
 

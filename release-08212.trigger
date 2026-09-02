@@ -3,3 +3,4 @@ Base: v0.82.11
 Remove: 0.82.10/0.82.11 dashboard DOM post-processing
 Render: native five cards and native three-panel school work dashboard
 Retry: CRLF-safe embedded renderer extraction
+Retry: validate generated admission cards by native card definitions
