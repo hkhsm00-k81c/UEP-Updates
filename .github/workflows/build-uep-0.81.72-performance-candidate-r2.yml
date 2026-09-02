@@ -1,122 +1,43 @@
-name: Build UEP 0.81.72 Performance Candidate R2
+name: Inspect UEP 0.82.18 for v0.82.19 retry
 'on':
   push:
     branches: [main]
-    paths: [build-uep-0.81.72-performance-candidate-r2.trigger]
+    paths: [release-08212.trigger]
 permissions:
-  contents: read
-  actions: read
+  contents: write
 jobs:
-  build:
+  build-release:
     runs-on: windows-latest
-    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - name: Download stage1 candidate artifact
-        shell: pwsh
+        with: {fetch-depth: 0}
+      - shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference='Stop'
-          New-Item -ItemType Directory -Force stage1,app,out|Out-Null
-          gh run download 32909082164 --repo $env:GITHUB_REPOSITORY -n UEP-0.81.72-performance-candidate -D stage1
-          Expand-Archive stage1/UEP-update-0.81.72-candidate.zip app -Force
-      - name: Replace operational write full-refresh contracts with patches
-        shell: pwsh
-        run: |
-          $ErrorActionPreference='Stop'
-          @'
-          const fs=require('fs');
-          const g='app/resources/app/gyomuon.js',m='app/resources/app/electron/main.cjs';
-          let gy=fs.readFileSync(g,'utf8'),main=fs.readFileSync(m,'utf8');
-          const must=(ok,msg)=>{if(!ok)throw new Error(msg)};
-          const rep=(src,from,to,label)=>{must(src.includes(from),'missing '+label);return src.replace(from,to)};
-
-          // Main: operational writes refresh only the six-range operational patch, not the whole UEP data graph.
-          main=rep(main,
-`  liveDataCache=null; liveDataFetchedAt=0;
-  const data=await fetchLiveData({force:true});
-  return {ok:true,id,data};`,
-`  const operational=await fetchOperationalData();
-  return {ok:true,id,patch:operational.patch||{}};`,'saveOfficialAttendance full refresh');
-          main=rep(main,
-`  liveDataCache=null; liveDataFetchedAt=0;
-  const data=await fetchLiveData({force:true});
-  return {ok:true,data};`,
-`  const operational=await fetchOperationalData();
-  return {ok:true,patch:operational.patch||{}};`,'deleteOfficialAttendance full refresh');
-          main=rep(main,
-`  liveDataCache=null;liveDataFetchedAt=0;return {ok:true,id,data:await fetchLiveData({force:true})};`,
-`  const operational=await fetchOperationalData();return {ok:true,id,patch:operational.patch||{}};`,'saveLateAttendance full refresh');
-          main=rep(main,
-`  await clearSheetValues(token,UEP_SPREADSHEET_ID,\`'31_지각기록'!A\${pos+4}:P\${pos+4}\`);liveDataCache=null;liveDataFetchedAt=0;return {ok:true,data:await fetchLiveData({force:true})};`,
-`  await clearSheetValues(token,UEP_SPREADSHEET_ID,\`'31_지각기록'!A\${pos+4}:P\${pos+4}\`);const operational=await fetchOperationalData();return {ok:true,patch:operational.patch||{}};`,'deleteLateAttendance full refresh');
-          main=rep(main,
-`  liveDataCache=null; liveDataFetchedAt=0;
-  const data=await fetchLiveData({force:true});
-  return {ok:true,data};`,
-`  const operational=await fetchOperationalData();
-  return {ok:true,patch:operational.patch||{}};`,'first duty full refresh');
-          // second identical duty block (lunch) after first replacement
-          main=rep(main,
-`  liveDataCache=null; liveDataFetchedAt=0;
-  const data=await fetchLiveData({force:true});
-  return {ok:true,data};`,
-`  const operational=await fetchOperationalData();
-  return {ok:true,patch:operational.patch||{}};`,'second duty full refresh');
-
-          // Dorm outing lives in the processing sheet. It already returns the exact new record, so update local cache directly.
-          main=rep(main,
-`  liveDataCache=null;liveDataFetchedAt=0;const data=await fetchLiveData({force:true});return {ok:true,id,data,record:{id,studentId:String(payload.studentId||''),studentNo,name,date,className,number,category,outTime,returnTime,reason:String(payload.reason||''),destination:String(payload.destination||''),note:String(payload.note||''),confirmed:String(payload.writer||''),status:'확인'}};`,
-`  const record={id,studentId:String(payload.studentId||''),studentNo,name,date,className,number,category,outTime,returnTime,reason:String(payload.reason||''),destination:String(payload.destination||''),note:String(payload.note||''),confirmed:String(payload.writer||''),status:'확인'};if(liveDataCache){liveDataCache={...liveDataCache,dormOutings:[...(liveDataCache.dormOutings||[]),record],syncedAt:new Date().toISOString()};liveDataFetchedAt=Date.now();}return {ok:true,id,record};`,'saveDormOuting full refresh');
-
-          // Renderer: merge returned operational patch instead of replacing the entire cache.
-          gy=rep(gy,
-`      readonlyCache=result?.data||readonlyCache; attendanceViewDate=payload.date; officialClassFilter="all"; officialStudentFilter="all"; closeDrawer(); render("attendance"); toast(row?"공결 기록을 수정했습니다.":"공결 기록을 등록했습니다.");`,
-`      if(result?.patch)readonlyCache={...(readonlyCache||{}),...result.patch}; attendanceViewDate=payload.date; officialClassFilter="all"; officialStudentFilter="all"; closeDrawer(); render("attendance"); toast(row?"공결 기록을 수정했습니다.":"공결 기록을 등록했습니다.");`,'renderer official save');
-          gy=rep(gy,
-`    try{const result=await window.schoolBoard.saveLateAttendance(payload);readonlyCache=result?.data||readonlyCache;attendanceViewDate=payload.date;closeDrawer();render("attendance");toast(row?"지각 기록을 수정했습니다.":"지각 기록을 등록했습니다.");}catch(error){toast(error?.message||"지각 저장에 실패했습니다.");}`,
-`    try{const result=await window.schoolBoard.saveLateAttendance(payload);if(result?.patch)readonlyCache={...(readonlyCache||{}),...result.patch};attendanceViewDate=payload.date;closeDrawer();render("attendance");toast(row?"지각 기록을 수정했습니다.":"지각 기록을 등록했습니다.");}catch(error){toast(error?.message||"지각 저장에 실패했습니다.");}`,'renderer late save');
-          gy=rep(gy,
-`  try{const result=await window.schoolBoard.deleteLateAttendance(row.id);readonlyCache=result?.data||readonlyCache;render("attendance");toast("지각 기록을 삭제했습니다.");}catch(error){toast(error?.message||"지각 삭제에 실패했습니다.");}`,
-`  try{const result=await window.schoolBoard.deleteLateAttendance(row.id);if(result?.patch)readonlyCache={...(readonlyCache||{}),...result.patch};render("attendance");toast("지각 기록을 삭제했습니다.");}catch(error){toast(error?.message||"지각 삭제에 실패했습니다.");}`,'renderer late delete');
-          // official delete is multiline; replace its result.data assignment generally within the known nearby contract.
-          gy=gy.replace(/(deleteOfficialAttendance\(row\.id\)[\s\S]{0,180}?)readonlyCache=result\?\.data\|\|readonlyCache;/,`$1if(result?.patch)readonlyCache={...(readonlyCache||{}),...result.patch};`);
-          must(!/deleteOfficialAttendance\(row\.id\)[\s\S]{0,220}?readonlyCache=result\?\.data\|\|readonlyCache;/.test(gy),'renderer official delete still replaces full cache');
-
-          gy=rep(gy,`      readonlyCache=result.data||readonlyCache;\n      renderDutyCalendarDrawer('lunch');`,`      if(result?.patch)readonlyCache={...(readonlyCache||{}),...result.patch};\n      renderDutyCalendarDrawer('lunch');`,'renderer lunch patch');
-          gy=rep(gy,`      readonlyCache=result.data||readonlyCache;\n      renderDutyCalendarDrawer('night');`,`      if(result?.patch)readonlyCache={...(readonlyCache||{}),...result.patch};\n      renderDutyCalendarDrawer('night');`,'renderer night patch');
-          gy=rep(gy,`if(!result?.ok)throw new Error(result?.reason||'저장 실패');readonlyCache=result.data||readonlyCache;close();openDormOutingDrawer();`,`if(!result?.ok)throw new Error(result?.reason||'저장 실패');if(result.record){readonlyCache=readonlyCache||{};const rows=(readonlyCache.dormOutings||[]).filter(x=>String(x.id||'')!==String(result.record.id||''));readonlyCache={...readonlyCache,dormOutings:[...rows,result.record]};}close();openDormOutingDrawer();`,'renderer dorm record');
-
-          fs.writeFileSync(g,gy,'utf8');fs.writeFileSync(m,main,'utf8');
-          '@ | Set-Content patch-r2.js -Encoding UTF8
-          node patch-r2.js
-      - name: Structural regression and no-full-refresh checks
-        shell: pwsh
-        run: |
-          $ErrorActionPreference='Stop'
-          node --check app/resources/app/gyomuon.js
-          node --check app/resources/app/electron/main.cjs
-          $m=Get-Content app/resources/app/electron/main.cjs -Raw -Encoding UTF8
-          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
-          foreach($fn in @('saveOfficialAttendance','deleteOfficialAttendance','saveLateAttendance','deleteLateAttendance','saveDormOuting','saveNightSupervisor','saveLunchDuty')){
-            $match=[regex]::Match($m,"(?:async\\s+)?function\\s+$fn\\b[\\s\\S]{0,5000}?(?=\\n(?:async\\s+)?function\\s+|\\nipcMain\\.handle|$)")
-            if(-not $match.Success){throw "function not found: $fn"}
-            if($match.Value -match 'fetchLiveData\\(\\{force:true\\}\\)|fetchLiveData\\(\\{ force: true'){throw "full refresh remains in $fn"}
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.82.18 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+          $files=@('app/resources/app/gyomuon.js','app/resources/app/electron/main.cjs')
+          $patterns=@('batch-read','schoolRead','ranges','readSchool','sheetName','openDashboardAdmissionBasics','openDashboardAdmissionTypes','openDashboardUniversityDetail','dashboardStudentStatusCompactMarkup')
+          $out=@()
+          foreach($f in $files){
+            $lines=Get-Content $f
+            $out += "===== $f ====="
+            for($i=0;$i -lt $lines.Count;$i++){
+              $matched=$false
+              foreach($p in $patterns){ if($lines[$i] -match [regex]::Escape($p)){ $matched=$true; break } }
+              if($matched){
+                $a=[Math]::Max(0,$i-12); $b=[Math]::Min($lines.Count-1,$i+20)
+                $out += "--- around line $($i+1) ---"
+                for($j=$a;$j -le $b;$j++){ $out += ('{0,7}: {1}' -f ($j+1),$lines[$j]) }
+              }
+            }
           }
-          if(($g|Select-String 'readonlyCache=result\?\.data\|\|readonlyCache|readonlyCache=result\.data\|\|readonlyCache' -AllMatches).Matches.Count -gt 2){Write-Host 'Other non-operational result.data contracts remain intentionally (e.g. contacts/program operations).'}
-          foreach($s in @('refreshOperationalCacheSilently','data-curriculum-workspace="plan"')){if(-not $g.Contains($s)){throw "stage1 marker lost: $s"}}
-      - name: Package R2 and verify
-        shell: pwsh
-        run: |
-          $ErrorActionPreference='Stop'
-          Compress-Archive -Path app/* -DestinationPath out/UEP-update-0.81.72-candidate-r2.zip -CompressionLevel Optimal
-          New-Item -ItemType Directory -Force verify|Out-Null;Expand-Archive out/UEP-update-0.81.72-candidate-r2.zip verify -Force
-          node --check verify/resources/app/gyomuon.js;node --check verify/resources/app/electron/main.cjs
-          $sha=(Get-FileHash out/UEP-update-0.81.72-candidate-r2.zip -Algorithm SHA256).Hash.ToLower()
-          "candidate=0.81.72-r2`nbase=0.81.72-stage1`nsha256=$sha`noperational-write-full-refresh=removed`nrelease=no"|Set-Content out/UEP-0.81.72-candidate-r2-report.txt -Encoding UTF8
-      - uses: actions/upload-artifact@v4
-        with:
-          name: UEP-0.81.72-performance-candidate-r2
-          path: out/*
-          retention-days: 7
+          $out | Set-Content inspect-08218-admissions.txt -Encoding utf8
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add inspect-08218-admissions.txt
+          git commit -m 'Inspect v0.82.18 admissions hooks'
+          git push origin HEAD:main
