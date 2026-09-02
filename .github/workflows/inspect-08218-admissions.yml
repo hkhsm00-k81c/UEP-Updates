@@ -1,6 +1,5 @@
 name: Inspect UEP 0.82.18 admissions integration
 on:
-  workflow_dispatch:
   push:
     branches: [main]
     paths: [inspect-08218-admissions.trigger]
@@ -11,6 +10,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
       - shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -19,21 +19,24 @@ jobs:
           New-Item -ItemType Directory -Force source,app | Out-Null
           gh release download v0.82.18 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
           Expand-Archive source/UEP-update.zip app -Force
-          $p='app/resources/app/gyomuon.js'
-          $g=Get-Content $p -Raw
-          $keys=@('대입 기초','전형 이해','오늘의 대학','52_대입기초','53_전형이해','56_대학입시마스터','batch-read','readSheet','sheetName','dashboardStudentStatusCompactMarkup')
+          $files=@('app/resources/app/gyomuon.js','app/resources/app/electron/main.cjs')
+          $patterns=@('batch-read','schoolRead','ranges','readSchool','sheetName','openDashboardAdmissionBasics','openDashboardAdmissionTypes','openDashboardUniversityDetail','52_대입기초','53_전형이해','54_수능최저DB','55_대학입결DB','56_대학입시마스터','dashboardStudentStatusCompactMarkup')
           $out=@()
-          foreach($k in $keys){
-            $out += "===== $k ====="
-            $start=0;$n=0
-            while(($i=$g.IndexOf($k,$start,[StringComparison]::OrdinalIgnoreCase)) -ge 0 -and $n -lt 6){
-              $a=[Math]::Max(0,$i-1800);$len=[Math]::Min(4200,$g.Length-$a)
-              $out += $g.Substring($a,$len)
-              $out += "`n--- occurrence ---`n"
-              $start=$i+$k.Length;$n++
+          foreach($f in $files){
+            $lines=Get-Content $f
+            $out += "===== $f ====="
+            for($i=0;$i -lt $lines.Count;$i++){
+              $line=$lines[$i]
+              $matched=$false
+              foreach($p in $patterns){ if($line -match [regex]::Escape($p)){ $matched=$true; break } }
+              if($matched){
+                $a=[Math]::Max(0,$i-8); $b=[Math]::Min($lines.Count-1,$i+14)
+                $out += "--- around line $($i+1) ---"
+                for($j=$a;$j -le $b;$j++){ $out += ('{0,7}: {1}' -f ($j+1),$lines[$j]) }
+              }
             }
           }
-          $out -join "`n" | Set-Content inspect-08218-admissions.txt -Encoding utf8
+          $out | Set-Content inspect-08218-admissions.txt -Encoding utf8
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add inspect-08218-admissions.txt
