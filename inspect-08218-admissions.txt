@@ -1,5 +1,7 @@
 ===== app/resources/app/gyomuon.js =====
 --- around line 103 ---
+     93:       riro: "https://unho.riroschool.kr/",
+     94:       training: "https://edu.cbe.go.kr/",
      95:       school: "https://school.cbe.go.kr/unho-h/M01/",
      96:       unhoLlm: "https://unho.kr/",
      97:       messengerPath: "",
@@ -23,7 +25,13 @@
     115:       },
     116:       dormStatus: {
     117:         label: "학사 현황·외출",
+    118:         fileTitle: "UEP 표준시트",
+    119:         spreadsheetId: "",
+    120:         sheetName: "기본정보 20_학사생마스터 / 데이터처리 02_학사외출_일자별",
+    121:         headerRow: 3,
 --- around line 110 ---
+    100:     manualCalendar: [],
+    101:     updateManifestUrl: "",
     102:     programSheetUrl: "",
     103:     programSheetName: "프로그램",
     104:     referenceData: structuredClone(SOURCE_REFERENCE_DATA),
@@ -47,7 +55,13 @@
     122:         joinKey: "학생ID 우선 · 학번 보조",
     123:         status: "auth-required",
     124:         lastSync: "",
+    125:       },
+    126:       schoolCalendar: {
+    127:         label: "학교 캘린더",
+    128:         fileTitle: "2026 운호고 업무 일정 계획",
 --- around line 120 ---
+    110:         sheetName: "기본자료",
+    111:         headerRow: 5,
     112:         joinKey: "학급 + 번호 + 성명",
     113:         status: "auth-required",
     114:         lastSync: "",
@@ -71,7 +85,13 @@
     132:         joinKey: "날짜",
     133:         status: "auth-required",
     134:         lastSync: "",
+    135:       },
+    136:     },
+    137:     quickOrder: ["dorm-outing", "night-supervisor", "approval", "homeroom", "extension", "meal", "unho-llm", "portal", "edufine", "riro", "training", "school-site", "messenger", "site-settings"],
+    138:     dashboardOrder: ["timetable", "programs", "weather", "calendar", "operations"],
 --- around line 130 ---
+    120:         sheetName: "기본정보 20_학사생마스터 / 데이터처리 02_학사외출_일자별",
+    121:         headerRow: 3,
     122:         joinKey: "학생ID 우선 · 학번 보조",
     123:         status: "auth-required",
     124:         lastSync: "",
@@ -95,7 +115,13 @@
     142:       schoolCode: "",
     143:       grade: "1",
     144:       classNo: "1",
+    145:       autoRefreshMinutes: 30,
+    146:       useApiKey: false,
+    147:       apiKeyConfigured: false,
+    148:       comciganSchoolCode: "69092",
 --- around line 189 ---
+    179:   },
+    180:   activePage: "dashboard",
     181:   timetableTab: "mine",
     182:   calendarMode: "month",
     183: };
@@ -119,7 +145,13 @@
     201:     return out;
     202:   }
     203:   return String(value);
+    204: }
+    205: function uepDiagRecord(stage,value){
+    206:   uepSchoolReadDiagnostics.push({at:new Date().toISOString(),stage,value:uepDiagSafe(value)});
+    207:   if(uepSchoolReadDiagnostics.length>80)uepSchoolReadDiagnostics.shift();
 --- around line 206 ---
+    196:     const out={};
+    197:     for(const [k,v] of Object.entries(value)){
     198:       if(/token|secret|password|authorization|cookie|credential|private|email|name/i.test(k)){out[k]='[REDACTED]';continue;}
     199:       out[k]=uepDiagSafe(v,depth+1);
     200:     }
@@ -143,7 +175,13 @@
     218:     online:navigator.onLine,
     219:     schoolReadBridge:{
     220:       sessionStatus:Boolean(window.schoolBoard?.schoolReadSessionStatus),
+    221:       login:Boolean(window.schoolBoard?.schoolReadLogin),
+    222:       preview:Boolean(window.schoolBoard?.previewReadonlySync),
+    223:       readCache:Boolean(window.schoolBoard?.readReadonlyCache)
+    224:     },
 --- around line 207 ---
+    197:     for(const [k,v] of Object.entries(value)){
+    198:       if(/token|secret|password|authorization|cookie|credential|private|email|name/i.test(k)){out[k]='[REDACTED]';continue;}
     199:       out[k]=uepDiagSafe(v,depth+1);
     200:     }
     201:     return out;
@@ -167,7 +205,13 @@
     219:     schoolReadBridge:{
     220:       sessionStatus:Boolean(window.schoolBoard?.schoolReadSessionStatus),
     221:       login:Boolean(window.schoolBoard?.schoolReadLogin),
+    222:       preview:Boolean(window.schoolBoard?.previewReadonlySync),
+    223:       readCache:Boolean(window.schoolBoard?.readReadonlyCache)
+    224:     },
+    225:     googleConnectionStatus:uepDiagSafe(googleConnectionStatus),
 --- around line 209 ---
+    199:       out[k]=uepDiagSafe(v,depth+1);
+    200:     }
     201:     return out;
     202:   }
     203:   return String(value);
@@ -191,7 +235,13 @@
     221:       login:Boolean(window.schoolBoard?.schoolReadLogin),
     222:       preview:Boolean(window.schoolBoard?.previewReadonlySync),
     223:       readCache:Boolean(window.schoolBoard?.readReadonlyCache)
+    224:     },
+    225:     googleConnectionStatus:uepDiagSafe(googleConnectionStatus),
+    226:     googleConnectionError:uepDiagSafe(googleConnectionError),
+    227:     cacheSummary:{
 --- around line 211 ---
+    201:     return out;
+    202:   }
     203:   return String(value);
     204: }
     205: function uepDiagRecord(stage,value){
@@ -215,7 +265,13 @@
     223:       readCache:Boolean(window.schoolBoard?.readReadonlyCache)
     224:     },
     225:     googleConnectionStatus:uepDiagSafe(googleConnectionStatus),
+    226:     googleConnectionError:uepDiagSafe(googleConnectionError),
+    227:     cacheSummary:{
+    228:       syncedAt:readonlyCache?.syncedAt||null,
+    229:       students:readonlyCache?.students?.length||0,
 --- around line 219 ---
+    209: async function downloadSchoolReadDiagnostics(){
+    210:   let verified=null;
     211:   try{verified=await window.schoolBoard?.schoolReadSessionStatus?.({verify:true});uepDiagRecord('export.sessionVerify',verified);}
     212:   catch(error){uepDiagRecord('export.sessionVerify.throw',{name:error?.name,message:error?.message,stack:error?.stack});}
     213:   const report={
@@ -239,7 +295,13 @@
     231:     },
     232:     verifiedSession:uepDiagSafe(verified),
     233:     events:uepSchoolReadDiagnostics
+    234:   };
+    235:   const blob=new Blob([JSON.stringify(report,null,2)],{type:'application/json'});
+    236:   const url=URL.createObjectURL(blob);
+    237:   const a=document.createElement('a');
 --- around line 220 ---
+    210:   let verified=null;
+    211:   try{verified=await window.schoolBoard?.schoolReadSessionStatus?.({verify:true});uepDiagRecord('export.sessionVerify',verified);}
     212:   catch(error){uepDiagRecord('export.sessionVerify.throw',{name:error?.name,message:error?.message,stack:error?.stack});}
     213:   const report={
     214:     schema:'uep-school-read-diagnostic-v1',
@@ -263,7 +325,13 @@
     232:     verifiedSession:uepDiagSafe(verified),
     233:     events:uepSchoolReadDiagnostics
     234:   };
+    235:   const blob=new Blob([JSON.stringify(report,null,2)],{type:'application/json'});
+    236:   const url=URL.createObjectURL(blob);
+    237:   const a=document.createElement('a');
+    238:   a.href=url;
 --- around line 221 ---
+    211:   try{verified=await window.schoolBoard?.schoolReadSessionStatus?.({verify:true});uepDiagRecord('export.sessionVerify',verified);}
+    212:   catch(error){uepDiagRecord('export.sessionVerify.throw',{name:error?.name,message:error?.message,stack:error?.stack});}
     213:   const report={
     214:     schema:'uep-school-read-diagnostic-v1',
     215:     appVersion:APP_VERSION,
@@ -287,7 +355,13 @@
     233:     events:uepSchoolReadDiagnostics
     234:   };
     235:   const blob=new Blob([JSON.stringify(report,null,2)],{type:'application/json'});
+    236:   const url=URL.createObjectURL(blob);
+    237:   const a=document.createElement('a');
+    238:   a.href=url;
+    239:   a.download='UEP-school-read-diagnostic-'+new Date().toISOString().replace(/[:.]/g,'-')+'.json';
 --- around line 233 ---
+    223:       readCache:Boolean(window.schoolBoard?.readReadonlyCache)
+    224:     },
     225:     googleConnectionStatus:uepDiagSafe(googleConnectionStatus),
     226:     googleConnectionError:uepDiagSafe(googleConnectionError),
     227:     cacheSummary:{
@@ -311,7 +385,13 @@
     245: const READONLY_FULL_REFRESH_MAX_AGE_MS = 60 * 60 * 1000;
     246: let readonlyAutoRefreshCycle = 0;
     247: let neisData = null;
+    248: let neisError = "";
+    249: let neisLoading = false;
+    250: let lastPeriodAlertKey = "";
+    251: let outingViewDate = new Date(today);
 --- around line 490 ---
+    480:       state.activePage='dashboard';
+    481:       navigate('dashboard');
     482:     }
     483:   } catch (bootRenderError) {
     484:     console.error('[UEP] 부팅 대시보드 강제 복구 실패',bootRenderError);
@@ -335,7 +415,13 @@
     502:   const email=String(saved?.email||'').trim();
     503:   uepDiagRecord('session.identity.available',{hasName:Boolean(name),hasEmail:Boolean(email),source:state?.auth?.user?'auth.user':state?.auth?.rememberedUser?'auth.rememberedUser':'settings.userProfile'});
     504:   if(!name||!email||!window.schoolBoard?.schoolReadLogin){
+    505:     const missing={authenticated:false,reason:!name||!email?'저장된 담임 이름·이메일 없음':'School Read 로그인 기능 없음'};
+    506:     uepDiagRecord('session.login.skipped',missing);return status||missing;
+    507:   }
+    508:   let login=null;
 --- around line 492 ---
+    482:     }
+    483:   } catch (bootRenderError) {
     484:     console.error('[UEP] 부팅 대시보드 강제 복구 실패',bootRenderError);
     485:   }
     486: 
@@ -359,7 +445,13 @@
     504:   if(!name||!email||!window.schoolBoard?.schoolReadLogin){
     505:     const missing={authenticated:false,reason:!name||!email?'저장된 담임 이름·이메일 없음':'School Read 로그인 기능 없음'};
     506:     uepDiagRecord('session.login.skipped',missing);return status||missing;
+    507:   }
+    508:   let login=null;
+    509:   try{login=await window.schoolBoard.schoolReadLogin({name,email});uepDiagRecord('session.login.result',login);}
+    510:   catch(error){uepDiagRecord('session.login.throw',{name:error?.name,message:error?.message,stack:error?.stack});return {authenticated:false,reason:error?.message||'학교 공용 읽기 로그인 예외'};}
 --- around line 497 ---
+    487:   // 외부 연결은 UI 초기화와 분리하고 서로 독립적인 작업은 병렬로 시작한다.
+    488:   // NEIS가 Google 캐시 완료를 기다리지 않도록 먼저 예약한다.
     489:   setTimeout(() => loadNeisDashboard(false), 0);
     490: async function ensureSchoolReadSessionForCurrentUser({verify=true}={}){
     491:   uepDiagRecord('session.ensure.start',{verify,online:navigator.onLine});
@@ -383,7 +475,13 @@
     509:   try{login=await window.schoolBoard.schoolReadLogin({name,email});uepDiagRecord('session.login.result',login);}
     510:   catch(error){uepDiagRecord('session.login.throw',{name:error?.name,message:error?.message,stack:error?.stack});return {authenticated:false,reason:error?.message||'학교 공용 읽기 로그인 예외'};}
     511:   if(!login?.ok)return {authenticated:false,reason:login?.message||login?.reason||'학교 공용 읽기 로그인 실패'};
+    512:   try{status=await window.schoolBoard.schoolReadSessionStatus({verify:true});uepDiagRecord('session.status.after',status);}
+    513:   catch(error){uepDiagRecord('session.status.after.throw',{name:error?.name,message:error?.message,stack:error?.stack});return {authenticated:false,reason:error?.message||'로그인 후 세션 검증 예외'};}
+    514:   return status||{authenticated:false};
+    515: }
 --- around line 504 ---
+    494:     uepDiagRecord('session.bridge.missing',missing);return missing;
+    495:   }
     496:   let status=null;
     497:   try{status=await window.schoolBoard.schoolReadSessionStatus({verify});uepDiagRecord('session.status.before',status);}
     498:   catch(error){uepDiagRecord('session.status.before.throw',{name:error?.name,message:error?.message,stack:error?.stack});}
@@ -407,7 +505,13 @@
     516: 
     517:   const credentialTask = window.schoolBoard?.schoolReadSessionStatus
     518:     ? withStartupTimeout(ensureSchoolReadSessionForCurrentUser({verify:true}), 8000, null)
+    519:         .then((status) => {
+    520:           if(status) googleConnectionStatus={ok:Boolean(status.authenticated),encryption:true,mode:'school_read_api',endpointReady:status.endpointReady!==false};
+    521:           if(!status?.authenticated && status?.reason) googleConnectionError=status.reason;
+    522:         })
 --- around line 509 ---
+    499:   if(status?.authenticated)return status;
+    500:   const saved=state?.auth?.user||state?.auth?.rememberedUser||state?.settings?.userProfile||{};
     501:   const name=String(saved?.name||state?.settings?.loginUserName||state?.settings?.teacherName||'').trim();
     502:   const email=String(saved?.email||'').trim();
     503:   uepDiagRecord('session.identity.available',{hasName:Boolean(name),hasEmail:Boolean(email),source:state?.auth?.user?'auth.user':state?.auth?.rememberedUser?'auth.rememberedUser':'settings.userProfile'});
@@ -431,7 +535,13 @@
     521:           if(!status?.authenticated && status?.reason) googleConnectionError=status.reason;
     522:         })
     523:         .catch((error) => {googleConnectionStatus={ok:false,encryption:true,mode:'school_read_api'};googleConnectionError=error?.message||'학교 공용 읽기 연결 실패';console.warn("[UEP] School Read API 최초 연결 실패", error);})
+    524:     : Promise.resolve();
+    525:   const cacheTask = window.schoolBoard?.readReadonlyCache
+    526:     ? withStartupTimeout(window.schoolBoard.readReadonlyCache(), 8000, null)
+    527:         .then((cached) => {
 --- around line 512 ---
+    502:   const email=String(saved?.email||'').trim();
+    503:   uepDiagRecord('session.identity.available',{hasName:Boolean(name),hasEmail:Boolean(email),source:state?.auth?.user?'auth.user':state?.auth?.rememberedUser?'auth.rememberedUser':'settings.userProfile'});
     504:   if(!name||!email||!window.schoolBoard?.schoolReadLogin){
     505:     const missing={authenticated:false,reason:!name||!email?'저장된 담임 이름·이메일 없음':'School Read 로그인 기능 없음'};
     506:     uepDiagRecord('session.login.skipped',missing);return status||missing;
@@ -455,7 +565,13 @@
     524:     : Promise.resolve();
     525:   const cacheTask = window.schoolBoard?.readReadonlyCache
     526:     ? withStartupTimeout(window.schoolBoard.readReadonlyCache(), 8000, null)
+    527:         .then((cached) => {
+    528:           if (cached?.ok) { readonlyCache=uep08123NormalizeReadonlyCache(cached.data); googleConnectionError = ""; }
+    529:           else if (cached) googleConnectionError = cached.reason || "학교 데이터 동기화를 확인하세요. 마지막 저장 자료는 계속 사용할 수 있습니다.";
+    530:         })
 --- around line 517 ---
+    507:   }
+    508:   let login=null;
     509:   try{login=await window.schoolBoard.schoolReadLogin({name,email});uepDiagRecord('session.login.result',login);}
     510:   catch(error){uepDiagRecord('session.login.throw',{name:error?.name,message:error?.message,stack:error?.stack});return {authenticated:false,reason:error?.message||'학교 공용 읽기 로그인 예외'};}
     511:   if(!login?.ok)return {authenticated:false,reason:login?.message||login?.reason||'학교 공용 읽기 로그인 실패'};
@@ -479,7 +595,13 @@
     529:           else if (cached) googleConnectionError = cached.reason || "학교 데이터 동기화를 확인하세요. 마지막 저장 자료는 계속 사용할 수 있습니다.";
     530:         })
     531:         .catch((error) => {
+    532:           console.warn("[UEP] 읽기 캐시 불러오기 실패", error);
+    533:           googleConnectionError = error?.message || "학교 데이터 동기화를 확인하세요. 마지막 저장 자료는 계속 사용할 수 있습니다.";
+    534:         })
+    535:     : Promise.resolve();
 --- around line 518 ---
+    508:   let login=null;
+    509:   try{login=await window.schoolBoard.schoolReadLogin({name,email});uepDiagRecord('session.login.result',login);}
     510:   catch(error){uepDiagRecord('session.login.throw',{name:error?.name,message:error?.message,stack:error?.stack});return {authenticated:false,reason:error?.message||'학교 공용 읽기 로그인 예외'};}
     511:   if(!login?.ok)return {authenticated:false,reason:login?.message||login?.reason||'학교 공용 읽기 로그인 실패'};
     512:   try{status=await window.schoolBoard.schoolReadSessionStatus({verify:true});uepDiagRecord('session.status.after',status);}
@@ -503,7 +625,13 @@
     530:         })
     531:         .catch((error) => {
     532:           console.warn("[UEP] 읽기 캐시 불러오기 실패", error);
+    533:           googleConnectionError = error?.message || "학교 데이터 동기화를 확인하세요. 마지막 저장 자료는 계속 사용할 수 있습니다.";
+    534:         })
+    535:     : Promise.resolve();
+    536:   await Promise.all([credentialTask, cacheTask]);
 --- around line 618 ---
+    608:   if(!failed){ state.settings.programSheetMigrationV07662=true; changed=true; }
+    609:   if(changed) await save();
     610: }
     611: 
     612: let readonlyRefreshInFlight=null;
@@ -527,7 +655,13 @@
     630:     googleConnectionError='';
     631:     if(typeof studentBadgeCache!=='undefined'&&studentBadgeCache?.clear) studentBadgeCache.clear();
     632:     updateDormOutingCount();
+    633:     updateTopSyncStatus();
+    634:     if(rerender && !setupWizardActive){
+    635:       const scrollY=window.scrollY;
+    636:       render(state.activePage||'dashboard');
 --- around line 1315 ---
+   1305:     outputs: outputsView,
+   1306:     communication: communicationView,
    1307:     settings: settingsView,
    1308:     help: helpView,
    1309:   };
@@ -551,7 +685,13 @@
    1327:       await save();
    1328:       navigate("dashboard");
    1329:     };
+   1330:   }
+   1331: }
+   1332: 
+   1333: function calendarEventIsPending(event) {
 --- around line 2886 ---
+   2876:     if(hi<0)continue;const headers=rows[hi].map(x=>String(x||'').trim());const out=[];
+   2877:     for(let r=hi+1;r<rows.length;r++){
    2878:       const cells=rows[r].map(x=>String(x??'').trim());if(!cells.some(Boolean))continue;const name=idx.nm>=0?cells[idx.nm]:'';if(!name||/합계|계$/.test(name)||/합계|총계|인원/.test(String(cells[0]||''))||/^\d+$/.test(name))continue;
    2879:       let studentNo=idx.sn>=0?String(cells[idx.sn]||'').replace(/\D/g,''):'';
    2880:       if(studentNo.length===5&&/^[123]\d{4}$/.test(studentNo)){const g=studentNo[0],cl=String(Number(studentNo.slice(1,3))),num=studentNo.slice(-2);studentNo=`${g}${cl}${num}`;}
@@ -575,7 +715,13 @@
    2898:   const lines=raw.split('\n').filter(x=>x.trim());
    2899:   const studentLines=lines.filter(line=>/(?:^|[^0-9])[123][0-9]{3}(?![0-9])/.test(line));
    2900:   const drafts=(studentLines.length>=2 && studentLines.length>=Math.min(3,Math.ceil(lines.length*.25)))?studentLines.map(line=>inputCenterDraftFromPayload({...file,name:file.name},line)):[inputCenterDraftFromPayload(file,raw)];
+   2901:   drafts.forEach(d=>{d.detectedType=classification.type;d.detectedConfidence=classification.confidence;d.detectedReason=classification.reason;});return drafts;
+   2902: }
+   2903: function inputCenterBundleDuplex(files=[]){
+   2904:   if(({'Excel·CSV':'교사 파일','문서 파일':'교사 파일'}[inputCenterConfig.source]||inputCenterConfig.source)!=='수기 스캔'||!['양면 스캔','단면 스캔','사진(JPG/PNG)'].includes(inputCenterConfig.subtype)) return files.flatMap(file=>inputCenterExpandTextFile(file));
 --- around line 2896 ---
+   2886:       draft.structuredRow=true;draft.ocrStatus='구조분석완료';draft.ocrEngine='Excel 셀 직접분석';draft.sheetName=section.name;draft.rowNo=r+1;draft.sheetHeaders=headers;draft.structuredCells=cells;draft.submittedAt=submittedIdx>=0?cells[submittedIdx]:'';draft.reportFields=headers.map((h,i)=>({label:h,value:cells[i]||'',index:i})).filter(x=>x.label&&x.value&&!identityCols.has(x.index));draft.text=draft.reportFields.map(x=>`${x.label}: ${x.value}`).join('\n');out.push(draft);
+   2887:     }
    2888:     if(out.length)return out;
    2889:   }
    2890:   return null;
@@ -599,7 +745,13 @@
    2908:     const pair=files.slice(i,i+per); const first=pair[0]||{};
    2909:     const text=pair.map(x=>String(x.text||'')).filter(Boolean).join('\n\n');
    2910:     const draft=inputCenterDraftFromPayload(first,text);
+   2911:     draft.bundleId=`BUNDLE-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+   2912:     draft.pages=pair.map((x,j)=>({page:j+1,filePath:x.path||'',fileName:x.name||'',extension:x.extension||'',size:Number(x.size||0),rotation:0}));
+   2913:     draft.pageCount=pair.length; draft.fileName=pair.map(x=>x.name).filter(Boolean).join(' + ')||(first.name||'스캔 원본');
+   2914:     draft.matchStatus=draft.studentNo?draft.matchStatus:'판독 대기';
 --- around line 3801 ---
+   3791: }
+   3792: function maskEmail(email){const [local,domain='']=String(email||'').split('@');if(!local)return '';return `${local.slice(0,1)}${'*'.repeat(Math.max(3,local.length-1))}${domain?'@'+domain:''}`;}
    3793: function hideUserAuthGate(){document.getElementById('userAuthGate')?.classList.add('hidden');document.body.classList.remove('uep-auth-locked');authSessionReady=true;state.auth.locked=false;refreshHeaderRoleBadge();}
    3794: function authGateMessage(text){const node=document.getElementById('userAuthMessage');if(node)node.textContent=text||'';}
    3795: function renderUserAuthGate({locked=false,switchUser=false}={}){
@@ -623,7 +775,13 @@
    3813:   if(!status?.authenticated)return false;
    3814:   const a=status.user||{};const account={id:String(a.userId||remembered?.id||savedUser?.id||''),email:String(a.email||remembered?.email||savedUser?.email||'').trim(),name:uep08125PickTeacherName(a.name,remembered?.name,savedUser?.name),role:String(a.role||''),admin:a.isAdmin?'Y':'N',grade:String(a.grade||'1'),classNo:String(a.homeroom||''),department:String(a.department||((a.grade||1)+'학년부')),active:true,activeRaw:'Y'};state.auth.user=accountToSession(account);state.settings.userProfile={...state.settings.userProfile,...state.auth.user};state.settings.loginUserName=state.auth.user.name;state.settings.teacherName=state.auth.user.name;googleConnectionStatus={ok:true,encryption:true,mode:'school_read_api'};
    3815:   const gate=document.getElementById('userAuthGate');
+   3816:   if(gate){
+   3817:     document.body.classList.add('uep-auth-locked');gate.classList.remove('hidden');
+   3818:     gate.innerHTML=`<section class="user-auth-card auto-login-transition"><div class="user-auth-brand"><span>U</span><div><small>UNHO EDUCATION PLATFORM</small><h2>자동 로그인 중…</h2><p>${escapeHtml(state.auth.user.name)} · ${escapeHtml(maskEmail(state.auth.user.email))}</p></div></div><div class="auto-login-progress"><i></i></div><footer>승인된 UEP 세션을 확인했습니다.</footer></section>`;
+   3819:     await new Promise(resolve=>setTimeout(resolve,220));
 --- around line 3802 ---
+   3792: function maskEmail(email){const [local,domain='']=String(email||'').split('@');if(!local)return '';return `${local.slice(0,1)}${'*'.repeat(Math.max(3,local.length-1))}${domain?'@'+domain:''}`;}
+   3793: function hideUserAuthGate(){document.getElementById('userAuthGate')?.classList.add('hidden');document.body.classList.remove('uep-auth-locked');authSessionReady=true;state.auth.locked=false;refreshHeaderRoleBadge();}
    3794: function authGateMessage(text){const node=document.getElementById('userAuthMessage');if(node)node.textContent=text||'';}
    3795: function renderUserAuthGate({locked=false,switchUser=false}={}){
    3796:   const gate=document.getElementById('userAuthGate');if(!gate)return;document.body.classList.add('uep-auth-locked');gate.classList.remove('hidden');authSessionReady=false;
@@ -647,7 +805,13 @@
    3814:   const a=status.user||{};const account={id:String(a.userId||remembered?.id||savedUser?.id||''),email:String(a.email||remembered?.email||savedUser?.email||'').trim(),name:uep08125PickTeacherName(a.name,remembered?.name,savedUser?.name),role:String(a.role||''),admin:a.isAdmin?'Y':'N',grade:String(a.grade||'1'),classNo:String(a.homeroom||''),department:String(a.department||((a.grade||1)+'학년부')),active:true,activeRaw:'Y'};state.auth.user=accountToSession(account);state.settings.userProfile={...state.settings.userProfile,...state.auth.user};state.settings.loginUserName=state.auth.user.name;state.settings.teacherName=state.auth.user.name;googleConnectionStatus={ok:true,encryption:true,mode:'school_read_api'};
    3815:   const gate=document.getElementById('userAuthGate');
    3816:   if(gate){
+   3817:     document.body.classList.add('uep-auth-locked');gate.classList.remove('hidden');
+   3818:     gate.innerHTML=`<section class="user-auth-card auto-login-transition"><div class="user-auth-brand"><span>U</span><div><small>UNHO EDUCATION PLATFORM</small><h2>자동 로그인 중…</h2><p>${escapeHtml(state.auth.user.name)} · ${escapeHtml(maskEmail(state.auth.user.email))}</p></div></div><div class="auto-login-progress"><i></i></div><footer>승인된 UEP 세션을 확인했습니다.</footer></section>`;
+   3819:     await new Promise(resolve=>setTimeout(resolve,220));
+   3820:   }
 --- around line 3811 ---
+   3801:   document.getElementById('rememberedUserContinue')?.addEventListener('click',async()=>{const status=await window.schoolBoard?.schoolReadSessionStatus?.({verify:true});if(!status?.authenticated)return renderUserAuthGate({switchUser:true});const a=status.user||{},account={id:String(a.userId||remembered.id||''),email:String(a.email||remembered.email||'').trim(),name:uep08125PickTeacherName(a.name,remembered.name),role:String(a.role||''),admin:a.isAdmin?'Y':'N',grade:String(a.grade||'1'),classNo:String(a.homeroom||''),department:String(a.department||((a.grade||1)+'학년부')),active:true,activeRaw:'Y'};state.auth.user=accountToSession(account);googleConnectionStatus={ok:true,encryption:true,mode:'school_read_api'};await save();hideUserAuthGate();refreshOperationalCacheSilently({rerender:false}).catch(()=>{});navigate(state.activePage||'dashboard');});
+   3802:   document.getElementById('userAuthForm')?.addEventListener('submit',async event=>{event.preventDefault();const name=document.getElementById('userAuthName')?.value,email=document.getElementById('userAuthEmail')?.value;const submit=event.submitter||document.querySelector('#userAuthForm button[type="submit"]');if(submit){submit.disabled=true;submit.textContent='확인 중…';}try{if(!window.schoolBoard?.schoolReadLogin)throw new Error('이 UEP 빌드에는 School Read API 로그인이 없습니다.');const result=await window.schoolBoard.schoolReadLogin({name,email});if(!result?.ok){authGateMessage(result?.message||'UEP 로그인에 실패했습니다.');return;}const a=result.user||{};const account={id:String(a.userId||''),email:String(a.email||email||'').trim(),name:uep08125PickTeacherName(a.name,name),role:String(a.role||''),admin:a.isAdmin?'Y':'N',grade:String(a.grade||'1'),classNo:String(a.homeroom||''),department:String(a.department||((a.grade||1)+'학년부')),active:true,activeRaw:'Y'};const user=accountToSession(account),remember=Boolean(document.getElementById('userAuthRemember')?.checked);state.auth.user=user;state.auth.rememberUser=remember;state.auth.rememberedUser=remember?{id:user.id,name:user.name,email:user.email}:null;state.settings.userProfile={...state.settings.userProfile,...user};state.settings.loginUserName=user.name;state.settings.teacherName=user.name;googleConnectionStatus={ok:true,encryption:true,mode:'school_read_api'};await save();hideUserAuthGate();const synced=await window.schoolBoard?.previewReadonlySync?.();if(synced?.ok){const cached=await window.schoolBoard?.readReadonlyCache?.();if(cached?.ok){readonlyCache=uep08123NormalizeReadonlyCache(cached.data);googleConnectionError='';}}else if(synced){googleConnectionError=synced.reason||'학교 데이터 동기화에 실패했습니다.';}startReadonlyAutoRefresh();navigate(state.activePage||'dashboard');}catch(error){authGateMessage(error?.message||'UEP 로그인에 실패했습니다.');}finally{if(submit){submit.disabled=false;submit.textContent='UEP 시작';}}});
    3803: }
    3804: async function restoreRememberedSessionImmediately(){
    3805:   const remembered=state?.auth?.rememberUser?state?.auth?.rememberedUser:null;
@@ -671,7 +835,13 @@
    3823:   return true;
    3824: }
    3825: async function initializeUserSessionGate(){
+   3826:   const remembered=state?.auth?.rememberUser?state?.auth?.rememberedUser:null;
+   3827:   const savedUser=state?.auth?.user;
+   3828:   if(uep08125ValidTeacherName(remembered?.name)&&remembered?.email&&window.schoolBoard?.schoolReadSessionStatus){
+   3829:     try{
 --- around line 3812 ---
+   3802:   document.getElementById('userAuthForm')?.addEventListener('submit',async event=>{event.preventDefault();const name=document.getElementById('userAuthName')?.value,email=document.getElementById('userAuthEmail')?.value;const submit=event.submitter||document.querySelector('#userAuthForm button[type="submit"]');if(submit){submit.disabled=true;submit.textContent='확인 중…';}try{if(!window.schoolBoard?.schoolReadLogin)throw new Error('이 UEP 빌드에는 School Read API 로그인이 없습니다.');const result=await window.schoolBoard.schoolReadLogin({name,email});if(!result?.ok){authGateMessage(result?.message||'UEP 로그인에 실패했습니다.');return;}const a=result.user||{};const account={id:String(a.userId||''),email:String(a.email||email||'').trim(),name:uep08125PickTeacherName(a.name,name),role:String(a.role||''),admin:a.isAdmin?'Y':'N',grade:String(a.grade||'1'),classNo:String(a.homeroom||''),department:String(a.department||((a.grade||1)+'학년부')),active:true,activeRaw:'Y'};const user=accountToSession(account),remember=Boolean(document.getElementById('userAuthRemember')?.checked);state.auth.user=user;state.auth.rememberUser=remember;state.auth.rememberedUser=remember?{id:user.id,name:user.name,email:user.email}:null;state.settings.userProfile={...state.settings.userProfile,...user};state.settings.loginUserName=user.name;state.settings.teacherName=user.name;googleConnectionStatus={ok:true,encryption:true,mode:'school_read_api'};await save();hideUserAuthGate();const synced=await window.schoolBoard?.previewReadonlySync?.();if(synced?.ok){const cached=await window.schoolBoard?.readReadonlyCache?.();if(cached?.ok){readonlyCache=uep08123NormalizeReadonlyCache(cached.data);googleConnectionError='';}}else if(synced){googleConnectionError=synced.reason||'학교 데이터 동기화에 실패했습니다.';}startReadonlyAutoRefresh();navigate(state.activePage||'dashboard');}catch(error){authGateMessage(error?.message||'UEP 로그인에 실패했습니다.');}finally{if(submit){submit.disabled=false;submit.textContent='UEP 시작';}}});
+   3803: }
    3804: async function restoreRememberedSessionImmediately(){
    3805:   const remembered=state?.auth?.rememberUser?state?.auth?.rememberedUser:null;
    3806:   const savedUser=state?.auth?.user;
@@ -695,7 +865,13 @@
    3824: }
    3825: async function initializeUserSessionGate(){
    3826:   const remembered=state?.auth?.rememberUser?state?.auth?.rememberedUser:null;
+   3827:   const savedUser=state?.auth?.user;
+   3828:   if(uep08125ValidTeacherName(remembered?.name)&&remembered?.email&&window.schoolBoard?.schoolReadSessionStatus){
+   3829:     try{
+   3830:       const status=await window.schoolBoard.schoolReadSessionStatus({verify:true});
 --- around line 3828 ---
+   3818:     gate.innerHTML=`<section class="user-auth-card auto-login-transition"><div class="user-auth-brand"><span>U</span><div><small>UNHO EDUCATION PLATFORM</small><h2>자동 로그인 중…</h2><p>${escapeHtml(state.auth.user.name)} · ${escapeHtml(maskEmail(state.auth.user.email))}</p></div></div><div class="auto-login-progress"><i></i></div><footer>승인된 UEP 세션을 확인했습니다.</footer></section>`;
+   3819:     await new Promise(resolve=>setTimeout(resolve,220));
    3820:   }
    3821:   await save();
    3822:   hideUserAuthGate();
@@ -719,7 +895,13 @@
    3840:   authSessionReady=false;
    3841:   state.auth.locked=true;
    3842:   renderUserAuthGate({switchUser:true});
+   3843:   authGateMessage('교사 이름과 이메일로 UEP를 시작하세요.');
+   3844:   return false;
+   3845: }
+   3846: async function lockCurrentUser(){state.auth.locked=true;await save();closeAccountPopover();renderUserAuthGate({locked:true});}
 --- around line 3830 ---
+   3820:   }
+   3821:   await save();
    3822:   hideUserAuthGate();
    3823:   return true;
    3824: }
@@ -743,7 +925,13 @@
    3842:   renderUserAuthGate({switchUser:true});
    3843:   authGateMessage('교사 이름과 이메일로 UEP를 시작하세요.');
    3844:   return false;
+   3845: }
+   3846: async function lockCurrentUser(){state.auth.locked=true;await save();closeAccountPopover();renderUserAuthGate({locked:true});}
+   3847: async function switchCurrentUser(){await window.schoolBoard?.schoolReadLogout?.();googleConnectionStatus={ok:false,encryption:true,mode:'school_read_api'};state.auth.user=null;state.auth.locked=true;await save();closeAccountPopover();renderUserAuthGate({switchUser:true});}
+   3848: async function logoutCurrentUser(){await window.schoolBoard?.schoolReadLogout?.();googleConnectionStatus={ok:false,encryption:true,mode:'school_read_api'};state.auth.user=null;state.auth.rememberUser=false;state.auth.rememberedUser=null;state.auth.locked=true;await save();closeAccountPopover();renderUserAuthGate({switchUser:true});}
 --- around line 3847 ---
+   3837:     }catch(error){console.warn('[UEP] 저장된 School Read 세션 확인 실패',error);}
+   3838:   }
    3839:   state.auth.user=null;
    3840:   authSessionReady=false;
    3841:   state.auth.locked=true;
@@ -767,7 +955,13 @@
    3859:   {icon:"🏫",title:"학교·담당 범위",desc:"운호고등학교의 담당 학년·반·부서를 지정합니다.",body:"담임도 학년 학생자료를 조회할 수 있으며, 담임반 업무수정과 타반 개인정보 보호를 분리 적용합니다. 학년부장·관리자는 담당 범위 전체를 조회합니다."},
    3860:   {icon:"☁",title:"UEP 데이터 연결",desc:"기본정보·응답·데이터처리·규칙로그 연결 상태를 확인합니다.",body:"담임은 UEP 이름·이메일 로그인으로 학교 공용 자료를 읽으며 별도 Google 인증정보를 등록하지 않습니다."},
    3861:   {icon:"▦",title:"NEIS 시간표",desc:"학교·학년·반과 기준일을 지정해 학급시간표를 확인합니다.",body:"공개 조회를 우선 사용하고 실패 시 마지막 정상 저장자료를 유지합니다."},
+   3862:   {icon:"🎨",title:"대시보드 위젯",desc:"내가 사용할 대시보드 카드만 선택합니다.",body:"시계·날씨, 오늘의 프로그램, 학교 캘린더, 개인 시간표, 오늘의 업무·공지를 개인별로 표시할 수 있습니다."},
+   3863:   {icon:"🔒",title:"승인·보안",desc:"사용자 승인과 새 기기 승인 원칙을 확인합니다.",body:"같은 사용자가 다른 PC에서 접속하면 새 기기 승인 대상입니다. 자동시작·항상 위는 승인 이후 설정 메뉴에서 변경합니다."},
+   3864:   {icon:"✅",title:"신청 정보 확인",desc:"등록 내용을 확인하고 승인 절차로 진행합니다.",body:"관리자는 사용자·기기 승인 요청을 학교업무공지와 사용자·권한 관리 화면에서 처리하도록 설계합니다."}
+   3865: ];
 --- around line 3848 ---
+   3838:   }
+   3839:   state.auth.user=null;
    3840:   authSessionReady=false;
    3841:   state.auth.locked=true;
    3842:   renderUserAuthGate({switchUser:true});
@@ -791,7 +985,13 @@
    3860:   {icon:"☁",title:"UEP 데이터 연결",desc:"기본정보·응답·데이터처리·규칙로그 연결 상태를 확인합니다.",body:"담임은 UEP 이름·이메일 로그인으로 학교 공용 자료를 읽으며 별도 Google 인증정보를 등록하지 않습니다."},
    3861:   {icon:"▦",title:"NEIS 시간표",desc:"학교·학년·반과 기준일을 지정해 학급시간표를 확인합니다.",body:"공개 조회를 우선 사용하고 실패 시 마지막 정상 저장자료를 유지합니다."},
    3862:   {icon:"🎨",title:"대시보드 위젯",desc:"내가 사용할 대시보드 카드만 선택합니다.",body:"시계·날씨, 오늘의 프로그램, 학교 캘린더, 개인 시간표, 오늘의 업무·공지를 개인별로 표시할 수 있습니다."},
+   3863:   {icon:"🔒",title:"승인·보안",desc:"사용자 승인과 새 기기 승인 원칙을 확인합니다.",body:"같은 사용자가 다른 PC에서 접속하면 새 기기 승인 대상입니다. 자동시작·항상 위는 승인 이후 설정 메뉴에서 변경합니다."},
+   3864:   {icon:"✅",title:"신청 정보 확인",desc:"등록 내용을 확인하고 승인 절차로 진행합니다.",body:"관리자는 사용자·기기 승인 요청을 학교업무공지와 사용자·권한 관리 화면에서 처리하도록 설계합니다."}
+   3865: ];
+   3866: 
 --- around line 7795 ---
+   7785:   const body=rows.length?rows.map(row=>`<div class="today-duty-person ${String(row.teacher||'').trim()===currentLoginTeacherName()?'mine':''}"><strong>${escapeHtml(row.teacher||'-')}</strong><span>${escapeHtml(row.place||'면학관 2~3층')}</span><small>${escapeHtml([row.start,row.end].filter(Boolean).join('~'))}</small></div>`).join(''):`<div class="night-supervisor-empty"><i>◇</i><b>오늘 야자감독이 없습니다</b><span>43_야자감독계획의 오늘 날짜가 비어 있습니다.</span></div>`;
+   7786:   $("#drawerBody").innerHTML=`<div class="today-duty-list"><time>${escapeHtml(key)}</time>${body}</div><div class="drawer-actions"><button class="btn primary" data-reference="night-supervisor">빠른열기 · 야자감독 전체 보기</button></div>`;
    7787:   $("#drawer").classList.remove("hidden");$("#drawerBackdrop").classList.remove("hidden");
    7788:   $("#drawerBody [data-reference='night-supervisor']")?.addEventListener("click",()=>openReferenceDrawer("night-supervisor"));
    7789: }
@@ -815,13 +1015,11 @@
    7807:   return `class-color-${hash%9}`;
    7808: }
    7809: 
---- around line 8085 ---
-   8077: function dashboardAdmissionRows(...keys){
-   8078:   for(const key of keys){const rows=readonlyCache?.[key];if(Array.isArray(rows))return rows;}
-   8079:   return [];
-   8080: }
-   8081: function dashboardAdmissionEnabled(row){return String(row?.['사용여부']??row?.use??'Y').toUpperCase()!=='N';}
-   8082: function dashboardAdmissionOrder(row){return Number(row?.['노출순서']??row?.order??9999)||9999;}
+   7810: 
+   7811: let dashboardTimetableMode="";
+   7812: let studentTimetableSelectedId="";
+   7813: function dashboardTimetableAutoMode(){
+--- around line 8093 ---
    8083: function dashboardAdmissionNormalizeUniversity(value){return String(value||'').replace(/대학교/g,'대').replace(/\s|\(.*?\)/g,'');}
    8084: function dashboardAdmissionTodayIndex(length){if(!length)return 0;const d=new Date(),s=new Date(d.getFullYear(),0,0);return Math.floor((d-s)/86400000)%length;}
    8085: function dashboardAdmissionUniversities(){return dashboardAdmissionRows('universityAdmissions','56_대학입시마스터').filter(dashboardAdmissionEnabled).sort((a,b)=>dashboardAdmissionOrder(a)-dashboardAdmissionOrder(b));}
@@ -839,45 +1037,6 @@
    8097: }
    8098: function dashboardAdmissionMethod(row){
    8099:   const text=[row['선발방식'],row['핵심평가'],row['주요평가자료'],row['한줄요약']].filter(Boolean).join(' ');
---- around line 8093 ---
-   8085: function dashboardAdmissionUniversities(){return dashboardAdmissionRows('universityAdmissions','56_대학입시마스터').filter(dashboardAdmissionEnabled).sort((a,b)=>dashboardAdmissionOrder(a)-dashboardAdmissionOrder(b));}
-   8086: function dashboardAdmissionTodayUniversity(){const rows=dashboardAdmissionUniversities();return rows[dashboardAdmissionTodayIndex(rows.length)]||null;}
-   8087: function openDashboardAdmissionDialog(title,body){
-   8088:   document.querySelector('.dashboard-admission-layer')?.remove();
-   8089:   const layer=document.createElement('div');layer.className='dashboard-admission-layer counsel-reason-layer';
-   8090:   layer.innerHTML='<div class="dashboard-admission-dialog"><header><div><small>UEP 대입상담 · 교육용 참고</small><h2>'+escapeHtml(title)+'</h2></div><button type="button" data-admission-close>×</button></header><div class="dashboard-admission-body">'+body+'</div></div>';
-   8091:   document.body.appendChild(layer);const close=()=>layer.remove();layer.querySelector('[data-admission-close]').onclick=close;layer.onclick=e=>{if(e.target===layer)close();};
-   8092: }
-   8093: function openDashboardAdmissionBasics(){
-   8094:   const rows=dashboardAdmissionRows('admissionBasics','52_대입기초').filter(dashboardAdmissionEnabled);
-   8095:   const detail=q=>rows.find(row=>String(row['주제']||'').includes(q));
-   8096:   openDashboardAdmissionDialog('대입 기초',`<div class="admission-learning-flow"><section><h3>대입은 수시와 정시로 나뉩니다</h3><div class="admission-two-column"><article><b>수시</b><p>학생부교과 · 학생부종합 · 논술 · 실기·실적으로 선발합니다.</p><small>보통 3학년 1학기까지의 학생부를 활용하지만, 반영 학기와 방식은 대학별로 다르므로 시행계획·모집요강을 확인합니다.</small></article><article><b>정시</b><p>수능 성적이 중심입니다.</p><small>대학마다 국어·수학·영어·탐구 반영비율, 가산점, 학생부·면접 병행 여부가 다릅니다.</small></article></div></section><section><h3>수시에서 꼭 이해할 것</h3><div class="admission-explain-grid"><article><b>언제 지원하나</b><p>3학년 9월 수시 원서접수 후 대학별 평가가 이어집니다.</p></article><article><b>수능최저란</b><p>수시 합격을 위해 충족해야 하는 수능 영역별 최소 기준입니다. 전형에 따라 없을 수도 있습니다.</p></article><article><b>내신 몇 학기인가</b><p>대체로 3학년 1학기까지를 보지만 대학·전형별 반영학기와 교과가 다릅니다.</p></article></div></section><section><h3>현재 1학년의 준비</h3><p>${escapeHtml(detail('선택과목')?.['상세설명']||'희망 계열과 연결되는 선택과목을 설계하고, 내신의 추이·모의고사 학업역량·수업과 탐구의 깊이를 함께 쌓습니다.')}</p><div class="admission-chip-row"><span>내신 기본기</span><span>계열 맞춤 선택과목</span><span>모의고사 점검</span><span>수업·탐구 기록</span></div></section><p class="admission-reference-note">2028 시행계획 기준 교육용 참고 · 2029 최종 모집요강 재확인</p></div>`);
-   8097: }
-   8098: function dashboardAdmissionMethod(row){
-   8099:   const text=[row['선발방식'],row['핵심평가'],row['주요평가자료'],row['한줄요약']].filter(Boolean).join(' ');
-   8100:   if(row['선발방식'])return String(row['선발방식']);
-   8101:   const out=[];if(/교과|내신/.test(text))out.push('내신');if(/수능최저|최저/.test(text))out.push('수능최저');if(/서류|학생부/.test(text))out.push('서류');if(/면접/.test(text))out.push('면접');if(/논술/.test(text))out.unshift('논술');if(/수능/.test(text)&&/정시|수능/.test(String(row['전형유형']||'')))return '수능100 또는 영역별 반영';return [...new Set(out)].join(' + ')||'대학별 방식 확인';
-   8102: }
-   8103: function dashboardAdmissionStructureRows(){return dashboardAdmissionRows('admissionStructures','57_대학별전형구조DB','universityAdmissionStructures');}
-   8104: function openDashboardAdmissionUniversityByName(name){const row=dashboardAdmissionUniversities().find(x=>dashboardAdmissionNormalizeUniversity(x['대학명'])===dashboardAdmissionNormalizeUniversity(name));openDashboardUniversityDetail(row||{'대학명':name});}
-   8105: function openDashboardAdmissionTypes(){
-   8106:   const types=dashboardAdmissionRows('admissionTypes','53_전형이해').filter(dashboardAdmissionEnabled),structures=dashboardAdmissionStructureRows();
-   8107:   const groups=[['학생부교과',['내신 중심','내신 + 수능최저','내신 + 서류','내신 + 면접','내신 + 수능최저 + 서류/면접']],['학생부종합',['서류100','서류 + 면접','단계별','수능최저 유/무']],['논술',['논술 중심','교과 병행','수능최저 유/무']],['정시',['수능100','학생부 병행','영역별 반영 차이']]];
---- around line 8094 ---
-   8086: function dashboardAdmissionTodayUniversity(){const rows=dashboardAdmissionUniversities();return rows[dashboardAdmissionTodayIndex(rows.length)]||null;}
-   8087: function openDashboardAdmissionDialog(title,body){
-   8088:   document.querySelector('.dashboard-admission-layer')?.remove();
-   8089:   const layer=document.createElement('div');layer.className='dashboard-admission-layer counsel-reason-layer';
-   8090:   layer.innerHTML='<div class="dashboard-admission-dialog"><header><div><small>UEP 대입상담 · 교육용 참고</small><h2>'+escapeHtml(title)+'</h2></div><button type="button" data-admission-close>×</button></header><div class="dashboard-admission-body">'+body+'</div></div>';
-   8091:   document.body.appendChild(layer);const close=()=>layer.remove();layer.querySelector('[data-admission-close]').onclick=close;layer.onclick=e=>{if(e.target===layer)close();};
-   8092: }
-   8093: function openDashboardAdmissionBasics(){
-   8094:   const rows=dashboardAdmissionRows('admissionBasics','52_대입기초').filter(dashboardAdmissionEnabled);
-   8095:   const detail=q=>rows.find(row=>String(row['주제']||'').includes(q));
-   8096:   openDashboardAdmissionDialog('대입 기초',`<div class="admission-learning-flow"><section><h3>대입은 수시와 정시로 나뉩니다</h3><div class="admission-two-column"><article><b>수시</b><p>학생부교과 · 학생부종합 · 논술 · 실기·실적으로 선발합니다.</p><small>보통 3학년 1학기까지의 학생부를 활용하지만, 반영 학기와 방식은 대학별로 다르므로 시행계획·모집요강을 확인합니다.</small></article><article><b>정시</b><p>수능 성적이 중심입니다.</p><small>대학마다 국어·수학·영어·탐구 반영비율, 가산점, 학생부·면접 병행 여부가 다릅니다.</small></article></div></section><section><h3>수시에서 꼭 이해할 것</h3><div class="admission-explain-grid"><article><b>언제 지원하나</b><p>3학년 9월 수시 원서접수 후 대학별 평가가 이어집니다.</p></article><article><b>수능최저란</b><p>수시 합격을 위해 충족해야 하는 수능 영역별 최소 기준입니다. 전형에 따라 없을 수도 있습니다.</p></article><article><b>내신 몇 학기인가</b><p>대체로 3학년 1학기까지를 보지만 대학·전형별 반영학기와 교과가 다릅니다.</p></article></div></section><section><h3>현재 1학년의 준비</h3><p>${escapeHtml(detail('선택과목')?.['상세설명']||'희망 계열과 연결되는 선택과목을 설계하고, 내신의 추이·모의고사 학업역량·수업과 탐구의 깊이를 함께 쌓습니다.')}</p><div class="admission-chip-row"><span>내신 기본기</span><span>계열 맞춤 선택과목</span><span>모의고사 점검</span><span>수업·탐구 기록</span></div></section><p class="admission-reference-note">2028 시행계획 기준 교육용 참고 · 2029 최종 모집요강 재확인</p></div>`);
-   8097: }
-   8098: function dashboardAdmissionMethod(row){
-   8099:   const text=[row['선발방식'],row['핵심평가'],row['주요평가자료'],row['한줄요약']].filter(Boolean).join(' ');
    8100:   if(row['선발방식'])return String(row['선발방식']);
    8101:   const out=[];if(/교과|내신/.test(text))out.push('내신');if(/수능최저|최저/.test(text))out.push('수능최저');if(/서류|학생부/.test(text))out.push('서류');if(/면접/.test(text))out.push('면접');if(/논술/.test(text))out.unshift('논술');if(/수능/.test(text)&&/정시|수능/.test(String(row['전형유형']||'')))return '수능100 또는 영역별 반영';return [...new Set(out)].join(' + ')||'대학별 방식 확인';
    8102: }
@@ -887,7 +1046,12 @@
    8106:   const types=dashboardAdmissionRows('admissionTypes','53_전형이해').filter(dashboardAdmissionEnabled),structures=dashboardAdmissionStructureRows();
    8107:   const groups=[['학생부교과',['내신 중심','내신 + 수능최저','내신 + 서류','내신 + 면접','내신 + 수능최저 + 서류/면접']],['학생부종합',['서류100','서류 + 면접','단계별','수능최저 유/무']],['논술',['논술 중심','교과 병행','수능최저 유/무']],['정시',['수능100','학생부 병행','영역별 반영 차이']]];
    8108:   const universityButtons=(group,method)=>{
+   8109:     const rows=structures.filter(r=>String(r['전형유형']||'').includes(group.replace('정시','수능'))&&dashboardAdmissionMethod(r).replace(/\s/g,'').includes(method.replace(/\s|유\/무/g,'')));
+   8110:     return rows.length?`<div class="admission-university-buttons">${[...new Set(rows.map(r=>r['대학명']).filter(Boolean))].map(name=>`<button data-admission-university="${escapeHtml(name)}">${escapeHtml(name)}</button>`).join('')}</div>`:'<small>대학별 전형구조DB 연결·확충 중</small>';
+   8111:   };
 --- around line 8104 ---
+   8094:   const rows=dashboardAdmissionRows('admissionBasics','52_대입기초').filter(dashboardAdmissionEnabled);
+   8095:   const detail=q=>rows.find(row=>String(row['주제']||'').includes(q));
    8096:   openDashboardAdmissionDialog('대입 기초',`<div class="admission-learning-flow"><section><h3>대입은 수시와 정시로 나뉩니다</h3><div class="admission-two-column"><article><b>수시</b><p>학생부교과 · 학생부종합 · 논술 · 실기·실적으로 선발합니다.</p><small>보통 3학년 1학기까지의 학생부를 활용하지만, 반영 학기와 방식은 대학별로 다르므로 시행계획·모집요강을 확인합니다.</small></article><article><b>정시</b><p>수능 성적이 중심입니다.</p><small>대학마다 국어·수학·영어·탐구 반영비율, 가산점, 학생부·면접 병행 여부가 다릅니다.</small></article></div></section><section><h3>수시에서 꼭 이해할 것</h3><div class="admission-explain-grid"><article><b>언제 지원하나</b><p>3학년 9월 수시 원서접수 후 대학별 평가가 이어집니다.</p></article><article><b>수능최저란</b><p>수시 합격을 위해 충족해야 하는 수능 영역별 최소 기준입니다. 전형에 따라 없을 수도 있습니다.</p></article><article><b>내신 몇 학기인가</b><p>대체로 3학년 1학기까지를 보지만 대학·전형별 반영학기와 교과가 다릅니다.</p></article></div></section><section><h3>현재 1학년의 준비</h3><p>${escapeHtml(detail('선택과목')?.['상세설명']||'희망 계열과 연결되는 선택과목을 설계하고, 내신의 추이·모의고사 학업역량·수업과 탐구의 깊이를 함께 쌓습니다.')}</p><div class="admission-chip-row"><span>내신 기본기</span><span>계열 맞춤 선택과목</span><span>모의고사 점검</span><span>수업·탐구 기록</span></div></section><p class="admission-reference-note">2028 시행계획 기준 교육용 참고 · 2029 최종 모집요강 재확인</p></div>`);
    8097: }
    8098: function dashboardAdmissionMethod(row){
@@ -911,7 +1075,13 @@
    8116: function openDashboardUniversityDetail(university=dashboardAdmissionTodayUniversity()){
    8117:   if(!university)return openDashboardAdmissionDialog('오늘의 대학','<p>56_대학입시마스터 자료를 읽지 못했습니다.</p>');
    8118:   const name=university['대학명']||'오늘의 대학',norm=dashboardAdmissionNormalizeUniversity(name);
+   8119:   const structures=dashboardAdmissionStructureRows().filter(r=>dashboardAdmissionNormalizeUniversity(r['대학명'])===norm);
+   8120:   const minimums=dashboardAdmissionRows('admissionMinimums','54_수능최저DB').filter(r=>dashboardAdmissionNormalizeUniversity(r['대학명'])===norm);
+   8121:   const results=dashboardAdmissionRows('admissionResults','55_대학입결DB').filter(r=>dashboardAdmissionNormalizeUniversity(r['대학명'])===norm);
+   8122:   const admissions=structures.length?structures:minimums;
 --- around line 8105 ---
+   8095:   const detail=q=>rows.find(row=>String(row['주제']||'').includes(q));
+   8096:   openDashboardAdmissionDialog('대입 기초',`<div class="admission-learning-flow"><section><h3>대입은 수시와 정시로 나뉩니다</h3><div class="admission-two-column"><article><b>수시</b><p>학생부교과 · 학생부종합 · 논술 · 실기·실적으로 선발합니다.</p><small>보통 3학년 1학기까지의 학생부를 활용하지만, 반영 학기와 방식은 대학별로 다르므로 시행계획·모집요강을 확인합니다.</small></article><article><b>정시</b><p>수능 성적이 중심입니다.</p><small>대학마다 국어·수학·영어·탐구 반영비율, 가산점, 학생부·면접 병행 여부가 다릅니다.</small></article></div></section><section><h3>수시에서 꼭 이해할 것</h3><div class="admission-explain-grid"><article><b>언제 지원하나</b><p>3학년 9월 수시 원서접수 후 대학별 평가가 이어집니다.</p></article><article><b>수능최저란</b><p>수시 합격을 위해 충족해야 하는 수능 영역별 최소 기준입니다. 전형에 따라 없을 수도 있습니다.</p></article><article><b>내신 몇 학기인가</b><p>대체로 3학년 1학기까지를 보지만 대학·전형별 반영학기와 교과가 다릅니다.</p></article></div></section><section><h3>현재 1학년의 준비</h3><p>${escapeHtml(detail('선택과목')?.['상세설명']||'희망 계열과 연결되는 선택과목을 설계하고, 내신의 추이·모의고사 학업역량·수업과 탐구의 깊이를 함께 쌓습니다.')}</p><div class="admission-chip-row"><span>내신 기본기</span><span>계열 맞춤 선택과목</span><span>모의고사 점검</span><span>수업·탐구 기록</span></div></section><p class="admission-reference-note">2028 시행계획 기준 교육용 참고 · 2029 최종 모집요강 재확인</p></div>`);
    8097: }
    8098: function dashboardAdmissionMethod(row){
    8099:   const text=[row['선발방식'],row['핵심평가'],row['주요평가자료'],row['한줄요약']].filter(Boolean).join(' ');
@@ -935,15 +1105,11 @@
    8117:   if(!university)return openDashboardAdmissionDialog('오늘의 대학','<p>56_대학입시마스터 자료를 읽지 못했습니다.</p>');
    8118:   const name=university['대학명']||'오늘의 대학',norm=dashboardAdmissionNormalizeUniversity(name);
    8119:   const structures=dashboardAdmissionStructureRows().filter(r=>dashboardAdmissionNormalizeUniversity(r['대학명'])===norm);
---- around line 8106 ---
-   8098: function dashboardAdmissionMethod(row){
-   8099:   const text=[row['선발방식'],row['핵심평가'],row['주요평가자료'],row['한줄요약']].filter(Boolean).join(' ');
-   8100:   if(row['선발방식'])return String(row['선발방식']);
-   8101:   const out=[];if(/교과|내신/.test(text))out.push('내신');if(/수능최저|최저/.test(text))out.push('수능최저');if(/서류|학생부/.test(text))out.push('서류');if(/면접/.test(text))out.push('면접');if(/논술/.test(text))out.unshift('논술');if(/수능/.test(text)&&/정시|수능/.test(String(row['전형유형']||'')))return '수능100 또는 영역별 반영';return [...new Set(out)].join(' + ')||'대학별 방식 확인';
-   8102: }
-   8103: function dashboardAdmissionStructureRows(){return dashboardAdmissionRows('admissionStructures','57_대학별전형구조DB','universityAdmissionStructures');}
-   8104: function openDashboardAdmissionUniversityByName(name){const row=dashboardAdmissionUniversities().find(x=>dashboardAdmissionNormalizeUniversity(x['대학명'])===dashboardAdmissionNormalizeUniversity(name));openDashboardUniversityDetail(row||{'대학명':name});}
-   8105: function openDashboardAdmissionTypes(){
+   8120:   const minimums=dashboardAdmissionRows('admissionMinimums','54_수능최저DB').filter(r=>dashboardAdmissionNormalizeUniversity(r['대학명'])===norm);
+   8121:   const results=dashboardAdmissionRows('admissionResults','55_대학입결DB').filter(r=>dashboardAdmissionNormalizeUniversity(r['대학명'])===norm);
+   8122:   const admissions=structures.length?structures:minimums;
+   8123:   openDashboardAdmissionDialog(name,`<div class="admission-university-detail"><section><h3>주요 전형과 선발방식</h3>${admissions.length?admissions.slice(0,18).map(r=>`<article><b>${escapeHtml(r['전형유형']||'전형')} · ${escapeHtml(r['전형명']||'전형명 확인')}</b><p>${escapeHtml(r['선발방식']||dashboardAdmissionMethod(r))}</p><small>수능최저 ${escapeHtml(r['수능최저']||r['수능최저원문']||(String(r['배지사용여부']).toUpperCase()==='N'?'참고/검증중':'미적용 또는 확인 필요'))}</small></article>`).join(''):'<p>대학별 전형구조 자료를 연결 중입니다.</p>'}</section><section><h3>교과·학종·정시 핵심</h3><p>${escapeHtml(university['수시핵심']||'수시 전형별 평가요소를 확인합니다.')}</p><p>${escapeHtml(university['정시핵심']||'정시 영역별 반영비율과 가산점을 확인합니다.')}</p><p><b>과목선택 참고</b> ${escapeHtml(university['과목선택/교과포인트']||'-')}</p></section><section><h3>운호고 실제 입결</h3>${results.length?results.slice(0,12).map(r=>`<article><b>${escapeHtml(r['모집단위']||'모집단위')}</b><p>${escapeHtml(r['전형명(대)']||r['전형명']||'')}</p><small>합격 ${escapeHtml(r['합격자수']||'-')}명 · 최저내신 ${escapeHtml(r['최저내신등급']||'-')}</small></article>`).join(''):'<p>현재 연결된 운호고 실제 입결이 없습니다.</p>'}</section><section><h3>담임 상담 포인트</h3><p>${escapeHtml(university['담임상담체크']||university['카드한줄']||'학생의 내신·선택과목·모의고사·수업 탐구를 대학 전형 구조와 함께 확인합니다.')}</p></section><p class="admission-reference-note">${escapeHtml(university['기준학년도']||'2028')} 기준 · ${escapeHtml(university['자료상태']||'교육용 참고')} · 2029 최종 모집요강 재확인</p></div>`);
+--- around line 8116 ---
    8106:   const types=dashboardAdmissionRows('admissionTypes','53_전형이해').filter(dashboardAdmissionEnabled),structures=dashboardAdmissionStructureRows();
    8107:   const groups=[['학생부교과',['내신 중심','내신 + 수능최저','내신 + 서류','내신 + 면접','내신 + 수능최저 + 서류/면접']],['학생부종합',['서류100','서류 + 면접','단계별','수능최저 유/무']],['논술',['논술 중심','교과 병행','수능최저 유/무']],['정시',['수능100','학생부 병행','영역별 반영 차이']]];
    8108:   const universityButtons=(group,method)=>{
@@ -959,64 +1125,6 @@
    8118:   const name=university['대학명']||'오늘의 대학',norm=dashboardAdmissionNormalizeUniversity(name);
    8119:   const structures=dashboardAdmissionStructureRows().filter(r=>dashboardAdmissionNormalizeUniversity(r['대학명'])===norm);
    8120:   const minimums=dashboardAdmissionRows('admissionMinimums','54_수능최저DB').filter(r=>dashboardAdmissionNormalizeUniversity(r['대학명'])===norm);
---- around line 8116 ---
-   8108:   const universityButtons=(group,method)=>{
-   8109:     const rows=structures.filter(r=>String(r['전형유형']||'').includes(group.replace('정시','수능'))&&dashboardAdmissionMethod(r).replace(/\s/g,'').includes(method.replace(/\s|유\/무/g,'')));
-   8110:     return rows.length?`<div class="admission-university-buttons">${[...new Set(rows.map(r=>r['대학명']).filter(Boolean))].map(name=>`<button data-admission-university="${escapeHtml(name)}">${escapeHtml(name)}</button>`).join('')}</div>`:'<small>대학별 전형구조DB 연결·확충 중</small>';
-   8111:   };
-   8112:   const html=groups.map(([group,methods])=>`<section><h3>${group}</h3>${methods.map(method=>{const row=types.find(r=>String(r['전형유형']||'').includes(group.replace('정시','수능'))&&dashboardAdmissionMethod(r).replace(/\s/g,'').includes(method.replace(/\s|유\/무/g,'')));return `<article><b>${method}</b><p>${escapeHtml(row?.['한줄요약']||row?.['핵심평가']||'대학별 실제 전형명과 반영요소를 비교합니다.')}</p>${universityButtons(group,method)}</article>`;}).join('')}</section>`).join('');
-   8113:   openDashboardAdmissionDialog('전형 이해 · 대학별 선발방식 비교',`<div class="admission-type-hub">${html}</div><p class="admission-reference-note">2028 시행계획 기준 교육용 참고 · 2029 최종 모집요강 재확인</p>`);
-   8114:   document.querySelectorAll('[data-admission-university]').forEach(button=>button.onclick=()=>openDashboardAdmissionUniversityByName(button.dataset.admissionUniversity));
-   8115: }
-   8116: function openDashboardUniversityDetail(university=dashboardAdmissionTodayUniversity()){
-   8117:   if(!university)return openDashboardAdmissionDialog('오늘의 대학','<p>56_대학입시마스터 자료를 읽지 못했습니다.</p>');
-   8118:   const name=university['대학명']||'오늘의 대학',norm=dashboardAdmissionNormalizeUniversity(name);
-   8119:   const structures=dashboardAdmissionStructureRows().filter(r=>dashboardAdmissionNormalizeUniversity(r['대학명'])===norm);
-   8120:   const minimums=dashboardAdmissionRows('admissionMinimums','54_수능최저DB').filter(r=>dashboardAdmissionNormalizeUniversity(r['대학명'])===norm);
-   8121:   const results=dashboardAdmissionRows('admissionResults','55_대학입결DB').filter(r=>dashboardAdmissionNormalizeUniversity(r['대학명'])===norm);
-   8122:   const admissions=structures.length?structures:minimums;
-   8123:   openDashboardAdmissionDialog(name,`<div class="admission-university-detail"><section><h3>주요 전형과 선발방식</h3>${admissions.length?admissions.slice(0,18).map(r=>`<article><b>${escapeHtml(r['전형유형']||'전형')} · ${escapeHtml(r['전형명']||'전형명 확인')}</b><p>${escapeHtml(r['선발방식']||dashboardAdmissionMethod(r))}</p><small>수능최저 ${escapeHtml(r['수능최저']||r['수능최저원문']||(String(r['배지사용여부']).toUpperCase()==='N'?'참고/검증중':'미적용 또는 확인 필요'))}</small></article>`).join(''):'<p>대학별 전형구조 자료를 연결 중입니다.</p>'}</section><section><h3>교과·학종·정시 핵심</h3><p>${escapeHtml(university['수시핵심']||'수시 전형별 평가요소를 확인합니다.')}</p><p>${escapeHtml(university['정시핵심']||'정시 영역별 반영비율과 가산점을 확인합니다.')}</p><p><b>과목선택 참고</b> ${escapeHtml(university['과목선택/교과포인트']||'-')}</p></section><section><h3>운호고 실제 입결</h3>${results.length?results.slice(0,12).map(r=>`<article><b>${escapeHtml(r['모집단위']||'모집단위')}</b><p>${escapeHtml(r['전형명(대)']||r['전형명']||'')}</p><small>합격 ${escapeHtml(r['합격자수']||'-')}명 · 최저내신 ${escapeHtml(r['최저내신등급']||'-')}</small></article>`).join(''):'<p>현재 연결된 운호고 실제 입결이 없습니다.</p>'}</section><section><h3>담임 상담 포인트</h3><p>${escapeHtml(university['담임상담체크']||university['카드한줄']||'학생의 내신·선택과목·모의고사·수업 탐구를 대학 전형 구조와 함께 확인합니다.')}</p></section><p class="admission-reference-note">${escapeHtml(university['기준학년도']||'2028')} 기준 · ${escapeHtml(university['자료상태']||'교육용 참고')} · 2029 최종 모집요강 재확인</p></div>`);
-   8124: }function dashboardStudentStatusCompactMarkup(){
-   8125:   const todayKey=dateKey(today),yesterday=new Date(today);yesterday.setDate(today.getDate()-1);const yesterdayKey=dateKey(yesterday);
-   8126:   const official=filterRowsForDashboardStatus(officialAttendanceRowsForDate08162(todayKey));
-   8127:   const late=filterRowsForDashboardStatus((readonlyCache?.lateAttendance||[]).filter(row=>uepComparableDate(row.date||row.day)===todayKey));
-   8128:   const night=filterRowsForDashboardStatus((readonlyCache?.nightAttendance||readonlyCache?.attendance||[]).filter(row=>String(row.date||row.day||'').slice(0,10)===yesterdayKey&&nightRecordIsAttendance(row)));
-   8129:   const currentStudents=filterRowsForDashboardStatus(readonlyCache?.students||[]),u=dashboardAdmissionTodayUniversity();
-   8130:   const cards=[['status','late','공결/지각',`공결 ${new Set(official.map(attendanceStudentKey)).size} · 지각 ${new Set(late.map(attendanceStudentKey)).size}`],['status','night','야자출결',`${new Set(night.map(attendanceStudentKey)).size}/${currentStudents.length||259}`],['admission','basics','대입 기초','수시·정시와 고1 준비'],['admission','types','전형 이해','대학별 선발방식 비교'],['admission','university','오늘의 대학',u?.['대학명']||'대학 정보']];
---- around line 8117 ---
-   8109:     const rows=structures.filter(r=>String(r['전형유형']||'').includes(group.replace('정시','수능'))&&dashboardAdmissionMethod(r).replace(/\s/g,'').includes(method.replace(/\s|유\/무/g,'')));
-   8110:     return rows.length?`<div class="admission-university-buttons">${[...new Set(rows.map(r=>r['대학명']).filter(Boolean))].map(name=>`<button data-admission-university="${escapeHtml(name)}">${escapeHtml(name)}</button>`).join('')}</div>`:'<small>대학별 전형구조DB 연결·확충 중</small>';
-   8111:   };
-   8112:   const html=groups.map(([group,methods])=>`<section><h3>${group}</h3>${methods.map(method=>{const row=types.find(r=>String(r['전형유형']||'').includes(group.replace('정시','수능'))&&dashboardAdmissionMethod(r).replace(/\s/g,'').includes(method.replace(/\s|유\/무/g,'')));return `<article><b>${method}</b><p>${escapeHtml(row?.['한줄요약']||row?.['핵심평가']||'대학별 실제 전형명과 반영요소를 비교합니다.')}</p>${universityButtons(group,method)}</article>`;}).join('')}</section>`).join('');
-   8113:   openDashboardAdmissionDialog('전형 이해 · 대학별 선발방식 비교',`<div class="admission-type-hub">${html}</div><p class="admission-reference-note">2028 시행계획 기준 교육용 참고 · 2029 최종 모집요강 재확인</p>`);
-   8114:   document.querySelectorAll('[data-admission-university]').forEach(button=>button.onclick=()=>openDashboardAdmissionUniversityByName(button.dataset.admissionUniversity));
-   8115: }
-   8116: function openDashboardUniversityDetail(university=dashboardAdmissionTodayUniversity()){
-   8117:   if(!university)return openDashboardAdmissionDialog('오늘의 대학','<p>56_대학입시마스터 자료를 읽지 못했습니다.</p>');
-   8118:   const name=university['대학명']||'오늘의 대학',norm=dashboardAdmissionNormalizeUniversity(name);
-   8119:   const structures=dashboardAdmissionStructureRows().filter(r=>dashboardAdmissionNormalizeUniversity(r['대학명'])===norm);
-   8120:   const minimums=dashboardAdmissionRows('admissionMinimums','54_수능최저DB').filter(r=>dashboardAdmissionNormalizeUniversity(r['대학명'])===norm);
-   8121:   const results=dashboardAdmissionRows('admissionResults','55_대학입결DB').filter(r=>dashboardAdmissionNormalizeUniversity(r['대학명'])===norm);
-   8122:   const admissions=structures.length?structures:minimums;
-   8123:   openDashboardAdmissionDialog(name,`<div class="admission-university-detail"><section><h3>주요 전형과 선발방식</h3>${admissions.length?admissions.slice(0,18).map(r=>`<article><b>${escapeHtml(r['전형유형']||'전형')} · ${escapeHtml(r['전형명']||'전형명 확인')}</b><p>${escapeHtml(r['선발방식']||dashboardAdmissionMethod(r))}</p><small>수능최저 ${escapeHtml(r['수능최저']||r['수능최저원문']||(String(r['배지사용여부']).toUpperCase()==='N'?'참고/검증중':'미적용 또는 확인 필요'))}</small></article>`).join(''):'<p>대학별 전형구조 자료를 연결 중입니다.</p>'}</section><section><h3>교과·학종·정시 핵심</h3><p>${escapeHtml(university['수시핵심']||'수시 전형별 평가요소를 확인합니다.')}</p><p>${escapeHtml(university['정시핵심']||'정시 영역별 반영비율과 가산점을 확인합니다.')}</p><p><b>과목선택 참고</b> ${escapeHtml(university['과목선택/교과포인트']||'-')}</p></section><section><h3>운호고 실제 입결</h3>${results.length?results.slice(0,12).map(r=>`<article><b>${escapeHtml(r['모집단위']||'모집단위')}</b><p>${escapeHtml(r['전형명(대)']||r['전형명']||'')}</p><small>합격 ${escapeHtml(r['합격자수']||'-')}명 · 최저내신 ${escapeHtml(r['최저내신등급']||'-')}</small></article>`).join(''):'<p>현재 연결된 운호고 실제 입결이 없습니다.</p>'}</section><section><h3>담임 상담 포인트</h3><p>${escapeHtml(university['담임상담체크']||university['카드한줄']||'학생의 내신·선택과목·모의고사·수업 탐구를 대학 전형 구조와 함께 확인합니다.')}</p></section><p class="admission-reference-note">${escapeHtml(university['기준학년도']||'2028')} 기준 · ${escapeHtml(university['자료상태']||'교육용 참고')} · 2029 최종 모집요강 재확인</p></div>`);
-   8124: }function dashboardStudentStatusCompactMarkup(){
-   8125:   const todayKey=dateKey(today),yesterday=new Date(today);yesterday.setDate(today.getDate()-1);const yesterdayKey=dateKey(yesterday);
-   8126:   const official=filterRowsForDashboardStatus(officialAttendanceRowsForDate08162(todayKey));
-   8127:   const late=filterRowsForDashboardStatus((readonlyCache?.lateAttendance||[]).filter(row=>uepComparableDate(row.date||row.day)===todayKey));
-   8128:   const night=filterRowsForDashboardStatus((readonlyCache?.nightAttendance||readonlyCache?.attendance||[]).filter(row=>String(row.date||row.day||'').slice(0,10)===yesterdayKey&&nightRecordIsAttendance(row)));
-   8129:   const currentStudents=filterRowsForDashboardStatus(readonlyCache?.students||[]),u=dashboardAdmissionTodayUniversity();
-   8130:   const cards=[['status','late','공결/지각',`공결 ${new Set(official.map(attendanceStudentKey)).size} · 지각 ${new Set(late.map(attendanceStudentKey)).size}`],['status','night','야자출결',`${new Set(night.map(attendanceStudentKey)).size}/${currentStudents.length||259}`],['admission','basics','대입 기초','수시·정시와 고1 준비'],['admission','types','전형 이해','대학별 선발방식 비교'],['admission','university','오늘의 대학',u?.['대학명']||'대학 정보']];
-   8131:   return `<div class="uep-student-status-compact uep-dashboard-five-cards">${cards.map(([type,key,label,value])=>`<button class="${type==='admission'?'dashboard-admission-card':''}" ${type==='status'?`data-dashboard-student-status="${key}"`:`data-dashboard-admission="${key}"`}><span>${label}</span><b>${escapeHtml(value)}</b></button>`).join('')}</div>`;
---- around line 8120 ---
-   8112:   const html=groups.map(([group,methods])=>`<section><h3>${group}</h3>${methods.map(method=>{const row=types.find(r=>String(r['전형유형']||'').includes(group.replace('정시','수능'))&&dashboardAdmissionMethod(r).replace(/\s/g,'').includes(method.replace(/\s|유\/무/g,'')));return `<article><b>${method}</b><p>${escapeHtml(row?.['한줄요약']||row?.['핵심평가']||'대학별 실제 전형명과 반영요소를 비교합니다.')}</p>${universityButtons(group,method)}</article>`;}).join('')}</section>`).join('');
-   8113:   openDashboardAdmissionDialog('전형 이해 · 대학별 선발방식 비교',`<div class="admission-type-hub">${html}</div><p class="admission-reference-note">2028 시행계획 기준 교육용 참고 · 2029 최종 모집요강 재확인</p>`);
-   8114:   document.querySelectorAll('[data-admission-university]').forEach(button=>button.onclick=()=>openDashboardAdmissionUniversityByName(button.dataset.admissionUniversity));
-   8115: }
-   8116: function openDashboardUniversityDetail(university=dashboardAdmissionTodayUniversity()){
-   8117:   if(!university)return openDashboardAdmissionDialog('오늘의 대학','<p>56_대학입시마스터 자료를 읽지 못했습니다.</p>');
-   8118:   const name=university['대학명']||'오늘의 대학',norm=dashboardAdmissionNormalizeUniversity(name);
-   8119:   const structures=dashboardAdmissionStructureRows().filter(r=>dashboardAdmissionNormalizeUniversity(r['대학명'])===norm);
-   8120:   const minimums=dashboardAdmissionRows('admissionMinimums','54_수능최저DB').filter(r=>dashboardAdmissionNormalizeUniversity(r['대학명'])===norm);
    8121:   const results=dashboardAdmissionRows('admissionResults','55_대학입결DB').filter(r=>dashboardAdmissionNormalizeUniversity(r['대학명'])===norm);
    8122:   const admissions=structures.length?structures:minimums;
    8123:   openDashboardAdmissionDialog(name,`<div class="admission-university-detail"><section><h3>주요 전형과 선발방식</h3>${admissions.length?admissions.slice(0,18).map(r=>`<article><b>${escapeHtml(r['전형유형']||'전형')} · ${escapeHtml(r['전형명']||'전형명 확인')}</b><p>${escapeHtml(r['선발방식']||dashboardAdmissionMethod(r))}</p><small>수능최저 ${escapeHtml(r['수능최저']||r['수능최저원문']||(String(r['배지사용여부']).toUpperCase()==='N'?'참고/검증중':'미적용 또는 확인 필요'))}</small></article>`).join(''):'<p>대학별 전형구조 자료를 연결 중입니다.</p>'}</section><section><h3>교과·학종·정시 핵심</h3><p>${escapeHtml(university['수시핵심']||'수시 전형별 평가요소를 확인합니다.')}</p><p>${escapeHtml(university['정시핵심']||'정시 영역별 반영비율과 가산점을 확인합니다.')}</p><p><b>과목선택 참고</b> ${escapeHtml(university['과목선택/교과포인트']||'-')}</p></section><section><h3>운호고 실제 입결</h3>${results.length?results.slice(0,12).map(r=>`<article><b>${escapeHtml(r['모집단위']||'모집단위')}</b><p>${escapeHtml(r['전형명(대)']||r['전형명']||'')}</p><small>합격 ${escapeHtml(r['합격자수']||'-')}명 · 최저내신 ${escapeHtml(r['최저내신등급']||'-')}</small></article>`).join(''):'<p>현재 연결된 운호고 실제 입결이 없습니다.</p>'}</section><section><h3>담임 상담 포인트</h3><p>${escapeHtml(university['담임상담체크']||university['카드한줄']||'학생의 내신·선택과목·모의고사·수업 탐구를 대학 전형 구조와 함께 확인합니다.')}</p></section><p class="admission-reference-note">${escapeHtml(university['기준학년도']||'2028')} 기준 · ${escapeHtml(university['자료상태']||'교육용 참고')} · 2029 최종 모집요강 재확인</p></div>`);
@@ -1031,31 +1139,9 @@
    8132: }
    8133: 
    8134: function dashboardStudentStatusMarkup(){
---- around line 8121 ---
-   8113:   openDashboardAdmissionDialog('전형 이해 · 대학별 선발방식 비교',`<div class="admission-type-hub">${html}</div><p class="admission-reference-note">2028 시행계획 기준 교육용 참고 · 2029 최종 모집요강 재확인</p>`);
-   8114:   document.querySelectorAll('[data-admission-university]').forEach(button=>button.onclick=()=>openDashboardAdmissionUniversityByName(button.dataset.admissionUniversity));
-   8115: }
-   8116: function openDashboardUniversityDetail(university=dashboardAdmissionTodayUniversity()){
-   8117:   if(!university)return openDashboardAdmissionDialog('오늘의 대학','<p>56_대학입시마스터 자료를 읽지 못했습니다.</p>');
-   8118:   const name=university['대학명']||'오늘의 대학',norm=dashboardAdmissionNormalizeUniversity(name);
-   8119:   const structures=dashboardAdmissionStructureRows().filter(r=>dashboardAdmissionNormalizeUniversity(r['대학명'])===norm);
-   8120:   const minimums=dashboardAdmissionRows('admissionMinimums','54_수능최저DB').filter(r=>dashboardAdmissionNormalizeUniversity(r['대학명'])===norm);
-   8121:   const results=dashboardAdmissionRows('admissionResults','55_대학입결DB').filter(r=>dashboardAdmissionNormalizeUniversity(r['대학명'])===norm);
-   8122:   const admissions=structures.length?structures:minimums;
-   8123:   openDashboardAdmissionDialog(name,`<div class="admission-university-detail"><section><h3>주요 전형과 선발방식</h3>${admissions.length?admissions.slice(0,18).map(r=>`<article><b>${escapeHtml(r['전형유형']||'전형')} · ${escapeHtml(r['전형명']||'전형명 확인')}</b><p>${escapeHtml(r['선발방식']||dashboardAdmissionMethod(r))}</p><small>수능최저 ${escapeHtml(r['수능최저']||r['수능최저원문']||(String(r['배지사용여부']).toUpperCase()==='N'?'참고/검증중':'미적용 또는 확인 필요'))}</small></article>`).join(''):'<p>대학별 전형구조 자료를 연결 중입니다.</p>'}</section><section><h3>교과·학종·정시 핵심</h3><p>${escapeHtml(university['수시핵심']||'수시 전형별 평가요소를 확인합니다.')}</p><p>${escapeHtml(university['정시핵심']||'정시 영역별 반영비율과 가산점을 확인합니다.')}</p><p><b>과목선택 참고</b> ${escapeHtml(university['과목선택/교과포인트']||'-')}</p></section><section><h3>운호고 실제 입결</h3>${results.length?results.slice(0,12).map(r=>`<article><b>${escapeHtml(r['모집단위']||'모집단위')}</b><p>${escapeHtml(r['전형명(대)']||r['전형명']||'')}</p><small>합격 ${escapeHtml(r['합격자수']||'-')}명 · 최저내신 ${escapeHtml(r['최저내신등급']||'-')}</small></article>`).join(''):'<p>현재 연결된 운호고 실제 입결이 없습니다.</p>'}</section><section><h3>담임 상담 포인트</h3><p>${escapeHtml(university['담임상담체크']||university['카드한줄']||'학생의 내신·선택과목·모의고사·수업 탐구를 대학 전형 구조와 함께 확인합니다.')}</p></section><p class="admission-reference-note">${escapeHtml(university['기준학년도']||'2028')} 기준 · ${escapeHtml(university['자료상태']||'교육용 참고')} · 2029 최종 모집요강 재확인</p></div>`);
-   8124: }function dashboardStudentStatusCompactMarkup(){
-   8125:   const todayKey=dateKey(today),yesterday=new Date(today);yesterday.setDate(today.getDate()-1);const yesterdayKey=dateKey(yesterday);
-   8126:   const official=filterRowsForDashboardStatus(officialAttendanceRowsForDate08162(todayKey));
-   8127:   const late=filterRowsForDashboardStatus((readonlyCache?.lateAttendance||[]).filter(row=>uepComparableDate(row.date||row.day)===todayKey));
-   8128:   const night=filterRowsForDashboardStatus((readonlyCache?.nightAttendance||readonlyCache?.attendance||[]).filter(row=>String(row.date||row.day||'').slice(0,10)===yesterdayKey&&nightRecordIsAttendance(row)));
-   8129:   const currentStudents=filterRowsForDashboardStatus(readonlyCache?.students||[]),u=dashboardAdmissionTodayUniversity();
-   8130:   const cards=[['status','late','공결/지각',`공결 ${new Set(official.map(attendanceStudentKey)).size} · 지각 ${new Set(late.map(attendanceStudentKey)).size}`],['status','night','야자출결',`${new Set(night.map(attendanceStudentKey)).size}/${currentStudents.length||259}`],['admission','basics','대입 기초','수시·정시와 고1 준비'],['admission','types','전형 이해','대학별 선발방식 비교'],['admission','university','오늘의 대학',u?.['대학명']||'대학 정보']];
-   8131:   return `<div class="uep-student-status-compact uep-dashboard-five-cards">${cards.map(([type,key,label,value])=>`<button class="${type==='admission'?'dashboard-admission-card':''}" ${type==='status'?`data-dashboard-student-status="${key}"`:`data-dashboard-admission="${key}"`}><span>${label}</span><b>${escapeHtml(value)}</b></button>`).join('')}</div>`;
-   8132: }
-   8133: 
-   8134: function dashboardStudentStatusMarkup(){
-   8135:   const todayKey=dateKey(today);
 --- around line 8124 ---
+   8114:   document.querySelectorAll('[data-admission-university]').forEach(button=>button.onclick=()=>openDashboardAdmissionUniversityByName(button.dataset.admissionUniversity));
+   8115: }
    8116: function openDashboardUniversityDetail(university=dashboardAdmissionTodayUniversity()){
    8117:   if(!university)return openDashboardAdmissionDialog('오늘의 대학','<p>56_대학입시마스터 자료를 읽지 못했습니다.</p>');
    8118:   const name=university['대학명']||'오늘의 대학',norm=dashboardAdmissionNormalizeUniversity(name);
@@ -1079,7 +1165,13 @@
    8136:   const yesterday=new Date(today);yesterday.setDate(today.getDate()-1);const yesterdayKey=dateKey(yesterday);
    8137:   const official=filterRowsForDashboardStatus(officialAttendanceRowsForDate08162(todayKey));
    8138:   const late=filterRowsForDashboardStatus((readonlyCache?.lateAttendance||[]).filter(row=>uepComparableDate(row.date||row.day)===todayKey));
+   8139:   const night=filterRowsForDashboardStatus((readonlyCache?.nightAttendance||readonlyCache?.attendance||[]).filter(row=>String(row.date||row.day||'').slice(0,10)===yesterdayKey&&nightRecordIsAttendance(row)));
+   8140:   const reportRows=filterRowsForDashboardStatus(dashboardReportStatusRows());
+   8141:   const targetGroups=dashboardReportGroups(reportRows);
+   8142:   const submitted=targetGroups.filter(group=>dashboardReportGroupState(group).state==="complete");
 --- around line 9388 ---
+   9378: }
+   9379: 
    9380: function openConnectionDetail(key) {
    9381:   const item = state.settings.dataConnections?.[key];
    9382:   if (!item) return;
@@ -1103,7 +1195,13 @@
    9400:   $("#drawer").classList.remove("hidden");
    9401:   $("#drawerBackdrop").classList.remove("hidden");
    9402:   const editButton=$("#drawerBody [data-calendar-edit]");
+   9403:   if(editButton) editButton.onclick=()=>openCalendarEditDrawer(editButton.dataset.calendarEdit);
+   9404: }
+   9405: 
+   9406: function openOAuthGuide() {
 --- around line 9434 ---
+   9424:   else googleConnectionError = cached?.reason || "UEP 학교 데이터를 읽지 못했습니다.";
+   9425:   updateTopSyncStatus();
    9426:   startReadonlyAutoRefresh();
    9427:   toast(`${result.account || "Google 서비스 계정"}으로 UEP 구글시트에 연결했습니다.`);
    9428:   render("settings");
@@ -1127,7 +1225,13 @@
    9446:     uepDiagRecord('sync.preview.throw',{name:error?.name,message:error?.message,stack:error?.stack});
    9447:     result={ok:false,reason:error?.message||'학교 공용 자료 조회 예외'};
    9448:   }
+   9449:   if (!result?.ok) {
+   9450:     if (button) {
+   9451:       button.disabled = false;
+   9452:       button.textContent = "지금 새로고침";
 --- around line 10772 ---
+  10762:     if (!result?.ok) {
+  10763:       button.disabled = false;
   10764:       button.textContent = original;
   10765:       return toast(result?.reason || "학교일정을 동기화하지 못했습니다.");
   10766:     }
@@ -1151,7 +1255,13 @@
   10784:     render(page);
   10785:   }));
   10786:   $$('[data-calendar-date]').forEach((button) => (button.onclick = async (event) => {
+  10787:     event.stopPropagation();
+  10788:     calendarSelectedDate = button.dataset.calendarDate || dateKey(today);
+  10789:     render(page);
+  10790:   }));
 --- around line 10831 ---
+  10821:   $$('[data-dashboard-calendar-date]').forEach((button) => (button.onclick = (event) => {
+  10822:     event.preventDefault();
   10823:     event.stopPropagation();
   10824:     dashboardSelectedDate=button.dataset.dashboardCalendarDate||dateKey(today);
   10825:     const selected=new Date(`${dashboardSelectedDate}T12:00:00`);
@@ -1175,7 +1285,13 @@
   10843:     navigate('calendar');
   10844:   }));
   10845:   $$('[data-calendar-edit]').forEach((button) => (button.onclick = (event) => { event.preventDefault(); event.stopPropagation(); openCalendarEditDrawer(button.dataset.calendarEdit); }));
+  10846:   $$("[data-school-event]").forEach(
+  10847:     (x) => (x.onclick = () => openSchoolCalendarEvent(x.dataset.schoolEvent)),
+  10848:   );
+  10849:   $$("[data-print-timetable]").forEach(
 --- around line 11635 ---
+  11625:     : trimmed.includes(",")
+  11626:       ? trimmed.split(/,+/)
   11627:       : trimmed.split(/\s+/);
   11628:   return { number: (parts.shift() || "").trim(), name: parts.join(" ").trim() };
   11629: }
@@ -1199,7 +1315,13 @@
   11647: 
   11648: 
   11649: function upsertNoticeCache(payload,id){
+  11650:   readonlyCache=readonlyCache||{};readonlyCache.notices=Array.isArray(readonlyCache.notices)?readonlyCache.notices:[];
+  11651:   const normalized={...payload,id:String(id||payload.id||''),status:payload.status||'게시',detail:payload.content,date:payload.postDate,receipts:readonlyCache.notices.find(x=>String(x.id)===String(id))?.receipts||[]};
+  11652:   const index=readonlyCache.notices.findIndex(x=>String(x.id)===String(normalized.id));
+  11653:   if(index>=0)readonlyCache.notices[index]={...readonlyCache.notices[index],...normalized};else readonlyCache.notices.unshift(normalized);
 --- around line 11641 ---
+  11631: function openProgramSheetSettings() {
+  11632:   $("#drawerKicker").textContent = "GOOGLE SHEETS";
   11633:   $("#drawerTitle").textContent = "프로그램 시트 연결 준비";
   11634:   $("#drawerBody").innerHTML =
   11635:     `<form class="site-editor" id="programSheetForm"><label>구글시트 주소<input id="programSheetUrl" type="url" value="${escapeHtml(state.settings.programSheetUrl || "")}" placeholder="https://docs.google.com/spreadsheets/..."></label><label>프로그램 탭 이름<input id="programSheetName" value="${escapeHtml(state.settings.programSheetName || "프로그램")}"></label><div class="sheet-schema"><b>권장 열 구조</b><span>운영일 · 프로그램명 · 시작시간 · 종료시간 · 장소 · 담당교사 · 학번 · 이름 · 안내</span></div><button class="btn primary">연결 정보 저장</button><p class="safe-note">여기서는 주소와 탭 이름만 저장합니다. 실제 읽기·쓰기는 권한 확인과 선생님 승인 후 연결합니다.</p></form>`;
@@ -1223,7 +1345,13 @@
   11653:   if(index>=0)readonlyCache.notices[index]={...readonlyCache.notices[index],...normalized};else readonlyCache.notices.unshift(normalized);
   11654:   if(Array.isArray(state.workNotices)&&state.workNotices.length){state.workNotices=[];save().catch(()=>{});}
   11655:   return normalized;
+  11656: }
+  11657: function setNoticeBusy(form,busy,label='저장 중…'){
+  11658:   const button=form?.querySelector('button[type="submit"]');if(!button)return;
+  11659:   if(busy){button.dataset.originalText=button.textContent;button.disabled=true;button.textContent=label;form.setAttribute('aria-busy','true');}
 --- around line 11811 ---
+  11801:   $("#drawerBody").innerHTML = b;
+  11802:   $("#drawer").classList.remove("hidden");
   11803:   $("#drawerBackdrop").classList.remove("hidden");
   11804:   const settingsButton = $("[data-sync-settings]");
   11805:   if (settingsButton) settingsButton.onclick = () => { closeDrawer(); navigate("settings"); };
@@ -1247,7 +1375,13 @@
   11823:   $("#drawer").classList.remove("reference-expanded");
   11824:   $("#drawer").classList.remove("reference-maximized");
   11825:   $("#drawer").classList.remove("extension-expanded");
+  11826:   $("#drawer").classList.remove("program-expanded");
+  11827:   $("#drawer").classList.remove("duty-calendar-expanded");
+  11828:   $("#drawer").classList.remove("dashboard-status-expanded");
+  11829:   $("#drawer").classList.remove("dorm-deep-expanded");
 --- around line 13175 ---
+  13165: 
+  13166: // __UEP_08116_SELECTION_SMS_HELPER__
   13167: function uepSelectionSms(student,errors){
   13168:   const lines=errors.map((x,i)=>`${i+1}. ${x.type}: ${x.detail}`).join("\n");
   13169:   return `[운호고 선택과목 보완 안내]\n${student.name} 학생의 2학년 선택과목 신청에서 확인이 필요한 내용이 있습니다.\n${lines}\n신청 내용을 확인한 뒤 담당 선생님의 안내에 따라 수정해 주세요.`;
@@ -1271,7 +1405,13 @@
   13187: 
   13188: 
   13189: /* UEP_08132_INTERACTION_REPAIR_START */
+  13190: (function(){
+  13191:   if(typeof document==='undefined') return;
+  13192:   if(window.__UEP08132InteractionRepair) return;
+  13193:   window.__UEP08132InteractionRepair=true;
 --- around line 13180 ---
+  13170: }
+  13171: 
   13172: 
   13173: 
   13174: // __UEP_SCHOOL_READ_BADGE_08122__
@@ -1295,8 +1435,14 @@
   13192:   if(window.__UEP08132InteractionRepair) return;
   13193:   window.__UEP08132InteractionRepair=true;
   13194: 
+  13195:   function renderRecordsSafe(){
+  13196:     if(typeof render==='function') render('records');
+  13197:   }
+  13198: 
 ===== app/resources/app/electron/main.cjs =====
 --- around line 13 ---
+      3: const { spawn } = require("child_process");
+      4: const crypto = require("crypto");
       5: const http = require("http");
       6: const os = require("os");
       7: const path = require("path");
@@ -1320,7 +1466,13 @@
      25: const fixedUserDataRoot = path.join(process.env.APPDATA || app.getPath("appData"), "UNHO Education Platform");
      26: try {
      27:   if (path.resolve(originalUserDataRoot) !== path.resolve(fixedUserDataRoot)) app.setPath("userData", fixedUserDataRoot);
+     28: } catch {}
+     29: const stableUserDataRoot = () => app.getPath("userData");
+     30: const legacyUserDataRoot = () => originalUserDataRoot;
+     31: const statePath = () => path.join(stableUserDataRoot(), "school-board-state.json");
 --- around line 14 ---
+      4: const crypto = require("crypto");
+      5: const http = require("http");
       6: const os = require("os");
       7: const path = require("path");
       8: const fs = require("fs/promises");
@@ -1344,7 +1496,13 @@
      26: try {
      27:   if (path.resolve(originalUserDataRoot) !== path.resolve(fixedUserDataRoot)) app.setPath("userData", fixedUserDataRoot);
      28: } catch {}
+     29: const stableUserDataRoot = () => app.getPath("userData");
+     30: const legacyUserDataRoot = () => originalUserDataRoot;
+     31: const statePath = () => path.join(stableUserDataRoot(), "school-board-state.json");
+     32: // UEP_08197_QUICK_LAUNCH_PERSISTENCE: executable paths live outside the replaceable app folder.
 --- around line 43 ---
+     33: const quickLaunchPath = () => path.join(stableUserDataRoot(), "quick-launch-settings.json");
+     34: const credentialPath = () => path.join(stableUserDataRoot(), "google-service-account.bin");
      35: const credentialRecoveryPath = () => path.join(stableUserDataRoot(), "google-service-account.recovery.json");
      36: const googleUserOAuthPath = () => path.join(stableUserDataRoot(), "google-user-oauth.bin");
      37: const googleUserOAuthRecoveryPath = () => path.join(stableUserDataRoot(), "google-user-oauth.recovery.json");
@@ -1368,7 +1526,13 @@
      55:   // 기존 버전의 userData에서 최초 1회 같이 옮겨야 기존 암호문을 복호화할 가능성이 유지됩니다.
      56:   for (const fileName of ["Local State","school-board-state.json","quick-launch-settings.json","google-service-account.bin","google-service-account.recovery.json","google-user-oauth.bin","google-user-oauth.recovery.json","neis-api-key.bin","neis-dashboard-cache.json","comcigan-timetable-cache.json"]) await migrateStableUserFile(fileName);
      57: }
+     58: let comciganWindow = null;
+     59: let mainWindow = null;
+     60: let shutdownStarted = false;
+     61: 
 --- around line 44 ---
+     34: const credentialPath = () => path.join(stableUserDataRoot(), "google-service-account.bin");
+     35: const credentialRecoveryPath = () => path.join(stableUserDataRoot(), "google-service-account.recovery.json");
      36: const googleUserOAuthPath = () => path.join(stableUserDataRoot(), "google-user-oauth.bin");
      37: const googleUserOAuthRecoveryPath = () => path.join(stableUserDataRoot(), "google-user-oauth.recovery.json");
      38: // __UEP_GOOGLE_OAUTH_CANONICAL_08073__
@@ -1392,7 +1556,13 @@
      56:   for (const fileName of ["Local State","school-board-state.json","quick-launch-settings.json","google-service-account.bin","google-service-account.recovery.json","google-user-oauth.bin","google-user-oauth.recovery.json","neis-api-key.bin","neis-dashboard-cache.json","comcigan-timetable-cache.json"]) await migrateStableUserFile(fileName);
      57: }
      58: let comciganWindow = null;
+     59: let mainWindow = null;
+     60: let shutdownStarted = false;
+     61: 
+     62: async function appendShutdownLog(message) {
 --- around line 335 ---
+    325:   try { await fs.rename(filePath, backup); } catch {}
+    326:   const error = new Error("저장된 보안 인증정보를 복호화할 수 없습니다. 서비스 계정 JSON을 다시 등록해 주세요.");
     327:   error.code = "UEP_SAFE_STORAGE_DECRYPT_FAILED";
     328:   throw error;
     329: }
@@ -1416,7 +1586,13 @@
     347: }
     348: async function getOrCreateSchoolReadDeviceId(){
     349:   try{const saved=String(await fs.readFile(schoolReadDevicePath(),'utf8')).trim();if(saved)return saved;}catch{}
+    350:   const id='UEP-'+crypto.randomUUID();
+    351:   await fs.mkdir(path.dirname(schoolReadDevicePath()),{recursive:true});
+    352:   await fs.writeFile(schoolReadDevicePath(),id,'utf8');
+    353:   return id;
 --- around line 336 ---
+    326:   const error = new Error("저장된 보안 인증정보를 복호화할 수 없습니다. 서비스 계정 JSON을 다시 등록해 주세요.");
+    327:   error.code = "UEP_SAFE_STORAGE_DECRYPT_FAILED";
     328:   throw error;
     329: }
     330: 
@@ -1440,7 +1616,13 @@
     348: async function getOrCreateSchoolReadDeviceId(){
     349:   try{const saved=String(await fs.readFile(schoolReadDevicePath(),'utf8')).trim();if(saved)return saved;}catch{}
     350:   const id='UEP-'+crypto.randomUUID();
+    351:   await fs.mkdir(path.dirname(schoolReadDevicePath()),{recursive:true});
+    352:   await fs.writeFile(schoolReadDevicePath(),id,'utf8');
+    353:   return id;
+    354: }
 --- around line 337 ---
+    327:   error.code = "UEP_SAFE_STORAGE_DECRYPT_FAILED";
+    328:   throw error;
     329: }
     330: 
     331: 
@@ -1464,7 +1646,13 @@
     349:   try{const saved=String(await fs.readFile(schoolReadDevicePath(),'utf8')).trim();if(saved)return saved;}catch{}
     350:   const id='UEP-'+crypto.randomUUID();
     351:   await fs.mkdir(path.dirname(schoolReadDevicePath()),{recursive:true});
+    352:   await fs.writeFile(schoolReadDevicePath(),id,'utf8');
+    353:   return id;
+    354: }
+    355: async function readSchoolReadSession(){
 --- around line 338 ---
+    328:   throw error;
+    329: }
     330: 
     331: 
     332: // __UEP_SCHOOL_READ_API_PRIMARY_08120__
@@ -1488,7 +1676,13 @@
     350:   const id='UEP-'+crypto.randomUUID();
     351:   await fs.mkdir(path.dirname(schoolReadDevicePath()),{recursive:true});
     352:   await fs.writeFile(schoolReadDevicePath(),id,'utf8');
+    353:   return id;
+    354: }
+    355: async function readSchoolReadSession(){
+    356:   try{const value=await readEncrypted(schoolReadSessionPath());return value&&typeof value==='object'?value:null;}catch{return null;}
 --- around line 340 ---
+    330: 
+    331: 
     332: // __UEP_SCHOOL_READ_API_PRIMARY_08120__
     333: // __UEP_SCHOOL_READ_ENDPOINT_FALLBACK_08121__
     334: const UEP_SCHOOL_READ_API_FALLBACK='https://script.google.com/macros/s/AKfycbyLEEam4L2sX653pii69TC3_84wTyfAed_UL8HRY6PBG467im1LmZJ0CIpSKSOj4r6-0w/exec';
@@ -1512,7 +1706,13 @@
     352:   await fs.writeFile(schoolReadDevicePath(),id,'utf8');
     353:   return id;
     354: }
+    355: async function readSchoolReadSession(){
+    356:   try{const value=await readEncrypted(schoolReadSessionPath());return value&&typeof value==='object'?value:null;}catch{return null;}
+    357: }
+    358: async function saveSchoolReadSession(value){await saveEncrypted(schoolReadSessionPath(),value);return value;}
 --- around line 341 ---
+    331: 
+    332: // __UEP_SCHOOL_READ_API_PRIMARY_08120__
     333: // __UEP_SCHOOL_READ_ENDPOINT_FALLBACK_08121__
     334: const UEP_SCHOOL_READ_API_FALLBACK='https://script.google.com/macros/s/AKfycbyLEEam4L2sX653pii69TC3_84wTyfAed_UL8HRY6PBG467im1LmZJ0CIpSKSOj4r6-0w/exec';
     335: let schoolReadPolicyCache={url:'',expiresAt:0};
@@ -1536,7 +1736,13 @@
     353:   return id;
     354: }
     355: async function readSchoolReadSession(){
+    356:   try{const value=await readEncrypted(schoolReadSessionPath());return value&&typeof value==='object'?value:null;}catch{return null;}
+    357: }
+    358: async function saveSchoolReadSession(value){await saveEncrypted(schoolReadSessionPath(),value);return value;}
+    359: async function clearSchoolReadSession(){try{await fs.unlink(schoolReadSessionPath());}catch(error){if(error?.code!=='ENOENT')throw error;}liveDataCache=null;liveDataFetchedAt=0;return {ok:true};}
 --- around line 343 ---
+    333: // __UEP_SCHOOL_READ_ENDPOINT_FALLBACK_08121__
+    334: const UEP_SCHOOL_READ_API_FALLBACK='https://script.google.com/macros/s/AKfycbyLEEam4L2sX653pii69TC3_84wTyfAed_UL8HRY6PBG467im1LmZJ0CIpSKSOj4r6-0w/exec';
     335: let schoolReadPolicyCache={url:'',expiresAt:0};
     336: function schoolReadError(message,code='UEP_SCHOOL_READ_ERROR'){const e=new Error(message);e.code=code;return e;}
     337: async function loadSchoolReadApiUrl(){
@@ -1560,7 +1766,13 @@
     355: async function readSchoolReadSession(){
     356:   try{const value=await readEncrypted(schoolReadSessionPath());return value&&typeof value==='object'?value:null;}catch{return null;}
     357: }
+    358: async function saveSchoolReadSession(value){await saveEncrypted(schoolReadSessionPath(),value);return value;}
+    359: async function clearSchoolReadSession(){try{await fs.unlink(schoolReadSessionPath());}catch(error){if(error?.code!=='ENOENT')throw error;}liveDataCache=null;liveDataFetchedAt=0;return {ok:true};}
+    360: async function schoolReadPost(action,payload={}){
+    361:   const url=await loadSchoolReadApiUrl();
 --- around line 344 ---
+    334: const UEP_SCHOOL_READ_API_FALLBACK='https://script.google.com/macros/s/AKfycbyLEEam4L2sX653pii69TC3_84wTyfAed_UL8HRY6PBG467im1LmZJ0CIpSKSOj4r6-0w/exec';
+    335: let schoolReadPolicyCache={url:'',expiresAt:0};
     336: function schoolReadError(message,code='UEP_SCHOOL_READ_ERROR'){const e=new Error(message);e.code=code;return e;}
     337: async function loadSchoolReadApiUrl(){
     338:   if(schoolReadPolicyCache.url&&schoolReadPolicyCache.expiresAt>Date.now())return schoolReadPolicyCache.url;
@@ -1584,7 +1796,13 @@
     356:   try{const value=await readEncrypted(schoolReadSessionPath());return value&&typeof value==='object'?value:null;}catch{return null;}
     357: }
     358: async function saveSchoolReadSession(value){await saveEncrypted(schoolReadSessionPath(),value);return value;}
+    359: async function clearSchoolReadSession(){try{await fs.unlink(schoolReadSessionPath());}catch(error){if(error?.code!=='ENOENT')throw error;}liveDataCache=null;liveDataFetchedAt=0;return {ok:true};}
+    360: async function schoolReadPost(action,payload={}){
+    361:   const url=await loadSchoolReadApiUrl();
+    362:   const response=await net.fetch(url,{method:'POST',headers:{'content-type':'application/json;charset=UTF-8','accept':'application/json'},body:JSON.stringify({action,...payload})});
 --- around line 345 ---
+    335: let schoolReadPolicyCache={url:'',expiresAt:0};
+    336: function schoolReadError(message,code='UEP_SCHOOL_READ_ERROR'){const e=new Error(message);e.code=code;return e;}
     337: async function loadSchoolReadApiUrl(){
     338:   if(schoolReadPolicyCache.url&&schoolReadPolicyCache.expiresAt>Date.now())return schoolReadPolicyCache.url;
     339:   let response;
@@ -1608,7 +1826,13 @@
     357: }
     358: async function saveSchoolReadSession(value){await saveEncrypted(schoolReadSessionPath(),value);return value;}
     359: async function clearSchoolReadSession(){try{await fs.unlink(schoolReadSessionPath());}catch(error){if(error?.code!=='ENOENT')throw error;}liveDataCache=null;liveDataFetchedAt=0;return {ok:true};}
+    360: async function schoolReadPost(action,payload={}){
+    361:   const url=await loadSchoolReadApiUrl();
+    362:   const response=await net.fetch(url,{method:'POST',headers:{'content-type':'application/json;charset=UTF-8','accept':'application/json'},body:JSON.stringify({action,...payload})});
+    363:   let data={};try{data=await response.json();}catch{}
 --- around line 348 ---
+    338:   if(schoolReadPolicyCache.url&&schoolReadPolicyCache.expiresAt>Date.now())return schoolReadPolicyCache.url;
+    339:   let response;
     340:   try{response=await net.fetch(UEP_UPDATE_POLICY_URL,{cache:'no-store'});}catch(error){throw schoolReadError('UEP School Read API 설정을 확인하지 못했습니다.','UEP_SCHOOL_READ_POLICY_UNAVAILABLE');}
     341:   if(!response.ok)throw schoolReadError('UEP School Read API 설정 조회 실패 ('+response.status+')','UEP_SCHOOL_READ_POLICY_UNAVAILABLE');
     342:   const policy=await response.json();
@@ -1632,7 +1856,13 @@
     360: async function schoolReadPost(action,payload={}){
     361:   const url=await loadSchoolReadApiUrl();
     362:   const response=await net.fetch(url,{method:'POST',headers:{'content-type':'application/json;charset=UTF-8','accept':'application/json'},body:JSON.stringify({action,...payload})});
+    363:   let data={};try{data=await response.json();}catch{}
+    364:   if(!response.ok)throw schoolReadError(data?.message||('School Read API HTTP '+response.status),data?.code||'UEP_SCHOOL_READ_HTTP_ERROR');
+    365:   return data;
+    366: }
 --- around line 349 ---
+    339:   let response;
+    340:   try{response=await net.fetch(UEP_UPDATE_POLICY_URL,{cache:'no-store'});}catch(error){throw schoolReadError('UEP School Read API 설정을 확인하지 못했습니다.','UEP_SCHOOL_READ_POLICY_UNAVAILABLE');}
     341:   if(!response.ok)throw schoolReadError('UEP School Read API 설정 조회 실패 ('+response.status+')','UEP_SCHOOL_READ_POLICY_UNAVAILABLE');
     342:   const policy=await response.json();
     343:   const url=String(policy?.schoolReadApiUrl||UEP_SCHOOL_READ_API_FALLBACK||'').trim();
@@ -1656,7 +1886,13 @@
     361:   const url=await loadSchoolReadApiUrl();
     362:   const response=await net.fetch(url,{method:'POST',headers:{'content-type':'application/json;charset=UTF-8','accept':'application/json'},body:JSON.stringify({action,...payload})});
     363:   let data={};try{data=await response.json();}catch{}
+    364:   if(!response.ok)throw schoolReadError(data?.message||('School Read API HTTP '+response.status),data?.code||'UEP_SCHOOL_READ_HTTP_ERROR');
+    365:   return data;
+    366: }
+    367: async function loginSchoolReadUser({name='',email=''}={}){
 --- around line 351 ---
+    341:   if(!response.ok)throw schoolReadError('UEP School Read API 설정 조회 실패 ('+response.status+')','UEP_SCHOOL_READ_POLICY_UNAVAILABLE');
+    342:   const policy=await response.json();
     343:   const url=String(policy?.schoolReadApiUrl||UEP_SCHOOL_READ_API_FALLBACK||'').trim();
     344:   if(!/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec(?:\?.*)?$/i.test(url))throw schoolReadError('UEP School Read API 배포 URL이 아직 등록되지 않았습니다.','UEP_SCHOOL_READ_NOT_CONFIGURED');
     345:   schoolReadPolicyCache={url,expiresAt:Date.now()+10*60*1000};
@@ -1680,7 +1916,13 @@
     363:   let data={};try{data=await response.json();}catch{}
     364:   if(!response.ok)throw schoolReadError(data?.message||('School Read API HTTP '+response.status),data?.code||'UEP_SCHOOL_READ_HTTP_ERROR');
     365:   return data;
+    366: }
+    367: async function loginSchoolReadUser({name='',email=''}={}){
+    368:   const deviceId=await getOrCreateSchoolReadDeviceId();
+    369:   const result=await schoolReadPost('login',{name:String(name||'').trim(),email:String(email||'').trim(),deviceId});
 --- around line 352 ---
+    342:   const policy=await response.json();
+    343:   const url=String(policy?.schoolReadApiUrl||UEP_SCHOOL_READ_API_FALLBACK||'').trim();
     344:   if(!/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec(?:\?.*)?$/i.test(url))throw schoolReadError('UEP School Read API 배포 URL이 아직 등록되지 않았습니다.','UEP_SCHOOL_READ_NOT_CONFIGURED');
     345:   schoolReadPolicyCache={url,expiresAt:Date.now()+10*60*1000};
     346:   return url;
@@ -1704,7 +1946,13 @@
     364:   if(!response.ok)throw schoolReadError(data?.message||('School Read API HTTP '+response.status),data?.code||'UEP_SCHOOL_READ_HTTP_ERROR');
     365:   return data;
     366: }
+    367: async function loginSchoolReadUser({name='',email=''}={}){
+    368:   const deviceId=await getOrCreateSchoolReadDeviceId();
+    369:   const result=await schoolReadPost('login',{name:String(name||'').trim(),email:String(email||'').trim(),deviceId});
+    370:   if(result?.ok&&result?.token){await saveSchoolReadSession({token:String(result.token),deviceId,user:result.user||{},expiresAt:Date.now()+Math.max(300,Number(result.expiresIn||0))*1000,savedAt:new Date().toISOString()});liveDataCache=null;liveDataFetchedAt=0;}
 --- around line 355 ---
+    345:   schoolReadPolicyCache={url,expiresAt:Date.now()+10*60*1000};
+    346:   return url;
     347: }
     348: async function getOrCreateSchoolReadDeviceId(){
     349:   try{const saved=String(await fs.readFile(schoolReadDevicePath(),'utf8')).trim();if(saved)return saved;}catch{}
@@ -1728,7 +1976,13 @@
     367: async function loginSchoolReadUser({name='',email=''}={}){
     368:   const deviceId=await getOrCreateSchoolReadDeviceId();
     369:   const result=await schoolReadPost('login',{name:String(name||'').trim(),email:String(email||'').trim(),deviceId});
+    370:   if(result?.ok&&result?.token){await saveSchoolReadSession({token:String(result.token),deviceId,user:result.user||{},expiresAt:Date.now()+Math.max(300,Number(result.expiresIn||0))*1000,savedAt:new Date().toISOString()});liveDataCache=null;liveDataFetchedAt=0;}
+    371:   return result;
+    372: }
+    373: async function schoolReadSessionStatus({verify=true}={}){
 --- around line 356 ---
+    346:   return url;
+    347: }
     348: async function getOrCreateSchoolReadDeviceId(){
     349:   try{const saved=String(await fs.readFile(schoolReadDevicePath(),'utf8')).trim();if(saved)return saved;}catch{}
     350:   const id='UEP-'+crypto.randomUUID();
@@ -1752,7 +2006,13 @@
     368:   const deviceId=await getOrCreateSchoolReadDeviceId();
     369:   const result=await schoolReadPost('login',{name:String(name||'').trim(),email:String(email||'').trim(),deviceId});
     370:   if(result?.ok&&result?.token){await saveSchoolReadSession({token:String(result.token),deviceId,user:result.user||{},expiresAt:Date.now()+Math.max(300,Number(result.expiresIn||0))*1000,savedAt:new Date().toISOString()});liveDataCache=null;liveDataFetchedAt=0;}
+    371:   return result;
+    372: }
+    373: async function schoolReadSessionStatus({verify=true}={}){
+    374:   let endpointReady=true,endpointError='';
 --- around line 358 ---
+    348: async function getOrCreateSchoolReadDeviceId(){
+    349:   try{const saved=String(await fs.readFile(schoolReadDevicePath(),'utf8')).trim();if(saved)return saved;}catch{}
     350:   const id='UEP-'+crypto.randomUUID();
     351:   await fs.mkdir(path.dirname(schoolReadDevicePath()),{recursive:true});
     352:   await fs.writeFile(schoolReadDevicePath(),id,'utf8');
@@ -1776,7 +2036,13 @@
     370:   if(result?.ok&&result?.token){await saveSchoolReadSession({token:String(result.token),deviceId,user:result.user||{},expiresAt:Date.now()+Math.max(300,Number(result.expiresIn||0))*1000,savedAt:new Date().toISOString()});liveDataCache=null;liveDataFetchedAt=0;}
     371:   return result;
     372: }
+    373: async function schoolReadSessionStatus({verify=true}={}){
+    374:   let endpointReady=true,endpointError='';
+    375:   try{await loadSchoolReadApiUrl();}catch(error){endpointReady=false;endpointError=String(error?.message||error);}
+    376:   const session=await readSchoolReadSession();
 --- around line 359 ---
+    349:   try{const saved=String(await fs.readFile(schoolReadDevicePath(),'utf8')).trim();if(saved)return saved;}catch{}
+    350:   const id='UEP-'+crypto.randomUUID();
     351:   await fs.mkdir(path.dirname(schoolReadDevicePath()),{recursive:true});
     352:   await fs.writeFile(schoolReadDevicePath(),id,'utf8');
     353:   return id;
@@ -1800,7 +2066,13 @@
     371:   return result;
     372: }
     373: async function schoolReadSessionStatus({verify=true}={}){
+    374:   let endpointReady=true,endpointError='';
+    375:   try{await loadSchoolReadApiUrl();}catch(error){endpointReady=false;endpointError=String(error?.message||error);}
+    376:   const session=await readSchoolReadSession();
+    377:   if(!session?.token||!session?.deviceId)return {ok:endpointReady,authenticated:false,endpointReady,reason:endpointError,user:null,mode:'school_read_api'};
 --- around line 360 ---
+    350:   const id='UEP-'+crypto.randomUUID();
+    351:   await fs.mkdir(path.dirname(schoolReadDevicePath()),{recursive:true});
     352:   await fs.writeFile(schoolReadDevicePath(),id,'utf8');
     353:   return id;
     354: }
@@ -1824,7 +2096,13 @@
     372: }
     373: async function schoolReadSessionStatus({verify=true}={}){
     374:   let endpointReady=true,endpointError='';
+    375:   try{await loadSchoolReadApiUrl();}catch(error){endpointReady=false;endpointError=String(error?.message||error);}
+    376:   const session=await readSchoolReadSession();
+    377:   if(!session?.token||!session?.deviceId)return {ok:endpointReady,authenticated:false,endpointReady,reason:endpointError,user:null,mode:'school_read_api'};
+    378:   if(!verify)return {ok:true,authenticated:true,endpointReady,user:session.user||null,mode:'school_read_api'};
 --- around line 361 ---
+    351:   await fs.mkdir(path.dirname(schoolReadDevicePath()),{recursive:true});
+    352:   await fs.writeFile(schoolReadDevicePath(),id,'utf8');
     353:   return id;
     354: }
     355: async function readSchoolReadSession(){
@@ -1848,7 +2126,13 @@
     373: async function schoolReadSessionStatus({verify=true}={}){
     374:   let endpointReady=true,endpointError='';
     375:   try{await loadSchoolReadApiUrl();}catch(error){endpointReady=false;endpointError=String(error?.message||error);}
+    376:   const session=await readSchoolReadSession();
+    377:   if(!session?.token||!session?.deviceId)return {ok:endpointReady,authenticated:false,endpointReady,reason:endpointError,user:null,mode:'school_read_api'};
+    378:   if(!verify)return {ok:true,authenticated:true,endpointReady,user:session.user||null,mode:'school_read_api'};
+    379:   try{const result=await schoolReadPost('verify-token',{token:session.token,deviceId:session.deviceId});if(!result?.ok)throw schoolReadError(result?.message||'UEP 세션 확인 실패',result?.code||'UEP_SCHOOL_READ_TOKEN_INVALID');session.user=result.user||session.user||{};await saveSchoolReadSession(session);return {ok:true,authenticated:true,endpointReady:true,user:session.user,expiresAt:result.expiresAt||'',mode:'school_read_api'};}catch(error){await clearSchoolReadSession();return {ok:false,authenticated:false,endpointReady,reason:String(error?.message||error),code:error?.code||'',user:null,mode:'school_read_api'};}
 --- around line 364 ---
+    354: }
+    355: async function readSchoolReadSession(){
     356:   try{const value=await readEncrypted(schoolReadSessionPath());return value&&typeof value==='object'?value:null;}catch{return null;}
     357: }
     358: async function saveSchoolReadSession(value){await saveEncrypted(schoolReadSessionPath(),value);return value;}
@@ -1872,7 +2156,13 @@
     376:   const session=await readSchoolReadSession();
     377:   if(!session?.token||!session?.deviceId)return {ok:endpointReady,authenticated:false,endpointReady,reason:endpointError,user:null,mode:'school_read_api'};
     378:   if(!verify)return {ok:true,authenticated:true,endpointReady,user:session.user||null,mode:'school_read_api'};
+    379:   try{const result=await schoolReadPost('verify-token',{token:session.token,deviceId:session.deviceId});if(!result?.ok)throw schoolReadError(result?.message||'UEP 세션 확인 실패',result?.code||'UEP_SCHOOL_READ_TOKEN_INVALID');session.user=result.user||session.user||{};await saveSchoolReadSession(session);return {ok:true,authenticated:true,endpointReady:true,user:session.user,expiresAt:result.expiresAt||'',mode:'school_read_api'};}catch(error){await clearSchoolReadSession();return {ok:false,authenticated:false,endpointReady,reason:String(error?.message||error),code:error?.code||'',user:null,mode:'school_read_api'};}
+    380: }
+    381: async function schoolReadBatchRead(spreadsheetId,ranges){
+    382:   const session=await readSchoolReadSession();
 --- around line 367 ---
+    357: }
+    358: async function saveSchoolReadSession(value){await saveEncrypted(schoolReadSessionPath(),value);return value;}
     359: async function clearSchoolReadSession(){try{await fs.unlink(schoolReadSessionPath());}catch(error){if(error?.code!=='ENOENT')throw error;}liveDataCache=null;liveDataFetchedAt=0;return {ok:true};}
     360: async function schoolReadPost(action,payload={}){
     361:   const url=await loadSchoolReadApiUrl();
@@ -1896,7 +2186,13 @@
     379:   try{const result=await schoolReadPost('verify-token',{token:session.token,deviceId:session.deviceId});if(!result?.ok)throw schoolReadError(result?.message||'UEP 세션 확인 실패',result?.code||'UEP_SCHOOL_READ_TOKEN_INVALID');session.user=result.user||session.user||{};await saveSchoolReadSession(session);return {ok:true,authenticated:true,endpointReady:true,user:session.user,expiresAt:result.expiresAt||'',mode:'school_read_api'};}catch(error){await clearSchoolReadSession();return {ok:false,authenticated:false,endpointReady,reason:String(error?.message||error),code:error?.code||'',user:null,mode:'school_read_api'};}
     380: }
     381: async function schoolReadBatchRead(spreadsheetId,ranges){
+    382:   const session=await readSchoolReadSession();
+    383:   if(!session?.token||!session?.deviceId)throw schoolReadError('UEP 로그인이 필요합니다.','UEP_SCHOOL_READ_LOGIN_REQUIRED');
+    384:   const result=await schoolReadPost('batch-read',{token:session.token,deviceId:session.deviceId,spreadsheetId,ranges});
+    385:   if(!result?.ok)throw schoolReadError(result?.message||'학교 데이터를 읽지 못했습니다.',result?.code||'UEP_SCHOOL_READ_BATCH_FAILED');
 --- around line 368 ---
+    358: async function saveSchoolReadSession(value){await saveEncrypted(schoolReadSessionPath(),value);return value;}
+    359: async function clearSchoolReadSession(){try{await fs.unlink(schoolReadSessionPath());}catch(error){if(error?.code!=='ENOENT')throw error;}liveDataCache=null;liveDataFetchedAt=0;return {ok:true};}
     360: async function schoolReadPost(action,payload={}){
     361:   const url=await loadSchoolReadApiUrl();
     362:   const response=await net.fetch(url,{method:'POST',headers:{'content-type':'application/json;charset=UTF-8','accept':'application/json'},body:JSON.stringify({action,...payload})});
@@ -1920,7 +2216,13 @@
     380: }
     381: async function schoolReadBatchRead(spreadsheetId,ranges){
     382:   const session=await readSchoolReadSession();
+    383:   if(!session?.token||!session?.deviceId)throw schoolReadError('UEP 로그인이 필요합니다.','UEP_SCHOOL_READ_LOGIN_REQUIRED');
+    384:   const result=await schoolReadPost('batch-read',{token:session.token,deviceId:session.deviceId,spreadsheetId,ranges});
+    385:   if(!result?.ok)throw schoolReadError(result?.message||'학교 데이터를 읽지 못했습니다.',result?.code||'UEP_SCHOOL_READ_BATCH_FAILED');
+    386:   return result.valueRanges||[];
 --- around line 369 ---
+    359: async function clearSchoolReadSession(){try{await fs.unlink(schoolReadSessionPath());}catch(error){if(error?.code!=='ENOENT')throw error;}liveDataCache=null;liveDataFetchedAt=0;return {ok:true};}
+    360: async function schoolReadPost(action,payload={}){
     361:   const url=await loadSchoolReadApiUrl();
     362:   const response=await net.fetch(url,{method:'POST',headers:{'content-type':'application/json;charset=UTF-8','accept':'application/json'},body:JSON.stringify({action,...payload})});
     363:   let data={};try{data=await response.json();}catch{}
@@ -1944,7 +2246,13 @@
     381: async function schoolReadBatchRead(spreadsheetId,ranges){
     382:   const session=await readSchoolReadSession();
     383:   if(!session?.token||!session?.deviceId)throw schoolReadError('UEP 로그인이 필요합니다.','UEP_SCHOOL_READ_LOGIN_REQUIRED');
+    384:   const result=await schoolReadPost('batch-read',{token:session.token,deviceId:session.deviceId,spreadsheetId,ranges});
+    385:   if(!result?.ok)throw schoolReadError(result?.message||'학교 데이터를 읽지 못했습니다.',result?.code||'UEP_SCHOOL_READ_BATCH_FAILED');
+    386:   return result.valueRanges||[];
+    387: }
 --- around line 370 ---
+    360: async function schoolReadPost(action,payload={}){
+    361:   const url=await loadSchoolReadApiUrl();
     362:   const response=await net.fetch(url,{method:'POST',headers:{'content-type':'application/json;charset=UTF-8','accept':'application/json'},body:JSON.stringify({action,...payload})});
     363:   let data={};try{data=await response.json();}catch{}
     364:   if(!response.ok)throw schoolReadError(data?.message||('School Read API HTTP '+response.status),data?.code||'UEP_SCHOOL_READ_HTTP_ERROR');
@@ -1968,7 +2276,13 @@
     382:   const session=await readSchoolReadSession();
     383:   if(!session?.token||!session?.deviceId)throw schoolReadError('UEP 로그인이 필요합니다.','UEP_SCHOOL_READ_LOGIN_REQUIRED');
     384:   const result=await schoolReadPost('batch-read',{token:session.token,deviceId:session.deviceId,spreadsheetId,ranges});
+    385:   if(!result?.ok)throw schoolReadError(result?.message||'학교 데이터를 읽지 못했습니다.',result?.code||'UEP_SCHOOL_READ_BATCH_FAILED');
+    386:   return result.valueRanges||[];
+    387: }
+    388: 
 --- around line 373 ---
+    363:   let data={};try{data=await response.json();}catch{}
+    364:   if(!response.ok)throw schoolReadError(data?.message||('School Read API HTTP '+response.status),data?.code||'UEP_SCHOOL_READ_HTTP_ERROR');
     365:   return data;
     366: }
     367: async function loginSchoolReadUser({name='',email=''}={}){
@@ -1992,7 +2306,13 @@
     385:   if(!result?.ok)throw schoolReadError(result?.message||'학교 데이터를 읽지 못했습니다.',result?.code||'UEP_SCHOOL_READ_BATCH_FAILED');
     386:   return result.valueRanges||[];
     387: }
+    388: 
+    389: function base64url(value) { return Buffer.from(value).toString("base64url"); }
+    390: 
+    391: // __UEP_GOOGLE_USER_OAUTH_08070__
 --- around line 375 ---
+    365:   return data;
+    366: }
     367: async function loginSchoolReadUser({name='',email=''}={}){
     368:   const deviceId=await getOrCreateSchoolReadDeviceId();
     369:   const result=await schoolReadPost('login',{name:String(name||'').trim(),email:String(email||'').trim(),deviceId});
@@ -2016,7 +2336,13 @@
     387: }
     388: 
     389: function base64url(value) { return Buffer.from(value).toString("base64url"); }
+    390: 
+    391: // __UEP_GOOGLE_USER_OAUTH_08070__
+    392: const UEP_UPDATE_POLICY_URL = "https://raw.githubusercontent.com/hkhsm00-k81c/UEP-Updates/main/uep-policy.json";
+    393: let googleOAuthPolicyCache={clientId:"",expiresAt:0};
 --- around line 376 ---
+    366: }
+    367: async function loginSchoolReadUser({name='',email=''}={}){
     368:   const deviceId=await getOrCreateSchoolReadDeviceId();
     369:   const result=await schoolReadPost('login',{name:String(name||'').trim(),email:String(email||'').trim(),deviceId});
     370:   if(result?.ok&&result?.token){await saveSchoolReadSession({token:String(result.token),deviceId,user:result.user||{},expiresAt:Date.now()+Math.max(300,Number(result.expiresIn||0))*1000,savedAt:new Date().toISOString()});liveDataCache=null;liveDataFetchedAt=0;}
@@ -2040,7 +2366,13 @@
     388: 
     389: function base64url(value) { return Buffer.from(value).toString("base64url"); }
     390: 
+    391: // __UEP_GOOGLE_USER_OAUTH_08070__
+    392: const UEP_UPDATE_POLICY_URL = "https://raw.githubusercontent.com/hkhsm00-k81c/UEP-Updates/main/uep-policy.json";
+    393: let googleOAuthPolicyCache={clientId:"",expiresAt:0};
+    394: 
 --- around line 379 ---
+    369:   const result=await schoolReadPost('login',{name:String(name||'').trim(),email:String(email||'').trim(),deviceId});
+    370:   if(result?.ok&&result?.token){await saveSchoolReadSession({token:String(result.token),deviceId,user:result.user||{},expiresAt:Date.now()+Math.max(300,Number(result.expiresIn||0))*1000,savedAt:new Date().toISOString()});liveDataCache=null;liveDataFetchedAt=0;}
     371:   return result;
     372: }
     373: async function schoolReadSessionStatus({verify=true}={}){
@@ -2064,7 +2396,13 @@
     391: // __UEP_GOOGLE_USER_OAUTH_08070__
     392: const UEP_UPDATE_POLICY_URL = "https://raw.githubusercontent.com/hkhsm00-k81c/UEP-Updates/main/uep-policy.json";
     393: let googleOAuthPolicyCache={clientId:"",expiresAt:0};
+    394: 
+    395: function googleOAuthError(message,code){const e=new Error(message);e.code=code;return e;}
+    396: async function loadGoogleOAuthClientId(){
+    397:   if(googleOAuthPolicyCache.clientId && googleOAuthPolicyCache.expiresAt>Date.now()) return googleOAuthPolicyCache.clientId;
 --- around line 381 ---
+    371:   return result;
+    372: }
     373: async function schoolReadSessionStatus({verify=true}={}){
     374:   let endpointReady=true,endpointError='';
     375:   try{await loadSchoolReadApiUrl();}catch(error){endpointReady=false;endpointError=String(error?.message||error);}
@@ -2088,7 +2426,13 @@
     393: let googleOAuthPolicyCache={clientId:"",expiresAt:0};
     394: 
     395: function googleOAuthError(message,code){const e=new Error(message);e.code=code;return e;}
+    396: async function loadGoogleOAuthClientId(){
+    397:   if(googleOAuthPolicyCache.clientId && googleOAuthPolicyCache.expiresAt>Date.now()) return googleOAuthPolicyCache.clientId;
+    398:   let response;
+    399:   try{ response=await net.fetch(UEP_UPDATE_POLICY_URL,{cache:"no-store"}); }
 --- around line 382 ---
+    372: }
+    373: async function schoolReadSessionStatus({verify=true}={}){
     374:   let endpointReady=true,endpointError='';
     375:   try{await loadSchoolReadApiUrl();}catch(error){endpointReady=false;endpointError=String(error?.message||error);}
     376:   const session=await readSchoolReadSession();
@@ -2112,7 +2456,13 @@
     394: 
     395: function googleOAuthError(message,code){const e=new Error(message);e.code=code;return e;}
     396: async function loadGoogleOAuthClientId(){
+    397:   if(googleOAuthPolicyCache.clientId && googleOAuthPolicyCache.expiresAt>Date.now()) return googleOAuthPolicyCache.clientId;
+    398:   let response;
+    399:   try{ response=await net.fetch(UEP_UPDATE_POLICY_URL,{cache:"no-store"}); }
+    400:   catch(error){ throw googleOAuthError("Google 계정 연결 설정을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.","UEP_GOOGLE_OAUTH_POLICY_UNAVAILABLE"); }
 --- around line 383 ---
+    373: async function schoolReadSessionStatus({verify=true}={}){
+    374:   let endpointReady=true,endpointError='';
     375:   try{await loadSchoolReadApiUrl();}catch(error){endpointReady=false;endpointError=String(error?.message||error);}
     376:   const session=await readSchoolReadSession();
     377:   if(!session?.token||!session?.deviceId)return {ok:endpointReady,authenticated:false,endpointReady,reason:endpointError,user:null,mode:'school_read_api'};
@@ -2136,7 +2486,13 @@
     395: function googleOAuthError(message,code){const e=new Error(message);e.code=code;return e;}
     396: async function loadGoogleOAuthClientId(){
     397:   if(googleOAuthPolicyCache.clientId && googleOAuthPolicyCache.expiresAt>Date.now()) return googleOAuthPolicyCache.clientId;
+    398:   let response;
+    399:   try{ response=await net.fetch(UEP_UPDATE_POLICY_URL,{cache:"no-store"}); }
+    400:   catch(error){ throw googleOAuthError("Google 계정 연결 설정을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.","UEP_GOOGLE_OAUTH_POLICY_UNAVAILABLE"); }
+    401:   if(!response.ok) throw googleOAuthError(`Google 계정 연결 설정 조회 실패 (${response.status})`,"UEP_GOOGLE_OAUTH_POLICY_UNAVAILABLE");
 --- around line 384 ---
+    374:   let endpointReady=true,endpointError='';
+    375:   try{await loadSchoolReadApiUrl();}catch(error){endpointReady=false;endpointError=String(error?.message||error);}
     376:   const session=await readSchoolReadSession();
     377:   if(!session?.token||!session?.deviceId)return {ok:endpointReady,authenticated:false,endpointReady,reason:endpointError,user:null,mode:'school_read_api'};
     378:   if(!verify)return {ok:true,authenticated:true,endpointReady,user:session.user||null,mode:'school_read_api'};
@@ -2160,7 +2516,13 @@
     396: async function loadGoogleOAuthClientId(){
     397:   if(googleOAuthPolicyCache.clientId && googleOAuthPolicyCache.expiresAt>Date.now()) return googleOAuthPolicyCache.clientId;
     398:   let response;
+    399:   try{ response=await net.fetch(UEP_UPDATE_POLICY_URL,{cache:"no-store"}); }
+    400:   catch(error){ throw googleOAuthError("Google 계정 연결 설정을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.","UEP_GOOGLE_OAUTH_POLICY_UNAVAILABLE"); }
+    401:   if(!response.ok) throw googleOAuthError(`Google 계정 연결 설정 조회 실패 (${response.status})`,"UEP_GOOGLE_OAUTH_POLICY_UNAVAILABLE");
+    402:   const policy=await response.json();
 --- around line 385 ---
+    375:   try{await loadSchoolReadApiUrl();}catch(error){endpointReady=false;endpointError=String(error?.message||error);}
+    376:   const session=await readSchoolReadSession();
     377:   if(!session?.token||!session?.deviceId)return {ok:endpointReady,authenticated:false,endpointReady,reason:endpointError,user:null,mode:'school_read_api'};
     378:   if(!verify)return {ok:true,authenticated:true,endpointReady,user:session.user||null,mode:'school_read_api'};
     379:   try{const result=await schoolReadPost('verify-token',{token:session.token,deviceId:session.deviceId});if(!result?.ok)throw schoolReadError(result?.message||'UEP 세션 확인 실패',result?.code||'UEP_SCHOOL_READ_TOKEN_INVALID');session.user=result.user||session.user||{};await saveSchoolReadSession(session);return {ok:true,authenticated:true,endpointReady:true,user:session.user,expiresAt:result.expiresAt||'',mode:'school_read_api'};}catch(error){await clearSchoolReadSession();return {ok:false,authenticated:false,endpointReady,reason:String(error?.message||error),code:error?.code||'',user:null,mode:'school_read_api'};}
@@ -2184,7 +2546,13 @@
     397:   if(googleOAuthPolicyCache.clientId && googleOAuthPolicyCache.expiresAt>Date.now()) return googleOAuthPolicyCache.clientId;
     398:   let response;
     399:   try{ response=await net.fetch(UEP_UPDATE_POLICY_URL,{cache:"no-store"}); }
+    400:   catch(error){ throw googleOAuthError("Google 계정 연결 설정을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.","UEP_GOOGLE_OAUTH_POLICY_UNAVAILABLE"); }
+    401:   if(!response.ok) throw googleOAuthError(`Google 계정 연결 설정 조회 실패 (${response.status})`,"UEP_GOOGLE_OAUTH_POLICY_UNAVAILABLE");
+    402:   const policy=await response.json();
+    403:   const clientId=String(policy?.googleOAuthClientId||"").trim();
 --- around line 386 ---
+    376:   const session=await readSchoolReadSession();
+    377:   if(!session?.token||!session?.deviceId)return {ok:endpointReady,authenticated:false,endpointReady,reason:endpointError,user:null,mode:'school_read_api'};
     378:   if(!verify)return {ok:true,authenticated:true,endpointReady,user:session.user||null,mode:'school_read_api'};
     379:   try{const result=await schoolReadPost('verify-token',{token:session.token,deviceId:session.deviceId});if(!result?.ok)throw schoolReadError(result?.message||'UEP 세션 확인 실패',result?.code||'UEP_SCHOOL_READ_TOKEN_INVALID');session.user=result.user||session.user||{};await saveSchoolReadSession(session);return {ok:true,authenticated:true,endpointReady:true,user:session.user,expiresAt:result.expiresAt||'',mode:'school_read_api'};}catch(error){await clearSchoolReadSession();return {ok:false,authenticated:false,endpointReady,reason:String(error?.message||error),code:error?.code||'',user:null,mode:'school_read_api'};}
     380: }
@@ -2208,7 +2576,13 @@
     398:   let response;
     399:   try{ response=await net.fetch(UEP_UPDATE_POLICY_URL,{cache:"no-store"}); }
     400:   catch(error){ throw googleOAuthError("Google 계정 연결 설정을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.","UEP_GOOGLE_OAUTH_POLICY_UNAVAILABLE"); }
+    401:   if(!response.ok) throw googleOAuthError(`Google 계정 연결 설정 조회 실패 (${response.status})`,"UEP_GOOGLE_OAUTH_POLICY_UNAVAILABLE");
+    402:   const policy=await response.json();
+    403:   const clientId=String(policy?.googleOAuthClientId||"").trim();
+    404:   if(!/\.apps\.googleusercontent\.com$/i.test(clientId)) throw googleOAuthError("관리자가 UEP Google OAuth 클라이언트를 아직 설정하지 않았습니다.","UEP_GOOGLE_OAUTH_CLIENT_NOT_CONFIGURED");
 --- around line 503 ---
+    493: async function getGoogleUserSheetsToken(){
+    494:   let saved=await readGoogleUserOAuth();
     495:   if(!saved) throw googleOAuthError("Google 계정 연결이 필요합니다.","UEP_GOOGLE_USER_AUTH_REQUIRED");
     496:   if(saved.access_token && Number(saved.expires_at||0)>Date.now()+90000) return String(saved.access_token);
     497:   saved=await refreshGoogleUserOAuth(saved);
@@ -2232,7 +2606,13 @@
     515:   const callbackPromise=new Promise((resolve,reject)=>{callbackResolve=resolve;callbackReject=reject;});
     516:   const server=http.createServer((req,res)=>{
     517:     try{
+    518:       const u=new URL(req.url||'/', 'http://127.0.0.1');
+    519:       if(u.pathname!=='/' && u.pathname!=='/oauth2callback'){res.writeHead(404);res.end('Not found');return;}
+    520:       const returnedState=String(u.searchParams.get('state')||'');
+    521:       const code=String(u.searchParams.get('code')||'');
 --- around line 505 ---
+    495:   if(!saved) throw googleOAuthError("Google 계정 연결이 필요합니다.","UEP_GOOGLE_USER_AUTH_REQUIRED");
+    496:   if(saved.access_token && Number(saved.expires_at||0)>Date.now()+90000) return String(saved.access_token);
     497:   saved=await refreshGoogleUserOAuth(saved);
     498:   if(!saved.access_token) throw googleOAuthError("Google 계정 액세스 토큰을 받지 못했습니다.","UEP_GOOGLE_USER_AUTH_REQUIRED");
     499:   return String(saved.access_token);
@@ -2256,7 +2636,13 @@
     517:     try{
     518:       const u=new URL(req.url||'/', 'http://127.0.0.1');
     519:       if(u.pathname!=='/' && u.pathname!=='/oauth2callback'){res.writeHead(404);res.end('Not found');return;}
+    520:       const returnedState=String(u.searchParams.get('state')||'');
+    521:       const code=String(u.searchParams.get('code')||'');
+    522:       const error=String(u.searchParams.get('error')||'');
+    523:       res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store'});
 --- around line 634 ---
+    624:     method: "POST",
+    625:     headers: { "content-type": "application/x-www-form-urlencoded" },
     626:     body,
     627:   });
     628:   if (!response.ok) throw new Error(`Google 인증 실패 (${response.status})`);
@@ -2280,7 +2666,13 @@
     646:       const retryAfter = Number(response.headers.get("retry-after") || 0);
     647:       const waitMs = retryAfter > 0 ? retryAfter * 1000 : 900 * Math.pow(2, attempt);
     648:       await new Promise(resolve => setTimeout(resolve, waitMs));
+    649:       return readSheetBatch(token, spreadsheetId, ranges, attempt + 1);
+    650:     }
+    651:     throw new Error(`UEP 구글시트 읽기 실패 (${response.status})${detail ? `: ${detail}` : ""}`);
+    652:   }
 --- around line 635 ---
+    625:     headers: { "content-type": "application/x-www-form-urlencoded" },
+    626:     body,
     627:   });
     628:   if (!response.ok) throw new Error(`Google 인증 실패 (${response.status})`);
     629:   const payload = await response.json();
@@ -2304,7 +2696,13 @@
     647:       const waitMs = retryAfter > 0 ? retryAfter * 1000 : 900 * Math.pow(2, attempt);
     648:       await new Promise(resolve => setTimeout(resolve, waitMs));
     649:       return readSheetBatch(token, spreadsheetId, ranges, attempt + 1);
+    650:     }
+    651:     throw new Error(`UEP 구글시트 읽기 실패 (${response.status})${detail ? `: ${detail}` : ""}`);
+    652:   }
+    653:   return (await response.json()).valueRanges || [];
 --- around line 640 ---
+    630:   if (!payload.access_token) throw new Error("Google 인증 토큰을 받지 못했습니다.");
+    631:   return payload.access_token;
     632: }
     633: 
     634: async function readSheetBatch(token, spreadsheetId, ranges, attempt = 0) {
@@ -2328,7 +2726,13 @@
     652:   }
     653:   return (await response.json()).valueRanges || [];
     654: }
+    655: 
+    656: function sheetNameFromA1Range(range="") {
+    657:   const prefix=String(range||"").split("!")[0].trim();
+    658:   return prefix.replace(/^'/,"").replace(/'$/,"").replace(/''/g,"'");
 --- around line 649 ---
+    639:   url.searchParams.set("dateTimeRenderOption", "SERIAL_NUMBER");
+    640:   ranges.forEach((range) => url.searchParams.append("ranges", range));
     641:   const response = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
     642:   if (!response.ok) {
     643:     let detail = "";
@@ -2352,7 +2756,13 @@
     661: function assignValueRangesByRange(target, entries, valueRanges) {
     662:   const logicalBySheet=new Map(entries.map(([logicalName,range])=>[sheetNameFromA1Range(range),logicalName]));
     663:   const assigned=new Set();
+    664:   (Array.isArray(valueRanges)?valueRanges:[]).forEach((item,index)=>{
+    665:     const responseSheet=sheetNameFromA1Range(item?.range);
+    666:     // Sheets batchGet may omit empty ranges or return them in a different order.
+    667:     // A response that names its range must only be assigned to that sheet; index is
 --- around line 653 ---
+    643:     let detail = "";
+    644:     try { detail = (await response.json())?.error?.message || ""; } catch {}
     645:     if ((response.status === 429 || response.status >= 500) && attempt < 3) {
     646:       const retryAfter = Number(response.headers.get("retry-after") || 0);
     647:       const waitMs = retryAfter > 0 ? retryAfter * 1000 : 900 * Math.pow(2, attempt);
@@ -2376,7 +2786,13 @@
     665:     const responseSheet=sheetNameFromA1Range(item?.range);
     666:     // Sheets batchGet may omit empty ranges or return them in a different order.
     667:     // A response that names its range must only be assigned to that sheet; index is
+    668:     // retained solely for legacy responses that contain no range metadata at all.
+    669:     const logicalName=responseSheet?logicalBySheet.get(responseSheet):entries[index]?.[0];
+    670:     if(!logicalName)return;
+    671:     target[logicalName]=item?.values||[];
 --- around line 656 ---
+    646:       const retryAfter = Number(response.headers.get("retry-after") || 0);
+    647:       const waitMs = retryAfter > 0 ? retryAfter * 1000 : 900 * Math.pow(2, attempt);
     648:       await new Promise(resolve => setTimeout(resolve, waitMs));
     649:       return readSheetBatch(token, spreadsheetId, ranges, attempt + 1);
     650:     }
@@ -2400,7 +2816,13 @@
     668:     // retained solely for legacy responses that contain no range metadata at all.
     669:     const logicalName=responseSheet?logicalBySheet.get(responseSheet):entries[index]?.[0];
     670:     if(!logicalName)return;
+    671:     target[logicalName]=item?.values||[];
+    672:     assigned.add(logicalName);
+    673:   });
+    674:   entries.forEach(([logicalName])=>{if(!assigned.has(logicalName)&&!target[logicalName])target[logicalName]=[];});
 --- around line 661 ---
+    651:     throw new Error(`UEP 구글시트 읽기 실패 (${response.status})${detail ? `: ${detail}` : ""}`);
+    652:   }
     653:   return (await response.json()).valueRanges || [];
     654: }
     655: 
@@ -2424,7 +2846,13 @@
     673:   });
     674:   entries.forEach(([logicalName])=>{if(!assigned.has(logicalName)&&!target[logicalName])target[logicalName]=[];});
     675:   return target;
+    676: }
+    677: 
+    678: async function updateSheetValues(token, spreadsheetId, range, values, attempt=0) {
+    679:   const url = new URL(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`);
 --- around line 662 ---
+    652:   }
+    653:   return (await response.json()).valueRanges || [];
     654: }
     655: 
     656: function sheetNameFromA1Range(range="") {
@@ -2448,7 +2876,13 @@
     674:   entries.forEach(([logicalName])=>{if(!assigned.has(logicalName)&&!target[logicalName])target[logicalName]=[];});
     675:   return target;
     676: }
+    677: 
+    678: async function updateSheetValues(token, spreadsheetId, range, values, attempt=0) {
+    679:   const url = new URL(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`);
+    680:   url.searchParams.set("valueInputOption", "USER_ENTERED");
 --- around line 664 ---
+    654: }
+    655: 
     656: function sheetNameFromA1Range(range="") {
     657:   const prefix=String(range||"").split("!")[0].trim();
     658:   return prefix.replace(/^'/,"").replace(/'$/,"").replace(/''/g,"'");
@@ -2472,7 +2906,13 @@
     676: }
     677: 
     678: async function updateSheetValues(token, spreadsheetId, range, values, attempt=0) {
+    679:   const url = new URL(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`);
+    680:   url.searchParams.set("valueInputOption", "USER_ENTERED");
+    681:   const response = await fetch(url, {
+    682:     method: "PUT",
 --- around line 665 ---
+    655: 
+    656: function sheetNameFromA1Range(range="") {
     657:   const prefix=String(range||"").split("!")[0].trim();
     658:   return prefix.replace(/^'/,"").replace(/'$/,"").replace(/''/g,"'");
     659: }
@@ -2496,7 +2936,13 @@
     677: 
     678: async function updateSheetValues(token, spreadsheetId, range, values, attempt=0) {
     679:   const url = new URL(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`);
+    680:   url.searchParams.set("valueInputOption", "USER_ENTERED");
+    681:   const response = await fetch(url, {
+    682:     method: "PUT",
+    683:     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
 --- around line 666 ---
+    656: function sheetNameFromA1Range(range="") {
+    657:   const prefix=String(range||"").split("!")[0].trim();
     658:   return prefix.replace(/^'/,"").replace(/'$/,"").replace(/''/g,"'");
     659: }
     660: 
@@ -2520,7 +2966,13 @@
     678: async function updateSheetValues(token, spreadsheetId, range, values, attempt=0) {
     679:   const url = new URL(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`);
     680:   url.searchParams.set("valueInputOption", "USER_ENTERED");
+    681:   const response = await fetch(url, {
+    682:     method: "PUT",
+    683:     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    684:     body: JSON.stringify({ majorDimension: "ROWS", values }),
 --- around line 1538 ---
+   1528:   await clearSheetValues(token,UEP_PROCESSING_SPREADSHEET_ID,`'${target}'!A3:X5000`);
+   1529:   await updateSheetValues(token,UEP_PROCESSING_SPREADSHEET_ID,`'${target}'!A3:X${rows.length+3}`,[required,...rows]);
    1530:   console.log(`[UEP] 선택보고서 정규화 자동 복구 완료: ${rows.length}건 · 학생확인 ${unmatchedStudents}건`);
    1531:   return {ok:true,repaired:true,count:rows.length,unmatchedStudents};
    1532: }
@@ -2544,7 +2996,13 @@
    1550:   const auth = await getReadonlySheetsAuth(credentials);
    1551:   const token = auth.token;
    1552:   const entries = [
+   1553:     ...Object.entries(SHEET_RANGES),
+   1554:     ["52_대입기초", "'52_대입기초'!A1:N500"],
+   1555:     ["53_전형이해", "'53_전형이해'!A1:N500"],
+   1556:     ["56_대학입시마스터", "'56_대학입시마스터'!A1:R500"],
 --- around line 1540 ---
+   1530:   console.log(`[UEP] 선택보고서 정규화 자동 복구 완료: ${rows.length}건 · 학생확인 ${unmatchedStudents}건`);
+   1531:   return {ok:true,repaired:true,count:rows.length,unmatchedStudents};
    1532: }
    1533: 
    1534: const UEP_OPERATIONAL_RANGE_NAMES=Object.freeze(['30_공식출결기록','31_지각기록','40_공지마감','44_공지확인현황','42_급식지도계획','43_야자감독계획']);
@@ -2568,7 +3026,13 @@
    1552:   const entries = [
    1553:     ...Object.entries(SHEET_RANGES),
    1554:     ["52_대입기초", "'52_대입기초'!A1:N500"],
+   1555:     ["53_전형이해", "'53_전형이해'!A1:N500"],
+   1556:     ["56_대학입시마스터", "'56_대학입시마스터'!A1:R500"],
+   1557:     ["54_수능최저DB", "'54_수능최저DB'!A1:U2000"],
+   1558:     ["55_대학입결DB", "'55_대학입결DB'!A1:K5000"],
 --- around line 1553 ---
+   1543:   const operationalSyncedAt=new Date().toISOString();liveDataCache={...liveDataCache,...patch,operationalSyncedAt};liveDataFetchedAt=Date.now();
+   1544:   return {ok:true,operationalSyncedAt,syncedAt:operationalSyncedAt,patch};
    1545: }
    1546: 
    1547: async function fetchLiveData({ force = false, credentials = null } = {}) {
@@ -2592,151 +3056,14 @@
    1565:   for (let offset = 0; offset < entries.length; offset += chunkSize) {
    1566:     chunks.push({ offset, chunk: entries.slice(offset, offset + chunkSize) });
    1567:   }
---- around line 1554 ---
-   1546: 
-   1547: async function fetchLiveData({ force = false, credentials = null } = {}) {
-   1548:   if (!force && liveDataCache && Date.now() - liveDataFetchedAt < 120000) return liveDataCache;
-   1549:   // 0.81.40: 관리자 로컬 서비스계정과 담임 School Read API 세션을 동일 읽기 파이프라인으로 연결합니다.
-   1550:   const auth = await getReadonlySheetsAuth(credentials);
-   1551:   const token = auth.token;
-   1552:   const entries = [
-   1553:     ...Object.entries(SHEET_RANGES),
-   1554:     ["52_대입기초", "'52_대입기초'!A1:N500"],
-   1555:     ["53_전형이해", "'53_전형이해'!A1:N500"],
-   1556:     ["56_대학입시마스터", "'56_대학입시마스터'!A1:R500"],
-   1557:     ["54_수능최저DB", "'54_수능최저DB'!A1:U2000"],
-   1558:     ["55_대학입결DB", "'55_대학입결DB'!A1:K5000"],
-   1559:   ];
-   1560:   const matrices = {};
-   1561:   // 기본정보 연결시트를 가장 먼저, 작은 묶음으로 읽습니다.
-   1562:   // 탭 추가로 URL이 길어지거나 특정 탭이 잠시 실패해도 전체 연결이 끊기지 않도록 합니다.
-   1563:   const chunkSize = 12;
-   1564:   const chunks = [];
-   1565:   for (let offset = 0; offset < entries.length; offset += chunkSize) {
-   1566:     chunks.push({ offset, chunk: entries.slice(offset, offset + chunkSize) });
-   1567:   }
-   1568:   await mapWithConcurrency(chunks, 1, async ({ offset, chunk }) => {
---- around line 1555 ---
-   1547: async function fetchLiveData({ force = false, credentials = null } = {}) {
-   1548:   if (!force && liveDataCache && Date.now() - liveDataFetchedAt < 120000) return liveDataCache;
-   1549:   // 0.81.40: 관리자 로컬 서비스계정과 담임 School Read API 세션을 동일 읽기 파이프라인으로 연결합니다.
-   1550:   const auth = await getReadonlySheetsAuth(credentials);
-   1551:   const token = auth.token;
-   1552:   const entries = [
-   1553:     ...Object.entries(SHEET_RANGES),
-   1554:     ["52_대입기초", "'52_대입기초'!A1:N500"],
-   1555:     ["53_전형이해", "'53_전형이해'!A1:N500"],
-   1556:     ["56_대학입시마스터", "'56_대학입시마스터'!A1:R500"],
-   1557:     ["54_수능최저DB", "'54_수능최저DB'!A1:U2000"],
-   1558:     ["55_대학입결DB", "'55_대학입결DB'!A1:K5000"],
-   1559:   ];
-   1560:   const matrices = {};
-   1561:   // 기본정보 연결시트를 가장 먼저, 작은 묶음으로 읽습니다.
-   1562:   // 탭 추가로 URL이 길어지거나 특정 탭이 잠시 실패해도 전체 연결이 끊기지 않도록 합니다.
-   1563:   const chunkSize = 12;
-   1564:   const chunks = [];
-   1565:   for (let offset = 0; offset < entries.length; offset += chunkSize) {
-   1566:     chunks.push({ offset, chunk: entries.slice(offset, offset + chunkSize) });
-   1567:   }
-   1568:   await mapWithConcurrency(chunks, 1, async ({ offset, chunk }) => {
-   1569:     try {
---- around line 1556 ---
-   1548:   if (!force && liveDataCache && Date.now() - liveDataFetchedAt < 120000) return liveDataCache;
-   1549:   // 0.81.40: 관리자 로컬 서비스계정과 담임 School Read API 세션을 동일 읽기 파이프라인으로 연결합니다.
-   1550:   const auth = await getReadonlySheetsAuth(credentials);
-   1551:   const token = auth.token;
-   1552:   const entries = [
-   1553:     ...Object.entries(SHEET_RANGES),
-   1554:     ["52_대입기초", "'52_대입기초'!A1:N500"],
-   1555:     ["53_전형이해", "'53_전형이해'!A1:N500"],
-   1556:     ["56_대학입시마스터", "'56_대학입시마스터'!A1:R500"],
-   1557:     ["54_수능최저DB", "'54_수능최저DB'!A1:U2000"],
-   1558:     ["55_대학입결DB", "'55_대학입결DB'!A1:K5000"],
-   1559:   ];
-   1560:   const matrices = {};
-   1561:   // 기본정보 연결시트를 가장 먼저, 작은 묶음으로 읽습니다.
-   1562:   // 탭 추가로 URL이 길어지거나 특정 탭이 잠시 실패해도 전체 연결이 끊기지 않도록 합니다.
-   1563:   const chunkSize = 12;
-   1564:   const chunks = [];
-   1565:   for (let offset = 0; offset < entries.length; offset += chunkSize) {
-   1566:     chunks.push({ offset, chunk: entries.slice(offset, offset + chunkSize) });
-   1567:   }
-   1568:   await mapWithConcurrency(chunks, 1, async ({ offset, chunk }) => {
-   1569:     try {
-   1570:       const valueRanges = await readSheetBatch(token, UEP_SPREADSHEET_ID, chunk.map(([, range]) => range));
---- around line 1557 ---
-   1549:   // 0.81.40: 관리자 로컬 서비스계정과 담임 School Read API 세션을 동일 읽기 파이프라인으로 연결합니다.
-   1550:   const auth = await getReadonlySheetsAuth(credentials);
-   1551:   const token = auth.token;
-   1552:   const entries = [
-   1553:     ...Object.entries(SHEET_RANGES),
-   1554:     ["52_대입기초", "'52_대입기초'!A1:N500"],
-   1555:     ["53_전형이해", "'53_전형이해'!A1:N500"],
-   1556:     ["56_대학입시마스터", "'56_대학입시마스터'!A1:R500"],
-   1557:     ["54_수능최저DB", "'54_수능최저DB'!A1:U2000"],
-   1558:     ["55_대학입결DB", "'55_대학입결DB'!A1:K5000"],
-   1559:   ];
-   1560:   const matrices = {};
-   1561:   // 기본정보 연결시트를 가장 먼저, 작은 묶음으로 읽습니다.
-   1562:   // 탭 추가로 URL이 길어지거나 특정 탭이 잠시 실패해도 전체 연결이 끊기지 않도록 합니다.
-   1563:   const chunkSize = 12;
-   1564:   const chunks = [];
-   1565:   for (let offset = 0; offset < entries.length; offset += chunkSize) {
-   1566:     chunks.push({ offset, chunk: entries.slice(offset, offset + chunkSize) });
-   1567:   }
    1568:   await mapWithConcurrency(chunks, 1, async ({ offset, chunk }) => {
    1569:     try {
    1570:       const valueRanges = await readSheetBatch(token, UEP_SPREADSHEET_ID, chunk.map(([, range]) => range));
    1571:       assignValueRangesByRange(matrices,chunk,valueRanges);
---- around line 1558 ---
-   1550:   const auth = await getReadonlySheetsAuth(credentials);
-   1551:   const token = auth.token;
-   1552:   const entries = [
-   1553:     ...Object.entries(SHEET_RANGES),
-   1554:     ["52_대입기초", "'52_대입기초'!A1:N500"],
-   1555:     ["53_전형이해", "'53_전형이해'!A1:N500"],
-   1556:     ["56_대학입시마스터", "'56_대학입시마스터'!A1:R500"],
-   1557:     ["54_수능최저DB", "'54_수능최저DB'!A1:U2000"],
-   1558:     ["55_대학입결DB", "'55_대학입결DB'!A1:K5000"],
-   1559:   ];
-   1560:   const matrices = {};
-   1561:   // 기본정보 연결시트를 가장 먼저, 작은 묶음으로 읽습니다.
-   1562:   // 탭 추가로 URL이 길어지거나 특정 탭이 잠시 실패해도 전체 연결이 끊기지 않도록 합니다.
-   1563:   const chunkSize = 12;
-   1564:   const chunks = [];
-   1565:   for (let offset = 0; offset < entries.length; offset += chunkSize) {
-   1566:     chunks.push({ offset, chunk: entries.slice(offset, offset + chunkSize) });
-   1567:   }
-   1568:   await mapWithConcurrency(chunks, 1, async ({ offset, chunk }) => {
-   1569:     try {
-   1570:       const valueRanges = await readSheetBatch(token, UEP_SPREADSHEET_ID, chunk.map(([, range]) => range));
-   1571:       assignValueRangesByRange(matrices,chunk,valueRanges);
-   1572:     } catch (chunkError) {
 --- around line 1570 ---
+   1560:   const matrices = {};
+   1561:   // 기본정보 연결시트를 가장 먼저, 작은 묶음으로 읽습니다.
    1562:   // 탭 추가로 URL이 길어지거나 특정 탭이 잠시 실패해도 전체 연결이 끊기지 않도록 합니다.
-   1563:   const chunkSize = 12;
-   1564:   const chunks = [];
-   1565:   for (let offset = 0; offset < entries.length; offset += chunkSize) {
-   1566:     chunks.push({ offset, chunk: entries.slice(offset, offset + chunkSize) });
-   1567:   }
-   1568:   await mapWithConcurrency(chunks, 1, async ({ offset, chunk }) => {
-   1569:     try {
-   1570:       const valueRanges = await readSheetBatch(token, UEP_SPREADSHEET_ID, chunk.map(([, range]) => range));
-   1571:       assignValueRangesByRange(matrices,chunk,valueRanges);
-   1572:     } catch (chunkError) {
-   1573:       console.warn(`[UEP] 기본정보 묶음 조회 실패(${offset + 1}~${offset + chunk.length}), 개별 재시도`, chunkError?.message || chunkError);
-   1574:       await mapWithConcurrency(chunk, 1, async ([logicalName, range]) => {
-   1575:         try {
-   1576:           const one = await readSheetBatch(token, UEP_SPREADSHEET_ID, [range]);
-   1577:           matrices[logicalName] = one?.[0]?.values || [];
-   1578:         } catch (sheetError) {
-   1579:           matrices[logicalName] = [];
-   1580:           console.warn(`[UEP] 기본정보 탭 조회 실패: ${logicalName}`, sheetError?.message || sheetError);
-   1581:         }
-   1582:       });
-   1583:     }
-   1584:   });
---- around line 1571 ---
    1563:   const chunkSize = 12;
    1564:   const chunks = [];
    1565:   for (let offset = 0; offset < entries.length; offset += chunkSize) {
@@ -2760,7 +3087,42 @@
    1583:     }
    1584:   });
    1585:   entries.forEach(([name]) => { if (!matrices[name]) matrices[name] = []; });
+   1586: 
+   1587:   // 선택보고서 정규화 탭의 구조가 손상된 경우 구글폼 원본으로 복구한 뒤 읽습니다.
+   1588:   // 읽기 전용 담임 세션에서는 정규화 탭 자동복구(쓰기)를 실행하지 않습니다.
+--- around line 1571 ---
+   1561:   // 기본정보 연결시트를 가장 먼저, 작은 묶음으로 읽습니다.
+   1562:   // 탭 추가로 URL이 길어지거나 특정 탭이 잠시 실패해도 전체 연결이 끊기지 않도록 합니다.
+   1563:   const chunkSize = 12;
+   1564:   const chunks = [];
+   1565:   for (let offset = 0; offset < entries.length; offset += chunkSize) {
+   1566:     chunks.push({ offset, chunk: entries.slice(offset, offset + chunkSize) });
+   1567:   }
+   1568:   await mapWithConcurrency(chunks, 1, async ({ offset, chunk }) => {
+   1569:     try {
+   1570:       const valueRanges = await readSheetBatch(token, UEP_SPREADSHEET_ID, chunk.map(([, range]) => range));
+   1571:       assignValueRangesByRange(matrices,chunk,valueRanges);
+   1572:     } catch (chunkError) {
+   1573:       console.warn(`[UEP] 기본정보 묶음 조회 실패(${offset + 1}~${offset + chunk.length}), 개별 재시도`, chunkError?.message || chunkError);
+   1574:       await mapWithConcurrency(chunk, 1, async ([logicalName, range]) => {
+   1575:         try {
+   1576:           const one = await readSheetBatch(token, UEP_SPREADSHEET_ID, [range]);
+   1577:           matrices[logicalName] = one?.[0]?.values || [];
+   1578:         } catch (sheetError) {
+   1579:           matrices[logicalName] = [];
+   1580:           console.warn(`[UEP] 기본정보 탭 조회 실패: ${logicalName}`, sheetError?.message || sheetError);
+   1581:         }
+   1582:       });
+   1583:     }
+   1584:   });
+   1585:   entries.forEach(([name]) => { if (!matrices[name]) matrices[name] = []; });
+   1586: 
+   1587:   // 선택보고서 정규화 탭의 구조가 손상된 경우 구글폼 원본으로 복구한 뒤 읽습니다.
+   1588:   // 읽기 전용 담임 세션에서는 정규화 탭 자동복구(쓰기)를 실행하지 않습니다.
+   1589:   if(auth.mode!=='school_read_api') await ensureSelectedReportNormalization(token);
 --- around line 1593 ---
+   1583:     }
+   1584:   });
    1585:   entries.forEach(([name]) => { if (!matrices[name]) matrices[name] = []; });
    1586: 
    1587:   // 선택보고서 정규화 탭의 구조가 손상된 경우 구글폼 원본으로 복구한 뒤 읽습니다.
@@ -2784,7 +3146,13 @@
    1605:   } catch(error) {
    1606:     // 한 탭의 일시 오류가 보고서·학사외출·선택과목 등 정상 탭까지 모두 비우지 않도록
    1607:     // 묶음 조회 실패 시 각 탭을 독립적으로 재시도합니다. 평상시에는 1회 batchGet으로 quota를 보호합니다.
+   1608:     console.warn("[UEP] 처리시트 묶음 조회 실패 - 개별 복구 시도",error?.message||error);
+   1609:     await mapWithConcurrency(processingRanges,1,async([logicalName,range])=>{
+   1610:       try{const one=await readSheetBatch(token,UEP_PROCESSING_SPREADSHEET_ID,[range]);matrices[logicalName]=one?.[0]?.values||[];}
+   1611:       catch(sheetError){matrices[logicalName]=[];console.warn(`[UEP] 처리시트 개별 조회 실패: ${logicalName}`,sheetError?.message||sheetError);}
 --- around line 1603 ---
+   1593:   const processingRanges = [
+   1594:     ["02_학사외출_일자별", "'02_학사외출_일자별'!A1:AD10000"],
    1595:     ["20_공통보고서_정규화", "'20_공통보고서_정규화'!A1:X5000"],
    1596:     ["21_선택보고서_정규화", "'21_선택보고서_정규화'!A1:X5000"],
    1597:     ["30_야자출결_정규화", "'30_야자출결_정규화'!A1:P70000"],
@@ -2808,7 +3176,13 @@
    1615:   // 학사외출은 데이터 처리시트의 02_학사외출_일자별만 조회합니다.
    1616:   // 응답 원본이나 기본정보 연결시트, 별도 운영 시트를 직접 참조하지 않습니다.
    1617: 
+   1618:   // 입력센터 원본은 별도 [UEP] 입력센터 원본 스프레드시트에서 읽습니다.
+   1619:   try {
+   1620:     const inputResult=await readSheetBatch(token,UEP_INPUT_CENTER_SPREADSHEET_ID,["'02_자료원본'!A1:X10000"]);
+   1621:     matrices["__INPUT_CENTER_SOURCE"]=inputResult?.[0]?.values||[];
 --- around line 1604 ---
+   1594:     ["02_학사외출_일자별", "'02_학사외출_일자별'!A1:AD10000"],
+   1595:     ["20_공통보고서_정규화", "'20_공통보고서_정규화'!A1:X5000"],
    1596:     ["21_선택보고서_정규화", "'21_선택보고서_정규화'!A1:X5000"],
    1597:     ["30_야자출결_정규화", "'30_야자출결_정규화'!A1:P70000"],
    1598:     // 학교캘린더는 기본정보 연결시트가 아니라 데이터 처리시트의 직접 이관값만 사용합니다.
@@ -2832,7 +3206,13 @@
    1616:   // 응답 원본이나 기본정보 연결시트, 별도 운영 시트를 직접 참조하지 않습니다.
    1617: 
    1618:   // 입력센터 원본은 별도 [UEP] 입력센터 원본 스프레드시트에서 읽습니다.
+   1619:   try {
+   1620:     const inputResult=await readSheetBatch(token,UEP_INPUT_CENTER_SPREADSHEET_ID,["'02_자료원본'!A1:X10000"]);
+   1621:     matrices["__INPUT_CENTER_SOURCE"]=inputResult?.[0]?.values||[];
+   1622:   } catch(error) {
 --- around line 1609 ---
+   1599:     ["41_학교캘린더", "'41_학교캘린더'!A1:W3000"],
+   1600:     ["51_선택과목오류_정규화", "'51_선택과목오류_정규화'!A1:V5000"],
    1601:   ];
    1602:   try {
    1603:     const result = await readSheetBatch(token, UEP_PROCESSING_SPREADSHEET_ID, processingRanges.map(([,range])=>range));
@@ -2856,7 +3236,13 @@
    1621:     matrices["__INPUT_CENTER_SOURCE"]=inputResult?.[0]?.values||[];
    1622:   } catch(error) {
    1623:     matrices["__INPUT_CENTER_SOURCE"]=[];
+   1624:     console.warn("[UEP] 입력센터 원본 조회 실패",error?.message||error);
+   1625:   }
+   1626: 
+   1627:   // 학생이 직접 입력한 희망계열·희망전공은 정규화 자료의 유무와 관계없이 항상 읽습니다.
 --- around line 1639 ---
+   1629:   try {
+   1630:     const rawSelection = await readSheetBatch(token, "1K-Me8Pm8T2d5fGHoqSPEAu4RXozETUQ-N5pZVxjs8Hw", ["'06_선택과목응답'!A1:U2000"]);
    1631:     matrices["__SELECTION_RESPONSES"] = rawSelection?.[0]?.values || [];
    1632:   } catch (error) {
    1633:     matrices["__SELECTION_RESPONSES"] = [];
@@ -2880,7 +3266,13 @@
    1651:         matrices[logicalName] = [];
    1652:         console.warn(`[UEP] 규칙로그 개별 조회 실패: ${logicalName}`, sheetError?.message || sheetError);
    1653:       }
+   1654:     });
+   1655:   }
+   1656:   // v0.76.93: 학사외출 규칙은 화면 운영의 핵심이므로 규칙 묶음 결과와 무관하게 마지막에 단독 재조회합니다.
+   1657:   // batchGet의 일부 누락/순서 문제 또는 다른 규칙 탭 오류가 있어도 40_학사외출규칙 원본을 우선합니다.
 --- around line 1641 ---
+   1631:     matrices["__SELECTION_RESPONSES"] = rawSelection?.[0]?.values || [];
+   1632:   } catch (error) {
    1633:     matrices["__SELECTION_RESPONSES"] = [];
    1634:     console.warn("[UEP] 선택과목 응답 조회 실패", error?.message || error);
    1635:   }
@@ -2904,7 +3296,13 @@
    1653:       }
    1654:     });
    1655:   }
+   1656:   // v0.76.93: 학사외출 규칙은 화면 운영의 핵심이므로 규칙 묶음 결과와 무관하게 마지막에 단독 재조회합니다.
+   1657:   // batchGet의 일부 누락/순서 문제 또는 다른 규칙 탭 오류가 있어도 40_학사외출규칙 원본을 우선합니다.
+   1658:   try {
+   1659:     const dormRuleResult = await readSheetBatch(
 --- around line 1642 ---
+   1632:   } catch (error) {
+   1633:     matrices["__SELECTION_RESPONSES"] = [];
    1634:     console.warn("[UEP] 선택과목 응답 조회 실패", error?.message || error);
    1635:   }
    1636: 
@@ -2928,247 +3326,13 @@
    1654:     });
    1655:   }
    1656:   // v0.76.93: 학사외출 규칙은 화면 운영의 핵심이므로 규칙 묶음 결과와 무관하게 마지막에 단독 재조회합니다.
---- around line 1717 ---
-   1709:   const uep08210MatrixObjects=(matrix)=>{
-   1710:     const rows=Array.isArray(matrix)?matrix:[];
-   1711:     const headers=(rows[2]||[]).map(v=>String(v??'').replace(/\r?\n/g,' ').trim());
-   1712:     if(!headers.some(Boolean))return [];
-   1713:     return rows.slice(3).filter(row=>Array.isArray(row)&&row.some(v=>String(v??'').trim())).map(row=>{
-   1714:       const obj={};headers.forEach((h,i)=>{if(h)obj[h]=row[i]??'';});return obj;
-   1715:     });
-   1716:   };
-   1717:   data.admissionBasics=uep08210MatrixObjects(matrices['52_대입기초']);
-   1718:   data.admissionTypes=uep08210MatrixObjects(matrices['53_전형이해']);
-   1719:   data.universityAdmissions=uep08210MatrixObjects(matrices['56_대학입시마스터']);
-   1720:   data['52_대입기초']=data.admissionBasics;
-   1721:   data['53_전형이해']=data.admissionTypes;
-   1722:   data['56_대학입시마스터']=data.universityAdmissions;
-   1723:   data.admissionMinimums=uep08210MatrixObjects(matrices['54_수능최저DB']);
-   1724:   data.admissionResults=uep08210MatrixObjects(matrices['55_대학입결DB']);
-   1725:   data['54_수능최저DB']=data.admissionMinimums;
-   1726:   data['55_대학입결DB']=data.admissionResults;
-   1727: 
-   1728:   {
-   1729:     const sourceMatrix=matrices["__INPUT_CENTER_SOURCE"]||[];
-   1730:     const sourceHeaders=(sourceMatrix[2]||[]).map(v=>String(v||'').trim());
-   1731:     const sourceRows=sourceMatrix.slice(3).filter(row=>row.some(v=>String(v||'').trim())).map(row=>{const o=Object.fromEntries(sourceHeaders.map((h,i)=>[h,row[i]??'']));return {id:o['입력ID'],batchId:o['배치ID'],source:o['입력경로'],type:o['자료유형'],subtype:o['세부유형'],schoolYear:o['학년도'],semester:o['학기'],studentId:o['학생ID'],studentNo:o['학번'],name:o['성명'],grade:o['학년'],className:o['반'],fileName:o['원본파일명'],storedPath:o['원본보관경로'],title:o['자료제목'],rawText:o['원본텍스트'],normalizedText:o['구조화데이터'],status:o['처리상태'],matchStatus:o['매칭상태'],programId:o['프로그램ID'],programKind:o['프로그램구분'],teacher:o['등록교사'],createdAt:o['등록일시'],note:o['비고'],storageMode:'uep'};});
---- around line 1718 ---
-   1710:     const rows=Array.isArray(matrix)?matrix:[];
-   1711:     const headers=(rows[2]||[]).map(v=>String(v??'').replace(/\r?\n/g,' ').trim());
-   1712:     if(!headers.some(Boolean))return [];
-   1713:     return rows.slice(3).filter(row=>Array.isArray(row)&&row.some(v=>String(v??'').trim())).map(row=>{
-   1714:       const obj={};headers.forEach((h,i)=>{if(h)obj[h]=row[i]??'';});return obj;
-   1715:     });
-   1716:   };
-   1717:   data.admissionBasics=uep08210MatrixObjects(matrices['52_대입기초']);
-   1718:   data.admissionTypes=uep08210MatrixObjects(matrices['53_전형이해']);
-   1719:   data.universityAdmissions=uep08210MatrixObjects(matrices['56_대학입시마스터']);
-   1720:   data['52_대입기초']=data.admissionBasics;
-   1721:   data['53_전형이해']=data.admissionTypes;
-   1722:   data['56_대학입시마스터']=data.universityAdmissions;
-   1723:   data.admissionMinimums=uep08210MatrixObjects(matrices['54_수능최저DB']);
-   1724:   data.admissionResults=uep08210MatrixObjects(matrices['55_대학입결DB']);
-   1725:   data['54_수능최저DB']=data.admissionMinimums;
-   1726:   data['55_대학입결DB']=data.admissionResults;
-   1727: 
-   1728:   {
-   1729:     const sourceMatrix=matrices["__INPUT_CENTER_SOURCE"]||[];
-   1730:     const sourceHeaders=(sourceMatrix[2]||[]).map(v=>String(v||'').trim());
-   1731:     const sourceRows=sourceMatrix.slice(3).filter(row=>row.some(v=>String(v||'').trim())).map(row=>{const o=Object.fromEntries(sourceHeaders.map((h,i)=>[h,row[i]??'']));return {id:o['입력ID'],batchId:o['배치ID'],source:o['입력경로'],type:o['자료유형'],subtype:o['세부유형'],schoolYear:o['학년도'],semester:o['학기'],studentId:o['학생ID'],studentNo:o['학번'],name:o['성명'],grade:o['학년'],className:o['반'],fileName:o['원본파일명'],storedPath:o['원본보관경로'],title:o['자료제목'],rawText:o['원본텍스트'],normalizedText:o['구조화데이터'],status:o['처리상태'],matchStatus:o['매칭상태'],programId:o['프로그램ID'],programKind:o['프로그램구분'],teacher:o['등록교사'],createdAt:o['등록일시'],note:o['비고'],storageMode:'uep'};});
-   1732:     // 입력센터의 단일 원본은 [UEP]입력센터 원본입니다.
---- around line 1719 ---
-   1711:     const headers=(rows[2]||[]).map(v=>String(v??'').replace(/\r?\n/g,' ').trim());
-   1712:     if(!headers.some(Boolean))return [];
-   1713:     return rows.slice(3).filter(row=>Array.isArray(row)&&row.some(v=>String(v??'').trim())).map(row=>{
-   1714:       const obj={};headers.forEach((h,i)=>{if(h)obj[h]=row[i]??'';});return obj;
-   1715:     });
-   1716:   };
-   1717:   data.admissionBasics=uep08210MatrixObjects(matrices['52_대입기초']);
-   1718:   data.admissionTypes=uep08210MatrixObjects(matrices['53_전형이해']);
-   1719:   data.universityAdmissions=uep08210MatrixObjects(matrices['56_대학입시마스터']);
-   1720:   data['52_대입기초']=data.admissionBasics;
-   1721:   data['53_전형이해']=data.admissionTypes;
-   1722:   data['56_대학입시마스터']=data.universityAdmissions;
-   1723:   data.admissionMinimums=uep08210MatrixObjects(matrices['54_수능최저DB']);
-   1724:   data.admissionResults=uep08210MatrixObjects(matrices['55_대학입결DB']);
-   1725:   data['54_수능최저DB']=data.admissionMinimums;
-   1726:   data['55_대학입결DB']=data.admissionResults;
-   1727: 
-   1728:   {
-   1729:     const sourceMatrix=matrices["__INPUT_CENTER_SOURCE"]||[];
-   1730:     const sourceHeaders=(sourceMatrix[2]||[]).map(v=>String(v||'').trim());
-   1731:     const sourceRows=sourceMatrix.slice(3).filter(row=>row.some(v=>String(v||'').trim())).map(row=>{const o=Object.fromEntries(sourceHeaders.map((h,i)=>[h,row[i]??'']));return {id:o['입력ID'],batchId:o['배치ID'],source:o['입력경로'],type:o['자료유형'],subtype:o['세부유형'],schoolYear:o['학년도'],semester:o['학기'],studentId:o['학생ID'],studentNo:o['학번'],name:o['성명'],grade:o['학년'],className:o['반'],fileName:o['원본파일명'],storedPath:o['원본보관경로'],title:o['자료제목'],rawText:o['원본텍스트'],normalizedText:o['구조화데이터'],status:o['처리상태'],matchStatus:o['매칭상태'],programId:o['프로그램ID'],programKind:o['프로그램구분'],teacher:o['등록교사'],createdAt:o['등록일시'],note:o['비고'],storageMode:'uep'};});
-   1732:     // 입력센터의 단일 원본은 [UEP]입력센터 원본입니다.
-   1733:     // 폐기 대상인 60_외부자료입력_정규화는 더 이상 읽거나 병합하지 않습니다.
---- around line 1720 ---
-   1712:     if(!headers.some(Boolean))return [];
-   1713:     return rows.slice(3).filter(row=>Array.isArray(row)&&row.some(v=>String(v??'').trim())).map(row=>{
-   1714:       const obj={};headers.forEach((h,i)=>{if(h)obj[h]=row[i]??'';});return obj;
-   1715:     });
-   1716:   };
-   1717:   data.admissionBasics=uep08210MatrixObjects(matrices['52_대입기초']);
-   1718:   data.admissionTypes=uep08210MatrixObjects(matrices['53_전형이해']);
-   1719:   data.universityAdmissions=uep08210MatrixObjects(matrices['56_대학입시마스터']);
-   1720:   data['52_대입기초']=data.admissionBasics;
-   1721:   data['53_전형이해']=data.admissionTypes;
-   1722:   data['56_대학입시마스터']=data.universityAdmissions;
-   1723:   data.admissionMinimums=uep08210MatrixObjects(matrices['54_수능최저DB']);
-   1724:   data.admissionResults=uep08210MatrixObjects(matrices['55_대학입결DB']);
-   1725:   data['54_수능최저DB']=data.admissionMinimums;
-   1726:   data['55_대학입결DB']=data.admissionResults;
-   1727: 
-   1728:   {
-   1729:     const sourceMatrix=matrices["__INPUT_CENTER_SOURCE"]||[];
-   1730:     const sourceHeaders=(sourceMatrix[2]||[]).map(v=>String(v||'').trim());
-   1731:     const sourceRows=sourceMatrix.slice(3).filter(row=>row.some(v=>String(v||'').trim())).map(row=>{const o=Object.fromEntries(sourceHeaders.map((h,i)=>[h,row[i]??'']));return {id:o['입력ID'],batchId:o['배치ID'],source:o['입력경로'],type:o['자료유형'],subtype:o['세부유형'],schoolYear:o['학년도'],semester:o['학기'],studentId:o['학생ID'],studentNo:o['학번'],name:o['성명'],grade:o['학년'],className:o['반'],fileName:o['원본파일명'],storedPath:o['원본보관경로'],title:o['자료제목'],rawText:o['원본텍스트'],normalizedText:o['구조화데이터'],status:o['처리상태'],matchStatus:o['매칭상태'],programId:o['프로그램ID'],programKind:o['프로그램구분'],teacher:o['등록교사'],createdAt:o['등록일시'],note:o['비고'],storageMode:'uep'};});
-   1732:     // 입력센터의 단일 원본은 [UEP]입력센터 원본입니다.
-   1733:     // 폐기 대상인 60_외부자료입력_정규화는 더 이상 읽거나 병합하지 않습니다.
-   1734:     data.externalInputs=sourceRows;
---- around line 1721 ---
-   1713:     return rows.slice(3).filter(row=>Array.isArray(row)&&row.some(v=>String(v??'').trim())).map(row=>{
-   1714:       const obj={};headers.forEach((h,i)=>{if(h)obj[h]=row[i]??'';});return obj;
-   1715:     });
-   1716:   };
-   1717:   data.admissionBasics=uep08210MatrixObjects(matrices['52_대입기초']);
-   1718:   data.admissionTypes=uep08210MatrixObjects(matrices['53_전형이해']);
-   1719:   data.universityAdmissions=uep08210MatrixObjects(matrices['56_대학입시마스터']);
-   1720:   data['52_대입기초']=data.admissionBasics;
-   1721:   data['53_전형이해']=data.admissionTypes;
-   1722:   data['56_대학입시마스터']=data.universityAdmissions;
-   1723:   data.admissionMinimums=uep08210MatrixObjects(matrices['54_수능최저DB']);
-   1724:   data.admissionResults=uep08210MatrixObjects(matrices['55_대학입결DB']);
-   1725:   data['54_수능최저DB']=data.admissionMinimums;
-   1726:   data['55_대학입결DB']=data.admissionResults;
-   1727: 
-   1728:   {
-   1729:     const sourceMatrix=matrices["__INPUT_CENTER_SOURCE"]||[];
-   1730:     const sourceHeaders=(sourceMatrix[2]||[]).map(v=>String(v||'').trim());
-   1731:     const sourceRows=sourceMatrix.slice(3).filter(row=>row.some(v=>String(v||'').trim())).map(row=>{const o=Object.fromEntries(sourceHeaders.map((h,i)=>[h,row[i]??'']));return {id:o['입력ID'],batchId:o['배치ID'],source:o['입력경로'],type:o['자료유형'],subtype:o['세부유형'],schoolYear:o['학년도'],semester:o['학기'],studentId:o['학생ID'],studentNo:o['학번'],name:o['성명'],grade:o['학년'],className:o['반'],fileName:o['원본파일명'],storedPath:o['원본보관경로'],title:o['자료제목'],rawText:o['원본텍스트'],normalizedText:o['구조화데이터'],status:o['처리상태'],matchStatus:o['매칭상태'],programId:o['프로그램ID'],programKind:o['프로그램구분'],teacher:o['등록교사'],createdAt:o['등록일시'],note:o['비고'],storageMode:'uep'};});
-   1732:     // 입력센터의 단일 원본은 [UEP]입력센터 원본입니다.
-   1733:     // 폐기 대상인 60_외부자료입력_정규화는 더 이상 읽거나 병합하지 않습니다.
-   1734:     data.externalInputs=sourceRows;
-   1735:     // 입력센터 원본은 03 UEP 적용 전까지 공식 보고서로 노출하지 않습니다.
---- around line 1722 ---
-   1714:       const obj={};headers.forEach((h,i)=>{if(h)obj[h]=row[i]??'';});return obj;
-   1715:     });
-   1716:   };
-   1717:   data.admissionBasics=uep08210MatrixObjects(matrices['52_대입기초']);
-   1718:   data.admissionTypes=uep08210MatrixObjects(matrices['53_전형이해']);
-   1719:   data.universityAdmissions=uep08210MatrixObjects(matrices['56_대학입시마스터']);
-   1720:   data['52_대입기초']=data.admissionBasics;
-   1721:   data['53_전형이해']=data.admissionTypes;
-   1722:   data['56_대학입시마스터']=data.universityAdmissions;
-   1723:   data.admissionMinimums=uep08210MatrixObjects(matrices['54_수능최저DB']);
-   1724:   data.admissionResults=uep08210MatrixObjects(matrices['55_대학입결DB']);
-   1725:   data['54_수능최저DB']=data.admissionMinimums;
-   1726:   data['55_대학입결DB']=data.admissionResults;
-   1727: 
-   1728:   {
-   1729:     const sourceMatrix=matrices["__INPUT_CENTER_SOURCE"]||[];
-   1730:     const sourceHeaders=(sourceMatrix[2]||[]).map(v=>String(v||'').trim());
-   1731:     const sourceRows=sourceMatrix.slice(3).filter(row=>row.some(v=>String(v||'').trim())).map(row=>{const o=Object.fromEntries(sourceHeaders.map((h,i)=>[h,row[i]??'']));return {id:o['입력ID'],batchId:o['배치ID'],source:o['입력경로'],type:o['자료유형'],subtype:o['세부유형'],schoolYear:o['학년도'],semester:o['학기'],studentId:o['학생ID'],studentNo:o['학번'],name:o['성명'],grade:o['학년'],className:o['반'],fileName:o['원본파일명'],storedPath:o['원본보관경로'],title:o['자료제목'],rawText:o['원본텍스트'],normalizedText:o['구조화데이터'],status:o['처리상태'],matchStatus:o['매칭상태'],programId:o['프로그램ID'],programKind:o['프로그램구분'],teacher:o['등록교사'],createdAt:o['등록일시'],note:o['비고'],storageMode:'uep'};});
-   1732:     // 입력센터의 단일 원본은 [UEP]입력센터 원본입니다.
-   1733:     // 폐기 대상인 60_외부자료입력_정규화는 더 이상 읽거나 병합하지 않습니다.
-   1734:     data.externalInputs=sourceRows;
-   1735:     // 입력센터 원본은 03 UEP 적용 전까지 공식 보고서로 노출하지 않습니다.
-   1736:     // UEP의 보고서 화면은 20/21 정규화 탭만 단일 진실원천(source of truth)으로 사용합니다.
---- around line 1723 ---
-   1715:     });
-   1716:   };
-   1717:   data.admissionBasics=uep08210MatrixObjects(matrices['52_대입기초']);
-   1718:   data.admissionTypes=uep08210MatrixObjects(matrices['53_전형이해']);
-   1719:   data.universityAdmissions=uep08210MatrixObjects(matrices['56_대학입시마스터']);
-   1720:   data['52_대입기초']=data.admissionBasics;
-   1721:   data['53_전형이해']=data.admissionTypes;
-   1722:   data['56_대학입시마스터']=data.universityAdmissions;
-   1723:   data.admissionMinimums=uep08210MatrixObjects(matrices['54_수능최저DB']);
-   1724:   data.admissionResults=uep08210MatrixObjects(matrices['55_대학입결DB']);
-   1725:   data['54_수능최저DB']=data.admissionMinimums;
-   1726:   data['55_대학입결DB']=data.admissionResults;
-   1727: 
-   1728:   {
-   1729:     const sourceMatrix=matrices["__INPUT_CENTER_SOURCE"]||[];
-   1730:     const sourceHeaders=(sourceMatrix[2]||[]).map(v=>String(v||'').trim());
-   1731:     const sourceRows=sourceMatrix.slice(3).filter(row=>row.some(v=>String(v||'').trim())).map(row=>{const o=Object.fromEntries(sourceHeaders.map((h,i)=>[h,row[i]??'']));return {id:o['입력ID'],batchId:o['배치ID'],source:o['입력경로'],type:o['자료유형'],subtype:o['세부유형'],schoolYear:o['학년도'],semester:o['학기'],studentId:o['학생ID'],studentNo:o['학번'],name:o['성명'],grade:o['학년'],className:o['반'],fileName:o['원본파일명'],storedPath:o['원본보관경로'],title:o['자료제목'],rawText:o['원본텍스트'],normalizedText:o['구조화데이터'],status:o['처리상태'],matchStatus:o['매칭상태'],programId:o['프로그램ID'],programKind:o['프로그램구분'],teacher:o['등록교사'],createdAt:o['등록일시'],note:o['비고'],storageMode:'uep'};});
-   1732:     // 입력센터의 단일 원본은 [UEP]입력센터 원본입니다.
-   1733:     // 폐기 대상인 60_외부자료입력_정규화는 더 이상 읽거나 병합하지 않습니다.
-   1734:     data.externalInputs=sourceRows;
-   1735:     // 입력센터 원본은 03 UEP 적용 전까지 공식 보고서로 노출하지 않습니다.
-   1736:     // UEP의 보고서 화면은 20/21 정규화 탭만 단일 진실원천(source of truth)으로 사용합니다.
-   1737:   }
---- around line 1724 ---
-   1716:   };
-   1717:   data.admissionBasics=uep08210MatrixObjects(matrices['52_대입기초']);
-   1718:   data.admissionTypes=uep08210MatrixObjects(matrices['53_전형이해']);
-   1719:   data.universityAdmissions=uep08210MatrixObjects(matrices['56_대학입시마스터']);
-   1720:   data['52_대입기초']=data.admissionBasics;
-   1721:   data['53_전형이해']=data.admissionTypes;
-   1722:   data['56_대학입시마스터']=data.universityAdmissions;
-   1723:   data.admissionMinimums=uep08210MatrixObjects(matrices['54_수능최저DB']);
-   1724:   data.admissionResults=uep08210MatrixObjects(matrices['55_대학입결DB']);
-   1725:   data['54_수능최저DB']=data.admissionMinimums;
-   1726:   data['55_대학입결DB']=data.admissionResults;
-   1727: 
-   1728:   {
-   1729:     const sourceMatrix=matrices["__INPUT_CENTER_SOURCE"]||[];
-   1730:     const sourceHeaders=(sourceMatrix[2]||[]).map(v=>String(v||'').trim());
-   1731:     const sourceRows=sourceMatrix.slice(3).filter(row=>row.some(v=>String(v||'').trim())).map(row=>{const o=Object.fromEntries(sourceHeaders.map((h,i)=>[h,row[i]??'']));return {id:o['입력ID'],batchId:o['배치ID'],source:o['입력경로'],type:o['자료유형'],subtype:o['세부유형'],schoolYear:o['학년도'],semester:o['학기'],studentId:o['학생ID'],studentNo:o['학번'],name:o['성명'],grade:o['학년'],className:o['반'],fileName:o['원본파일명'],storedPath:o['원본보관경로'],title:o['자료제목'],rawText:o['원본텍스트'],normalizedText:o['구조화데이터'],status:o['처리상태'],matchStatus:o['매칭상태'],programId:o['프로그램ID'],programKind:o['프로그램구분'],teacher:o['등록교사'],createdAt:o['등록일시'],note:o['비고'],storageMode:'uep'};});
-   1732:     // 입력센터의 단일 원본은 [UEP]입력센터 원본입니다.
-   1733:     // 폐기 대상인 60_외부자료입력_정규화는 더 이상 읽거나 병합하지 않습니다.
-   1734:     data.externalInputs=sourceRows;
-   1735:     // 입력센터 원본은 03 UEP 적용 전까지 공식 보고서로 노출하지 않습니다.
-   1736:     // UEP의 보고서 화면은 20/21 정규화 탭만 단일 진실원천(source of truth)으로 사용합니다.
-   1737:   }
-   1738:   if (!data.students.length) throw new Error("구글시트의 02_학생마스터에서 학생정보를 찾지 못했습니다.");
---- around line 1725 ---
-   1717:   data.admissionBasics=uep08210MatrixObjects(matrices['52_대입기초']);
-   1718:   data.admissionTypes=uep08210MatrixObjects(matrices['53_전형이해']);
-   1719:   data.universityAdmissions=uep08210MatrixObjects(matrices['56_대학입시마스터']);
-   1720:   data['52_대입기초']=data.admissionBasics;
-   1721:   data['53_전형이해']=data.admissionTypes;
-   1722:   data['56_대학입시마스터']=data.universityAdmissions;
-   1723:   data.admissionMinimums=uep08210MatrixObjects(matrices['54_수능최저DB']);
-   1724:   data.admissionResults=uep08210MatrixObjects(matrices['55_대학입결DB']);
-   1725:   data['54_수능최저DB']=data.admissionMinimums;
-   1726:   data['55_대학입결DB']=data.admissionResults;
-   1727: 
-   1728:   {
-   1729:     const sourceMatrix=matrices["__INPUT_CENTER_SOURCE"]||[];
-   1730:     const sourceHeaders=(sourceMatrix[2]||[]).map(v=>String(v||'').trim());
-   1731:     const sourceRows=sourceMatrix.slice(3).filter(row=>row.some(v=>String(v||'').trim())).map(row=>{const o=Object.fromEntries(sourceHeaders.map((h,i)=>[h,row[i]??'']));return {id:o['입력ID'],batchId:o['배치ID'],source:o['입력경로'],type:o['자료유형'],subtype:o['세부유형'],schoolYear:o['학년도'],semester:o['학기'],studentId:o['학생ID'],studentNo:o['학번'],name:o['성명'],grade:o['학년'],className:o['반'],fileName:o['원본파일명'],storedPath:o['원본보관경로'],title:o['자료제목'],rawText:o['원본텍스트'],normalizedText:o['구조화데이터'],status:o['처리상태'],matchStatus:o['매칭상태'],programId:o['프로그램ID'],programKind:o['프로그램구분'],teacher:o['등록교사'],createdAt:o['등록일시'],note:o['비고'],storageMode:'uep'};});
-   1732:     // 입력센터의 단일 원본은 [UEP]입력센터 원본입니다.
-   1733:     // 폐기 대상인 60_외부자료입력_정규화는 더 이상 읽거나 병합하지 않습니다.
-   1734:     data.externalInputs=sourceRows;
-   1735:     // 입력센터 원본은 03 UEP 적용 전까지 공식 보고서로 노출하지 않습니다.
-   1736:     // UEP의 보고서 화면은 20/21 정규화 탭만 단일 진실원천(source of truth)으로 사용합니다.
-   1737:   }
-   1738:   if (!data.students.length) throw new Error("구글시트의 02_학생마스터에서 학생정보를 찾지 못했습니다.");
-   1739:   data.connection = {
---- around line 1726 ---
-   1718:   data.admissionTypes=uep08210MatrixObjects(matrices['53_전형이해']);
-   1719:   data.universityAdmissions=uep08210MatrixObjects(matrices['56_대학입시마스터']);
-   1720:   data['52_대입기초']=data.admissionBasics;
-   1721:   data['53_전형이해']=data.admissionTypes;
-   1722:   data['56_대학입시마스터']=data.universityAdmissions;
-   1723:   data.admissionMinimums=uep08210MatrixObjects(matrices['54_수능최저DB']);
-   1724:   data.admissionResults=uep08210MatrixObjects(matrices['55_대학입결DB']);
-   1725:   data['54_수능최저DB']=data.admissionMinimums;
-   1726:   data['55_대학입결DB']=data.admissionResults;
-   1727: 
-   1728:   {
-   1729:     const sourceMatrix=matrices["__INPUT_CENTER_SOURCE"]||[];
-   1730:     const sourceHeaders=(sourceMatrix[2]||[]).map(v=>String(v||'').trim());
-   1731:     const sourceRows=sourceMatrix.slice(3).filter(row=>row.some(v=>String(v||'').trim())).map(row=>{const o=Object.fromEntries(sourceHeaders.map((h,i)=>[h,row[i]??'']));return {id:o['입력ID'],batchId:o['배치ID'],source:o['입력경로'],type:o['자료유형'],subtype:o['세부유형'],schoolYear:o['학년도'],semester:o['학기'],studentId:o['학생ID'],studentNo:o['학번'],name:o['성명'],grade:o['학년'],className:o['반'],fileName:o['원본파일명'],storedPath:o['원본보관경로'],title:o['자료제목'],rawText:o['원본텍스트'],normalizedText:o['구조화데이터'],status:o['처리상태'],matchStatus:o['매칭상태'],programId:o['프로그램ID'],programKind:o['프로그램구분'],teacher:o['등록교사'],createdAt:o['등록일시'],note:o['비고'],storageMode:'uep'};});
-   1732:     // 입력센터의 단일 원본은 [UEP]입력센터 원본입니다.
-   1733:     // 폐기 대상인 60_외부자료입력_정규화는 더 이상 읽거나 병합하지 않습니다.
-   1734:     data.externalInputs=sourceRows;
-   1735:     // 입력센터 원본은 03 UEP 적용 전까지 공식 보고서로 노출하지 않습니다.
-   1736:     // UEP의 보고서 화면은 20/21 정규화 탭만 단일 진실원천(source of truth)으로 사용합니다.
-   1737:   }
-   1738:   if (!data.students.length) throw new Error("구글시트의 02_학생마스터에서 학생정보를 찾지 못했습니다.");
-   1739:   data.connection = {
-   1740:     spreadsheetId: UEP_SPREADSHEET_ID,
+   1657:   // batchGet의 일부 누락/순서 문제 또는 다른 규칙 탭 오류가 있어도 40_학사외출규칙 원본을 우선합니다.
+   1658:   try {
+   1659:     const dormRuleResult = await readSheetBatch(
+   1660:       token,
 --- around line 1741 ---
+   1731:     const sourceRows=sourceMatrix.slice(3).filter(row=>row.some(v=>String(v||'').trim())).map(row=>{const o=Object.fromEntries(sourceHeaders.map((h,i)=>[h,row[i]??'']));return {id:o['입력ID'],batchId:o['배치ID'],source:o['입력경로'],type:o['자료유형'],subtype:o['세부유형'],schoolYear:o['학년도'],semester:o['학기'],studentId:o['학생ID'],studentNo:o['학번'],name:o['성명'],grade:o['학년'],className:o['반'],fileName:o['원본파일명'],storedPath:o['원본보관경로'],title:o['자료제목'],rawText:o['원본텍스트'],normalizedText:o['구조화데이터'],status:o['처리상태'],matchStatus:o['매칭상태'],programId:o['프로그램ID'],programKind:o['프로그램구분'],teacher:o['등록교사'],createdAt:o['등록일시'],note:o['비고'],storageMode:'uep'};});
+   1732:     // 입력센터의 단일 원본은 [UEP]입력센터 원본입니다.
    1733:     // 폐기 대상인 60_외부자료입력_정규화는 더 이상 읽거나 병합하지 않습니다.
    1734:     data.externalInputs=sourceRows;
    1735:     // 입력센터 원본은 03 UEP 적용 전까지 공식 보고서로 노출하지 않습니다.
@@ -3192,7 +3356,13 @@
    1753:   const date = value instanceof Date ? value : new Date(value);
    1754:   return `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, "0")}${String(date.getDate()).padStart(2, "0")}`;
    1755: }
+   1756: 
+   1757: function mondayOf(dateValue) {
+   1758:   const date = dateValue instanceof Date ? new Date(dateValue) : new Date(dateValue || Date.now());
+   1759:   date.setHours(12, 0, 0, 0);
 --- around line 2138 ---
+   2128:   });
+   2129:   win.on("closed", () => {
    2130:     mainWindow = null;
    2131:     beginCleanShutdown("main-window-closed");
    2132:   });
@@ -3216,7 +3386,13 @@
    2150:       const ext=path.extname(source); const base=path.basename(source,ext).replace(/[^a-zA-Z0-9가-힣_-]/g,"_");
    2151:       let destination=path.join(target,`${Date.now()}-${base}${ext}`); await fs.copyFile(source,destination);
    2152:       files.push({name:path.basename(source),path:destination,addedAt:new Date().toISOString()});
+   2153:     }
+   2154:     return {ok:true,files,folder:target};
+   2155:   });
+   2156:   ipcMain.handle("program:openEvidenceFolder", async (_event, programId) => {const target=programEvidencePath(programId);await fs.mkdir(target,{recursive:true});return {ok:!(await shell.openPath(target)),folder:target};});
 --- around line 2139 ---
+   2129:   win.on("closed", () => {
+   2130:     mainWindow = null;
    2131:     beginCleanShutdown("main-window-closed");
    2132:   });
    2133:   win.loadFile(path.join(__dirname, "..", "index.html"));
@@ -3240,7 +3416,13 @@
    2151:       let destination=path.join(target,`${Date.now()}-${base}${ext}`); await fs.copyFile(source,destination);
    2152:       files.push({name:path.basename(source),path:destination,addedAt:new Date().toISOString()});
    2153:     }
+   2154:     return {ok:true,files,folder:target};
+   2155:   });
+   2156:   ipcMain.handle("program:openEvidenceFolder", async (_event, programId) => {const target=programEvidencePath(programId);await fs.mkdir(target,{recursive:true});return {ok:!(await shell.openPath(target)),folder:target};});
+   2157:   ipcMain.handle("google:credentialStatus", async () => {
 --- around line 2140 ---
+   2130:     mainWindow = null;
+   2131:     beginCleanShutdown("main-window-closed");
    2132:   });
    2133:   win.loadFile(path.join(__dirname, "..", "index.html"));
    2134: }
@@ -3264,7 +3446,13 @@
    2152:       files.push({name:path.basename(source),path:destination,addedAt:new Date().toISOString()});
    2153:     }
    2154:     return {ok:true,files,folder:target};
+   2155:   });
+   2156:   ipcMain.handle("program:openEvidenceFolder", async (_event, programId) => {const target=programEvidencePath(programId);await fs.mkdir(target,{recursive:true});return {ok:!(await shell.openPath(target)),folder:target};});
+   2157:   ipcMain.handle("google:credentialStatus", async () => {
+   2158:   try {
 --- around line 2388 ---
+   2378: ipcMain.handle("attendance:lateSave", async (_event, payload={}) => saveLateAttendance(payload));
+   2379: ipcMain.handle("attendance:lateDelete", async (_event, id="") => deleteLateAttendance(id));
    2380: ipcMain.handle("counsel:save", async (_event, payload={}) => saveCounselRecord(payload));
    2381: ipcMain.handle("studentGuidance:save", async (_event, payload={}) => saveStudentGuidanceRecord(payload));
    2382:   ipcMain.handle("dormOuting:save", async (_event, payload={}) => saveDormOuting(payload));
@@ -3288,7 +3476,13 @@
    2400:     "담당부서":String(payload.department||"1학년부"),"담당자":String(payload.author||""),"상태":String(payload.status||"게시"),
    2401:     "수정일시":nowIso,"수정자":String(payload.author||"UEP"),"비고":String(payload.note||"UEP 화면 입력"),
    2402:     "공지성격":String(payload.noticeKind||payload.type||"일반공지"),"종례전달":payload.homeroomNotice?"Y":"N",
+   2403:     "중요":payload.important?"Y":"N","상단알림":payload.topAlert?"Y":"N","게시종료일":String(payload.endDate||""),
+   2404:     "마감유형":String(payload.deadlineType||"")
+   2405:   };
+   2406:   if(Array.isArray(headerNames)&&headerNames.length)return headerNames.map(name=>values[name]??"");
 --- around line 2389 ---
+   2379: ipcMain.handle("attendance:lateDelete", async (_event, id="") => deleteLateAttendance(id));
+   2380: ipcMain.handle("counsel:save", async (_event, payload={}) => saveCounselRecord(payload));
    2381: ipcMain.handle("studentGuidance:save", async (_event, payload={}) => saveStudentGuidanceRecord(payload));
    2382:   ipcMain.handle("dormOuting:save", async (_event, payload={}) => saveDormOuting(payload));
    2383: ipcMain.handle("dormRule:save", async (_event, payload={}) => saveDormRule(payload));
@@ -3312,7 +3506,13 @@
    2401:     "수정일시":nowIso,"수정자":String(payload.author||"UEP"),"비고":String(payload.note||"UEP 화면 입력"),
    2402:     "공지성격":String(payload.noticeKind||payload.type||"일반공지"),"종례전달":payload.homeroomNotice?"Y":"N",
    2403:     "중요":payload.important?"Y":"N","상단알림":payload.topAlert?"Y":"N","게시종료일":String(payload.endDate||""),
+   2404:     "마감유형":String(payload.deadlineType||"")
+   2405:   };
+   2406:   if(Array.isArray(headerNames)&&headerNames.length)return headerNames.map(name=>values[name]??"");
+   2407:   return Object.values(values).slice(0,22);
 --- around line 2470 ---
+   2460:       await appendSheetValues(token,UEP_SPREADSHEET_ID,`'00_UEP설정'!A:${columnLetter(headers.length-1)}`,[row]);
+   2461:     }
    2462:     liveDataCache=null;liveDataFetchedAt=0;
    2463:     return {ok:true,key,value};
    2464:   } catch(error){return {ok:false,reason:error?.message||'공용 보안설정 저장 실패'};}
@@ -3336,7 +3536,13 @@
    2482:     const headers=(values[0]||[]).map(v=>String(v||'').trim());
    2483:     const idx=name=>headers.indexOf(name);
    2484:     const keyCol=idx('설정키'),valueCol=idx('설정값'),descCol=idx('설명');
+   2485:     if(keyCol<0||valueCol<0)throw new Error('00_UEP설정 헤더를 찾지 못했습니다.');
+   2486:     const allowed=new Set(['SENSITIVE_PIN_HASH','SUBJECT_CONFIDENTIAL_PIN_HASH']);
+   2487:     const settings=values.slice(1).map(r=>({key:String(r?.[keyCol]||'').trim(),value:String(r?.[valueCol]||'').trim(),description:descCol>=0?String(r?.[descCol]||''):''})).filter(r=>allowed.has(r.key)&&r.value);
+   2488:     return {ok:true,settings};
 --- around line 2472 ---
+   2462:     liveDataCache=null;liveDataFetchedAt=0;
+   2463:     return {ok:true,key,value};
    2464:   } catch(error){return {ok:false,reason:error?.message||'공용 보안설정 저장 실패'};}
    2465: });
    2466: // __UEP_08168_SHARED_SECURITY_READ__
@@ -3360,7 +3566,13 @@
    2484:     const keyCol=idx('설정키'),valueCol=idx('설정값'),descCol=idx('설명');
    2485:     if(keyCol<0||valueCol<0)throw new Error('00_UEP설정 헤더를 찾지 못했습니다.');
    2486:     const allowed=new Set(['SENSITIVE_PIN_HASH','SUBJECT_CONFIDENTIAL_PIN_HASH']);
+   2487:     const settings=values.slice(1).map(r=>({key:String(r?.[keyCol]||'').trim(),value:String(r?.[valueCol]||'').trim(),description:descCol>=0?String(r?.[descCol]||''):''})).filter(r=>allowed.has(r.key)&&r.value);
+   2488:     return {ok:true,settings};
+   2489:   }catch(error){return {ok:false,reason:error?.message||'공용 보안설정 읽기 실패'};}
+   2490: });
 --- around line 2473 ---
+   2463:     return {ok:true,key,value};
+   2464:   } catch(error){return {ok:false,reason:error?.message||'공용 보안설정 저장 실패'};}
    2465: });
    2466: // __UEP_08168_SHARED_SECURITY_READ__
    2467: ipcMain.handle("securityConfig:readShared", async () => {
@@ -3384,7 +3596,13 @@
    2485:     if(keyCol<0||valueCol<0)throw new Error('00_UEP설정 헤더를 찾지 못했습니다.');
    2486:     const allowed=new Set(['SENSITIVE_PIN_HASH','SUBJECT_CONFIDENTIAL_PIN_HASH']);
    2487:     const settings=values.slice(1).map(r=>({key:String(r?.[keyCol]||'').trim(),value:String(r?.[valueCol]||'').trim(),description:descCol>=0?String(r?.[descCol]||''):''})).filter(r=>allowed.has(r.key)&&r.value);
+   2488:     return {ok:true,settings};
+   2489:   }catch(error){return {ok:false,reason:error?.message||'공용 보안설정 읽기 실패'};}
+   2490: });
+   2491: 
 --- around line 2570 ---
+   2560:     const header=findHeaderRowByRequired(matrix,["공지ID","상태"]); if(!header) throw new Error("40_공지마감 헤더를 찾지 못했습니다.");
+   2561:     const h=header.index, headers=header.headers, idCol=headers.indexOf("공지ID"), statusCol=headers.indexOf("상태"), modifiedCol=headers.indexOf("수정일시");
    2562:     const rowIndex=matrix.findIndex((r,i)=>i>h&&String(r?.[idCol]||"")===String(id)); if(rowIndex<0) throw new Error("삭제할 공지를 찾지 못했습니다.");
    2563:     if(statusCol>=0) await updateSheetValues(token,UEP_SPREADSHEET_ID,`'40_공지마감'!${columnLetter(statusCol)}${rowIndex+1}:${columnLetter(statusCol)}${rowIndex+1}` ,[["삭제"]]);
    2564:     if(modifiedCol>=0) await updateSheetValues(token,UEP_SPREADSHEET_ID,`'40_공지마감'!${columnLetter(modifiedCol)}${rowIndex+1}:${columnLetter(modifiedCol)}${rowIndex+1}` ,[[new Date().toISOString()]]);
@@ -3408,7 +3626,13 @@
    2582:       return {ok:false,reason:result?.reason||result?.message||'School Read 공지확인 저장 기능이 아직 배포되지 않았습니다.',requiresSchoolReadWrite:true};
    2583:     }
    2584:     const account=await readEncrypted(credentialPath()); if(!validateServiceAccount(account)) throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+   2585:     const token=await getSheetsToken(account), now=new Date().toISOString();
+   2586:     const noticeId=String(payload.noticeId||"").trim(), teacher=String(payload.teacher||"").trim(), userId=String(payload.userId||"").trim();
+   2587:     if(!noticeId||!teacher) throw new Error("공지ID와 교사명이 필요합니다.");
+   2588:     const matrix=await readNoticeSheetMatrix(token,"44_공지확인현황","A1:Q3000");
 --- around line 2573 ---
+   2563:     if(statusCol>=0) await updateSheetValues(token,UEP_SPREADSHEET_ID,`'40_공지마감'!${columnLetter(statusCol)}${rowIndex+1}:${columnLetter(statusCol)}${rowIndex+1}` ,[["삭제"]]);
+   2564:     if(modifiedCol>=0) await updateSheetValues(token,UEP_SPREADSHEET_ID,`'40_공지마감'!${columnLetter(modifiedCol)}${rowIndex+1}:${columnLetter(modifiedCol)}${rowIndex+1}` ,[[new Date().toISOString()]]);
    2565:     liveDataCache=null;liveDataFetchedAt=0;return {ok:true,id};
    2566:   } catch(error){return {ok:false,reason:error?.message||"공지 삭제 실패"};}
    2567: });
@@ -3432,7 +3656,13 @@
    2585:     const token=await getSheetsToken(account), now=new Date().toISOString();
    2586:     const noticeId=String(payload.noticeId||"").trim(), teacher=String(payload.teacher||"").trim(), userId=String(payload.userId||"").trim();
    2587:     if(!noticeId||!teacher) throw new Error("공지ID와 교사명이 필요합니다.");
+   2588:     const matrix=await readNoticeSheetMatrix(token,"44_공지확인현황","A1:Q3000");
+   2589:     const header=findHeaderRowByRequired(matrix,["기록ID","공지ID","교사명","확인상태","제출상태"]); if(!header) throw new Error("44_공지확인현황 헤더를 찾지 못했습니다.");
+   2590:     const h=header.index, headers=header.headers, idx=name=>headers.indexOf(name);
+   2591:     const rowIndex=matrix.findIndex((r,i)=>i>h&&String(r?.[idx("공지ID")]||"")===noticeId&&((userId&&String(r?.[idx("사용자ID")]||"")===userId)||String(r?.[idx("교사명")]||"")===teacher));
 --- around line 2575 ---
+   2565:     liveDataCache=null;liveDataFetchedAt=0;return {ok:true,id};
+   2566:   } catch(error){return {ok:false,reason:error?.message||"공지 삭제 실패"};}
    2567: });
    2568: ipcMain.handle("notice:receiptSave", async (_event, payload={}) => {
    2569:   try {
@@ -3456,7 +3686,13 @@
    2587:     if(!noticeId||!teacher) throw new Error("공지ID와 교사명이 필요합니다.");
    2588:     const matrix=await readNoticeSheetMatrix(token,"44_공지확인현황","A1:Q3000");
    2589:     const header=findHeaderRowByRequired(matrix,["기록ID","공지ID","교사명","확인상태","제출상태"]); if(!header) throw new Error("44_공지확인현황 헤더를 찾지 못했습니다.");
+   2590:     const h=header.index, headers=header.headers, idx=name=>headers.indexOf(name);
+   2591:     const rowIndex=matrix.findIndex((r,i)=>i>h&&String(r?.[idx("공지ID")]||"")===noticeId&&((userId&&String(r?.[idx("사용자ID")]||"")===userId)||String(r?.[idx("교사명")]||"")===teacher));
+   2592:     const current=rowIndex>=0?matrix[rowIndex]:[];
+   2593:     const confirmed=payload.confirmed!=null?Boolean(payload.confirmed):String(current?.[idx("확인상태")]||"N").toUpperCase()==="Y";
 --- around line 2580 ---
+   2570:     const schoolSession=await readSchoolReadSession().catch(()=>null);
+   2571:     if(schoolSession?.token&&schoolSession?.deviceId){
    2572:       // __UEP_08168_NOTICE_RECEIPT_SCHOOL_READ_FIRST__
    2573:       const result=await schoolReadPost('notice-receipt-save',{token:schoolSession.token,deviceId:schoolSession.deviceId,noticeId:String(payload.noticeId||'').trim(),teacher:String(payload.teacher||'').trim(),userId:String(payload.userId||'').trim(),grade:String(payload.grade||''),classNo:String(payload.classNo||''),confirmed:payload.confirmed!==false,submitted:Boolean(payload.submitted),read:payload.read!==false,dismissed:Boolean(payload.dismissed),detailViewed:Boolean(payload.detailViewed),sourceType:String(payload.sourceType||'직접공지'),note:String(payload.note||'UEP 담임 확인')}).catch(error=>({ok:false,reason:error?.message||'School Read 공지확인 저장 실패'}));
    2574:       if(result?.ok)return result;
@@ -3480,7 +3716,13 @@
    2592:     const current=rowIndex>=0?matrix[rowIndex]:[];
    2593:     const confirmed=payload.confirmed!=null?Boolean(payload.confirmed):String(current?.[idx("확인상태")]||"N").toUpperCase()==="Y";
    2594:     const submitted=payload.submitted!=null?Boolean(payload.submitted):String(current?.[idx("제출상태")]||"N").toUpperCase()==="Y";
+   2595:     const read=payload.read!=null?Boolean(payload.read):String(current?.[idx("읽음상태")]||"N").toUpperCase()==="Y";
+   2596:     const dismissed=payload.dismissed!=null?Boolean(payload.dismissed):String(current?.[idx("공지해제")]||"N").toUpperCase()==="Y";
+   2597:     const detailViewed=payload.detailViewed!=null?Boolean(payload.detailViewed):String(current?.[idx("상세열람")]||"N").toUpperCase()==="Y";
+   2598:     const sourceType=String(payload.sourceType||current?.[idx("원본유형")]||"직접공지");
 --- around line 2582 ---
+   2572:       // __UEP_08168_NOTICE_RECEIPT_SCHOOL_READ_FIRST__
+   2573:       const result=await schoolReadPost('notice-receipt-save',{token:schoolSession.token,deviceId:schoolSession.deviceId,noticeId:String(payload.noticeId||'').trim(),teacher:String(payload.teacher||'').trim(),userId:String(payload.userId||'').trim(),grade:String(payload.grade||''),classNo:String(payload.classNo||''),confirmed:payload.confirmed!==false,submitted:Boolean(payload.submitted),read:payload.read!==false,dismissed:Boolean(payload.dismissed),detailViewed:Boolean(payload.detailViewed),sourceType:String(payload.sourceType||'직접공지'),note:String(payload.note||'UEP 담임 확인')}).catch(error=>({ok:false,reason:error?.message||'School Read 공지확인 저장 실패'}));
    2574:       if(result?.ok)return result;
    2575:       return {ok:false,reason:result?.reason||result?.message||'학교 공용 확인저장 기능이 아직 배포되지 않았습니다.',requiresSchoolReadWrite:true};
    2576:     }
@@ -3504,3 +3746,7 @@
    2594:     const submitted=payload.submitted!=null?Boolean(payload.submitted):String(current?.[idx("제출상태")]||"N").toUpperCase()==="Y";
    2595:     const read=payload.read!=null?Boolean(payload.read):String(current?.[idx("읽음상태")]||"N").toUpperCase()==="Y";
    2596:     const dismissed=payload.dismissed!=null?Boolean(payload.dismissed):String(current?.[idx("공지해제")]||"N").toUpperCase()==="Y";
+   2597:     const detailViewed=payload.detailViewed!=null?Boolean(payload.detailViewed):String(current?.[idx("상세열람")]||"N").toUpperCase()==="Y";
+   2598:     const sourceType=String(payload.sourceType||current?.[idx("원본유형")]||"직접공지");
+   2599:     const recordId=String(current?.[idx("기록ID")]||`NACK-${crypto.randomUUID()}`);
+   2600:     const confirmedAt=confirmed?(String(current?.[idx("확인일시")]||"")||now):"";
