@@ -13,8 +13,8 @@ const pkg=JSON.parse(fs.readFileSync(pkgPath,'utf8'));
 
 const must=(v,m)=>{if(!v)throw new Error(m)};
 must(g.includes('const APP_VERSION = "0.82.11";'),'0.82.11 version missing');
-g=g.replace('const APP_VERSION = "0.82.11";','const APP_VERSION = "0.82.12";');
-pkg.version='0.82.12';
+g=g.replace('const APP_VERSION = "0.82.11";','const APP_VERSION = "0.82.13";');
+pkg.version='0.82.13';
 
 function removeMarked(text,start,end){
   const a=text.indexOf(start),b=text.indexOf(end);
@@ -147,7 +147,7 @@ g=replaceFunction(g,'todayOperationsMarkup',nativeOperations);
 
 const bindAnchor="  $$('[data-dashboard-student-status]').forEach((button) => (button.onclick = (event) => { event.preventDefault(); event.stopPropagation(); openDashboardStudentStatus(button.dataset.dashboardStudentStatus); }));";
 must(g.includes(bindAnchor),'dashboard binding anchor missing');
-g=g.replace(bindAnchor,bindAnchor+String.raw`
+g=g.replace(bindAnchor,()=>bindAnchor+String.raw`
   $$('[data-dashboard-admission]').forEach(button=>button.onclick=event=>{event.preventDefault();event.stopPropagation();({basics:openDashboardAdmissionBasics,types:openDashboardAdmissionTypes,university:()=>openDashboardUniversityDetail()}[button.dataset.dashboardAdmission])?.();});
   $$('[data-dashboard-missing-class]').forEach(button=>button.onclick=()=>{openDashboardStudentStatus('report');requestAnimationFrame(()=>$('#drawerBody [data-dashboard-class-card="'+button.dataset.dashboardMissingClass+'"]')?.click());});
   $$('[data-dashboard-missing-student]').forEach(button=>button.onclick=()=>{openDashboardStudentStatus('report');requestAnimationFrame(()=>$('#drawerBody [data-dashboard-board-student="'+button.dataset.dashboardMissingStudent+'"]')?.click());});`);
@@ -160,4 +160,4 @@ css+=String.raw`
 fs.writeFileSync(gPath,g);
 fs.writeFileSync(cssPath,css);
 fs.writeFileSync(pkgPath,JSON.stringify(pkg,null,2)+'\n');
-console.log('UEP 0.82.12 native dashboard patch applied');
+console.log('UEP 0.82.13 native dashboard patch applied');
