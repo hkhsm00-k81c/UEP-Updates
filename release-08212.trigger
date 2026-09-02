@@ -20,3 +20,4 @@ Build retry 2: whitespace-tolerant 53/53A/53B anchors
 Build retry 3: insert 53A/53B in electron main.cjs, renderer mapping in gyomuon.js
 Inspect: v0.82.19 parser to renderer live admissions data flow
 Inspect: parser-only output for real sheet-to-cache mapping
+Inspect: exact parser-to-readonlyCache admissions handoff
