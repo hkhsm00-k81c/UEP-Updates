@@ -1,0 +1,550 @@
+===== const partial=parseGoogleSheetData(matrices) :: line 1541 =====
+1523:     const logicalKey=`${schoolYear}|${semester}|${studentKey}|${programId}`;
+1524:     const contentHash=crypto.createHash('sha256').update([studentKey,programId,content].map(v=>String(v||'').trim()).join('\n'),'utf8').digest('hex');
+1525:     rows.push([reportId,'선택활동',studentId,studentNo,name,schoolYear,semester,programId,programName,submittedAt,'Y',/동의/.test(consent)?'동의함':consent,content,JSON.stringify(originalPairs),'REPORT_TEXT_V2',String(ri+1),matchStatus,'GOOGLE_FORM',sourceId,'',logicalKey,submittedAt,'정상',contentHash]);
+1526:   }
+1527:   if(unmatchedPrograms)throw new Error(`선택보고서 프로그램 매칭 실패 ${unmatchedPrograms}건이 있어 자동 복구를 중단했습니다.`);
+1528:   await clearSheetValues(token,UEP_PROCESSING_SPREADSHEET_ID,`'${target}'!A3:X5000`);
+1529:   await updateSheetValues(token,UEP_PROCESSING_SPREADSHEET_ID,`'${target}'!A3:X${rows.length+3}`,[required,...rows]);
+1530:   console.log(`[UEP] 선택보고서 정규화 자동 복구 완료: ${rows.length}건 · 학생확인 ${unmatchedStudents}건`);
+1531:   return {ok:true,repaired:true,count:rows.length,unmatchedStudents};
+1532: }
+1533: 
+1534: const UEP_OPERATIONAL_RANGE_NAMES=Object.freeze(['30_공식출결기록','31_지각기록','40_공지마감','44_공지확인현황','42_급식지도계획','43_야자감독계획']);
+1535: async function fetchOperationalData({credentials=null}={}){
+1536:   if(!liveDataCache)return {ok:false,requiresFullSync:true,reason:'전체 캐시가 아직 준비되지 않았습니다.'};
+1537:   const auth=await getReadonlySheetsAuth(credentials),token=auth.token;
+1538:   const operationalEntries=UEP_OPERATIONAL_RANGE_NAMES.map(name=>[name,SHEET_RANGES[name]]);
+1539:   const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,operationalEntries.map(([,range])=>range));
+1540:   const matrices={};assignValueRangesByRange(matrices,operationalEntries,result);
+1541:   const partial=parseGoogleSheetData(matrices);
+1542:   const patch={officialAttendance:partial.officialAttendance||[],lateAttendance:partial.lateAttendance||[],notices:partial.notices||[],noticeReceipts:partial.noticeReceipts||[],lunchDuties:partial.lunchDuties||[],nightSupervisors:partial.nightSupervisors||[]};
+1543:   const operationalSyncedAt=new Date().toISOString();liveDataCache={...liveDataCache,...patch,operationalSyncedAt};liveDataFetchedAt=Date.now();
+1544:   return {ok:true,operationalSyncedAt,syncedAt:operationalSyncedAt,patch};
+1545: }
+1546: 
+1547: async function fetchLiveData({ force = false, credentials = null } = {}) {
+1548:   if (!force && liveDataCache && Date.now() - liveDataFetchedAt < 120000) return liveDataCache;
+1549:   // 0.81.40: 관리자 로컬 서비스계정과 담임 School Read API 세션을 동일 읽기 파이프라인으로 연결합니다.
+1550:   const auth = await getReadonlySheetsAuth(credentials);
+1551:   const token = auth.token;
+1552:   const entries = [
+1553:     ...Object.entries(SHEET_RANGES),
+1554:     ["52_대입기초", "'52_대입기초'!A1:N500"],
+1555:     ["53_전형이해", "'53_전형이해'!A1:N500"],
+1556:     ["53A_전형세부유형DB", "'53A_전형세부유형DB'!A1:R500"],
+1557:     ["53B_전형유형별대학DB", "'53B_전형유형별대학DB'!A1:P3000"],
+1558:     ["56_대학입시마스터", "'56_대학입시마스터'!A1:R500"],
+1559:     ["54_수능최저DB", "'54_수능최저DB'!A1:U2000"],
+1560:     ["55_대학입결DB", "'55_대학입결DB'!A1:K5000"],
+1561:   ];
+1562:   const matrices = {};
+1563:   // 기본정보 연결시트를 가장 먼저, 작은 묶음으로 읽습니다.
+1564:   // 탭 추가로 URL이 길어지거나 특정 탭이 잠시 실패해도 전체 연결이 끊기지 않도록 합니다.
+1565:   const chunkSize = 12;
+1566:   const chunks = [];
+1567:   for (let offset = 0; offset < entries.length; offset += chunkSize) {
+1568:     chunks.push({ offset, chunk: entries.slice(offset, offset + chunkSize) });
+1569:   }
+1570:   await mapWithConcurrency(chunks, 1, async ({ offset, chunk }) => {
+1571:     try {
+1572:       const valueRanges = await readSheetBatch(token, UEP_SPREADSHEET_ID, chunk.map(([, range]) => range));
+1573:       assignValueRangesByRange(matrices,chunk,valueRanges);
+1574:     } catch (chunkError) {
+1575:       console.warn(`[UEP] 기본정보 묶음 조회 실패(${offset + 1}~${offset + chunk.length}), 개별 재시도`, chunkError?.message || chunkError);
+1576:       await mapWithConcurrency(chunk, 1, async ([logicalName, range]) => {
+1577:         try {
+1578:           const one = await readSheetBatch(token, UEP_SPREADSHEET_ID, [range]);
+1579:           matrices[logicalName] = one?.[0]?.values || [];
+1580:         } catch (sheetError) {
+1581:           matrices[logicalName] = [];
+1582:           console.warn(`[UEP] 기본정보 탭 조회 실패: ${logicalName}`, sheetError?.message || sheetError);
+1583:         }
+1584:       });
+1585:     }
+1586:   });
+1587:   entries.forEach(([name]) => { if (!matrices[name]) matrices[name] = []; });
+1588: 
+1589:   // 선택보고서 정규화 탭의 구조가 손상된 경우 구글폼 원본으로 복구한 뒤 읽습니다.
+1590:   // 읽기 전용 담임 세션에서는 정규화 탭 자동복구(쓰기)를 실행하지 않습니다.
+1591:   if(auth.mode!=='school_read_api') await ensureSelectedReportNormalization(token);
+1592: 
+1593:   // 학생응답 가공 결과: 현재 실제 존재하는 데이터 처리 탭만 직접 읽습니다.
+1594:   // 선택과목은 응답수집 06_선택과목응답을 별도 읽고 기존 fallback 로직으로 구성합니다.
+1595:   const processingRanges = [
+1596:     ["02_학사외출_일자별", "'02_학사외출_일자별'!A1:AD10000"],
+1597:     ["20_공통보고서_정규화", "'20_공통보고서_정규화'!A1:X5000"],
+1598:     ["21_선택보고서_정규화", "'21_선택보고서_정규화'!A1:X5000"],
+1599:     ["30_야자출결_정규화", "'30_야자출결_정규화'!A1:P70000"],
+1600:     // 학교캘린더는 기본정보 연결시트가 아니라 데이터 처리시트의 직접 이관값만 사용합니다.
+1601:     ["41_학교캘린더", "'41_학교캘린더'!A1:W3000"],
+1602:     ["51_선택과목오류_정규화", "'51_선택과목오류_정규화'!A1:V5000"],
+1603:   ];
+1604:   try {
+1605:     const result = await readSheetBatch(token, UEP_PROCESSING_SPREADSHEET_ID, processingRanges.map(([,range])=>range));
+1606:     assignValueRangesByRange(matrices,processingRanges,result);
+1607:   } catch(error) {
+1608:     // 한 탭의 일시 오류가 보고서·학사외출·선택과목 등 정상 탭까지 모두 비우지 않도록
+1609:     // 묶음 조회 실패 시 각 탭을 독립적으로 재시도합니다. 평상시에는 1회 batchGet으로 quota를 보호합니다.
+1610:     console.warn("[UEP] 처리시트 묶음 조회 실패 - 개별 복구 시도",error?.message||error);
+1611:     await mapWithConcurrency(processingRanges,1,async([logicalName,range])=>{
+1612:       try{const one=await readSheetBatch(token,UEP_PROCESSING_SPREADSHEET_ID,[range]);matrices[logicalName]=one?.[0]?.values||[];}
+1613:       catch(sheetError){matrices[logicalName]=[];console.warn(`[UEP] 처리시트 개별 조회 실패: ${logicalName}`,sheetError?.message||sheetError);}
+1614:     });
+1615:   }
+1616: 
+1617:   // 학사외출은 데이터 처리시트의 02_학사외출_일자별만 조회합니다.
+1618:   // 응답 원본이나 기본정보 연결시트, 별도 운영 시트를 직접 참조하지 않습니다.
+1619: 
+1620:   // 입력센터 원본은 별도 [UEP] 입력센터 원본 스프레드시트에서 읽습니다.
+1621:   try {
+1622:     const inputResult=await readSheetBatch(token,UEP_INPUT_CENTER_SPREADSHEET_ID,["'02_자료원본'!A1:X10000"]);
+1623:     matrices["__INPUT_CENTER_SOURCE"]=inputResult?.[0]?.values||[];
+1624:   } catch(error) {
+1625:     matrices["__INPUT_CENTER_SOURCE"]=[];
+1626:     console.warn("[UEP] 입력센터 원본 조회 실패",error?.message||error);
+1627:   }
+1628: 
+1629:   // 학생이 직접 입력한 희망계열·희망전공은 정규화 자료의 유무와 관계없이 항상 읽습니다.
+1630:   // 선택과목 목록은 처리시트/고교학점제 결과를 우선하되, 진로 보조정보는 원응답의 최신값을 기준으로 합니다.
+1631:   try {
+===== liveDataCache= :: line 359 =====
+341:   if(!response.ok)throw schoolReadError('UEP School Read API 설정 조회 실패 ('+response.status+')','UEP_SCHOOL_READ_POLICY_UNAVAILABLE');
+342:   const policy=await response.json();
+343:   const url=String(policy?.schoolReadApiUrl||UEP_SCHOOL_READ_API_FALLBACK||'').trim();
+344:   if(!/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec(?:\?.*)?$/i.test(url))throw schoolReadError('UEP School Read API 배포 URL이 아직 등록되지 않았습니다.','UEP_SCHOOL_READ_NOT_CONFIGURED');
+345:   schoolReadPolicyCache={url,expiresAt:Date.now()+10*60*1000};
+346:   return url;
+347: }
+348: async function getOrCreateSchoolReadDeviceId(){
+349:   try{const saved=String(await fs.readFile(schoolReadDevicePath(),'utf8')).trim();if(saved)return saved;}catch{}
+350:   const id='UEP-'+crypto.randomUUID();
+351:   await fs.mkdir(path.dirname(schoolReadDevicePath()),{recursive:true});
+352:   await fs.writeFile(schoolReadDevicePath(),id,'utf8');
+353:   return id;
+354: }
+355: async function readSchoolReadSession(){
+356:   try{const value=await readEncrypted(schoolReadSessionPath());return value&&typeof value==='object'?value:null;}catch{return null;}
+357: }
+358: async function saveSchoolReadSession(value){await saveEncrypted(schoolReadSessionPath(),value);return value;}
+359: async function clearSchoolReadSession(){try{await fs.unlink(schoolReadSessionPath());}catch(error){if(error?.code!=='ENOENT')throw error;}liveDataCache=null;liveDataFetchedAt=0;return {ok:true};}
+360: async function schoolReadPost(action,payload={}){
+361:   const url=await loadSchoolReadApiUrl();
+362:   const response=await net.fetch(url,{method:'POST',headers:{'content-type':'application/json;charset=UTF-8','accept':'application/json'},body:JSON.stringify({action,...payload})});
+363:   let data={};try{data=await response.json();}catch{}
+364:   if(!response.ok)throw schoolReadError(data?.message||('School Read API HTTP '+response.status),data?.code||'UEP_SCHOOL_READ_HTTP_ERROR');
+365:   return data;
+366: }
+367: async function loginSchoolReadUser({name='',email=''}={}){
+368:   const deviceId=await getOrCreateSchoolReadDeviceId();
+369:   const result=await schoolReadPost('login',{name:String(name||'').trim(),email:String(email||'').trim(),deviceId});
+370:   if(result?.ok&&result?.token){await saveSchoolReadSession({token:String(result.token),deviceId,user:result.user||{},expiresAt:Date.now()+Math.max(300,Number(result.expiresIn||0))*1000,savedAt:new Date().toISOString()});liveDataCache=null;liveDataFetchedAt=0;}
+371:   return result;
+372: }
+373: async function schoolReadSessionStatus({verify=true}={}){
+374:   let endpointReady=true,endpointError='';
+375:   try{await loadSchoolReadApiUrl();}catch(error){endpointReady=false;endpointError=String(error?.message||error);}
+376:   const session=await readSchoolReadSession();
+377:   if(!session?.token||!session?.deviceId)return {ok:endpointReady,authenticated:false,endpointReady,reason:endpointError,user:null,mode:'school_read_api'};
+378:   if(!verify)return {ok:true,authenticated:true,endpointReady,user:session.user||null,mode:'school_read_api'};
+379:   try{const result=await schoolReadPost('verify-token',{token:session.token,deviceId:session.deviceId});if(!result?.ok)throw schoolReadError(result?.message||'UEP 세션 확인 실패',result?.code||'UEP_SCHOOL_READ_TOKEN_INVALID');session.user=result.user||session.user||{};await saveSchoolReadSession(session);return {ok:true,authenticated:true,endpointReady:true,user:session.user,expiresAt:result.expiresAt||'',mode:'school_read_api'};}catch(error){await clearSchoolReadSession();return {ok:false,authenticated:false,endpointReady,reason:String(error?.message||error),code:error?.code||'',user:null,mode:'school_read_api'};}
+380: }
+381: async function schoolReadBatchRead(spreadsheetId,ranges){
+382:   const session=await readSchoolReadSession();
+383:   if(!session?.token||!session?.deviceId)throw schoolReadError('UEP 로그인이 필요합니다.','UEP_SCHOOL_READ_LOGIN_REQUIRED');
+384:   const result=await schoolReadPost('batch-read',{token:session.token,deviceId:session.deviceId,spreadsheetId,ranges});
+385:   if(!result?.ok)throw schoolReadError(result?.message||'학교 데이터를 읽지 못했습니다.',result?.code||'UEP_SCHOOL_READ_BATCH_FAILED');
+386:   return result.valueRanges||[];
+387: }
+388: 
+389: function base64url(value) { return Buffer.from(value).toString("base64url"); }
+390: 
+391: // __UEP_GOOGLE_USER_OAUTH_08070__
+392: const UEP_UPDATE_POLICY_URL = "https://raw.githubusercontent.com/hkhsm00-k81c/UEP-Updates/main/uep-policy.json";
+393: let googleOAuthPolicyCache={clientId:"",expiresAt:0};
+394: 
+395: function googleOAuthError(message,code){const e=new Error(message);e.code=code;return e;}
+396: async function loadGoogleOAuthClientId(){
+397:   if(googleOAuthPolicyCache.clientId && googleOAuthPolicyCache.expiresAt>Date.now()) return googleOAuthPolicyCache.clientId;
+398:   let response;
+399:   try{ response=await net.fetch(UEP_UPDATE_POLICY_URL,{cache:"no-store"}); }
+400:   catch(error){ throw googleOAuthError("Google 계정 연결 설정을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.","UEP_GOOGLE_OAUTH_POLICY_UNAVAILABLE"); }
+401:   if(!response.ok) throw googleOAuthError(`Google 계정 연결 설정 조회 실패 (${response.status})`,"UEP_GOOGLE_OAUTH_POLICY_UNAVAILABLE");
+402:   const policy=await response.json();
+403:   const clientId=String(policy?.googleOAuthClientId||"").trim();
+404:   if(!/\.apps\.googleusercontent\.com$/i.test(clientId)) throw googleOAuthError("관리자가 UEP Google OAuth 클라이언트를 아직 설정하지 않았습니다.","UEP_GOOGLE_OAUTH_CLIENT_NOT_CONFIGURED");
+405:   googleOAuthPolicyCache={clientId,expiresAt:Date.now()+10*60*1000};
+406:   return clientId;
+407: }
+408: function googleUserOAuthRecoveryKey(salt){
+409:   const identity=`${os.hostname()}|${os.userInfo().username}|UEP-GOOGLE-USER-OAUTH-v1`;
+410:   return crypto.scryptSync(identity,salt,32);
+411: }
+412: function encodeGoogleUserOAuthRecovery(value){
+413:   const salt=crypto.randomBytes(16),iv=crypto.randomBytes(12),key=googleUserOAuthRecoveryKey(salt);
+414:   const cipher=crypto.createCipheriv('aes-256-gcm',key,iv);
+415:   const encrypted=Buffer.concat([cipher.update(JSON.stringify(value),'utf8'),cipher.final()]);
+416:   return {version:1,algorithm:'aes-256-gcm',salt:salt.toString('base64'),iv:iv.toString('base64'),tag:cipher.getAuthTag().toString('base64'),data:encrypted.toString('base64')};
+417: }
+418: function decodeGoogleUserOAuthRecovery(payload){
+419:   if(!payload||payload.version!==1||payload.algorithm!=='aes-256-gcm')throw new Error('invalid OAuth recovery token');
+420:   const salt=Buffer.from(payload.salt,'base64'),iv=Buffer.from(payload.iv,'base64'),tag=Buffer.from(payload.tag,'base64'),data=Buffer.from(payload.data,'base64');
+421:   const decipher=crypto.createDecipheriv('aes-256-gcm',googleUserOAuthRecoveryKey(salt),iv);decipher.setAuthTag(tag);
+422:   return JSON.parse(Buffer.concat([decipher.update(data),decipher.final()]).toString('utf8'));
+423: }
+424: async function writeGoogleUserOAuthRecovery(value){
+425:   const payload=encodeGoogleUserOAuthRecovery(value);
+426:   for(const target of [googleUserOAuthRecoveryPath(),googleUserOAuthCanonicalRecoveryPath()]){
+427:     await fs.mkdir(path.dirname(target),{recursive:true});
+428:     await fs.writeFile(target,JSON.stringify(payload),'utf8');
+429:   }
+430: }
+431: async function readGoogleUserOAuthRecovery(){
+432:   for(const target of [googleUserOAuthCanonicalRecoveryPath(),googleUserOAuthRecoveryPath()]){
+433:     try{return decodeGoogleUserOAuthRecovery(JSON.parse(await fs.readFile(target,'utf8')));}catch{}
+434:   }
+435:   throw new Error('OAuth recovery token not found');
+436: }
+437: async function saveGoogleUserOAuth(value){
+438:   let primarySaved=false;
+439:   if(safeStorage.isEncryptionAvailable()){
+440:     const encrypted=safeStorage.encryptString(JSON.stringify(value));
+441:     for(const target of [googleUserOAuthCanonicalPath(),googleUserOAuthPath()]){
+442:       try{await fs.mkdir(path.dirname(target),{recursive:true});await fs.writeFile(target,encrypted);primarySaved=true;}catch{}
+443:     }
+444:   }
+445:   await writeGoogleUserOAuthRecovery(value);
+446:   return {primarySaved,recoverySaved:true,canonical:true};
+447: }
+448: async function readGoogleUserOAuth(){
+449:   for(const target of [googleUserOAuthCanonicalPath(),googleUserOAuthPath()]){
+===== matrices[name] :: line 1587 =====
+1569:   }
+1570:   await mapWithConcurrency(chunks, 1, async ({ offset, chunk }) => {
+1571:     try {
+1572:       const valueRanges = await readSheetBatch(token, UEP_SPREADSHEET_ID, chunk.map(([, range]) => range));
+1573:       assignValueRangesByRange(matrices,chunk,valueRanges);
+1574:     } catch (chunkError) {
+1575:       console.warn(`[UEP] 기본정보 묶음 조회 실패(${offset + 1}~${offset + chunk.length}), 개별 재시도`, chunkError?.message || chunkError);
+1576:       await mapWithConcurrency(chunk, 1, async ([logicalName, range]) => {
+1577:         try {
+1578:           const one = await readSheetBatch(token, UEP_SPREADSHEET_ID, [range]);
+1579:           matrices[logicalName] = one?.[0]?.values || [];
+1580:         } catch (sheetError) {
+1581:           matrices[logicalName] = [];
+1582:           console.warn(`[UEP] 기본정보 탭 조회 실패: ${logicalName}`, sheetError?.message || sheetError);
+1583:         }
+1584:       });
+1585:     }
+1586:   });
+1587:   entries.forEach(([name]) => { if (!matrices[name]) matrices[name] = []; });
+1588: 
+1589:   // 선택보고서 정규화 탭의 구조가 손상된 경우 구글폼 원본으로 복구한 뒤 읽습니다.
+1590:   // 읽기 전용 담임 세션에서는 정규화 탭 자동복구(쓰기)를 실행하지 않습니다.
+1591:   if(auth.mode!=='school_read_api') await ensureSelectedReportNormalization(token);
+1592: 
+1593:   // 학생응답 가공 결과: 현재 실제 존재하는 데이터 처리 탭만 직접 읽습니다.
+1594:   // 선택과목은 응답수집 06_선택과목응답을 별도 읽고 기존 fallback 로직으로 구성합니다.
+1595:   const processingRanges = [
+1596:     ["02_학사외출_일자별", "'02_학사외출_일자별'!A1:AD10000"],
+1597:     ["20_공통보고서_정규화", "'20_공통보고서_정규화'!A1:X5000"],
+1598:     ["21_선택보고서_정규화", "'21_선택보고서_정규화'!A1:X5000"],
+1599:     ["30_야자출결_정규화", "'30_야자출결_정규화'!A1:P70000"],
+1600:     // 학교캘린더는 기본정보 연결시트가 아니라 데이터 처리시트의 직접 이관값만 사용합니다.
+1601:     ["41_학교캘린더", "'41_학교캘린더'!A1:W3000"],
+1602:     ["51_선택과목오류_정규화", "'51_선택과목오류_정규화'!A1:V5000"],
+1603:   ];
+1604:   try {
+1605:     const result = await readSheetBatch(token, UEP_PROCESSING_SPREADSHEET_ID, processingRanges.map(([,range])=>range));
+1606:     assignValueRangesByRange(matrices,processingRanges,result);
+1607:   } catch(error) {
+1608:     // 한 탭의 일시 오류가 보고서·학사외출·선택과목 등 정상 탭까지 모두 비우지 않도록
+1609:     // 묶음 조회 실패 시 각 탭을 독립적으로 재시도합니다. 평상시에는 1회 batchGet으로 quota를 보호합니다.
+1610:     console.warn("[UEP] 처리시트 묶음 조회 실패 - 개별 복구 시도",error?.message||error);
+1611:     await mapWithConcurrency(processingRanges,1,async([logicalName,range])=>{
+1612:       try{const one=await readSheetBatch(token,UEP_PROCESSING_SPREADSHEET_ID,[range]);matrices[logicalName]=one?.[0]?.values||[];}
+1613:       catch(sheetError){matrices[logicalName]=[];console.warn(`[UEP] 처리시트 개별 조회 실패: ${logicalName}`,sheetError?.message||sheetError);}
+1614:     });
+1615:   }
+1616: 
+1617:   // 학사외출은 데이터 처리시트의 02_학사외출_일자별만 조회합니다.
+1618:   // 응답 원본이나 기본정보 연결시트, 별도 운영 시트를 직접 참조하지 않습니다.
+1619: 
+1620:   // 입력센터 원본은 별도 [UEP] 입력센터 원본 스프레드시트에서 읽습니다.
+1621:   try {
+1622:     const inputResult=await readSheetBatch(token,UEP_INPUT_CENTER_SPREADSHEET_ID,["'02_자료원본'!A1:X10000"]);
+1623:     matrices["__INPUT_CENTER_SOURCE"]=inputResult?.[0]?.values||[];
+1624:   } catch(error) {
+1625:     matrices["__INPUT_CENTER_SOURCE"]=[];
+1626:     console.warn("[UEP] 입력센터 원본 조회 실패",error?.message||error);
+1627:   }
+1628: 
+1629:   // 학생이 직접 입력한 희망계열·희망전공은 정규화 자료의 유무와 관계없이 항상 읽습니다.
+1630:   // 선택과목 목록은 처리시트/고교학점제 결과를 우선하되, 진로 보조정보는 원응답의 최신값을 기준으로 합니다.
+1631:   try {
+1632:     const rawSelection = await readSheetBatch(token, "1K-Me8Pm8T2d5fGHoqSPEAu4RXozETUQ-N5pZVxjs8Hw", ["'06_선택과목응답'!A1:U2000"]);
+1633:     matrices["__SELECTION_RESPONSES"] = rawSelection?.[0]?.values || [];
+1634:   } catch (error) {
+1635:     matrices["__SELECTION_RESPONSES"] = [];
+1636:     console.warn("[UEP] 선택과목 응답 조회 실패", error?.message || error);
+1637:   }
+1638: 
+1639:   // 규칙 적용 자료: 평상시는 batchGet, 한 탭이라도 실패하면 각 탭을 독립 재조회합니다.
+1640:   // 특히 40_학사외출규칙은 다른 규칙 탭 오류와 무관하게 반드시 복구를 시도합니다.
+1641:   const ruleEntries = Object.entries(RULE_SHEET_RANGES);
+1642:   try {
+1643:     const ruleValueRanges = await readSheetBatch(token, UEP_RULES_SPREADSHEET_ID, ruleEntries.map(([, range]) => range));
+1644:     assignValueRangesByRange(matrices,ruleEntries,ruleValueRanges);
+1645:     ruleEntries.forEach(([name]) => { if (!matrices[name]) matrices[name] = []; });
+1646:   } catch (error) {
+1647:     console.warn("[UEP] 규칙로그 묶음 조회 실패 - 개별 복구 시도", error?.message || error);
+1648:     await mapWithConcurrency(ruleEntries, 1, async ([logicalName, range]) => {
+1649:       try {
+1650:         const one = await readSheetBatch(token, UEP_RULES_SPREADSHEET_ID, [range]);
+1651:         matrices[logicalName] = one?.[0]?.values || [];
+1652:       } catch (sheetError) {
+1653:         matrices[logicalName] = [];
+1654:         console.warn(`[UEP] 규칙로그 개별 조회 실패: ${logicalName}`, sheetError?.message || sheetError);
+1655:       }
+1656:     });
+1657:   }
+1658:   // v0.76.93: 학사외출 규칙은 화면 운영의 핵심이므로 규칙 묶음 결과와 무관하게 마지막에 단독 재조회합니다.
+1659:   // batchGet의 일부 누락/순서 문제 또는 다른 규칙 탭 오류가 있어도 40_학사외출규칙 원본을 우선합니다.
+1660:   try {
+1661:     const dormRuleResult = await readSheetBatch(
+1662:       token,
+1663:       UEP_RULES_SPREADSHEET_ID,
+1664:       ["'40_학사외출규칙'!A1:X1000"]
+1665:     );
+1666:     const dormRuleMatrix = dormRuleResult?.[0]?.values || [];
+1667:     if (dormRuleMatrix.length >= 3) {
+1668:       matrices["40_학사외출규칙"] = dormRuleMatrix;
+1669:       console.log(`[UEP] 40_학사외출규칙 단독 조회 성공: ${Math.max(0,dormRuleMatrix.length-3)}건`);
+1670:     } else {
+1671:       console.warn("[UEP] 40_학사외출규칙 단독 조회 결과가 비어 있습니다.");
+1672:     }
+1673:   } catch (dormRuleError) {
+1674:     console.warn("[UEP] 40_학사외출규칙 단독 조회 실패", dormRuleError?.message || dormRuleError);
+1675:   }
+1676: 
+1677:   const curriculumSpreadsheetId = "1fevlAWQZqWQkiYl-eGRCdzidBj59Z8NqOxfCrGvwlHI";
+===== valueRanges :: line 386 =====
+368:   const deviceId=await getOrCreateSchoolReadDeviceId();
+369:   const result=await schoolReadPost('login',{name:String(name||'').trim(),email:String(email||'').trim(),deviceId});
+370:   if(result?.ok&&result?.token){await saveSchoolReadSession({token:String(result.token),deviceId,user:result.user||{},expiresAt:Date.now()+Math.max(300,Number(result.expiresIn||0))*1000,savedAt:new Date().toISOString()});liveDataCache=null;liveDataFetchedAt=0;}
+371:   return result;
+372: }
+373: async function schoolReadSessionStatus({verify=true}={}){
+374:   let endpointReady=true,endpointError='';
+375:   try{await loadSchoolReadApiUrl();}catch(error){endpointReady=false;endpointError=String(error?.message||error);}
+376:   const session=await readSchoolReadSession();
+377:   if(!session?.token||!session?.deviceId)return {ok:endpointReady,authenticated:false,endpointReady,reason:endpointError,user:null,mode:'school_read_api'};
+378:   if(!verify)return {ok:true,authenticated:true,endpointReady,user:session.user||null,mode:'school_read_api'};
+379:   try{const result=await schoolReadPost('verify-token',{token:session.token,deviceId:session.deviceId});if(!result?.ok)throw schoolReadError(result?.message||'UEP 세션 확인 실패',result?.code||'UEP_SCHOOL_READ_TOKEN_INVALID');session.user=result.user||session.user||{};await saveSchoolReadSession(session);return {ok:true,authenticated:true,endpointReady:true,user:session.user,expiresAt:result.expiresAt||'',mode:'school_read_api'};}catch(error){await clearSchoolReadSession();return {ok:false,authenticated:false,endpointReady,reason:String(error?.message||error),code:error?.code||'',user:null,mode:'school_read_api'};}
+380: }
+381: async function schoolReadBatchRead(spreadsheetId,ranges){
+382:   const session=await readSchoolReadSession();
+383:   if(!session?.token||!session?.deviceId)throw schoolReadError('UEP 로그인이 필요합니다.','UEP_SCHOOL_READ_LOGIN_REQUIRED');
+384:   const result=await schoolReadPost('batch-read',{token:session.token,deviceId:session.deviceId,spreadsheetId,ranges});
+385:   if(!result?.ok)throw schoolReadError(result?.message||'학교 데이터를 읽지 못했습니다.',result?.code||'UEP_SCHOOL_READ_BATCH_FAILED');
+386:   return result.valueRanges||[];
+387: }
+388: 
+389: function base64url(value) { return Buffer.from(value).toString("base64url"); }
+390: 
+391: // __UEP_GOOGLE_USER_OAUTH_08070__
+392: const UEP_UPDATE_POLICY_URL = "https://raw.githubusercontent.com/hkhsm00-k81c/UEP-Updates/main/uep-policy.json";
+393: let googleOAuthPolicyCache={clientId:"",expiresAt:0};
+394: 
+395: function googleOAuthError(message,code){const e=new Error(message);e.code=code;return e;}
+396: async function loadGoogleOAuthClientId(){
+397:   if(googleOAuthPolicyCache.clientId && googleOAuthPolicyCache.expiresAt>Date.now()) return googleOAuthPolicyCache.clientId;
+398:   let response;
+399:   try{ response=await net.fetch(UEP_UPDATE_POLICY_URL,{cache:"no-store"}); }
+400:   catch(error){ throw googleOAuthError("Google 계정 연결 설정을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.","UEP_GOOGLE_OAUTH_POLICY_UNAVAILABLE"); }
+401:   if(!response.ok) throw googleOAuthError(`Google 계정 연결 설정 조회 실패 (${response.status})`,"UEP_GOOGLE_OAUTH_POLICY_UNAVAILABLE");
+402:   const policy=await response.json();
+403:   const clientId=String(policy?.googleOAuthClientId||"").trim();
+404:   if(!/\.apps\.googleusercontent\.com$/i.test(clientId)) throw googleOAuthError("관리자가 UEP Google OAuth 클라이언트를 아직 설정하지 않았습니다.","UEP_GOOGLE_OAUTH_CLIENT_NOT_CONFIGURED");
+405:   googleOAuthPolicyCache={clientId,expiresAt:Date.now()+10*60*1000};
+406:   return clientId;
+407: }
+408: function googleUserOAuthRecoveryKey(salt){
+409:   const identity=`${os.hostname()}|${os.userInfo().username}|UEP-GOOGLE-USER-OAUTH-v1`;
+410:   return crypto.scryptSync(identity,salt,32);
+411: }
+412: function encodeGoogleUserOAuthRecovery(value){
+413:   const salt=crypto.randomBytes(16),iv=crypto.randomBytes(12),key=googleUserOAuthRecoveryKey(salt);
+414:   const cipher=crypto.createCipheriv('aes-256-gcm',key,iv);
+415:   const encrypted=Buffer.concat([cipher.update(JSON.stringify(value),'utf8'),cipher.final()]);
+416:   return {version:1,algorithm:'aes-256-gcm',salt:salt.toString('base64'),iv:iv.toString('base64'),tag:cipher.getAuthTag().toString('base64'),data:encrypted.toString('base64')};
+417: }
+418: function decodeGoogleUserOAuthRecovery(payload){
+419:   if(!payload||payload.version!==1||payload.algorithm!=='aes-256-gcm')throw new Error('invalid OAuth recovery token');
+420:   const salt=Buffer.from(payload.salt,'base64'),iv=Buffer.from(payload.iv,'base64'),tag=Buffer.from(payload.tag,'base64'),data=Buffer.from(payload.data,'base64');
+421:   const decipher=crypto.createDecipheriv('aes-256-gcm',googleUserOAuthRecoveryKey(salt),iv);decipher.setAuthTag(tag);
+422:   return JSON.parse(Buffer.concat([decipher.update(data),decipher.final()]).toString('utf8'));
+423: }
+424: async function writeGoogleUserOAuthRecovery(value){
+425:   const payload=encodeGoogleUserOAuthRecovery(value);
+426:   for(const target of [googleUserOAuthRecoveryPath(),googleUserOAuthCanonicalRecoveryPath()]){
+427:     await fs.mkdir(path.dirname(target),{recursive:true});
+428:     await fs.writeFile(target,JSON.stringify(payload),'utf8');
+429:   }
+430: }
+431: async function readGoogleUserOAuthRecovery(){
+432:   for(const target of [googleUserOAuthCanonicalRecoveryPath(),googleUserOAuthRecoveryPath()]){
+433:     try{return decodeGoogleUserOAuthRecovery(JSON.parse(await fs.readFile(target,'utf8')));}catch{}
+434:   }
+435:   throw new Error('OAuth recovery token not found');
+436: }
+437: async function saveGoogleUserOAuth(value){
+438:   let primarySaved=false;
+439:   if(safeStorage.isEncryptionAvailable()){
+440:     const encrypted=safeStorage.encryptString(JSON.stringify(value));
+441:     for(const target of [googleUserOAuthCanonicalPath(),googleUserOAuthPath()]){
+442:       try{await fs.mkdir(path.dirname(target),{recursive:true});await fs.writeFile(target,encrypted);primarySaved=true;}catch{}
+443:     }
+444:   }
+445:   await writeGoogleUserOAuthRecovery(value);
+446:   return {primarySaved,recoverySaved:true,canonical:true};
+447: }
+448: async function readGoogleUserOAuth(){
+449:   for(const target of [googleUserOAuthCanonicalPath(),googleUserOAuthPath()]){
+450:     try{
+451:       const encrypted=await fs.readFile(target);
+452:       if(safeStorage.isEncryptionAvailable()){
+453:         try{const value=JSON.parse(safeStorage.decryptString(encrypted));if(value&&typeof value==='object'){await saveGoogleUserOAuth(value);return value;}}catch{}
+454:       }
+455:       try{const legacy=JSON.parse(encrypted.toString('utf8'));if(legacy&&typeof legacy==='object'){await saveGoogleUserOAuth(legacy);return legacy;}}catch{}
+456:     }catch{}
+457:   }
+458:   try{
+459:     const recovered=await readGoogleUserOAuthRecovery();
+460:     if(recovered&&typeof recovered==='object'){await saveGoogleUserOAuth(recovered);return recovered;}
+461:   }catch{}
+462:   return null;
+463: }
+464: async function googleUserInfo(accessToken){
+465:   const response=await net.fetch('https://openidconnect.googleapis.com/v1/userinfo',{headers:{authorization:`Bearer ${accessToken}`}});
+466:   if(!response.ok) throw googleOAuthError(`Google 사용자 확인 실패 (${response.status})`,'UEP_GOOGLE_OAUTH_USERINFO_FAILED');
+467:   return await response.json();
+468: }
+469: async function refreshGoogleUserOAuth(saved){
+470:   if(!saved?.refresh_token) throw googleOAuthError("Google 계정 연결을 다시 승인해 주세요.","UEP_GOOGLE_USER_AUTH_REQUIRED");
+471:   const clientId=await loadGoogleOAuthClientId();
+472:   if(String(saved.client_id||'').trim() && String(saved.client_id).trim()!==clientId){
+473:     await disconnectGoogleUser();
+474:     throw googleOAuthError('Google 연결 설정이 갱신되었습니다. Google 계정 연결을 한 번만 다시 승인해 주세요.','UEP_GOOGLE_USER_AUTH_REQUIRED');
+475:   }
+476:   const body=new URLSearchParams({client_id:clientId,refresh_token:String(saved.refresh_token),grant_type:'refresh_token'});
+===== entries = [ :: line 1552 =====
+1534: const UEP_OPERATIONAL_RANGE_NAMES=Object.freeze(['30_공식출결기록','31_지각기록','40_공지마감','44_공지확인현황','42_급식지도계획','43_야자감독계획']);
+1535: async function fetchOperationalData({credentials=null}={}){
+1536:   if(!liveDataCache)return {ok:false,requiresFullSync:true,reason:'전체 캐시가 아직 준비되지 않았습니다.'};
+1537:   const auth=await getReadonlySheetsAuth(credentials),token=auth.token;
+1538:   const operationalEntries=UEP_OPERATIONAL_RANGE_NAMES.map(name=>[name,SHEET_RANGES[name]]);
+1539:   const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,operationalEntries.map(([,range])=>range));
+1540:   const matrices={};assignValueRangesByRange(matrices,operationalEntries,result);
+1541:   const partial=parseGoogleSheetData(matrices);
+1542:   const patch={officialAttendance:partial.officialAttendance||[],lateAttendance:partial.lateAttendance||[],notices:partial.notices||[],noticeReceipts:partial.noticeReceipts||[],lunchDuties:partial.lunchDuties||[],nightSupervisors:partial.nightSupervisors||[]};
+1543:   const operationalSyncedAt=new Date().toISOString();liveDataCache={...liveDataCache,...patch,operationalSyncedAt};liveDataFetchedAt=Date.now();
+1544:   return {ok:true,operationalSyncedAt,syncedAt:operationalSyncedAt,patch};
+1545: }
+1546: 
+1547: async function fetchLiveData({ force = false, credentials = null } = {}) {
+1548:   if (!force && liveDataCache && Date.now() - liveDataFetchedAt < 120000) return liveDataCache;
+1549:   // 0.81.40: 관리자 로컬 서비스계정과 담임 School Read API 세션을 동일 읽기 파이프라인으로 연결합니다.
+1550:   const auth = await getReadonlySheetsAuth(credentials);
+1551:   const token = auth.token;
+1552:   const entries = [
+1553:     ...Object.entries(SHEET_RANGES),
+1554:     ["52_대입기초", "'52_대입기초'!A1:N500"],
+1555:     ["53_전형이해", "'53_전형이해'!A1:N500"],
+1556:     ["53A_전형세부유형DB", "'53A_전형세부유형DB'!A1:R500"],
+1557:     ["53B_전형유형별대학DB", "'53B_전형유형별대학DB'!A1:P3000"],
+1558:     ["56_대학입시마스터", "'56_대학입시마스터'!A1:R500"],
+1559:     ["54_수능최저DB", "'54_수능최저DB'!A1:U2000"],
+1560:     ["55_대학입결DB", "'55_대학입결DB'!A1:K5000"],
+1561:   ];
+1562:   const matrices = {};
+1563:   // 기본정보 연결시트를 가장 먼저, 작은 묶음으로 읽습니다.
+1564:   // 탭 추가로 URL이 길어지거나 특정 탭이 잠시 실패해도 전체 연결이 끊기지 않도록 합니다.
+1565:   const chunkSize = 12;
+1566:   const chunks = [];
+1567:   for (let offset = 0; offset < entries.length; offset += chunkSize) {
+1568:     chunks.push({ offset, chunk: entries.slice(offset, offset + chunkSize) });
+1569:   }
+1570:   await mapWithConcurrency(chunks, 1, async ({ offset, chunk }) => {
+1571:     try {
+1572:       const valueRanges = await readSheetBatch(token, UEP_SPREADSHEET_ID, chunk.map(([, range]) => range));
+1573:       assignValueRangesByRange(matrices,chunk,valueRanges);
+1574:     } catch (chunkError) {
+1575:       console.warn(`[UEP] 기본정보 묶음 조회 실패(${offset + 1}~${offset + chunk.length}), 개별 재시도`, chunkError?.message || chunkError);
+1576:       await mapWithConcurrency(chunk, 1, async ([logicalName, range]) => {
+1577:         try {
+1578:           const one = await readSheetBatch(token, UEP_SPREADSHEET_ID, [range]);
+1579:           matrices[logicalName] = one?.[0]?.values || [];
+1580:         } catch (sheetError) {
+1581:           matrices[logicalName] = [];
+1582:           console.warn(`[UEP] 기본정보 탭 조회 실패: ${logicalName}`, sheetError?.message || sheetError);
+1583:         }
+1584:       });
+1585:     }
+1586:   });
+1587:   entries.forEach(([name]) => { if (!matrices[name]) matrices[name] = []; });
+1588: 
+1589:   // 선택보고서 정규화 탭의 구조가 손상된 경우 구글폼 원본으로 복구한 뒤 읽습니다.
+1590:   // 읽기 전용 담임 세션에서는 정규화 탭 자동복구(쓰기)를 실행하지 않습니다.
+1591:   if(auth.mode!=='school_read_api') await ensureSelectedReportNormalization(token);
+1592: 
+1593:   // 학생응답 가공 결과: 현재 실제 존재하는 데이터 처리 탭만 직접 읽습니다.
+1594:   // 선택과목은 응답수집 06_선택과목응답을 별도 읽고 기존 fallback 로직으로 구성합니다.
+1595:   const processingRanges = [
+1596:     ["02_학사외출_일자별", "'02_학사외출_일자별'!A1:AD10000"],
+1597:     ["20_공통보고서_정규화", "'20_공통보고서_정규화'!A1:X5000"],
+1598:     ["21_선택보고서_정규화", "'21_선택보고서_정규화'!A1:X5000"],
+1599:     ["30_야자출결_정규화", "'30_야자출결_정규화'!A1:P70000"],
+1600:     // 학교캘린더는 기본정보 연결시트가 아니라 데이터 처리시트의 직접 이관값만 사용합니다.
+1601:     ["41_학교캘린더", "'41_학교캘린더'!A1:W3000"],
+1602:     ["51_선택과목오류_정규화", "'51_선택과목오류_정규화'!A1:V5000"],
+1603:   ];
+1604:   try {
+1605:     const result = await readSheetBatch(token, UEP_PROCESSING_SPREADSHEET_ID, processingRanges.map(([,range])=>range));
+1606:     assignValueRangesByRange(matrices,processingRanges,result);
+1607:   } catch(error) {
+1608:     // 한 탭의 일시 오류가 보고서·학사외출·선택과목 등 정상 탭까지 모두 비우지 않도록
+1609:     // 묶음 조회 실패 시 각 탭을 독립적으로 재시도합니다. 평상시에는 1회 batchGet으로 quota를 보호합니다.
+1610:     console.warn("[UEP] 처리시트 묶음 조회 실패 - 개별 복구 시도",error?.message||error);
+1611:     await mapWithConcurrency(processingRanges,1,async([logicalName,range])=>{
+1612:       try{const one=await readSheetBatch(token,UEP_PROCESSING_SPREADSHEET_ID,[range]);matrices[logicalName]=one?.[0]?.values||[];}
+1613:       catch(sheetError){matrices[logicalName]=[];console.warn(`[UEP] 처리시트 개별 조회 실패: ${logicalName}`,sheetError?.message||sheetError);}
+1614:     });
+1615:   }
+1616: 
+1617:   // 학사외출은 데이터 처리시트의 02_학사외출_일자별만 조회합니다.
+1618:   // 응답 원본이나 기본정보 연결시트, 별도 운영 시트를 직접 참조하지 않습니다.
+1619: 
+1620:   // 입력센터 원본은 별도 [UEP] 입력센터 원본 스프레드시트에서 읽습니다.
+1621:   try {
+1622:     const inputResult=await readSheetBatch(token,UEP_INPUT_CENTER_SPREADSHEET_ID,["'02_자료원본'!A1:X10000"]);
+1623:     matrices["__INPUT_CENTER_SOURCE"]=inputResult?.[0]?.values||[];
+1624:   } catch(error) {
+1625:     matrices["__INPUT_CENTER_SOURCE"]=[];
+1626:     console.warn("[UEP] 입력센터 원본 조회 실패",error?.message||error);
+1627:   }
+1628: 
+1629:   // 학생이 직접 입력한 희망계열·희망전공은 정규화 자료의 유무와 관계없이 항상 읽습니다.
+1630:   // 선택과목 목록은 처리시트/고교학점제 결과를 우선하되, 진로 보조정보는 원응답의 최신값을 기준으로 합니다.
+1631:   try {
+1632:     const rawSelection = await readSheetBatch(token, "1K-Me8Pm8T2d5fGHoqSPEAu4RXozETUQ-N5pZVxjs8Hw", ["'06_선택과목응답'!A1:U2000"]);
+1633:     matrices["__SELECTION_RESPONSES"] = rawSelection?.[0]?.values || [];
+1634:   } catch (error) {
+1635:     matrices["__SELECTION_RESPONSES"] = [];
+1636:     console.warn("[UEP] 선택과목 응답 조회 실패", error?.message || error);
+1637:   }
+1638: 
+1639:   // 규칙 적용 자료: 평상시는 batchGet, 한 탭이라도 실패하면 각 탭을 독립 재조회합니다.
+1640:   // 특히 40_학사외출규칙은 다른 규칙 탭 오류와 무관하게 반드시 복구를 시도합니다.
+1641:   const ruleEntries = Object.entries(RULE_SHEET_RANGES);
+1642:   try {
