@@ -1,0 +1,37 @@
+name: Diagnose UEP 0.82.09 FetchLiveData
+on:
+  push:
+    branches: [main]
+    paths: [diag-08209-fetchlive.trigger]
+permissions:
+  contents: write
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.82.09 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+          $file='app/resources/app/electron/main.cjs'
+          $txt=Get-Content $file -Raw
+          $script:out=@()
+          foreach($pat in @('fetchLiveData','const UEP_SPREADSHEET_ID','UEP_SPREADSHEET_ID =','readSheetBatch(token, UEP_SPREADSHEET_ID','readSheetBatch(token,UEP_SPREADSHEET_ID','liveDataCache','summary:','sourceName:')){
+            $matches=[regex]::Matches($txt,[regex]::Escape($pat))
+            $script:out += "### $pat count=$($matches.Count)"
+            foreach($x in $matches | Select-Object -First 15){
+              $s=[Math]::Max(0,$x.Index-5000);$l=[Math]::Min(16000,$txt.Length-$s)
+              $script:out += $txt.Substring($s,$l);$script:out += "`n---`n"
+            }
+          }
+          $script:out | Set-Content diag-08209-fetchlive.txt -Encoding utf8
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add diag-08209-fetchlive.txt
+          git commit -m 'Capture UEP 0.82.09 fetchLiveData diagnostics'
+          git push origin HEAD:main
