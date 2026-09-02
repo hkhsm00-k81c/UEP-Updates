@@ -1,4 +1,4 @@
-name: Build and Release UEP 0.82.20 Real Admissions Connect
+name: Build and Release UEP 0.82.21 Admissions UI
 'on':
   push:
     branches: [main]
@@ -18,40 +18,41 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference='Stop'
-          node --check scripts/patch-uep-08220-admissions-real-connect.js
+          node --check scripts/patch-uep-08221-admissions-ui-releaseux.js
           New-Item -ItemType Directory -Force source,app | Out-Null
-          gh release download v0.82.19 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          gh release download v0.82.20 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
           Expand-Archive source/UEP-update.zip app -Force
-          node scripts/patch-uep-08220-admissions-real-connect.js app
+          node scripts/patch-uep-08221-admissions-ui-releaseux.js app
           node --check app/resources/app/gyomuon.js
           node --check app/resources/app/electron/main.cjs
           $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
-          $m=Get-Content app/resources/app/electron/main.cjs -Raw -Encoding UTF8
-          foreach($x in @('const APP_VERSION = "0.82.20";','UEP_08220_ADMISSIONS_REAL_CONNECT','52_대입기초 실시간 연결','53_전형이해 + 53A 세부유형 + 53B 실제 대학전형 실시간 연결')){if(-not $g.Contains($x)){throw "missing renderer marker: $x"}}
-          foreach($x in @("data.admissionTypeDetails=uep08210MatrixObjects(matrices['53A_전형세부유형DB'])","data.admissionStructures=uep08210MatrixObjects(matrices['53B_전형유형별대학DB'])","data['53A_전형세부유형DB']=data.admissionTypeDetails","data['53B_전형유형별대학DB']=data.admissionStructures")){if(-not $m.Contains($x)){throw "missing cache mapping: $x"}}
+          $c=Get-Content app/resources/app/gyomuon.css -Raw -Encoding UTF8
+          foreach($x in @('const APP_VERSION = "0.82.21";','UEP_08220_ADMISSIONS_REAL_CONNECT','UEP_08221_ADMISSIONS_UI_RELEASE_UX','uep08221ShowReleaseNotes','uep08221EnsureVersionBadge','uep08221OpenUniversityFromTypes')){if(-not $g.Contains($x)){throw "missing renderer marker: $x"}}
+          foreach($x in @('#uep-global-version-badge','#uep-release-notes-overlay','#uep-admission-back-button','.admission-explain-grid article')){if(-not $c.Contains($x)){throw "missing css marker: $x"}}
           foreach($x in @('__UEP_08217_LOGIN_WATCHDOG__','setInterval(sync,2500)')){if($g.Contains($x)){throw "forbidden regression marker: $x"}}
           Remove-Item UEP-update.zip,sha256.txt -Force -ErrorAction SilentlyContinue
           Compress-Archive -Path app\* -DestinationPath UEP-update.zip -CompressionLevel Optimal
           $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower();"$sha  UEP-update.zip"|Set-Content sha256.txt -Encoding ascii
           $notes=@'
-          UEP v0.82.20
-          - v0.82.19 실제 연결 누락 교정판
-          - 53A_전형세부유형DB와 53B_전형유형별대학DB를 readonlyCache에 실제 주입
-          - 대입 기초 화면을 52_대입기초 행 기반 동적 렌더링으로 전환
-          - 전형 이해 화면을 53 + 53A + 53B 실제 데이터 기반 동적 렌더링으로 전환
-          - 오늘의 대학은 기존 56 -> 53B -> 54 -> 55 조인 로직이 실제 데이터를 받도록 복구
-          - School Read API·로그인·일반 대시보드 로직은 변경하지 않음
+          UEP v0.82.21
+          - 대입 기초·전형 이해·오늘의 대학 UI 가독성 개선
+          - 본문 글자와 행간 확대, 카드 정보 위계 및 옅은 유형별 배경 적용
+          - 상담/주의 정보와 대학 탐색 버튼 가독성 강화
+          - 전형 이해에서 대학 상세로 이동 후 돌아가기 버튼 추가
+          - 프로그램 최상단에 현재 버전 상시 표시
+          - 새 버전 첫 실행 시 수정사항 팝업 자동 표시 구조 복구
+          - v0.82.20 대입상담 실시간 시트 연결 로직은 그대로 유지
           '@
-          gh release create v0.82.20 UEP-update.zip sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.20' --notes $notes --target $env:GITHUB_SHA
+          gh release create v0.82.21 UEP-update.zip sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.21' --notes $notes --target $env:GITHUB_SHA
           $policy=Get-Content uep-policy.json -Raw|ConvertFrom-Json
-          $policy.latestVersion='0.82.20'
-          $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.20/UEP-update.zip'
+          $policy.latestVersion='0.82.21'
+          $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.21/UEP-update.zip'
           $policy.sha256=$sha
-          $policy.message='UEP 0.82.20 · 대입상담 시트 실제 연결 교정'
+          $policy.message='UEP 0.82.21 · 대입상담 UI 개선 + 버전/수정사항 표시 복구'
           $policy|ConvertTo-Json -Depth 10|Set-Content uep-policy.json -Encoding utf8
-          @("UEP 0.82.20 RELEASE SUCCESS","base=v0.82.19","real-connect=52,53,53A,53B,54,55,56","sha256=$sha","size=$((Get-Item UEP-update.zip).Length)","commit=$env:GITHUB_SHA")|Set-Content release-08212-status.txt
+          @("UEP 0.82.21 RELEASE SUCCESS","base=v0.82.20","ui=admissions-readability,back-navigation","release-ux=version-badge,first-run-popup","sha256=$sha","size=$((Get-Item UEP-update.zip).Length)","commit=$env:GITHUB_SHA")|Set-Content release-08212-status.txt
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add uep-policy.json release-08212-status.txt
-          git commit -m 'Publish UEP 0.82.20 real admissions connection'
+          git commit -m 'Publish UEP 0.82.21 admissions UI and release UX'
           git push origin HEAD:main
