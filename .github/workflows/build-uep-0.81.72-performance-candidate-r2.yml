@@ -1,4 +1,4 @@
-name: Inspect UEP 0.82.19 parser cache handoff
+name: Build and Release UEP 0.82.20 Real Admissions Connect
 'on':
   push:
     branches: [main]
@@ -6,35 +6,52 @@ name: Inspect UEP 0.82.19 parser cache handoff
 permissions:
   contents: write
 jobs:
-  inspect:
+  build-release:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
         with: {fetch-depth: 0}
+      - uses: actions/setup-node@v4
+        with: {node-version: '20'}
       - shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference='Stop'
+          node --check scripts/patch-uep-08220-admissions-real-connect.js
           New-Item -ItemType Directory -Force source,app | Out-Null
           gh release download v0.82.19 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
           Expand-Archive source/UEP-update.zip app -Force
-          $f='app/resources/app/electron/main.cjs'
-          $lines=Get-Content $f -Encoding UTF8
-          $out=@()
-          foreach($p in @('function parseGoogleSheetData','const partial=parseGoogleSheetData(matrices)','liveDataCache=','matrices[key]','matrices[name]','valueRanges','entries = [')){
-            for($i=0;$i -lt $lines.Count;$i++){
-              if($lines[$i].Contains($p)){
-                $a=[Math]::Max(0,$i-18);$b=[Math]::Min($lines.Count-1,$i+90)
-                $out += "===== $p :: line $($i+1) ====="
-                for($j=$a;$j -le $b;$j++){ $out += ('{0}: {1}' -f ($j+1),$lines[$j]) }
-                break
-              }
-            }
-          }
-          $out | Set-Content inspect-08219-cache-handoff.txt -Encoding utf8
+          node scripts/patch-uep-08220-admissions-real-connect.js app
+          node --check app/resources/app/gyomuon.js
+          node --check app/resources/app/electron/main.cjs
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          $m=Get-Content app/resources/app/electron/main.cjs -Raw -Encoding UTF8
+          foreach($x in @('const APP_VERSION = "0.82.20";','UEP_08220_ADMISSIONS_REAL_CONNECT','52_대입기초 실시간 연결','53_전형이해 + 53A 세부유형 + 53B 실제 대학전형 실시간 연결')){if(-not $g.Contains($x)){throw "missing renderer marker: $x"}}
+          foreach($x in @("data.admissionTypeDetails=uep08210MatrixObjects(matrices['53A_전형세부유형DB'])","data.admissionStructures=uep08210MatrixObjects(matrices['53B_전형유형별대학DB'])","data['53A_전형세부유형DB']=data.admissionTypeDetails","data['53B_전형유형별대학DB']=data.admissionStructures")){if(-not $m.Contains($x)){throw "missing cache mapping: $x"}}
+          foreach($x in @('__UEP_08217_LOGIN_WATCHDOG__','setInterval(sync,2500)')){if($g.Contains($x)){throw "forbidden regression marker: $x"}}
+          Remove-Item UEP-update.zip,sha256.txt -Force -ErrorAction SilentlyContinue
+          Compress-Archive -Path app\* -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower();"$sha  UEP-update.zip"|Set-Content sha256.txt -Encoding ascii
+          $notes=@'
+          UEP v0.82.20
+          - v0.82.19 실제 연결 누락 교정판
+          - 53A_전형세부유형DB와 53B_전형유형별대학DB를 readonlyCache에 실제 주입
+          - 대입 기초 화면을 52_대입기초 행 기반 동적 렌더링으로 전환
+          - 전형 이해 화면을 53 + 53A + 53B 실제 데이터 기반 동적 렌더링으로 전환
+          - 오늘의 대학은 기존 56 -> 53B -> 54 -> 55 조인 로직이 실제 데이터를 받도록 복구
+          - School Read API·로그인·일반 대시보드 로직은 변경하지 않음
+          '@
+          gh release create v0.82.20 UEP-update.zip sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.20' --notes $notes --target $env:GITHUB_SHA
+          $policy=Get-Content uep-policy.json -Raw|ConvertFrom-Json
+          $policy.latestVersion='0.82.20'
+          $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.20/UEP-update.zip'
+          $policy.sha256=$sha
+          $policy.message='UEP 0.82.20 · 대입상담 시트 실제 연결 교정'
+          $policy|ConvertTo-Json -Depth 10|Set-Content uep-policy.json -Encoding utf8
+          @("UEP 0.82.20 RELEASE SUCCESS","base=v0.82.19","real-connect=52,53,53A,53B,54,55,56","sha256=$sha","size=$((Get-Item UEP-update.zip).Length)","commit=$env:GITHUB_SHA")|Set-Content release-08212-status.txt
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add inspect-08219-cache-handoff.txt
-          git commit -m 'Inspect v0.82.19 parser cache handoff'
+          git add uep-policy.json release-08212-status.txt
+          git commit -m 'Publish UEP 0.82.20 real admissions connection'
           git push origin HEAD:main
