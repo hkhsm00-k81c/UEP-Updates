@@ -1,0 +1,62 @@
+name: Build and Release UEP 0.82.10
+on:
+  push:
+    branches: [main]
+    paths: [release-08210.trigger]
+permissions:
+  contents: write
+jobs:
+  build-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - uses: actions/setup-node@v4
+        with: {node-version: '20'}
+      - shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check scripts/patch-uep-08210-dashboard-integration.js
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.82.09 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+          node scripts/patch-uep-08210-dashboard-integration.js app
+          node --check app/resources/app/gyomuon.js
+          node --check app/resources/app/electron/main.cjs
+          $g=Get-Content app/resources/app/gyomuon.js -Raw
+          $m=Get-Content app/resources/app/electron/main.cjs -Raw
+          $c=Get-Content app/resources/app/gyomuon.css -Raw
+          foreach($marker in @('const APP_VERSION = "0.82.10";','UEP_08210_DASHBOARD_INTEGRATION_START','공결대장','학년공지','학생상담/점검','보고서 미제출 현황')){if(-not $g.Contains($marker)){throw "missing gyomuon marker: $marker"}}
+          foreach($marker in @("'52_대입기초'!A1:N500","'53_전형이해'!A1:N500","'56_대학입시마스터'!A1:R500",'data.admissionBasics','data.admissionTypes','data.universityAdmissions')){if(-not $m.Contains($marker)){throw "missing main marker: $marker"}}
+          if(-not $c.Contains('UEP_08210_DASHBOARD_INTEGRATION_CSS')){throw 'missing 0.82.10 css marker'}
+          foreach($obsolete in @('UEP_08206_ADMISSION_DASHBOARD_START','UEP_08208_DASHBOARD_SCOPE_FIX_START','UEP_08209_DASHBOARD_DATA_FIX_START')){if($g.Contains($obsolete)){throw "obsolete overlay remains: $obsolete"}}
+          Remove-Item UEP-update.zip,sha256.txt -Force -ErrorAction SilentlyContinue
+          Compress-Archive -Path app\* -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "$sha  UEP-update.zip" | Set-Content sha256.txt -Encoding ascii
+          if(gh release view v0.82.10 --repo $env:GITHUB_REPOSITORY 2>$null){gh release delete v0.82.10 --repo $env:GITHUB_REPOSITORY --yes --cleanup-tag}
+          $notes=@'
+          UEP v0.82.10
+
+          - 기본정보 연결시트 52_대입기초 · 53_전형이해 · 56_대학입시마스터를 School Read 전체 캐시에 정식 포함
+          - 입시 3카드가 readonlyCache 실제 자료를 읽고 상세 팝업 표시
+          - 기존 보고서 카드의 제출완료/제출중/미제출 툴팁·클릭 이벤트 잔존 제거
+          - 학교업무 영역을 학년공지 · 학생상담/점검 · 보고서 미제출 현황으로 단일 정리
+          - 관리자 보고서 미제출 1~9반 3×3 전체 표시 보정
+          - 공결/지각 상세에 공결대장 버튼 추가: [운호고]2026학년도 공결대장 원본 열기
+          '@
+          gh release create v0.82.10 UEP-update.zip sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.10' --notes $notes --target $env:GITHUB_SHA
+          $policy=Get-Content uep-policy.json -Raw | ConvertFrom-Json
+          $policy.latestVersion='0.82.10'
+          $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.10/UEP-update.zip'
+          $policy.sha256=$sha
+          $policy.message='UEP 0.82.10 입시 데이터 정식 연결 · 공결대장 링크 · 대시보드 통합 보정'
+          $policy | ConvertTo-Json -Depth 10 | Set-Content uep-policy.json -Encoding utf8
+          @("UEP 0.82.10 RELEASE SUCCESS","sha256=$sha","size=$((Get-Item UEP-update.zip).Length)","commit=$env:GITHUB_SHA") | Set-Content release-08210-status.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add uep-policy.json release-08210-status.txt
+          git commit -m 'Publish UEP 0.82.10 policy and status'
+          git push origin HEAD:main
