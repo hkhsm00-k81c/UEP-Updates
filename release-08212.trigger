@@ -9,3 +9,4 @@ Retry: negative-lookbehind validation for standalone selector
 Release: v0.82.14 native official attendance ledger card
 Release: v0.82.15 bundled 2028 admissions education comparison data
 Release: v0.82.16 one-time changelog popup and four status summary cards in one row
+Retry: v0.82.16 release-note validation anchor fix
