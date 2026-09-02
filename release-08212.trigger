@@ -10,3 +10,4 @@ Release: v0.82.14 native official attendance ledger card
 Release: v0.82.15 bundled 2028 admissions education comparison data
 Release: v0.82.16 one-time changelog popup and four status summary cards in one row
 Retry: v0.82.16 release-note validation anchor fix
+Hotfix: v0.82.17 local-first login recovery for School Read API 404
