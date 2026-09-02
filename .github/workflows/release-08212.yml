@@ -1,4 +1,4 @@
-name: Inspect UEP 0.82.18 for v0.82.19
+name: Inspect UEP 0.82.19 admissions data flow
 on:
   push:
     branches: [main]
@@ -6,7 +6,7 @@ on:
 permissions:
   contents: write
 jobs:
-  build-release:
+  inspect:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,27 +17,33 @@ jobs:
         run: |
           $ErrorActionPreference='Stop'
           New-Item -ItemType Directory -Force source,app | Out-Null
-          gh release download v0.82.18 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          gh release download v0.82.19 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
           Expand-Archive source/UEP-update.zip app -Force
-          $files=@('app/resources/app/gyomuon.js','app/resources/app/electron/main.cjs')
-          $patterns=@('batch-read','schoolRead','ranges','readSchool','sheetName','openDashboardAdmissionBasics','openDashboardAdmissionTypes','openDashboardUniversityDetail','dashboardStudentStatusCompactMarkup')
+          $targets=@(
+            @{f='app/resources/app/gyomuon.js'; p='dashboardAdmissionRows'},
+            @{f='app/resources/app/gyomuon.js'; p='openDashboardAdmissionBasics'},
+            @{f='app/resources/app/gyomuon.js'; p='openDashboardAdmissionTypes'},
+            @{f='app/resources/app/gyomuon.js'; p='openDashboardUniversityDetail'},
+            @{f='app/resources/app/electron/main.cjs'; p='function parseGoogleSheetData'},
+            @{f='app/resources/app/electron/main.cjs'; p='async function fetchLiveData'},
+            @{f='app/resources/app/electron/main.cjs'; p='admissionBasics'},
+            @{f='app/resources/app/electron/main.cjs'; p='admissionStructures'}
+          )
           $out=@()
-          foreach($f in $files){
-            $lines=Get-Content $f
-            $out += "===== $f ====="
+          foreach($t in $targets){
+            $lines=Get-Content $t.f -Encoding UTF8
             for($i=0;$i -lt $lines.Count;$i++){
-              $matched=$false
-              foreach($p in $patterns){ if($lines[$i] -match [regex]::Escape($p)){ $matched=$true; break } }
-              if($matched){
-                $a=[Math]::Max(0,$i-10); $b=[Math]::Min($lines.Count-1,$i+18)
-                $out += "--- around line $($i+1) ---"
-                for($j=$a;$j -le $b;$j++){ $out += ('{0,7}: {1}' -f ($j+1),$lines[$j]) }
+              if($lines[$i] -like "*$($t.p)*"){
+                $a=[Math]::Max(0,$i-8);$b=[Math]::Min($lines.Count-1,$i+45)
+                $out += "===== $($t.f) :: $($t.p) :: line $($i+1) ====="
+                for($j=$a;$j -le $b;$j++){ $out += ('{0}: {1}' -f ($j+1),$lines[$j]) }
+                break
               }
             }
           }
-          $out | Set-Content inspect-08218-admissions.txt -Encoding utf8
+          $out | Set-Content inspect-08219-dataflow.txt -Encoding utf8
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add inspect-08218-admissions.txt
-          git commit -m 'Inspect v0.82.18 sheet read hooks for admissions integration'
+          git add inspect-08219-dataflow.txt
+          git commit -m 'Inspect v0.82.19 admissions parser renderer data flow'
           git push origin HEAD:main
