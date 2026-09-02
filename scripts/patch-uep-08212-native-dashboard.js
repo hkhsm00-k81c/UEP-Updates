@@ -13,8 +13,8 @@ const pkg=JSON.parse(fs.readFileSync(pkgPath,'utf8'));
 
 const must=(v,m)=>{if(!v)throw new Error(m)};
 must(g.includes('const APP_VERSION = "0.82.11";'),'0.82.11 version missing');
-g=g.replace('const APP_VERSION = "0.82.11";','const APP_VERSION = "0.82.14";');
-pkg.version='0.82.14';
+g=g.replace('const APP_VERSION = "0.82.11";','const APP_VERSION = "0.82.15";');
+pkg.version='0.82.15';
 
 function removeMarked(text,start,end){
   const a=text.indexOf(start),b=text.indexOf(end);
@@ -68,7 +68,7 @@ function dashboardAdmissionEnabled(row){return String(row?.['사용여부']??row
 function dashboardAdmissionOrder(row){return Number(row?.['노출순서']??row?.order??9999)||9999;}
 function dashboardAdmissionNormalizeUniversity(value){return String(value||'').replace(/대학교/g,'대').replace(/\s|\(.*?\)/g,'');}
 function dashboardAdmissionTodayIndex(length){if(!length)return 0;const d=new Date(),s=new Date(d.getFullYear(),0,0);return Math.floor((d-s)/86400000)%length;}
-function dashboardAdmissionUniversities(){return dashboardAdmissionRows('universityAdmissions','56_대학입시마스터').filter(dashboardAdmissionEnabled).sort((a,b)=>dashboardAdmissionOrder(a)-dashboardAdmissionOrder(b));}
+function dashboardAdmissionUniversities(){const live=dashboardAdmissionRows('universityAdmissions','56_대학입시마스터').filter(dashboardAdmissionEnabled),seen=new Set(live.map(r=>dashboardAdmissionNormalizeUniversity(r['대학명'])));return [...live,...dashboardAdmission2028Universities().filter(r=>!seen.has(dashboardAdmissionNormalizeUniversity(r['대학명'])))].sort((a,b)=>dashboardAdmissionOrder(a)-dashboardAdmissionOrder(b));}
 function dashboardAdmissionTodayUniversity(){const rows=dashboardAdmissionUniversities();return rows[dashboardAdmissionTodayIndex(rows.length)]||null;}
 function openDashboardAdmissionDialog(title,body){
   document.querySelector('.dashboard-admission-layer')?.remove();
@@ -86,13 +86,40 @@ function dashboardAdmissionMethod(row){
   if(row['선발방식'])return String(row['선발방식']);
   const out=[];if(/교과|내신/.test(text))out.push('내신');if(/수능최저|최저/.test(text))out.push('수능최저');if(/서류|학생부/.test(text))out.push('서류');if(/면접/.test(text))out.push('면접');if(/논술/.test(text))out.unshift('논술');if(/수능/.test(text)&&/정시|수능/.test(String(row['전형유형']||'')))return '수능100 또는 영역별 반영';return [...new Set(out)].join(' + ')||'대학별 방식 확인';
 }
-function dashboardAdmissionStructureRows(){return dashboardAdmissionRows('admissionStructures','57_대학별전형구조DB','universityAdmissionStructures');}
+const dashboardAdmission2028Catalog=[
+ ['서울대','https://admission.snu.ac.kr/undergraduate/notice?bbsidx=168854&md=v',[['학생부종합','지역균형전형','단계별 서류 + 면접','단계별|서류 + 면접'],['학생부종합','일반전형','단계별 서류 + 면접','단계별|서류 + 면접'],['수능','일반전형','수능 + 교과평가','학생부 병행|영역별 반영 차이']]],
+ ['연세대','https://admission.yonsei.ac.kr/seoul/',[['학생부교과','추천형','내신 + 면접, 전형별 최저 확인','내신 + 면접|수능최저 유/무'],['학생부종합','활동우수형','단계별 서류 + 면접','단계별|서류 + 면접'],['논술','논술전형','논술 중심, 최저 여부 확인','논술 중심|수능최저 유/무'],['수능','일반전형','수능 중심 · 영역별 반영','수능100|영역별 반영 차이']]],
+ ['고려대','https://oku.korea.ac.kr/oku/cms/FR_BBS_CON/BoardView.do?BBS_SEQ=1791&BOARD_SEQ=5&CONTENTS_NO=2&MENU_ID=750&SITE_NO=2',[['학생부교과','학교추천전형','내신 + 서류, 최저 여부 확인','내신 + 서류|수능최저 유/무'],['학생부종합','학업우수전형','서류 + 면접','서류 + 면접|단계별'],['학생부종합','계열적합전형','단계별 서류 + 면접','단계별|서류 + 면접'],['수능','일반전형','수능 중심 · 영역별 반영','수능100|영역별 반영 차이']]],
+ ['서강대','https://admission.sogang.ac.kr/enter/html/counsel/noticeView.asp?idx=28940',[['학생부교과','지역균형','내신 중심 + 수능최저','내신 + 수능최저'],['학생부종합','일반','서류100','서류100'],['논술','논술','논술 중심 + 교과 병행','논술 중심|교과 병행|수능최저 유/무'],['수능','일반','수능 중심 · 영역별 반영','수능100|영역별 반영 차이']]],
+ ['성균관대','https://admission.skku.edu/admission/html/ipsi/noticeView.html?idx=59465',[['학생부교과','학교장추천','내신 중심 + 수능최저','내신 + 수능최저'],['학생부종합','융합형·탐구형','서류100','서류100'],['학생부종합','과학인재','단계별 서류 + 면접','단계별|서류 + 면접'],['논술','논술우수','논술 중심, 최저 여부 확인','논술 중심|수능최저 유/무'],['수능','일반','수능 중심 · 영역별 반영','수능100|영역별 반영 차이']]],
+ ['한양대','https://go.hanyang.ac.kr/web/notice/notice_view.do?bn=20977&m_type=IPSI',[['학생부교과','추천형','내신 + 교과 정성평가','내신 중심|내신 + 서류'],['학생부종합','학업형','서류100','서류100'],['학생부종합','면접형','단계별 서류 + 면접','단계별|서류 + 면접'],['논술','논술','논술 중심','논술 중심'],['수능','일반','수능 중심 · 영역별 반영','수능100|영역별 반영 차이']]],
+ ['중앙대','https://admission.cau.ac.kr/2028_iphak/typeA/index.html',[['학생부교과','지역균형','내신 중심 + 수능최저','내신 + 수능최저'],['학생부종합','CAU융합형인재','서류 + 면접','서류 + 면접|단계별'],['학생부종합','CAU탐구형인재','서류100','서류100'],['논술','논술','논술 중심 + 교과 병행','논술 중심|교과 병행|수능최저 유/무'],['수능','일반','수능 중심 · 영역별 반영','수능100|영역별 반영 차이']]],
+ ['경희대','https://iphak.khu.ac.kr/detail.do?board_seq=17147&categoryid=&menuurl=eK5YJKH2QBG2u8s%2BVLHkaw%3D%3D&pageNo=1&userpwd=',[['학생부교과','지역균형','내신 중심 + 수능최저','내신 + 수능최저'],['학생부종합','네오르네상스','단계별 서류 + 면접','단계별|서류 + 면접'],['논술','논술우수자','논술 중심 + 수능최저','논술 중심|수능최저 유/무'],['수능','일반','수능 중심 · 영역별 반영','수능100|영역별 반영 차이']]],
+ ['한국외대','https://adms.hufs.ac.kr/',[['학생부교과','학교장추천','내신 중심 + 수능최저','내신 + 수능최저'],['학생부종합','면접형','단계별 서류 + 면접','단계별|서류 + 면접'],['학생부종합','서류형','서류100','서류100'],['논술','논술','논술 중심 + 수능최저','논술 중심|수능최저 유/무'],['수능','일반','수능 중심 · 영역별 반영','수능100|영역별 반영 차이']]],
+ ['서울시립대','https://admission.uos.ac.kr/',[['학생부교과','지역균형선발','내신 중심 + 수능최저','내신 + 수능최저'],['학생부종합','학생부종합Ⅰ','단계별 서류 + 면접','단계별|서류 + 면접'],['학생부종합','학생부종합Ⅱ','서류100','서류100'],['논술','논술','논술 중심 + 교과 병행','논술 중심|교과 병행'],['수능','일반','수능 중심 · 영역별 반영','수능100|영역별 반영 차이']]],
+ ['건국대','https://enter.konkuk.ac.kr/',[['학생부교과','KU지역균형','내신 + 서류','내신 + 서류'],['학생부종합','KU자기추천','단계별 서류 + 면접','단계별|서류 + 면접'],['논술','KU논술우수자','논술 중심 + 수능최저','논술 중심|수능최저 유/무'],['수능','KU일반학생','수능 중심 · 영역별 반영','수능100|영역별 반영 차이']]],
+ ['동국대','https://ipsi.dongguk.edu/admission/html/counsel/noticeView.asp?BOARD_IDX=37098',[['학생부교과','학교장추천인재','내신 + 서류','내신 + 서류'],['학생부종합','Do Dream','단계별 서류 + 면접','단계별|서류 + 면접'],['논술','논술','논술 중심 + 교과 병행','논술 중심|교과 병행|수능최저 유/무'],['수능','일반','수능 + 학생부평가 여부 확인','학생부 병행|영역별 반영 차이']]],
+ ['홍익대','https://admission.hongik.ac.kr/',[['학생부교과','학교장추천자','내신 중심 + 수능최저','내신 + 수능최저'],['학생부종합','학교생활우수자','서류100','서류100'],['논술','논술','논술 중심 + 수능최저','논술 중심|수능최저 유/무'],['수능','일반','수능 중심 · 영역별 반영','수능100|영역별 반영 차이']]],
+ ['충북대','https://ipsi.chungbuk.ac.kr/',[['학생부교과','학생부교과','내신 중심, 전형별 최저 확인','내신 중심|수능최저 유/무'],['학생부종합','학생부종합Ⅰ','서류100','서류100'],['학생부종합','학생부종합Ⅱ','단계별 서류 + 면접','단계별|서류 + 면접'],['수능','일반','수능 중심 · 영역별 반영','수능100|영역별 반영 차이']]],
+ ['충남대','https://ipsi.cnu.ac.kr/',[['학생부교과','일반전형','내신 중심 + 수능최저 여부 확인','내신 중심|수능최저 유/무'],['학생부종합','PRISM인재','서류 + 면접','서류 + 면접|단계별'],['수능','일반','수능 중심 · 영역별 반영','수능100|영역별 반영 차이']]],
+ ['부산대','https://go.pusan.ac.kr/',[['학생부교과','학생부교과','내신 중심 + 수능최저','내신 + 수능최저'],['학생부종합','학생부종합','서류 + 면접 여부 확인','서류100|서류 + 면접'],['논술','논술','논술 중심 + 수능최저','논술 중심|수능최저 유/무'],['수능','일반','수능 중심 · 영역별 반영','수능100|영역별 반영 차이']]],
+ ['경북대','https://ipsi1.knu.ac.kr/',[['학생부교과','교과우수자','내신 중심 + 수능최저','내신 + 수능최저'],['학생부종합','일반학생','서류 + 면접 여부 확인','서류100|서류 + 면접'],['논술','논술','논술 중심 + 수능최저','논술 중심|수능최저 유/무'],['수능','일반','수능 중심 · 영역별 반영','수능100|영역별 반영 차이']]],
+ ['전남대','https://admission.jnu.ac.kr/',[['학생부교과','일반','내신 중심 + 수능최저 여부 확인','내신 중심|수능최저 유/무'],['학생부종합','고교생활우수자','서류 + 면접 여부 확인','서류100|서류 + 면접'],['수능','일반','수능 중심 · 영역별 반영','수능100|영역별 반영 차이']]],
+ ['전북대','https://enter.jbnu.ac.kr/',[['학생부교과','일반학생','내신 중심 + 수능최저 여부 확인','내신 중심|수능최저 유/무'],['학생부종합','큰사람','단계별 서류 + 면접','단계별|서류 + 면접'],['수능','일반','수능 중심 · 영역별 반영','수능100|영역별 반영 차이']]],
+ ['강원대','https://admission.kangwon.ac.kr/',[['학생부교과','일반','내신 중심, 전형별 최저 확인','내신 중심|수능최저 유/무'],['학생부종합','미래인재','서류 + 면접 여부 확인','서류100|서류 + 면접'],['수능','일반','수능 중심 · 영역별 반영','수능100|영역별 반영 차이']]],
+ ['경상국립대','https://new.gnu.ac.kr/',[['학생부교과','일반','내신 중심 + 수능최저 여부 확인','내신 중심|수능최저 유/무'],['학생부종합','일반','서류 + 면접 여부 확인','서류100|서류 + 면접'],['수능','일반','수능 중심 · 영역별 반영','수능100|영역별 반영 차이']]],
+ ['한국기술교육대','https://admission.koreatech.ac.kr/',[['학생부교과','교과전형','내신 중심 + 수능최저 여부 확인','내신 중심|수능최저 유/무'],['학생부종합','창의인재','서류 + 면접','서류 + 면접|단계별'],['논술','논술','논술 중심 여부 확인','논술 중심'],['수능','일반','수능 중심 · 영역별 반영','수능100|영역별 반영 차이']]],
+ ['한국교원대','https://ent.knue.ac.kr/',[['학생부종합','학생부종합우수자','단계별 서류 + 면접','단계별|서류 + 면접'],['학생부종합','국가보훈대상자·특별전형','서류 + 면접','서류 + 면접'],['수능','일반','수능 + 면접 여부 확인','수능100|학생부 병행|영역별 반영 차이']]]
+];
+function dashboardAdmission2028Rows(){return dashboardAdmission2028Catalog.flatMap(([university,source,methods])=>methods.map(([type,name,method,compare])=>({'대학명':university,'전형유형':type,'전형명':name,'선발방식':method,'비교유형':compare,'교과':/내신|교과/.test(method)?'반영':'-','서류':/서류|정성/.test(method)?'반영':'-','면접':/면접/.test(method)?'반영 또는 확인':'-','수능최저':/최저/.test(method)?'전형별 확인':'유/무 확인','추천/지원자격':/추천|지역균형|학교장/.test(name)?'학교추천·지원자격 확인':'전형별 확인','특징':'1학년 교육·상담용 구조 비교','기준학년도':'2028','자료상태':'교육용 참고/검증중','출처':source})));}
+function dashboardAdmission2028Universities(){return dashboardAdmission2028Catalog.map(([name,source],index)=>({'대학명':name,'카드한줄':'2028 시행계획으로 전형의 큰 구조를 익히는 교육용 대학 카드','수시핵심':'교과·학종·논술의 실제 전형명과 평가요소를 함께 비교합니다.','정시핵심':'수능 중심 선발이지만 영역별 반영과 학생부·면접 병행 여부는 대학마다 다릅니다.','과목선택/교과포인트':'희망 전공과 연결되는 과목의 이수 과정과 수업·탐구 경험을 함께 살펴봅니다.','담임상담체크':'합격 가능성 단정 전에 학생의 내신 추이, 선택과목, 모의고사, 수업·탐구를 전형 구조와 연결해 설명합니다.','기준학년도':'2028','자료상태':'교육용 참고/검증중','출처':source,'노출순서':100+index,'사용여부':'Y'}));}
+function dashboardAdmissionStructureRows(){const live=dashboardAdmissionRows('admissionStructures','57_대학별전형구조DB','universityAdmissionStructures');if(!live.length)return dashboardAdmission2028Rows();const keys=new Set(live.map(r=>[dashboardAdmissionNormalizeUniversity(r['대학명']),r['전형유형'],r['전형명']].join('|')));return [...live,...dashboardAdmission2028Rows().filter(r=>!keys.has([dashboardAdmissionNormalizeUniversity(r['대학명']),r['전형유형'],r['전형명']].join('|')))];}
 function openDashboardAdmissionUniversityByName(name){const row=dashboardAdmissionUniversities().find(x=>dashboardAdmissionNormalizeUniversity(x['대학명'])===dashboardAdmissionNormalizeUniversity(name));openDashboardUniversityDetail(row||{'대학명':name});}
 function openDashboardAdmissionTypes(){
   const types=dashboardAdmissionRows('admissionTypes','53_전형이해').filter(dashboardAdmissionEnabled),structures=dashboardAdmissionStructureRows();
   const groups=[['학생부교과',['내신 중심','내신 + 수능최저','내신 + 서류','내신 + 면접','내신 + 수능최저 + 서류/면접']],['학생부종합',['서류100','서류 + 면접','단계별','수능최저 유/무']],['논술',['논술 중심','교과 병행','수능최저 유/무']],['정시',['수능100','학생부 병행','영역별 반영 차이']]];
   const universityButtons=(group,method)=>{
-    const rows=structures.filter(r=>String(r['전형유형']||'').includes(group.replace('정시','수능'))&&dashboardAdmissionMethod(r).replace(/\s/g,'').includes(method.replace(/\s|유\/무/g,'')));
+    const rows=structures.filter(r=>String(r['전형유형']||'').includes(group.replace('정시','수능'))&&(String(r['비교유형']||'').split('|').includes(method)||dashboardAdmissionMethod(r).replace(/\s/g,'').includes(method.replace(/\s|유\/무/g,''))));
     return rows.length?`<div class="admission-university-buttons">${[...new Set(rows.map(r=>r['대학명']).filter(Boolean))].map(name=>`<button data-admission-university="${escapeHtml(name)}">${escapeHtml(name)}</button>`).join('')}</div>`:'<small>대학별 전형구조DB 연결·확충 중</small>';
   };
   const html=groups.map(([group,methods])=>`<section><h3>${group}</h3>${methods.map(method=>{const row=types.find(r=>String(r['전형유형']||'').includes(group.replace('정시','수능'))&&dashboardAdmissionMethod(r).replace(/\s/g,'').includes(method.replace(/\s|유\/무/g,'')));return `<article><b>${method}</b><p>${escapeHtml(row?.['한줄요약']||row?.['핵심평가']||'대학별 실제 전형명과 반영요소를 비교합니다.')}</p>${universityButtons(group,method)}</article>`;}).join('')}</section>`).join('');
@@ -105,8 +132,9 @@ function openDashboardUniversityDetail(university=dashboardAdmissionTodayUnivers
   const structures=dashboardAdmissionStructureRows().filter(r=>dashboardAdmissionNormalizeUniversity(r['대학명'])===norm);
   const minimums=dashboardAdmissionRows('admissionMinimums','54_수능최저DB').filter(r=>dashboardAdmissionNormalizeUniversity(r['대학명'])===norm);
   const results=dashboardAdmissionRows('admissionResults','55_대학입결DB').filter(r=>dashboardAdmissionNormalizeUniversity(r['대학명'])===norm);
-  const admissions=structures.length?structures:minimums;
-  openDashboardAdmissionDialog(name,`<div class="admission-university-detail"><section><h3>주요 전형과 선발방식</h3>${admissions.length?admissions.slice(0,18).map(r=>`<article><b>${escapeHtml(r['전형유형']||'전형')} · ${escapeHtml(r['전형명']||'전형명 확인')}</b><p>${escapeHtml(r['선발방식']||dashboardAdmissionMethod(r))}</p><small>수능최저 ${escapeHtml(r['수능최저']||r['수능최저원문']||(String(r['배지사용여부']).toUpperCase()==='N'?'참고/검증중':'미적용 또는 확인 필요'))}</small></article>`).join(''):'<p>대학별 전형구조 자료를 연결 중입니다.</p>'}</section><section><h3>교과·학종·정시 핵심</h3><p>${escapeHtml(university['수시핵심']||'수시 전형별 평가요소를 확인합니다.')}</p><p>${escapeHtml(university['정시핵심']||'정시 영역별 반영비율과 가산점을 확인합니다.')}</p><p><b>과목선택 참고</b> ${escapeHtml(university['과목선택/교과포인트']||'-')}</p></section><section><h3>운호고 실제 입결</h3>${results.length?results.slice(0,12).map(r=>`<article><b>${escapeHtml(r['모집단위']||'모집단위')}</b><p>${escapeHtml(r['전형명(대)']||r['전형명']||'')}</p><small>합격 ${escapeHtml(r['합격자수']||'-')}명 · 최저내신 ${escapeHtml(r['최저내신등급']||'-')}</small></article>`).join(''):'<p>현재 연결된 운호고 실제 입결이 없습니다.</p>'}</section><section><h3>담임 상담 포인트</h3><p>${escapeHtml(university['담임상담체크']||university['카드한줄']||'학생의 내신·선택과목·모의고사·수업 탐구를 대학 전형 구조와 함께 확인합니다.')}</p></section><p class="admission-reference-note">${escapeHtml(university['기준학년도']||'2028')} 기준 · ${escapeHtml(university['자료상태']||'교육용 참고')} · 2029 최종 모집요강 재확인</p></div>`);
+  const admissions=structures.length?structures:minimums,source=structures.find(r=>r['출처'])?.['출처']||university['출처']||'';
+  openDashboardAdmissionDialog(name,`<div class="admission-university-detail"><section><h3>주요 전형과 선발방식</h3>${admissions.length?admissions.slice(0,18).map(r=>`<article><b>${escapeHtml(r['전형유형']||'전형')} · ${escapeHtml(r['전형명']||'전형명 확인')}</b><p>${escapeHtml(r['선발방식']||dashboardAdmissionMethod(r))}</p><small>수능최저 ${escapeHtml(r['수능최저']||r['수능최저원문']||(String(r['배지사용여부']).toUpperCase()==='N'?'참고/검증중':'미적용 또는 확인 필요'))}</small></article>`).join(''):'<p>대학별 전형구조 자료를 연결 중입니다.</p>'}</section><section><h3>교과·학종·정시 핵심</h3><p>${escapeHtml(university['수시핵심']||'수시 전형별 평가요소를 확인합니다.')}</p><p>${escapeHtml(university['정시핵심']||'정시 영역별 반영비율과 가산점을 확인합니다.')}</p><p><b>과목선택 참고</b> ${escapeHtml(university['과목선택/교과포인트']||'-')}</p></section><section><h3>운호고 실제 입결</h3>${results.length?results.slice(0,12).map(r=>`<article><b>${escapeHtml(r['모집단위']||'모집단위')}</b><p>${escapeHtml(r['전형명(대)']||r['전형명']||'')}</p><small>합격 ${escapeHtml(r['합격자수']||'-')}명 · 최저내신 ${escapeHtml(r['최저내신등급']||'-')}</small></article>`).join(''):'<p>현재 연결된 운호고 실제 입결이 없습니다.</p>'}</section><section><h3>담임 상담 포인트</h3><p>${escapeHtml(university['담임상담체크']||university['카드한줄']||'학생의 내신·선택과목·모의고사·수업 탐구를 대학 전형 구조와 함께 확인합니다.')}</p></section><p class="admission-reference-note">${escapeHtml(university['기준학년도']||'2028')} 기준 · ${escapeHtml(university['자료상태']||'교육용 참고')} · 2029 최종 모집요강 재확인 · 이 화면은 자동 합격판정용이 아닙니다.</p>${source?`<button class="admission-source-button" data-admission-source="${escapeHtml(source)}">대학 공식 시행계획·입학처 확인 ↗</button>`:''}</div>`);
+  document.querySelector('[data-admission-source]')?.addEventListener('click',button=>window.schoolBoard?.openChrome?.(button.currentTarget.dataset.admissionSource));
 }
 NATIVE_08212_END */
 const insertAt=g.indexOf('function dashboardStudentStatusCompactMarkup()');
@@ -171,9 +199,10 @@ css+=String.raw`
 css+=String.raw`
 /* UEP_08214_OFFICIAL_LEDGER_CARD */
 .dashboard-official-ledger-card{display:flex;width:100%;margin:0 0 14px;padding:14px 18px;border:1px solid #b9ddd3;border-radius:14px;background:linear-gradient(135deg,#effaf7,#f7fcfb);color:#174f43;text-align:left;cursor:pointer}.dashboard-official-ledger-card:hover{border-color:#65b5a1;box-shadow:0 7px 18px rgba(33,119,98,.12);transform:translateY(-1px)}.dashboard-official-ledger-card span{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;width:100%;gap:3px 16px}.dashboard-official-ledger-card small{grid-column:1;color:#628078;font-size:10px}.dashboard-official-ledger-card b{grid-column:1;font-size:14px}.dashboard-official-ledger-card em{grid-column:2;grid-row:1/3;font-style:normal;font-size:11px;font-weight:800;color:#247865}
+.admission-source-button{grid-column:1/-1;justify-self:start;border:1px solid #b8d5cd;border-radius:10px;background:#eef8f5;color:#176d5e;padding:9px 13px;font-weight:800;cursor:pointer}
 `;
 
 fs.writeFileSync(gPath,g);
 fs.writeFileSync(cssPath,css);
 fs.writeFileSync(pkgPath,JSON.stringify(pkg,null,2)+'\n');
-console.log('UEP 0.82.14 native dashboard patch applied');
+console.log('UEP 0.82.15 admissions education data bundle applied');
