@@ -23,3 +23,4 @@ Inspect: parser-only output for real sheet-to-cache mapping
 Inspect: exact parser-to-readonlyCache admissions handoff
 Inspect retry: literal Contains matching
 Release: v0.82.20 real admissions cache handoff and sheet-driven renderer
+Retry: flexible function-boundary matching for renderer replacement
