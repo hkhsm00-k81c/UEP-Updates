@@ -1,0 +1,832 @@
+===== function openDashboardAdmissionUniversityByName :: line 8107 =====
+8087: function openDashboardAdmissionDialogBase(title,body){
+8088:   document.querySelector('.dashboard-admission-layer')?.remove();
+8089:   const layer=document.createElement('div');layer.className='dashboard-admission-layer counsel-reason-layer';
+8090:   layer.innerHTML='<div class="dashboard-admission-dialog"><header><div><small>UEP 대입상담 · 교육용 참고</small><h2>'+escapeHtml(title)+'</h2></div><button type="button" data-admission-close>×</button></header><div class="dashboard-admission-body">'+body+'</div></div>';
+8091:   document.body.appendChild(layer);const close=()=>layer.remove();layer.querySelector('[data-admission-close]').onclick=close;layer.onclick=e=>{if(e.target===layer)close();};
+8092: }
+8093: function openDashboardAdmissionBasics(){
+8094:   const rows=dashboardAdmissionRows('admissionBasics','52_대입기초').filter(dashboardAdmissionEnabled).sort((a,b)=>dashboardAdmissionOrder(a)-dashboardAdmissionOrder(b));
+8095:   if(!rows.length)return openDashboardAdmissionDialog('대입 기초','<p>52_대입기초 자료를 읽지 못했습니다.</p>');
+8096:   const groups=[];
+8097:   for(const row of rows){const key=String(row['대분류']||'대입 기초').trim()||'대입 기초';let group=groups.find(x=>x.key===key);if(!group){group={key,rows:[]};groups.push(group);}group.rows.push(row);}
+8098:   const html=groups.map(group=>`<section><h3>${escapeHtml(group.key)}</h3><div class="admission-explain-grid">${group.rows.map(row=>`<article><b>${escapeHtml(row['주제']||'')}</b><p>${escapeHtml(row['카드요약']||row['상세설명']||'')}</p>${row['상세설명']&&row['상세설명']!==row['카드요약']?`<small>${escapeHtml(row['상세설명'])}</small>`:''}${row['상담포인트']?`<small><strong>상담</strong> · ${escapeHtml(row['상담포인트'])}</small>`:''}${row['주의/오해']?`<small><strong>주의</strong> · ${escapeHtml(row['주의/오해'])}</small>`:''}</article>`).join('')}</div></section>`).join('');
+8099:   openDashboardAdmissionDialog('대입 기초',`<div class="admission-learning-flow">${html}<p class="admission-reference-note">52_대입기초 실시간 연결 · 2029 대입 기준, 대학별 세부사항은 최종 모집요강 재확인</p></div>`);
+8100: }
+8101: function dashboardAdmissionMethod(row){
+8102:   const text=[row['선발방식'],row['평가구조요약'],row['핵심평가'],row['주요평가자료'],row['한줄요약'],row['상담표시문구']].filter(Boolean).join(' ');
+8103:   if(row['선발방식'])return String(row['선발방식']);if(row['평가구조요약'])return String(row['평가구조요약']);
+8104:   const out=[];if(/교과|내신/.test(text))out.push('내신');if(/수능최저|최저/.test(text))out.push('수능최저');if(/서류|학생부/.test(text))out.push('서류');if(/면접/.test(text))out.push('면접');if(/논술/.test(text))out.unshift('논술');if(/수능/.test(text)&&/정시|수능/.test(String(row['전형유형']||'')))return '수능100 또는 영역별 반영';return [...new Set(out)].join(' + ')||'대학별 방식 확인';
+8105: }
+8106: function dashboardAdmissionStructureRows(){return dashboardAdmissionRows('admissionStructures','53B_전형유형별대학DB','universityAdmissionStructures');}
+8107: function openDashboardAdmissionUniversityByName(name){const row=dashboardAdmissionUniversities().find(x=>dashboardAdmissionNormalizeUniversity(x['대학명'])===dashboardAdmissionNormalizeUniversity(name));openDashboardUniversityDetail(row||{'대학명':name});}
+8108: function openDashboardAdmissionTypes(){
+8109:   const types=dashboardAdmissionRows('admissionTypes','53_전형이해').filter(dashboardAdmissionEnabled).sort((a,b)=>dashboardAdmissionOrder(a)-dashboardAdmissionOrder(b));
+8110:   const details=dashboardAdmissionRows('admissionTypeDetails','53A_전형세부유형DB').filter(dashboardAdmissionEnabled).sort((a,b)=>dashboardAdmissionOrder(a)-dashboardAdmissionOrder(b));
+8111:   const structures=dashboardAdmissionStructureRows().filter(r=>String(r['UEP노출']??'Y').toUpperCase()!=='N');
+8112:   if(!types.length&&!details.length)return openDashboardAdmissionDialog('전형 이해','<p>53_전형이해·53A_전형세부유형DB 자료를 읽지 못했습니다.</p>');
+8113:   const normalizeType=v=>String(v||'').replace('정시','수능위주').trim();
+8114:   const html=types.map(type=>{
+8115:     const broad=normalizeType(type['전형유형']);
+8116:     const ds=details.filter(d=>normalizeType(d['대전형'])===broad);
+8117:     const cards=(ds.length?ds:[type]).map(d=>{
+8118:       const sid=String(d['세부ID']||'');
+8119:       const linked=structures.filter(s=>normalizeType(s['대전형'])===broad&&(!sid||String(s['세부유형ID']||'').split(',').map(x=>x.trim()).includes(sid)));
+8120:       const names=[...new Set(linked.map(s=>s['대학명']).filter(Boolean))];
+8121:       const buttons=names.length?`<div class="admission-university-buttons">${names.map(name=>`<button data-admission-university="${escapeHtml(name)}">${escapeHtml(name)}</button>`).join('')}</div>`:'';
+8122:       return `<article><b>${escapeHtml(d['세부유형']||type['전형유형']||'')}</b><p>${escapeHtml(d['대표평가구조']||d['한줄요약']||type['한줄요약']||'')}</p>${d['수능최저경향']?`<small><strong>수능최저</strong> · ${escapeHtml(d['수능최저경향'])}</small>`:''}${d['담임상담체크']?`<small><strong>상담체크</strong> · ${escapeHtml(d['담임상담체크'])}</small>`:''}${d['고1준비포인트']?`<small><strong>고1 준비</strong> · ${escapeHtml(d['고1준비포인트'])}</small>`:''}${buttons}</article>`;
+8123:     }).join('');
+8124:     return `<section><h3>${escapeHtml(type['전형유형']||broad)}</h3><p>${escapeHtml(type['한줄요약']||'')}</p><div class="admission-explain-grid">${cards}</div></section>`;
+8125:   }).join('');
+8126:   openDashboardAdmissionDialog('전형 이해 · 대학별 선발방식 비교',`<div class="admission-learning-flow">${html}<p class="admission-reference-note">53_전형이해 + 53A 세부유형 + 53B 실제 대학전형 실시간 연결</p></div>`);
+8127:   document.querySelectorAll('[data-admission-university]').forEach(button=>button.onclick=()=>uep08221OpenUniversityFromTypes(button.dataset.admissionUniversity));
+8128: }
+8129: function openDashboardUniversityDetail(university=dashboardAdmissionTodayUniversity()){
+8130:   if(!university)return openDashboardAdmissionDialog('오늘의 대학','<p>56_대학입시마스터 자료를 읽지 못했습니다.</p>');
+8131:   const name=university['대학명']||'오늘의 대학',norm=dashboardAdmissionNormalizeUniversity(name);
+8132:   const structures=dashboardAdmissionStructureRows().filter(r=>dashboardAdmissionNormalizeUniversity(r['대학명'])===norm);
+8133:   const minimums=dashboardAdmissionRows('admissionMinimums','54_수능최저DB').filter(r=>dashboardAdmissionNormalizeUniversity(r['대학명'])===norm);
+8134:   const results=dashboardAdmissionRows('admissionResults','55_대학입결DB').filter(r=>dashboardAdmissionNormalizeUniversity(r['대학명'])===norm);
+8135:   const admissions=structures.length?structures:minimums;
+8136:   openDashboardAdmissionDialog(name,`<div class="admission-university-detail"><section><h3>주요 전형과 선발방식</h3>${admissions.length?admissions.slice(0,18).map(r=>`<article><b>${escapeHtml(r['전형유형']||r['대전형']||'전형')} · ${escapeHtml(r['전형명']||'전형명 확인')}</b><p>${escapeHtml(r['선발방식']||r['평가구조요약']||dashboardAdmissionMethod(r))}</p><small>수능최저 ${escapeHtml(r['수능최저']||r['수능최저원문']||(String(r['배지사용여부']).toUpperCase()==='N'?'참고/검증중':'미적용 또는 확인 필요'))}</small></article>`).join(''):'<p>대학별 전형구조 자료를 연결 중입니다.</p>'}</section><section><h3>교과·학종·정시 핵심</h3><p>${escapeHtml(university['수시핵심']||'수시 전형별 평가요소를 확인합니다.')}</p><p>${escapeHtml(university['정시핵심']||'정시 영역별 반영비율과 가산점을 확인합니다.')}</p><p><b>과목선택 참고</b> ${escapeHtml(university['과목선택/교과포인트']||'-')}</p></section><section><h3>운호고 실제 입결</h3>${results.length?results.slice(0,12).map(r=>`<article><b>${escapeHtml(r['모집단위']||'모집단위')}</b><p>${escapeHtml(r['전형명(대)']||r['전형명']||'')}</p><small>합격 ${escapeHtml(r['합격자수']||'-')}명 · 최저내신 ${escapeHtml(r['최저내신등급']||'-')}</small></article>`).join(''):'<p>현재 연결된 운호고 실제 입결이 없습니다.</p>'}</section><section><h3>담임 상담 포인트</h3><p>${escapeHtml(university['담임상담체크']||university['카드한줄']||'학생의 내신·선택과목·모의고사·수업 탐구를 대학 전형 구조와 함께 확인합니다.')}</p></section><p class="admission-reference-note">${escapeHtml(university['기준학년도']||'2028')} 기준 · ${escapeHtml(university['자료상태']||'교육용 참고')} · 2029 최종 모집요강 재확인</p></div>`);
+8137: }function dashboardStudentStatusCompactMarkup(){
+8138:   const todayKey=dateKey(today),yesterday=new Date(today);yesterday.setDate(today.getDate()-1);const yesterdayKey=dateKey(yesterday);
+8139:   const official=filterRowsForDashboardStatus(officialAttendanceRowsForDate08162(todayKey));
+8140:   const late=filterRowsForDashboardStatus((readonlyCache?.lateAttendance||[]).filter(row=>uepComparableDate(row.date||row.day)===todayKey));
+8141:   const night=filterRowsForDashboardStatus((readonlyCache?.nightAttendance||readonlyCache?.attendance||[]).filter(row=>String(row.date||row.day||'').slice(0,10)===yesterdayKey&&nightRecordIsAttendance(row)));
+8142:   const currentStudents=filterRowsForDashboardStatus(readonlyCache?.students||[]),u=dashboardAdmissionTodayUniversity();
+8143:   const cards=[['status','late','공결/지각',`공결 ${new Set(official.map(attendanceStudentKey)).size} · 지각 ${new Set(late.map(attendanceStudentKey)).size}`],['status','night','야자출결',`${new Set(night.map(attendanceStudentKey)).size}/${currentStudents.length||259}`],['admission','basics','대입 기초','수시·정시와 고1 준비'],['admission','types','전형 이해','대학별 선발방식 비교'],['admission','university','오늘의 대학',u?.['대학명']||'대학 정보']];
+8144:   return `<div class="uep-student-status-compact uep-dashboard-five-cards">${cards.map(([type,key,label,value])=>`<button class="${type==='admission'?'dashboard-admission-card':''}" ${type==='status'?`data-dashboard-student-status="${key}"`:`data-dashboard-admission="${key}"`}><span>${label}</span><b>${escapeHtml(value)}</b></button>`).join('')}</div>`;
+8145: }
+8146: 
+8147: function dashboardStudentStatusMarkup(){
+8148:   const todayKey=dateKey(today);
+8149:   const yesterday=new Date(today);yesterday.setDate(today.getDate()-1);const yesterdayKey=dateKey(yesterday);
+8150:   const official=filterRowsForDashboardStatus(officialAttendanceRowsForDate08162(todayKey));
+8151:   const late=filterRowsForDashboardStatus((readonlyCache?.lateAttendance||[]).filter(row=>uepComparableDate(row.date||row.day)===todayKey));
+8152:   const night=filterRowsForDashboardStatus((readonlyCache?.nightAttendance||readonlyCache?.attendance||[]).filter(row=>String(row.date||row.day||'').slice(0,10)===yesterdayKey&&nightRecordIsAttendance(row)));
+8153:   const reportRows=filterRowsForDashboardStatus(dashboardReportStatusRows());
+8154:   const targetGroups=dashboardReportGroups(reportRows);
+8155:   const submitted=targetGroups.filter(group=>dashboardReportGroupState(group).state==="complete");
+8156:   const progress=targetGroups.filter(group=>dashboardReportGroupState(group).state==="progress");
+8157:   const missing=targetGroups.filter(group=>dashboardReportGroupState(group).state==="missing");
+8158:   const scope=dashboardGradeScope();
+8159:   const currentStudents=filterRowsForDashboardStatus(readonlyCache?.students||[]);
+8160:   const officialCount=new Set(official.map(attendanceStudentKey)).size;
+8161:   const lateCount=new Set(late.map(attendanceStudentKey)).size;
+8162:   const nightCount=new Set(night.map(attendanceStudentKey)).size;
+8163:   const nightTotal=currentStudents.length||259;
+8164:   const metrics=[
+8165:     ['late','공결/지각',`${officialCount}/${lateCount}`,'attendance',`공결 ${officialCount}명 · 지각 ${lateCount}명`,'명'],
+8166:     ['night','야자출결',`${nightCount}/${nightTotal}`,'attendance','야자 출결 학생','명'],
+8167:     ['submitted','제출완료',submitted.length,'programs','선택활동 보고서 제출완료 학생','명'],
+8168:     ['progress','제출중',progress.length,'programs','선택활동 보고서 일부 제출 학생','명'],
+8169:     ['report','미제출',missing.length,'programs','선택활동 보고서 미제출 학생','명']
+8170:   ];
+8171:   return `<div class="uep-student-scope"><span>조회 기준 · <b>${escapeHtml(scope.label)}</b></span><strong>선택활동 대상 <b>${targetGroups.length}</b>명</strong><em>완료 ${submitted.length}명 · 제출중 ${progress.length}명 · 미제출 ${missing.length}명</em></div><div class="uep-student-kpis">${metrics.map(([kind,label,count,page,desc,unit])=>`<button class="kpi-${kind}" data-dashboard-student-status="${kind}" data-page="${page}" title="${desc} 조회"><span>${label}</span><b>${count}</b><small>${kind==='late'?desc:unit}</small></button>`).join('')}</div>`;
+8172: }
+8173: 
+8174: function dashboardStatusStudentGroups(rows,{report=false,attendance=false}={}){
+8175:   const map=new Map();
+8176:   (rows||[]).forEach((source,index)=>{
+8177:     const row=report?source:normalizeDashboardStudentRow(source);
+8178:     const key=String(row.studentRef?.id||row.studentId||row.studentNo||`${row.classLabel}|${row.name}|${index}`);
+8179:     if(!map.has(key))map.set(key,{...row,key,rows:[],programs:[...(row.programs||[])],statusLabels:[]});
+8180:     const group=map.get(key);group.rows.push(...(row.rows||[row]));
+8181:     if(report){(row.programs||[]).forEach(x=>{if(!group.programs.includes(x))group.programs.push(x);});}
+8182:     if(attendance){
+8183:       const label=String(source.dashboardStatusType||source.detailType||source.type||source.statusType||'').trim();
+8184:       if(label&&!group.statusLabels.includes(label))group.statusLabels.push(label);
+8185:     }
+8186:   });
+8187:   return [...map.values()].sort((a,b)=>String(a.studentNo||'').localeCompare(String(b.studentNo||''),'ko'));
+8188: }
+8189: function dashboardStatusClassNo(row){
+8190:   const gc=recordGradeClass(row.studentRef||row);
+8191:   if(gc.classNo)return String(Number(gc.classNo));
+8192:   const label=String(row.classLabel||row.className||'');
+8193:   const match=label.match(/(?:^|[-\s])([1-9])(?:반)?$/);
+8194:   if(match)return String(Number(match[1]));
+8195:   const studentNo=String(row.studentNo||row.studentRef?.studentNo||'').replace(/\D/g,'');
+8196:   if(/^1[1-9]\d{2}$/.test(studentNo))return studentNo.slice(1,2);
+8197:   return '';
+8198: }
+8199: function dashboardStatusBoardMarkup(rows,kind,{report=false,attendance=false}={}){
+8200:   const ownClass=dashboardOwnClassNo();
+8201:   const groups=dashboardStatusStudentGroups(rows,{report,attendance});
+8202:   const buckets=Array.from({length:9},(_,i)=>({classNo:String(i+1),students:groups.filter(row=>dashboardStatusClassNo(row)===String(i+1))}));
+8203:   const unclassified=groups.filter(row=>!dashboardStatusClassNo(row)||Number(dashboardStatusClassNo(row))<1||Number(dashboardStatusClassNo(row))>9);
+8204:   const studentButton=(row)=>{
+8205:     let extra='';
+8206:     if(report){const st=dashboardReportGroupState(row);extra=st.total?`${st.submitted}/${st.total}`:`${row.programs?.length||0}건`;}
+8207:     else if(attendance)extra=(row.statusLabels||[]).join('·');
+===== function openDashboardUniversityDetail :: line 8129 =====
+8109:   const types=dashboardAdmissionRows('admissionTypes','53_전형이해').filter(dashboardAdmissionEnabled).sort((a,b)=>dashboardAdmissionOrder(a)-dashboardAdmissionOrder(b));
+8110:   const details=dashboardAdmissionRows('admissionTypeDetails','53A_전형세부유형DB').filter(dashboardAdmissionEnabled).sort((a,b)=>dashboardAdmissionOrder(a)-dashboardAdmissionOrder(b));
+8111:   const structures=dashboardAdmissionStructureRows().filter(r=>String(r['UEP노출']??'Y').toUpperCase()!=='N');
+8112:   if(!types.length&&!details.length)return openDashboardAdmissionDialog('전형 이해','<p>53_전형이해·53A_전형세부유형DB 자료를 읽지 못했습니다.</p>');
+8113:   const normalizeType=v=>String(v||'').replace('정시','수능위주').trim();
+8114:   const html=types.map(type=>{
+8115:     const broad=normalizeType(type['전형유형']);
+8116:     const ds=details.filter(d=>normalizeType(d['대전형'])===broad);
+8117:     const cards=(ds.length?ds:[type]).map(d=>{
+8118:       const sid=String(d['세부ID']||'');
+8119:       const linked=structures.filter(s=>normalizeType(s['대전형'])===broad&&(!sid||String(s['세부유형ID']||'').split(',').map(x=>x.trim()).includes(sid)));
+8120:       const names=[...new Set(linked.map(s=>s['대학명']).filter(Boolean))];
+8121:       const buttons=names.length?`<div class="admission-university-buttons">${names.map(name=>`<button data-admission-university="${escapeHtml(name)}">${escapeHtml(name)}</button>`).join('')}</div>`:'';
+8122:       return `<article><b>${escapeHtml(d['세부유형']||type['전형유형']||'')}</b><p>${escapeHtml(d['대표평가구조']||d['한줄요약']||type['한줄요약']||'')}</p>${d['수능최저경향']?`<small><strong>수능최저</strong> · ${escapeHtml(d['수능최저경향'])}</small>`:''}${d['담임상담체크']?`<small><strong>상담체크</strong> · ${escapeHtml(d['담임상담체크'])}</small>`:''}${d['고1준비포인트']?`<small><strong>고1 준비</strong> · ${escapeHtml(d['고1준비포인트'])}</small>`:''}${buttons}</article>`;
+8123:     }).join('');
+8124:     return `<section><h3>${escapeHtml(type['전형유형']||broad)}</h3><p>${escapeHtml(type['한줄요약']||'')}</p><div class="admission-explain-grid">${cards}</div></section>`;
+8125:   }).join('');
+8126:   openDashboardAdmissionDialog('전형 이해 · 대학별 선발방식 비교',`<div class="admission-learning-flow">${html}<p class="admission-reference-note">53_전형이해 + 53A 세부유형 + 53B 실제 대학전형 실시간 연결</p></div>`);
+8127:   document.querySelectorAll('[data-admission-university]').forEach(button=>button.onclick=()=>uep08221OpenUniversityFromTypes(button.dataset.admissionUniversity));
+8128: }
+8129: function openDashboardUniversityDetail(university=dashboardAdmissionTodayUniversity()){
+8130:   if(!university)return openDashboardAdmissionDialog('오늘의 대학','<p>56_대학입시마스터 자료를 읽지 못했습니다.</p>');
+8131:   const name=university['대학명']||'오늘의 대학',norm=dashboardAdmissionNormalizeUniversity(name);
+8132:   const structures=dashboardAdmissionStructureRows().filter(r=>dashboardAdmissionNormalizeUniversity(r['대학명'])===norm);
+8133:   const minimums=dashboardAdmissionRows('admissionMinimums','54_수능최저DB').filter(r=>dashboardAdmissionNormalizeUniversity(r['대학명'])===norm);
+8134:   const results=dashboardAdmissionRows('admissionResults','55_대학입결DB').filter(r=>dashboardAdmissionNormalizeUniversity(r['대학명'])===norm);
+8135:   const admissions=structures.length?structures:minimums;
+8136:   openDashboardAdmissionDialog(name,`<div class="admission-university-detail"><section><h3>주요 전형과 선발방식</h3>${admissions.length?admissions.slice(0,18).map(r=>`<article><b>${escapeHtml(r['전형유형']||r['대전형']||'전형')} · ${escapeHtml(r['전형명']||'전형명 확인')}</b><p>${escapeHtml(r['선발방식']||r['평가구조요약']||dashboardAdmissionMethod(r))}</p><small>수능최저 ${escapeHtml(r['수능최저']||r['수능최저원문']||(String(r['배지사용여부']).toUpperCase()==='N'?'참고/검증중':'미적용 또는 확인 필요'))}</small></article>`).join(''):'<p>대학별 전형구조 자료를 연결 중입니다.</p>'}</section><section><h3>교과·학종·정시 핵심</h3><p>${escapeHtml(university['수시핵심']||'수시 전형별 평가요소를 확인합니다.')}</p><p>${escapeHtml(university['정시핵심']||'정시 영역별 반영비율과 가산점을 확인합니다.')}</p><p><b>과목선택 참고</b> ${escapeHtml(university['과목선택/교과포인트']||'-')}</p></section><section><h3>운호고 실제 입결</h3>${results.length?results.slice(0,12).map(r=>`<article><b>${escapeHtml(r['모집단위']||'모집단위')}</b><p>${escapeHtml(r['전형명(대)']||r['전형명']||'')}</p><small>합격 ${escapeHtml(r['합격자수']||'-')}명 · 최저내신 ${escapeHtml(r['최저내신등급']||'-')}</small></article>`).join(''):'<p>현재 연결된 운호고 실제 입결이 없습니다.</p>'}</section><section><h3>담임 상담 포인트</h3><p>${escapeHtml(university['담임상담체크']||university['카드한줄']||'학생의 내신·선택과목·모의고사·수업 탐구를 대학 전형 구조와 함께 확인합니다.')}</p></section><p class="admission-reference-note">${escapeHtml(university['기준학년도']||'2028')} 기준 · ${escapeHtml(university['자료상태']||'교육용 참고')} · 2029 최종 모집요강 재확인</p></div>`);
+8137: }function dashboardStudentStatusCompactMarkup(){
+8138:   const todayKey=dateKey(today),yesterday=new Date(today);yesterday.setDate(today.getDate()-1);const yesterdayKey=dateKey(yesterday);
+8139:   const official=filterRowsForDashboardStatus(officialAttendanceRowsForDate08162(todayKey));
+8140:   const late=filterRowsForDashboardStatus((readonlyCache?.lateAttendance||[]).filter(row=>uepComparableDate(row.date||row.day)===todayKey));
+8141:   const night=filterRowsForDashboardStatus((readonlyCache?.nightAttendance||readonlyCache?.attendance||[]).filter(row=>String(row.date||row.day||'').slice(0,10)===yesterdayKey&&nightRecordIsAttendance(row)));
+8142:   const currentStudents=filterRowsForDashboardStatus(readonlyCache?.students||[]),u=dashboardAdmissionTodayUniversity();
+8143:   const cards=[['status','late','공결/지각',`공결 ${new Set(official.map(attendanceStudentKey)).size} · 지각 ${new Set(late.map(attendanceStudentKey)).size}`],['status','night','야자출결',`${new Set(night.map(attendanceStudentKey)).size}/${currentStudents.length||259}`],['admission','basics','대입 기초','수시·정시와 고1 준비'],['admission','types','전형 이해','대학별 선발방식 비교'],['admission','university','오늘의 대학',u?.['대학명']||'대학 정보']];
+8144:   return `<div class="uep-student-status-compact uep-dashboard-five-cards">${cards.map(([type,key,label,value])=>`<button class="${type==='admission'?'dashboard-admission-card':''}" ${type==='status'?`data-dashboard-student-status="${key}"`:`data-dashboard-admission="${key}"`}><span>${label}</span><b>${escapeHtml(value)}</b></button>`).join('')}</div>`;
+8145: }
+8146: 
+8147: function dashboardStudentStatusMarkup(){
+8148:   const todayKey=dateKey(today);
+8149:   const yesterday=new Date(today);yesterday.setDate(today.getDate()-1);const yesterdayKey=dateKey(yesterday);
+8150:   const official=filterRowsForDashboardStatus(officialAttendanceRowsForDate08162(todayKey));
+8151:   const late=filterRowsForDashboardStatus((readonlyCache?.lateAttendance||[]).filter(row=>uepComparableDate(row.date||row.day)===todayKey));
+8152:   const night=filterRowsForDashboardStatus((readonlyCache?.nightAttendance||readonlyCache?.attendance||[]).filter(row=>String(row.date||row.day||'').slice(0,10)===yesterdayKey&&nightRecordIsAttendance(row)));
+8153:   const reportRows=filterRowsForDashboardStatus(dashboardReportStatusRows());
+8154:   const targetGroups=dashboardReportGroups(reportRows);
+8155:   const submitted=targetGroups.filter(group=>dashboardReportGroupState(group).state==="complete");
+8156:   const progress=targetGroups.filter(group=>dashboardReportGroupState(group).state==="progress");
+8157:   const missing=targetGroups.filter(group=>dashboardReportGroupState(group).state==="missing");
+8158:   const scope=dashboardGradeScope();
+8159:   const currentStudents=filterRowsForDashboardStatus(readonlyCache?.students||[]);
+8160:   const officialCount=new Set(official.map(attendanceStudentKey)).size;
+8161:   const lateCount=new Set(late.map(attendanceStudentKey)).size;
+8162:   const nightCount=new Set(night.map(attendanceStudentKey)).size;
+8163:   const nightTotal=currentStudents.length||259;
+8164:   const metrics=[
+8165:     ['late','공결/지각',`${officialCount}/${lateCount}`,'attendance',`공결 ${officialCount}명 · 지각 ${lateCount}명`,'명'],
+8166:     ['night','야자출결',`${nightCount}/${nightTotal}`,'attendance','야자 출결 학생','명'],
+8167:     ['submitted','제출완료',submitted.length,'programs','선택활동 보고서 제출완료 학생','명'],
+8168:     ['progress','제출중',progress.length,'programs','선택활동 보고서 일부 제출 학생','명'],
+8169:     ['report','미제출',missing.length,'programs','선택활동 보고서 미제출 학생','명']
+8170:   ];
+8171:   return `<div class="uep-student-scope"><span>조회 기준 · <b>${escapeHtml(scope.label)}</b></span><strong>선택활동 대상 <b>${targetGroups.length}</b>명</strong><em>완료 ${submitted.length}명 · 제출중 ${progress.length}명 · 미제출 ${missing.length}명</em></div><div class="uep-student-kpis">${metrics.map(([kind,label,count,page,desc,unit])=>`<button class="kpi-${kind}" data-dashboard-student-status="${kind}" data-page="${page}" title="${desc} 조회"><span>${label}</span><b>${count}</b><small>${kind==='late'?desc:unit}</small></button>`).join('')}</div>`;
+8172: }
+8173: 
+8174: function dashboardStatusStudentGroups(rows,{report=false,attendance=false}={}){
+8175:   const map=new Map();
+8176:   (rows||[]).forEach((source,index)=>{
+8177:     const row=report?source:normalizeDashboardStudentRow(source);
+8178:     const key=String(row.studentRef?.id||row.studentId||row.studentNo||`${row.classLabel}|${row.name}|${index}`);
+8179:     if(!map.has(key))map.set(key,{...row,key,rows:[],programs:[...(row.programs||[])],statusLabels:[]});
+8180:     const group=map.get(key);group.rows.push(...(row.rows||[row]));
+8181:     if(report){(row.programs||[]).forEach(x=>{if(!group.programs.includes(x))group.programs.push(x);});}
+8182:     if(attendance){
+8183:       const label=String(source.dashboardStatusType||source.detailType||source.type||source.statusType||'').trim();
+8184:       if(label&&!group.statusLabels.includes(label))group.statusLabels.push(label);
+8185:     }
+8186:   });
+8187:   return [...map.values()].sort((a,b)=>String(a.studentNo||'').localeCompare(String(b.studentNo||''),'ko'));
+8188: }
+8189: function dashboardStatusClassNo(row){
+8190:   const gc=recordGradeClass(row.studentRef||row);
+8191:   if(gc.classNo)return String(Number(gc.classNo));
+8192:   const label=String(row.classLabel||row.className||'');
+8193:   const match=label.match(/(?:^|[-\s])([1-9])(?:반)?$/);
+8194:   if(match)return String(Number(match[1]));
+8195:   const studentNo=String(row.studentNo||row.studentRef?.studentNo||'').replace(/\D/g,'');
+8196:   if(/^1[1-9]\d{2}$/.test(studentNo))return studentNo.slice(1,2);
+8197:   return '';
+8198: }
+8199: function dashboardStatusBoardMarkup(rows,kind,{report=false,attendance=false}={}){
+8200:   const ownClass=dashboardOwnClassNo();
+8201:   const groups=dashboardStatusStudentGroups(rows,{report,attendance});
+8202:   const buckets=Array.from({length:9},(_,i)=>({classNo:String(i+1),students:groups.filter(row=>dashboardStatusClassNo(row)===String(i+1))}));
+8203:   const unclassified=groups.filter(row=>!dashboardStatusClassNo(row)||Number(dashboardStatusClassNo(row))<1||Number(dashboardStatusClassNo(row))>9);
+8204:   const studentButton=(row)=>{
+8205:     let extra='';
+8206:     if(report){const st=dashboardReportGroupState(row);extra=st.total?`${st.submitted}/${st.total}`:`${row.programs?.length||0}건`;}
+8207:     else if(attendance)extra=(row.statusLabels||[]).join('·');
+8208:     return `<button class="dashboard-status-student" data-dashboard-board-student="${escapeHtml(row.key)}" title="${escapeHtml(`${row.studentNo||''} ${row.name||''}`)}"><b>${escapeHtml(row.studentNo||'')} ${escapeHtml(row.name||'')}</b>${extra?`<small>${escapeHtml(extra)}</small>`:''}</button>`;
+8209:   };
+8210:   const board=`<div class="dashboard-class-board">${buckets.map(bucket=>`<section class="dashboard-class-card ${ownClass===bucket.classNo?'is-my-class':''}" data-dashboard-class-card="${bucket.classNo}"><header><div><b>${bucket.classNo}반</b>${ownClass===bucket.classNo?'<em>내 반</em>':''}</div><strong>${bucket.students.length}명</strong></header><div class="dashboard-class-students">${bucket.students.length?bucket.students.map(studentButton).join(''):'<span class="dashboard-class-empty">해당 학생 없음</span>'}</div></section>`).join('')}</div>`;
+8211:   const unmatched=unclassified.length?`<section class="dashboard-unclassified"><header><b>미분류 · ${unclassified.length}명</b><span>학번·학급 연결을 확인하세요. 학생을 누락하지 않고 표시합니다.</span></header><div>${unclassified.map(studentButton).join('')}</div></section>`:'';
+8212:   return board+unmatched;
+8213: }
+8214: 
+8215: function dashboardOfficialAttendanceLabel(row,fallback='공결'){
+8216:   const text=[row?.detailType,row?.attendanceType,row?.type,row?.statusType,row?.status,row?.result,row?.reason,row?.detail].filter(Boolean).join(' '); let type=fallback;
+8217:   if(/출석인정[^\n]*조퇴|공조퇴/.test(text))type='공조퇴'; else if(/출석인정[^\n]*지각|공지각/.test(text))type='공지각'; else if(/출석인정[^\n]*외출|공외출/.test(text))type='공외출'; else if(/출석인정[^\n]*(결석|결과)|공결/.test(text))type='공결'; else if(/조퇴/.test(text))type='조퇴'; else if(/지각/.test(text))type='지각'; else if(/외출/.test(text))type='외출';
+8218:   const direct=String(row?.periodLabel||row?.period||row?.periods||row?.classPeriod||row?.lessonPeriod||'').trim(); let period='';
+8219:   const dm=direct.match(/(\d{1,2})\s*(?:~|-|–)\s*(\d{1,2})/)||direct.match(/(\d{1,2})/);
+8220:   if(dm)period=dm[2]?(dm[1]+'~'+dm[2]+'교시'):(dm[1]+'교시');
+8221:   if(!period){const a=Number(row?.startPeriod||row?.fromPeriod||row?.periodStart||0),b=Number(row?.endPeriod||row?.toPeriod||row?.periodEnd||0);if(a&&b)period=a===b?(a+'교시'):(a+'~'+b+'교시');else if(a)period=a+'교시';}
+8222:   if(!period){const m=text.match(/(\d{1,2})\s*(?:~|-|–)\s*(\d{1,2})\s*교시/)||text.match(/(\d{1,2})\s*교시/);if(m)period=m[2]?(m[1]+'~'+m[2]+'교시'):(m[1]+'교시');}
+8223:   return [type,period].filter(Boolean).join(' ');
+8224: }
+8225: function openDashboardStudentStatus(kind, selectedDate=""){
+8226:   const defaultDate=kind==='night'?(()=>{const d=new Date(today);d.setDate(today.getDate()-1);return dateKey(d);})():dateKey(today);
+8227:   const basisDate=selectedDate||defaultDate;
+8228:   const official=officialAttendanceRowsForDate08162(basisDate).map(r=>({...r,dashboardStatusType:dashboardOfficialAttendanceLabel(r,'공결')}));
+8229:   const late=(readonlyCache?.lateAttendance||[]).filter(r=>uepComparableDate(r.date||r.day)===basisDate).map(r=>({...r,dashboardStatusType:dashboardOfficialAttendanceLabel(r,'공지각')}));
+===== function openDashboardUniversity :: line 8129 =====
+8109:   const types=dashboardAdmissionRows('admissionTypes','53_전형이해').filter(dashboardAdmissionEnabled).sort((a,b)=>dashboardAdmissionOrder(a)-dashboardAdmissionOrder(b));
+8110:   const details=dashboardAdmissionRows('admissionTypeDetails','53A_전형세부유형DB').filter(dashboardAdmissionEnabled).sort((a,b)=>dashboardAdmissionOrder(a)-dashboardAdmissionOrder(b));
+8111:   const structures=dashboardAdmissionStructureRows().filter(r=>String(r['UEP노출']??'Y').toUpperCase()!=='N');
+8112:   if(!types.length&&!details.length)return openDashboardAdmissionDialog('전형 이해','<p>53_전형이해·53A_전형세부유형DB 자료를 읽지 못했습니다.</p>');
+8113:   const normalizeType=v=>String(v||'').replace('정시','수능위주').trim();
+8114:   const html=types.map(type=>{
+8115:     const broad=normalizeType(type['전형유형']);
+8116:     const ds=details.filter(d=>normalizeType(d['대전형'])===broad);
+8117:     const cards=(ds.length?ds:[type]).map(d=>{
+8118:       const sid=String(d['세부ID']||'');
+8119:       const linked=structures.filter(s=>normalizeType(s['대전형'])===broad&&(!sid||String(s['세부유형ID']||'').split(',').map(x=>x.trim()).includes(sid)));
+8120:       const names=[...new Set(linked.map(s=>s['대학명']).filter(Boolean))];
+8121:       const buttons=names.length?`<div class="admission-university-buttons">${names.map(name=>`<button data-admission-university="${escapeHtml(name)}">${escapeHtml(name)}</button>`).join('')}</div>`:'';
+8122:       return `<article><b>${escapeHtml(d['세부유형']||type['전형유형']||'')}</b><p>${escapeHtml(d['대표평가구조']||d['한줄요약']||type['한줄요약']||'')}</p>${d['수능최저경향']?`<small><strong>수능최저</strong> · ${escapeHtml(d['수능최저경향'])}</small>`:''}${d['담임상담체크']?`<small><strong>상담체크</strong> · ${escapeHtml(d['담임상담체크'])}</small>`:''}${d['고1준비포인트']?`<small><strong>고1 준비</strong> · ${escapeHtml(d['고1준비포인트'])}</small>`:''}${buttons}</article>`;
+8123:     }).join('');
+8124:     return `<section><h3>${escapeHtml(type['전형유형']||broad)}</h3><p>${escapeHtml(type['한줄요약']||'')}</p><div class="admission-explain-grid">${cards}</div></section>`;
+8125:   }).join('');
+8126:   openDashboardAdmissionDialog('전형 이해 · 대학별 선발방식 비교',`<div class="admission-learning-flow">${html}<p class="admission-reference-note">53_전형이해 + 53A 세부유형 + 53B 실제 대학전형 실시간 연결</p></div>`);
+8127:   document.querySelectorAll('[data-admission-university]').forEach(button=>button.onclick=()=>uep08221OpenUniversityFromTypes(button.dataset.admissionUniversity));
+8128: }
+8129: function openDashboardUniversityDetail(university=dashboardAdmissionTodayUniversity()){
+8130:   if(!university)return openDashboardAdmissionDialog('오늘의 대학','<p>56_대학입시마스터 자료를 읽지 못했습니다.</p>');
+8131:   const name=university['대학명']||'오늘의 대학',norm=dashboardAdmissionNormalizeUniversity(name);
+8132:   const structures=dashboardAdmissionStructureRows().filter(r=>dashboardAdmissionNormalizeUniversity(r['대학명'])===norm);
+8133:   const minimums=dashboardAdmissionRows('admissionMinimums','54_수능최저DB').filter(r=>dashboardAdmissionNormalizeUniversity(r['대학명'])===norm);
+8134:   const results=dashboardAdmissionRows('admissionResults','55_대학입결DB').filter(r=>dashboardAdmissionNormalizeUniversity(r['대학명'])===norm);
+8135:   const admissions=structures.length?structures:minimums;
+8136:   openDashboardAdmissionDialog(name,`<div class="admission-university-detail"><section><h3>주요 전형과 선발방식</h3>${admissions.length?admissions.slice(0,18).map(r=>`<article><b>${escapeHtml(r['전형유형']||r['대전형']||'전형')} · ${escapeHtml(r['전형명']||'전형명 확인')}</b><p>${escapeHtml(r['선발방식']||r['평가구조요약']||dashboardAdmissionMethod(r))}</p><small>수능최저 ${escapeHtml(r['수능최저']||r['수능최저원문']||(String(r['배지사용여부']).toUpperCase()==='N'?'참고/검증중':'미적용 또는 확인 필요'))}</small></article>`).join(''):'<p>대학별 전형구조 자료를 연결 중입니다.</p>'}</section><section><h3>교과·학종·정시 핵심</h3><p>${escapeHtml(university['수시핵심']||'수시 전형별 평가요소를 확인합니다.')}</p><p>${escapeHtml(university['정시핵심']||'정시 영역별 반영비율과 가산점을 확인합니다.')}</p><p><b>과목선택 참고</b> ${escapeHtml(university['과목선택/교과포인트']||'-')}</p></section><section><h3>운호고 실제 입결</h3>${results.length?results.slice(0,12).map(r=>`<article><b>${escapeHtml(r['모집단위']||'모집단위')}</b><p>${escapeHtml(r['전형명(대)']||r['전형명']||'')}</p><small>합격 ${escapeHtml(r['합격자수']||'-')}명 · 최저내신 ${escapeHtml(r['최저내신등급']||'-')}</small></article>`).join(''):'<p>현재 연결된 운호고 실제 입결이 없습니다.</p>'}</section><section><h3>담임 상담 포인트</h3><p>${escapeHtml(university['담임상담체크']||university['카드한줄']||'학생의 내신·선택과목·모의고사·수업 탐구를 대학 전형 구조와 함께 확인합니다.')}</p></section><p class="admission-reference-note">${escapeHtml(university['기준학년도']||'2028')} 기준 · ${escapeHtml(university['자료상태']||'교육용 참고')} · 2029 최종 모집요강 재확인</p></div>`);
+8137: }function dashboardStudentStatusCompactMarkup(){
+8138:   const todayKey=dateKey(today),yesterday=new Date(today);yesterday.setDate(today.getDate()-1);const yesterdayKey=dateKey(yesterday);
+8139:   const official=filterRowsForDashboardStatus(officialAttendanceRowsForDate08162(todayKey));
+8140:   const late=filterRowsForDashboardStatus((readonlyCache?.lateAttendance||[]).filter(row=>uepComparableDate(row.date||row.day)===todayKey));
+8141:   const night=filterRowsForDashboardStatus((readonlyCache?.nightAttendance||readonlyCache?.attendance||[]).filter(row=>String(row.date||row.day||'').slice(0,10)===yesterdayKey&&nightRecordIsAttendance(row)));
+8142:   const currentStudents=filterRowsForDashboardStatus(readonlyCache?.students||[]),u=dashboardAdmissionTodayUniversity();
+8143:   const cards=[['status','late','공결/지각',`공결 ${new Set(official.map(attendanceStudentKey)).size} · 지각 ${new Set(late.map(attendanceStudentKey)).size}`],['status','night','야자출결',`${new Set(night.map(attendanceStudentKey)).size}/${currentStudents.length||259}`],['admission','basics','대입 기초','수시·정시와 고1 준비'],['admission','types','전형 이해','대학별 선발방식 비교'],['admission','university','오늘의 대학',u?.['대학명']||'대학 정보']];
+8144:   return `<div class="uep-student-status-compact uep-dashboard-five-cards">${cards.map(([type,key,label,value])=>`<button class="${type==='admission'?'dashboard-admission-card':''}" ${type==='status'?`data-dashboard-student-status="${key}"`:`data-dashboard-admission="${key}"`}><span>${label}</span><b>${escapeHtml(value)}</b></button>`).join('')}</div>`;
+8145: }
+8146: 
+8147: function dashboardStudentStatusMarkup(){
+8148:   const todayKey=dateKey(today);
+8149:   const yesterday=new Date(today);yesterday.setDate(today.getDate()-1);const yesterdayKey=dateKey(yesterday);
+8150:   const official=filterRowsForDashboardStatus(officialAttendanceRowsForDate08162(todayKey));
+8151:   const late=filterRowsForDashboardStatus((readonlyCache?.lateAttendance||[]).filter(row=>uepComparableDate(row.date||row.day)===todayKey));
+8152:   const night=filterRowsForDashboardStatus((readonlyCache?.nightAttendance||readonlyCache?.attendance||[]).filter(row=>String(row.date||row.day||'').slice(0,10)===yesterdayKey&&nightRecordIsAttendance(row)));
+8153:   const reportRows=filterRowsForDashboardStatus(dashboardReportStatusRows());
+8154:   const targetGroups=dashboardReportGroups(reportRows);
+8155:   const submitted=targetGroups.filter(group=>dashboardReportGroupState(group).state==="complete");
+8156:   const progress=targetGroups.filter(group=>dashboardReportGroupState(group).state==="progress");
+8157:   const missing=targetGroups.filter(group=>dashboardReportGroupState(group).state==="missing");
+8158:   const scope=dashboardGradeScope();
+8159:   const currentStudents=filterRowsForDashboardStatus(readonlyCache?.students||[]);
+8160:   const officialCount=new Set(official.map(attendanceStudentKey)).size;
+8161:   const lateCount=new Set(late.map(attendanceStudentKey)).size;
+8162:   const nightCount=new Set(night.map(attendanceStudentKey)).size;
+8163:   const nightTotal=currentStudents.length||259;
+8164:   const metrics=[
+8165:     ['late','공결/지각',`${officialCount}/${lateCount}`,'attendance',`공결 ${officialCount}명 · 지각 ${lateCount}명`,'명'],
+8166:     ['night','야자출결',`${nightCount}/${nightTotal}`,'attendance','야자 출결 학생','명'],
+8167:     ['submitted','제출완료',submitted.length,'programs','선택활동 보고서 제출완료 학생','명'],
+8168:     ['progress','제출중',progress.length,'programs','선택활동 보고서 일부 제출 학생','명'],
+8169:     ['report','미제출',missing.length,'programs','선택활동 보고서 미제출 학생','명']
+8170:   ];
+8171:   return `<div class="uep-student-scope"><span>조회 기준 · <b>${escapeHtml(scope.label)}</b></span><strong>선택활동 대상 <b>${targetGroups.length}</b>명</strong><em>완료 ${submitted.length}명 · 제출중 ${progress.length}명 · 미제출 ${missing.length}명</em></div><div class="uep-student-kpis">${metrics.map(([kind,label,count,page,desc,unit])=>`<button class="kpi-${kind}" data-dashboard-student-status="${kind}" data-page="${page}" title="${desc} 조회"><span>${label}</span><b>${count}</b><small>${kind==='late'?desc:unit}</small></button>`).join('')}</div>`;
+8172: }
+8173: 
+8174: function dashboardStatusStudentGroups(rows,{report=false,attendance=false}={}){
+8175:   const map=new Map();
+8176:   (rows||[]).forEach((source,index)=>{
+8177:     const row=report?source:normalizeDashboardStudentRow(source);
+8178:     const key=String(row.studentRef?.id||row.studentId||row.studentNo||`${row.classLabel}|${row.name}|${index}`);
+8179:     if(!map.has(key))map.set(key,{...row,key,rows:[],programs:[...(row.programs||[])],statusLabels:[]});
+8180:     const group=map.get(key);group.rows.push(...(row.rows||[row]));
+8181:     if(report){(row.programs||[]).forEach(x=>{if(!group.programs.includes(x))group.programs.push(x);});}
+8182:     if(attendance){
+8183:       const label=String(source.dashboardStatusType||source.detailType||source.type||source.statusType||'').trim();
+8184:       if(label&&!group.statusLabels.includes(label))group.statusLabels.push(label);
+8185:     }
+8186:   });
+8187:   return [...map.values()].sort((a,b)=>String(a.studentNo||'').localeCompare(String(b.studentNo||''),'ko'));
+8188: }
+8189: function dashboardStatusClassNo(row){
+8190:   const gc=recordGradeClass(row.studentRef||row);
+8191:   if(gc.classNo)return String(Number(gc.classNo));
+8192:   const label=String(row.classLabel||row.className||'');
+8193:   const match=label.match(/(?:^|[-\s])([1-9])(?:반)?$/);
+8194:   if(match)return String(Number(match[1]));
+8195:   const studentNo=String(row.studentNo||row.studentRef?.studentNo||'').replace(/\D/g,'');
+8196:   if(/^1[1-9]\d{2}$/.test(studentNo))return studentNo.slice(1,2);
+8197:   return '';
+8198: }
+8199: function dashboardStatusBoardMarkup(rows,kind,{report=false,attendance=false}={}){
+8200:   const ownClass=dashboardOwnClassNo();
+8201:   const groups=dashboardStatusStudentGroups(rows,{report,attendance});
+8202:   const buckets=Array.from({length:9},(_,i)=>({classNo:String(i+1),students:groups.filter(row=>dashboardStatusClassNo(row)===String(i+1))}));
+8203:   const unclassified=groups.filter(row=>!dashboardStatusClassNo(row)||Number(dashboardStatusClassNo(row))<1||Number(dashboardStatusClassNo(row))>9);
+8204:   const studentButton=(row)=>{
+8205:     let extra='';
+8206:     if(report){const st=dashboardReportGroupState(row);extra=st.total?`${st.submitted}/${st.total}`:`${row.programs?.length||0}건`;}
+8207:     else if(attendance)extra=(row.statusLabels||[]).join('·');
+8208:     return `<button class="dashboard-status-student" data-dashboard-board-student="${escapeHtml(row.key)}" title="${escapeHtml(`${row.studentNo||''} ${row.name||''}`)}"><b>${escapeHtml(row.studentNo||'')} ${escapeHtml(row.name||'')}</b>${extra?`<small>${escapeHtml(extra)}</small>`:''}</button>`;
+8209:   };
+8210:   const board=`<div class="dashboard-class-board">${buckets.map(bucket=>`<section class="dashboard-class-card ${ownClass===bucket.classNo?'is-my-class':''}" data-dashboard-class-card="${bucket.classNo}"><header><div><b>${bucket.classNo}반</b>${ownClass===bucket.classNo?'<em>내 반</em>':''}</div><strong>${bucket.students.length}명</strong></header><div class="dashboard-class-students">${bucket.students.length?bucket.students.map(studentButton).join(''):'<span class="dashboard-class-empty">해당 학생 없음</span>'}</div></section>`).join('')}</div>`;
+8211:   const unmatched=unclassified.length?`<section class="dashboard-unclassified"><header><b>미분류 · ${unclassified.length}명</b><span>학번·학급 연결을 확인하세요. 학생을 누락하지 않고 표시합니다.</span></header><div>${unclassified.map(studentButton).join('')}</div></section>`:'';
+8212:   return board+unmatched;
+8213: }
+8214: 
+8215: function dashboardOfficialAttendanceLabel(row,fallback='공결'){
+8216:   const text=[row?.detailType,row?.attendanceType,row?.type,row?.statusType,row?.status,row?.result,row?.reason,row?.detail].filter(Boolean).join(' '); let type=fallback;
+8217:   if(/출석인정[^\n]*조퇴|공조퇴/.test(text))type='공조퇴'; else if(/출석인정[^\n]*지각|공지각/.test(text))type='공지각'; else if(/출석인정[^\n]*외출|공외출/.test(text))type='공외출'; else if(/출석인정[^\n]*(결석|결과)|공결/.test(text))type='공결'; else if(/조퇴/.test(text))type='조퇴'; else if(/지각/.test(text))type='지각'; else if(/외출/.test(text))type='외출';
+8218:   const direct=String(row?.periodLabel||row?.period||row?.periods||row?.classPeriod||row?.lessonPeriod||'').trim(); let period='';
+8219:   const dm=direct.match(/(\d{1,2})\s*(?:~|-|–)\s*(\d{1,2})/)||direct.match(/(\d{1,2})/);
+8220:   if(dm)period=dm[2]?(dm[1]+'~'+dm[2]+'교시'):(dm[1]+'교시');
+8221:   if(!period){const a=Number(row?.startPeriod||row?.fromPeriod||row?.periodStart||0),b=Number(row?.endPeriod||row?.toPeriod||row?.periodEnd||0);if(a&&b)period=a===b?(a+'교시'):(a+'~'+b+'교시');else if(a)period=a+'교시';}
+8222:   if(!period){const m=text.match(/(\d{1,2})\s*(?:~|-|–)\s*(\d{1,2})\s*교시/)||text.match(/(\d{1,2})\s*교시/);if(m)period=m[2]?(m[1]+'~'+m[2]+'교시'):(m[1]+'교시');}
+8223:   return [type,period].filter(Boolean).join(' ');
+8224: }
+8225: function openDashboardStudentStatus(kind, selectedDate=""){
+8226:   const defaultDate=kind==='night'?(()=>{const d=new Date(today);d.setDate(today.getDate()-1);return dateKey(d);})():dateKey(today);
+8227:   const basisDate=selectedDate||defaultDate;
+8228:   const official=officialAttendanceRowsForDate08162(basisDate).map(r=>({...r,dashboardStatusType:dashboardOfficialAttendanceLabel(r,'공결')}));
+8229:   const late=(readonlyCache?.lateAttendance||[]).filter(r=>uepComparableDate(r.date||r.day)===basisDate).map(r=>({...r,dashboardStatusType:dashboardOfficialAttendanceLabel(r,'공지각')}));
+===== universityAdmissions :: line 8085 =====
+8065:   return reports.filter(report=>dashboardProgramIsSelectedActivity(report)).map(report=>({
+8066:     ...report,
+8067:     programTitle:report.programTitle||report.programName||report.reportGroup||'프로그램명 확인 필요',
+8068:     activityKind:'선택활동',
+8069:     submitted:report.submitted!==false&&Boolean(report.id||report.reportId||report.submittedAt||report.content)
+8070:   }));
+8071: }
+8072: function officialAttendanceRowsForDate08162(date){
+8073:   // __UEP_08162_OFFICIAL_SINGLE_DATE_SOURCE__
+8074:   const key=String(date||'').slice(0,10);
+8075:   return (readonlyCache?.officialAttendance||[]).filter(row=>String(row?.date||'').slice(0,10)===key);
+8076: }
+8077: function dashboardAdmissionRows(...keys){
+8078:   for(const key of keys){const rows=readonlyCache?.[key];if(Array.isArray(rows))return rows;}
+8079:   return [];
+8080: }
+8081: function dashboardAdmissionEnabled(row){return String(row?.['사용여부']??row?.use??'Y').toUpperCase()!=='N';}
+8082: function dashboardAdmissionOrder(row){return Number(row?.['노출순서']??row?.order??9999)||9999;}
+8083: function dashboardAdmissionNormalizeUniversity(value){return String(value||'').replace(/대학교/g,'대').replace(/\s|\(.*?\)/g,'');}
+8084: function dashboardAdmissionTodayIndex(length){if(!length)return 0;const d=new Date(),s=new Date(d.getFullYear(),0,0);return Math.floor((d-s)/86400000)%length;}
+8085: function dashboardAdmissionUniversities(){return dashboardAdmissionRows('universityAdmissions','56_대학입시마스터').filter(dashboardAdmissionEnabled).sort((a,b)=>dashboardAdmissionOrder(a)-dashboardAdmissionOrder(b));}
+8086: function dashboardAdmissionTodayUniversity(){const rows=dashboardAdmissionUniversities();return rows[dashboardAdmissionTodayIndex(rows.length)]||null;}
+8087: function openDashboardAdmissionDialogBase(title,body){
+8088:   document.querySelector('.dashboard-admission-layer')?.remove();
+8089:   const layer=document.createElement('div');layer.className='dashboard-admission-layer counsel-reason-layer';
+8090:   layer.innerHTML='<div class="dashboard-admission-dialog"><header><div><small>UEP 대입상담 · 교육용 참고</small><h2>'+escapeHtml(title)+'</h2></div><button type="button" data-admission-close>×</button></header><div class="dashboard-admission-body">'+body+'</div></div>';
+8091:   document.body.appendChild(layer);const close=()=>layer.remove();layer.querySelector('[data-admission-close]').onclick=close;layer.onclick=e=>{if(e.target===layer)close();};
+8092: }
+8093: function openDashboardAdmissionBasics(){
+8094:   const rows=dashboardAdmissionRows('admissionBasics','52_대입기초').filter(dashboardAdmissionEnabled).sort((a,b)=>dashboardAdmissionOrder(a)-dashboardAdmissionOrder(b));
+8095:   if(!rows.length)return openDashboardAdmissionDialog('대입 기초','<p>52_대입기초 자료를 읽지 못했습니다.</p>');
+8096:   const groups=[];
+8097:   for(const row of rows){const key=String(row['대분류']||'대입 기초').trim()||'대입 기초';let group=groups.find(x=>x.key===key);if(!group){group={key,rows:[]};groups.push(group);}group.rows.push(row);}
+8098:   const html=groups.map(group=>`<section><h3>${escapeHtml(group.key)}</h3><div class="admission-explain-grid">${group.rows.map(row=>`<article><b>${escapeHtml(row['주제']||'')}</b><p>${escapeHtml(row['카드요약']||row['상세설명']||'')}</p>${row['상세설명']&&row['상세설명']!==row['카드요약']?`<small>${escapeHtml(row['상세설명'])}</small>`:''}${row['상담포인트']?`<small><strong>상담</strong> · ${escapeHtml(row['상담포인트'])}</small>`:''}${row['주의/오해']?`<small><strong>주의</strong> · ${escapeHtml(row['주의/오해'])}</small>`:''}</article>`).join('')}</div></section>`).join('');
+8099:   openDashboardAdmissionDialog('대입 기초',`<div class="admission-learning-flow">${html}<p class="admission-reference-note">52_대입기초 실시간 연결 · 2029 대입 기준, 대학별 세부사항은 최종 모집요강 재확인</p></div>`);
+8100: }
+8101: function dashboardAdmissionMethod(row){
+8102:   const text=[row['선발방식'],row['평가구조요약'],row['핵심평가'],row['주요평가자료'],row['한줄요약'],row['상담표시문구']].filter(Boolean).join(' ');
+8103:   if(row['선발방식'])return String(row['선발방식']);if(row['평가구조요약'])return String(row['평가구조요약']);
+8104:   const out=[];if(/교과|내신/.test(text))out.push('내신');if(/수능최저|최저/.test(text))out.push('수능최저');if(/서류|학생부/.test(text))out.push('서류');if(/면접/.test(text))out.push('면접');if(/논술/.test(text))out.unshift('논술');if(/수능/.test(text)&&/정시|수능/.test(String(row['전형유형']||'')))return '수능100 또는 영역별 반영';return [...new Set(out)].join(' + ')||'대학별 방식 확인';
+8105: }
+8106: function dashboardAdmissionStructureRows(){return dashboardAdmissionRows('admissionStructures','53B_전형유형별대학DB','universityAdmissionStructures');}
+8107: function openDashboardAdmissionUniversityByName(name){const row=dashboardAdmissionUniversities().find(x=>dashboardAdmissionNormalizeUniversity(x['대학명'])===dashboardAdmissionNormalizeUniversity(name));openDashboardUniversityDetail(row||{'대학명':name});}
+8108: function openDashboardAdmissionTypes(){
+8109:   const types=dashboardAdmissionRows('admissionTypes','53_전형이해').filter(dashboardAdmissionEnabled).sort((a,b)=>dashboardAdmissionOrder(a)-dashboardAdmissionOrder(b));
+8110:   const details=dashboardAdmissionRows('admissionTypeDetails','53A_전형세부유형DB').filter(dashboardAdmissionEnabled).sort((a,b)=>dashboardAdmissionOrder(a)-dashboardAdmissionOrder(b));
+8111:   const structures=dashboardAdmissionStructureRows().filter(r=>String(r['UEP노출']??'Y').toUpperCase()!=='N');
+8112:   if(!types.length&&!details.length)return openDashboardAdmissionDialog('전형 이해','<p>53_전형이해·53A_전형세부유형DB 자료를 읽지 못했습니다.</p>');
+8113:   const normalizeType=v=>String(v||'').replace('정시','수능위주').trim();
+8114:   const html=types.map(type=>{
+8115:     const broad=normalizeType(type['전형유형']);
+8116:     const ds=details.filter(d=>normalizeType(d['대전형'])===broad);
+8117:     const cards=(ds.length?ds:[type]).map(d=>{
+8118:       const sid=String(d['세부ID']||'');
+8119:       const linked=structures.filter(s=>normalizeType(s['대전형'])===broad&&(!sid||String(s['세부유형ID']||'').split(',').map(x=>x.trim()).includes(sid)));
+8120:       const names=[...new Set(linked.map(s=>s['대학명']).filter(Boolean))];
+8121:       const buttons=names.length?`<div class="admission-university-buttons">${names.map(name=>`<button data-admission-university="${escapeHtml(name)}">${escapeHtml(name)}</button>`).join('')}</div>`:'';
+8122:       return `<article><b>${escapeHtml(d['세부유형']||type['전형유형']||'')}</b><p>${escapeHtml(d['대표평가구조']||d['한줄요약']||type['한줄요약']||'')}</p>${d['수능최저경향']?`<small><strong>수능최저</strong> · ${escapeHtml(d['수능최저경향'])}</small>`:''}${d['담임상담체크']?`<small><strong>상담체크</strong> · ${escapeHtml(d['담임상담체크'])}</small>`:''}${d['고1준비포인트']?`<small><strong>고1 준비</strong> · ${escapeHtml(d['고1준비포인트'])}</small>`:''}${buttons}</article>`;
+8123:     }).join('');
+8124:     return `<section><h3>${escapeHtml(type['전형유형']||broad)}</h3><p>${escapeHtml(type['한줄요약']||'')}</p><div class="admission-explain-grid">${cards}</div></section>`;
+8125:   }).join('');
+8126:   openDashboardAdmissionDialog('전형 이해 · 대학별 선발방식 비교',`<div class="admission-learning-flow">${html}<p class="admission-reference-note">53_전형이해 + 53A 세부유형 + 53B 실제 대학전형 실시간 연결</p></div>`);
+8127:   document.querySelectorAll('[data-admission-university]').forEach(button=>button.onclick=()=>uep08221OpenUniversityFromTypes(button.dataset.admissionUniversity));
+8128: }
+8129: function openDashboardUniversityDetail(university=dashboardAdmissionTodayUniversity()){
+8130:   if(!university)return openDashboardAdmissionDialog('오늘의 대학','<p>56_대학입시마스터 자료를 읽지 못했습니다.</p>');
+8131:   const name=university['대학명']||'오늘의 대학',norm=dashboardAdmissionNormalizeUniversity(name);
+8132:   const structures=dashboardAdmissionStructureRows().filter(r=>dashboardAdmissionNormalizeUniversity(r['대학명'])===norm);
+8133:   const minimums=dashboardAdmissionRows('admissionMinimums','54_수능최저DB').filter(r=>dashboardAdmissionNormalizeUniversity(r['대학명'])===norm);
+8134:   const results=dashboardAdmissionRows('admissionResults','55_대학입결DB').filter(r=>dashboardAdmissionNormalizeUniversity(r['대학명'])===norm);
+8135:   const admissions=structures.length?structures:minimums;
+8136:   openDashboardAdmissionDialog(name,`<div class="admission-university-detail"><section><h3>주요 전형과 선발방식</h3>${admissions.length?admissions.slice(0,18).map(r=>`<article><b>${escapeHtml(r['전형유형']||r['대전형']||'전형')} · ${escapeHtml(r['전형명']||'전형명 확인')}</b><p>${escapeHtml(r['선발방식']||r['평가구조요약']||dashboardAdmissionMethod(r))}</p><small>수능최저 ${escapeHtml(r['수능최저']||r['수능최저원문']||(String(r['배지사용여부']).toUpperCase()==='N'?'참고/검증중':'미적용 또는 확인 필요'))}</small></article>`).join(''):'<p>대학별 전형구조 자료를 연결 중입니다.</p>'}</section><section><h3>교과·학종·정시 핵심</h3><p>${escapeHtml(university['수시핵심']||'수시 전형별 평가요소를 확인합니다.')}</p><p>${escapeHtml(university['정시핵심']||'정시 영역별 반영비율과 가산점을 확인합니다.')}</p><p><b>과목선택 참고</b> ${escapeHtml(university['과목선택/교과포인트']||'-')}</p></section><section><h3>운호고 실제 입결</h3>${results.length?results.slice(0,12).map(r=>`<article><b>${escapeHtml(r['모집단위']||'모집단위')}</b><p>${escapeHtml(r['전형명(대)']||r['전형명']||'')}</p><small>합격 ${escapeHtml(r['합격자수']||'-')}명 · 최저내신 ${escapeHtml(r['최저내신등급']||'-')}</small></article>`).join(''):'<p>현재 연결된 운호고 실제 입결이 없습니다.</p>'}</section><section><h3>담임 상담 포인트</h3><p>${escapeHtml(university['담임상담체크']||university['카드한줄']||'학생의 내신·선택과목·모의고사·수업 탐구를 대학 전형 구조와 함께 확인합니다.')}</p></section><p class="admission-reference-note">${escapeHtml(university['기준학년도']||'2028')} 기준 · ${escapeHtml(university['자료상태']||'교육용 참고')} · 2029 최종 모집요강 재확인</p></div>`);
+8137: }function dashboardStudentStatusCompactMarkup(){
+8138:   const todayKey=dateKey(today),yesterday=new Date(today);yesterday.setDate(today.getDate()-1);const yesterdayKey=dateKey(yesterday);
+8139:   const official=filterRowsForDashboardStatus(officialAttendanceRowsForDate08162(todayKey));
+8140:   const late=filterRowsForDashboardStatus((readonlyCache?.lateAttendance||[]).filter(row=>uepComparableDate(row.date||row.day)===todayKey));
+8141:   const night=filterRowsForDashboardStatus((readonlyCache?.nightAttendance||readonlyCache?.attendance||[]).filter(row=>String(row.date||row.day||'').slice(0,10)===yesterdayKey&&nightRecordIsAttendance(row)));
+8142:   const currentStudents=filterRowsForDashboardStatus(readonlyCache?.students||[]),u=dashboardAdmissionTodayUniversity();
+8143:   const cards=[['status','late','공결/지각',`공결 ${new Set(official.map(attendanceStudentKey)).size} · 지각 ${new Set(late.map(attendanceStudentKey)).size}`],['status','night','야자출결',`${new Set(night.map(attendanceStudentKey)).size}/${currentStudents.length||259}`],['admission','basics','대입 기초','수시·정시와 고1 준비'],['admission','types','전형 이해','대학별 선발방식 비교'],['admission','university','오늘의 대학',u?.['대학명']||'대학 정보']];
+8144:   return `<div class="uep-student-status-compact uep-dashboard-five-cards">${cards.map(([type,key,label,value])=>`<button class="${type==='admission'?'dashboard-admission-card':''}" ${type==='status'?`data-dashboard-student-status="${key}"`:`data-dashboard-admission="${key}"`}><span>${label}</span><b>${escapeHtml(value)}</b></button>`).join('')}</div>`;
+8145: }
+8146: 
+8147: function dashboardStudentStatusMarkup(){
+8148:   const todayKey=dateKey(today);
+8149:   const yesterday=new Date(today);yesterday.setDate(today.getDate()-1);const yesterdayKey=dateKey(yesterday);
+8150:   const official=filterRowsForDashboardStatus(officialAttendanceRowsForDate08162(todayKey));
+8151:   const late=filterRowsForDashboardStatus((readonlyCache?.lateAttendance||[]).filter(row=>uepComparableDate(row.date||row.day)===todayKey));
+8152:   const night=filterRowsForDashboardStatus((readonlyCache?.nightAttendance||readonlyCache?.attendance||[]).filter(row=>String(row.date||row.day||'').slice(0,10)===yesterdayKey&&nightRecordIsAttendance(row)));
+8153:   const reportRows=filterRowsForDashboardStatus(dashboardReportStatusRows());
+8154:   const targetGroups=dashboardReportGroups(reportRows);
+8155:   const submitted=targetGroups.filter(group=>dashboardReportGroupState(group).state==="complete");
+8156:   const progress=targetGroups.filter(group=>dashboardReportGroupState(group).state==="progress");
+8157:   const missing=targetGroups.filter(group=>dashboardReportGroupState(group).state==="missing");
+8158:   const scope=dashboardGradeScope();
+8159:   const currentStudents=filterRowsForDashboardStatus(readonlyCache?.students||[]);
+8160:   const officialCount=new Set(official.map(attendanceStudentKey)).size;
+8161:   const lateCount=new Set(late.map(attendanceStudentKey)).size;
+8162:   const nightCount=new Set(night.map(attendanceStudentKey)).size;
+8163:   const nightTotal=currentStudents.length||259;
+8164:   const metrics=[
+8165:     ['late','공결/지각',`${officialCount}/${lateCount}`,'attendance',`공결 ${officialCount}명 · 지각 ${lateCount}명`,'명'],
+8166:     ['night','야자출결',`${nightCount}/${nightTotal}`,'attendance','야자 출결 학생','명'],
+8167:     ['submitted','제출완료',submitted.length,'programs','선택활동 보고서 제출완료 학생','명'],
+8168:     ['progress','제출중',progress.length,'programs','선택활동 보고서 일부 제출 학생','명'],
+8169:     ['report','미제출',missing.length,'programs','선택활동 보고서 미제출 학생','명']
+8170:   ];
+8171:   return `<div class="uep-student-scope"><span>조회 기준 · <b>${escapeHtml(scope.label)}</b></span><strong>선택활동 대상 <b>${targetGroups.length}</b>명</strong><em>완료 ${submitted.length}명 · 제출중 ${progress.length}명 · 미제출 ${missing.length}명</em></div><div class="uep-student-kpis">${metrics.map(([kind,label,count,page,desc,unit])=>`<button class="kpi-${kind}" data-dashboard-student-status="${kind}" data-page="${page}" title="${desc} 조회"><span>${label}</span><b>${count}</b><small>${kind==='late'?desc:unit}</small></button>`).join('')}</div>`;
+8172: }
+8173: 
+8174: function dashboardStatusStudentGroups(rows,{report=false,attendance=false}={}){
+8175:   const map=new Map();
+8176:   (rows||[]).forEach((source,index)=>{
+8177:     const row=report?source:normalizeDashboardStudentRow(source);
+8178:     const key=String(row.studentRef?.id||row.studentId||row.studentNo||`${row.classLabel}|${row.name}|${index}`);
+8179:     if(!map.has(key))map.set(key,{...row,key,rows:[],programs:[...(row.programs||[])],statusLabels:[]});
+8180:     const group=map.get(key);group.rows.push(...(row.rows||[row]));
+8181:     if(report){(row.programs||[]).forEach(x=>{if(!group.programs.includes(x))group.programs.push(x);});}
+8182:     if(attendance){
+8183:       const label=String(source.dashboardStatusType||source.detailType||source.type||source.statusType||'').trim();
+8184:       if(label&&!group.statusLabels.includes(label))group.statusLabels.push(label);
+8185:     }
+===== admissionUniversities :: line 4931 =====
+4911:   const sum=chosen.reduce((total,item)=>total+item.level,0);
+4912:   const detail=`${chosen.map(item=>`${item.subject}(${item.level})`).join(" + ")} = ${sum} / 기준 ${count}합${sumLimit}${englishLimit?` · 영어≤${englishLimit}`:""}`;
+4913:   return {result:sum<=sumLimit?"충족":"미충족",detail,cls:sum<=sumLimit?"good":"bad"};
+4914: }
+4915: 
+4916: function universityNameKey(value) {
+4917:   return String(value || "")
+4918:     .normalize("NFKC")
+4919:     .toLowerCase()
+4920:     .replace(/\([^)]*\)|\[[^\]]*\]/g,"")
+4921:     .replace(/대학교/g,"대")
+4922:     .replace(/캠퍼스/g,"")
+4923:     .replace(/\s+/g,"")
+4924:     .replace(/[()·.\-_/]/g,"");
+4925: }
+4926: function universityMatches(value, query) {
+4927:   if (!query) return true;
+4928:   const a=universityNameKey(value), b=universityNameKey(query);
+4929:   return a.includes(b) || b.includes(a);
+4930: }
+4931: function admissionUniversities() {
+4932:   return [...new Set([...(readonlyCache?.admissionMinimums||[]).map(x=>x.university),...(readonlyCache?.admissionCuts||[]).map(x=>x.university)].filter(Boolean))].sort((a,b)=>String(a).localeCompare(String(b),"ko"));
+4933: }
+4934: function minimumAllExamsMarkup(student, rules) {
+4935:   const exams=mockExamNames(student.id);
+4936:   const mockRows=(readonlyCache?.scoreRecords||[]).filter(row=>row.studentId===student.id&&row.scoreType==="모의고사");
+4937:   if(!exams.length) return `<div class="query-empty data-card"><b>모의고사 자료가 없습니다.</b><span>개인별 수능최저 비교를 위해 모의고사 성적을 연결하세요.</span></div>`;
+4938:   return `<div class="query-summary"><span><b>${rules.length}</b>대학·전형</span><span><b>${exams.length}</b>전체 모의고사</span><span><b>과목별 등급</b>평균등급 미사용</span><span><b>계산식 표시</b>검증 가능</span></div><div class="data-card minimum-matrix-card"><div class="card-head"><div><strong>전체 모의고사 × 수능최저</strong></div><small>각 칸에 사용한 과목별 등급과 계산식을 표시합니다.</small></div><div class="minimum-matrix-scroll"><table class="minimum-matrix"><thead><tr><th>대학·전형</th><th>수능최저 기준</th>${exams.map(name=>`<th>${escapeHtml(name)}</th>`).join("")}</tr></thead><tbody>${rules.map(rule=>`<tr><th><b>${escapeHtml(rule.university)}</b><small>${escapeHtml(rule.type)} · ${escapeHtml(rule.name)} ${escapeHtml(rule.unit||"")}</small></th><td class="rule-cell">${escapeHtml(rule.minimum||"-")}<small>${escapeHtml([rule.inquiryCount?`탐구 ${rule.inquiryCount}과목`:"",rule.english?`영어 ${rule.english}`:"",rule.history?`한국사 ${rule.history}`:""].filter(Boolean).join(" · "))}</small></td>${exams.map(name=>{const check=minimumCheck(rule,mockRows.filter(row=>row.exam===name));return `<td><span class="minimum-result ${check.cls}">${check.result}</span><small>${escapeHtml(check.detail)}</small></td>`;}).join("")}</tr>`).join("")}</tbody></table></div></div>`;
+4939: }
+4940: function universityCohortMarkup(university, mode, rules, cuts) {
+4941:   const students=readonlyCache?.students||[];
+4942:   const rows=students.map(student=>{
+4943:     const base=admissionBase(student.id);
+4944:     const exams=mockExamNames(student.id);
+4945:     const mockRows=(readonlyCache?.scoreRecords||[]).filter(row=>row.studentId===student.id&&row.scoreType==="모의고사");
+4946:     const minMatches=[];
+4947:     rules.forEach(rule=>exams.forEach(exam=>{const check=minimumCheck(rule,mockRows.filter(row=>row.exam===exam));if(check.result==="충족")minMatches.push({rule,exam,check});}));
+4948:     const cutMatches=cuts.filter(cut=>base.actual9!=null&&Number.isFinite(Number(cut.cut))&&base.actual9<=Number(cut.cut)).sort((a,b)=>Number(a.cut)-Number(b.cut));
+4949:     return {student,base,minMatches,cutMatches};
+4950:   });
+4951:   const internalRows=rows.filter(item=>item.cutMatches.length).sort((a,b)=>(a.base.actual9??99)-(b.base.actual9??99)||String(a.student.studentNo).localeCompare(String(b.student.studentNo)));
+4952:   const minimumRows=rows.filter(item=>item.minMatches.length).sort((a,b)=>b.minMatches.length-a.minMatches.length||String(a.student.studentNo).localeCompare(String(b.student.studentNo)));
+4953:   const combinedRows=rows.filter(item=>item.cutMatches.length&&item.minMatches.length).sort((a,b)=>(a.base.actual9??99)-(b.base.actual9??99));
+4954:   const internalTable=`<div class="data-card cohort-card"><div class="card-head"><div><strong>${escapeHtml(university)} 내신 기준 충족 학생</strong></div><small>석차 기반 실제 9등급이 입결 이내인 학생</small></div><div class="data-head cohort-internal-grid"><span>학번</span><span>학생</span><span>반</span><span>실제 9등급</span><span>충족 모집단위·전형</span><span>입결</span></div>${internalRows.map(item=>{const cut=item.cutMatches[0];return `<div class="data-row cohort-internal-grid"><b>${escapeHtml(item.student.studentNo)}</b><span>${escapeHtml(item.student.name)}</span><span>${escapeHtml(item.student.className)}반</span><strong>${item.base.actual9?.toFixed(2)||"-"}</strong><span>${escapeHtml(`${cut.unit||"-"} · ${cut.name||"-"}`)}</span><span>${Number(cut.cut).toFixed(2)}</span></div>`;}).join("")||'<div class="query-empty"><b>현재 내신 기준 충족 학생이 없습니다.</b></div>'}</div>`;
+4955:   const minimumTable=`<div class="data-card cohort-card"><div class="card-head"><div><strong>${escapeHtml(university)} 수능최저 충족 학생</strong></div><small>한 번 이상 충족한 모의고사·전형을 모아 표시</small></div><div class="data-head cohort-minimum-grid"><span>학번</span><span>학생</span><span>반</span><span>충족 모의고사</span><span>충족 전형 수</span><span>대표 계산식</span></div>${minimumRows.map(item=>{const exams=[...new Set(item.minMatches.map(x=>x.exam))];const first=item.minMatches[0];return `<div class="data-row cohort-minimum-grid"><b>${escapeHtml(item.student.studentNo)}</b><span>${escapeHtml(item.student.name)}</span><span>${escapeHtml(item.student.className)}반</span><span>${escapeHtml(exams.join(" · "))}</span><strong>${item.minMatches.length}</strong><span><b>${escapeHtml(first.rule.name||first.rule.type||"")}</b><small>${escapeHtml(first.check.detail)}</small></span></div>`;}).join("")||'<div class="query-empty"><b>현재 수능최저 충족 학생이 없습니다.</b></div>'}</div>`;
+4956:   const combinedTable=`<div class="data-card cohort-card"><div class="card-head"><div><strong>${escapeHtml(university)} 내신·수능최저 동시 충족</strong></div><small>현재 자료에서 두 조건을 모두 충족한 학생</small></div><div class="data-head cohort-combined-grid"><span>학번</span><span>학생</span><span>반</span><span>실제 9등급</span><span>내신 충족</span><span>최저 충족 모의고사</span></div>${combinedRows.map(item=>`<div class="data-row cohort-combined-grid"><b>${escapeHtml(item.student.studentNo)}</b><span>${escapeHtml(item.student.name)}</span><span>${escapeHtml(item.student.className)}반</span><strong>${item.base.actual9?.toFixed(2)||"-"}</strong><span>${item.cutMatches.length}개 모집단위</span><span>${escapeHtml([...new Set(item.minMatches.map(x=>x.exam))].join(" · "))}</span></div>`).join("")||'<div class="query-empty"><b>동시 충족 학생이 없습니다.</b></div>'}</div>`;
+4957:   const summary=`<div class="query-summary"><span><b>${escapeHtml(university)}</b>대학 기준</span><span><b>${internalRows.length}</b>내신 충족</span><span><b>${minimumRows.length}</b>최저 충족</span><span><b>${combinedRows.length}</b>동시 충족</span></div>`;
+4958:   if(mode==="minimum") return summary+minimumTable;
+4959:   if(mode==="cuts") return summary+internalTable;
+4960:   return summary+combinedTable+internalTable+minimumTable;
+4961: }
+4962: 
+4963: function runAdmissionQuery() {
+4964:   const scope=$("#admissionScope")?.value || "individual";
+4965:   const studentId=$("#admissionStudent")?.value || "";
+4966:   const universityInput=($("#admissionUniversity")?.value || "").trim();
+4967:   const target=$("#admissionQueryResult");
+4968:   const students=readonlyCache?.students || [];
+4969:   const rules=(readonlyCache?.admissionMinimums || []).filter(x=>universityMatches(x.university,universityInput));
+4970:   const cuts=(readonlyCache?.admissionCuts || []).filter(x=>universityMatches(x.university,universityInput));
+4971:   if(scope==="university") {
+4972:     if(!universityInput){target.innerHTML=`<div class="query-empty"><b>대학을 선택하세요.</b><span>대학명을 입력하거나 자동완성 목록에서 선택하면 충족 학생을 모아 보여줍니다.</span></div>`;return;}
+4973:     if(!rules.length&&!cuts.length){target.innerHTML=`<div class="query-empty"><b>연결 자료에서 대학을 찾지 못했습니다.</b><span>자동완성 목록의 대학명을 선택하세요.</span></div>`;return;}
+4974:     target.innerHTML=universityCohortMarkup(universityInput,admissionMode,rules,cuts);
+4975:     return;
+4976:   }
+4977:   if(!studentId){target.innerHTML=`<div class="query-empty"><b>학생을 선택하세요.</b><span>반 필터는 선택 사항이며, 학생을 고른 뒤 조회하세요.</span></div>`;return;}
+4978:   const student=students.find(x=>x.id===studentId);
+4979:   if(!student){target.innerHTML=`<div class="query-empty"><b>학생자료를 찾지 못했습니다.</b><span>학생정보 연결 상태를 확인하세요.</span></div>`;return;}
+4980:   const base=admissionBase(student.id);
+4981:   const head=`<div class="student-admission-head"><div><small>${escapeHtml(student.studentNo)} · ${escapeHtml(student.className)}</small><h3>${escapeHtml(student.name)} 입시 조회</h3></div><span class="state">${escapeHtml(base.preferred || "내신 자료")} · 5등급제/실제9등급</span></div>`;
+4982:   const actualDetailTable=`<div class="data-card"><div class="card-head"><div><strong>석차 기반 실제 9등급</strong></div><small>석차 ÷ 수강자수 누적비율 기준</small></div><div class="data-head actual-nine-grid"><span>과목</span><span>원점수</span><span>5등급</span><span>석차/수강자</span><span>상위비율</span><span>실제 9등급</span></div>${base.actualDetails.map(({row,result})=>`<div class="data-row actual-nine-grid"><b>${escapeHtml(row.subject)}</b><span>${scoreDisplay(row.rawScore)}</span><span>${scoreDisplay(row.level,2)}</span><span>${result.rank}/${result.enrollment}</span><span>${result.percentile.toFixed(1)}%</span><span class="state">${result.grade}등급</span></div>`).join("")||'<div class="query-empty"><b>석차·수강자수 자료가 없습니다.</b><span>산출제외 과목은 실제 9등급 계산에서 제외합니다.</span></div>'}</div>`;
+4983:   const conversion=`<div class="query-summary"><span><b>${base.avg5==null?"-":base.avg5.toFixed(2)}</b>5등급제 평균</span><span><b>${base.actual9==null?"-":base.actual9.toFixed(2)}</b>실제 9등급 평균</span><span><b>${base.actualDetails.length}</b>산출과목</span><span><b>${escapeHtml(base.preferred||"-")}</b>기준고사</span></div>${actualDetailTable}`;
+4984:   const cutRows=cuts.map(cut=>({...cut,diff:base.actual9==null?null:base.actual9-Number(cut.cut)})).filter(item=>item.diff==null||Number.isFinite(item.diff)).sort((a,b)=>Math.abs(a.diff??99)-Math.abs(b.diff??99)).slice(0,100);
+4985:   const cutsHtml=`<div class="query-summary"><span><b>${base.actual9==null?"-":base.actual9.toFixed(2)}</b>실제 9등급 평균</span><span><b>${cuts.length}</b>입결자료</span><span><b>${universityInput?escapeHtml(universityInput):"전체"}</b>대학범위</span><span><b>${cutRows.length}</b>표시자료</span></div><div class="data-card"><div class="card-head"><div><strong>대학별 입결 비교</strong></div><small>실제 9등급 평균과 가까운 순</small></div><div class="data-head admission-cut-grid"><span>대학</span><span>모집단위</span><span>전형</span><span>입결</span><span>차이</span><span>판정</span></div>${cutRows.map(row=>`<div class="data-row admission-cut-grid"><b>${escapeHtml(row.university)}</b><span>${escapeHtml(row.unit)}</span><span>${escapeHtml(row.name)}</span><span>${Number(row.cut).toFixed(2)}</span><span>${row.diff==null?"-":row.diff.toFixed(2)}</span><span class="state ${row.diff!=null&&row.diff>0.7?"warn":""}">${row.diff==null?"판단대기":row.diff<=0?"범위내":row.diff<=0.7?"도전":"상향"}</span></div>`).join("")||'<div class="query-empty"><b>입결 자료가 없습니다.</b></div>'}</div>`;
+4986:   const minimum=minimumAllExamsMarkup(student,rules);
+4987:   if(admissionMode==="conversion") target.innerHTML=head+conversion;
+4988:   else if(admissionMode==="minimum") target.innerHTML=head+minimum;
+4989:   else if(admissionMode==="cuts") target.innerHTML=head+cutsHtml;
+4990:   else if(admissionMode==="mock") target.innerHTML=head+minimum+cutsHtml;
+4991:   else target.innerHTML=head+conversion+minimum+cutsHtml;
+4992: }
+4993: 
+4994: 
+4995: function latestMockSnapshot(studentId){
+4996:   const names=mockExamNames(studentId);
+4997:   const exam=names[names.length-1]||"";
+4998:   const rows=uepRowsForStudent(uepStudentPerfIndex().scoreByStudent,String(studentId)).filter(r=>r.scoreType==="모의고사"&&(!exam||r.exam===exam));
+4999:   const main=rows.filter(r=>["국어","수학","영어"].includes(String(r.subject||"")));
+5000:   const inquiry=rows.filter(r=>!["국어","수학","영어","한국사"].includes(String(r.subject||""))).sort((a,b)=>Number(a.level||99)-Number(b.level||99)).slice(0,2);
+5001:   const mainLevels=main.map(r=>Number(r.level)).filter(Number.isFinite);
+5002:   const inquiryLevels=inquiry.map(r=>Number(r.level)).filter(Number.isFinite);
+5003:   const levels=[...mainLevels,...inquiryLevels];
+5004:   return {exam,rows,levels,mainLevels,inquiryLevels,max:levels.length?Math.max(...levels):null,best:levels.length?Math.min(...levels):null,
+5005:     mainWithin2:mainLevels.filter(v=>v<=2).length,mainWithin3:mainLevels.filter(v=>v<=3).length,mainWithin4:mainLevels.filter(v=>v<=4).length,
+5006:     allWithin4:levels.length>0&&levels.every(v=>v<=4),allWithin5:levels.length>0&&levels.every(v=>v<=5),detail:[...main,...inquiry].map(r=>`${r.subject} ${r.level}등급`).join(" · ")};
+5007: }
+5008: function studentPreparationStats(student){
+5009:   const idx=uepStudentPerfIndex();
+5010:   const programs=uepRowsForStudent(idx.programByStudent,student);
+5011:   const after=programs.filter(p=>/방과후/.test(`${p.kind||''} ${p.afterType||''} ${p.title||''}`)).length;
+5012:   const night=programs.filter(p=>/야간심화|심화수업/.test(`${p.afterType||''} ${p.title||''}`)).length;
+5013:   const selected=programs.filter(p=>/선택/.test(`${p.kind||''}`)).length;
+5014:   const reports=uepRowsForStudent(idx.reportByStudent,student);
+5015:   const nightAttendance=uepRowsForStudent(idx.nightByStudent,student);
+5016:   const subjectRows=uepRowsForStudent(idx.selectedByStudent,student);
+5017:   return {after,night,selected,reports:reports.length,nightStudy:nightAttendance.length,subjects:subjectRows.length};
+5018: }
+5019: function admissionManagementDataset(group){
+5020:   const rule=uepManagementRule(group);
+5021:   const standard={internal:rule.internal,name:rule.label,mockText:rule.mockText};
+5022:   const dataset=(readonlyCache?.students||[]).map(student=>{
+5023:     const base=admissionBase(student.id),mock=latestMockSnapshot(student.id),prep=studentPreparationStats(student);
+5024:     const directInternalOk=base.actual9!=null&&base.actual9<=standard.internal;
+5025:     const fiveKey=base.avg5==null?null:Number(base.avg5).toFixed(2);
+5026:     return {student,base,mock,prep,directInternalOk,fiveKey,standard};
+5027:   });
+5028:   const qualifyingFiveGroups=new Set(dataset.filter(x=>x.directInternalOk&&x.fiveKey!=null).map(x=>x.fiveKey));
+5029:   return dataset.map(x=>{
+5030:     const internalOk=x.directInternalOk||(x.fiveKey!=null&&qualifyingFiveGroups.has(x.fiveKey));
+5031:     const groupExpanded=internalOk&&!x.directInternalOk;
+===== universityMaster :: line 14235 =====
+14215:   const VERSION='0.82.18';
+14216:   const STORAGE_KEY='uep:release-notes:'+VERSION;
+14217:   function show(){
+14218:     try{if(localStorage.getItem(STORAGE_KEY)==='shown')return;}catch{}
+14219:     if(document.querySelector('[data-uep-release-notes="'+VERSION+'"]'))return;
+14220:     const layer=document.createElement('div');
+14221:     layer.className='uep-release-notes-layer';
+14222:     layer.dataset.uepReleaseNotes=VERSION;
+14223:     layer.innerHTML='<section class="uep-release-notes-dialog" role="dialog" aria-modal="true" aria-labelledby="uep-release-notes-title"><header><div><small>UEP UPDATE</small><h2 id="uep-release-notes-title">v0.82.18 복구 업데이트</h2></div><button type="button" aria-label="닫기" data-uep-release-notes-close>×</button></header><div class="uep-release-notes-body"><article><b>구글시트 연결 복구 기준판</b><p>실시간 구글시트 연결이 정상 동작하던 v0.82.14 패키지를 기준으로 다시 구성했습니다.</p></article><article><b>공결·지각 상단 정리</b><p>학교 공결대장 · 기준일 · 학생 수 · 조회 범위 4개 카드를 한 줄로 배치했습니다.</p></article><article><b>업데이트 수정내역 1회 안내</b><p>새 버전 설치 후 최초 실행 시에만 이 안내가 표시됩니다.</p></article><article><b>대입 화면 기본구조 유지</b><p>v0.82.14에서 정상 동작하던 대입 기초·전형 이해·오늘의 대학 구조는 그대로 유지합니다.</p></article></div><footer><button type="button" data-uep-release-notes-confirm>확인</button></footer></section>';
+14224:     const close=()=>{try{localStorage.setItem(STORAGE_KEY,'shown');}catch{}layer.remove();};
+14225:     layer.querySelector('[data-uep-release-notes-close]')?.addEventListener('click',close);
+14226:     layer.querySelector('[data-uep-release-notes-confirm]')?.addEventListener('click',close);
+14227:     layer.addEventListener('click',e=>{if(e.target===layer)close();});
+14228:     document.body.appendChild(layer);
+14229:   }
+14230:   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(show,350),{once:true});
+14231:   else setTimeout(show,350);
+14232: })();
+14233: 
+14234: /* UEP_08219_ADMISSIONS_LIVE */
+14235: const UEP_ADMISSIONS_LIVE_RANGES=Object.freeze({basics:'52_대입기초',types:'53_전형이해',typeDetail:'53A_전형세부유형DB',typeUniversity:'53B_전형유형별대학DB',csatMinimum:'54_수능최저DB',schoolResults:'55_대학입결DB',universityMaster:'56_대학입시마스터'});
+14236: 
+14237: /* UEP_08220_ADMISSIONS_REAL_CONNECT: 52 -> basics, 53+53A+53B -> types, 56->53B->54->55 -> university */
+14238: 
+14239: /* UEP_08221_ADMISSIONS_UI_RELEASE_UX */
+14240: const UEP_08221_RELEASE_NOTES=[
+14241:   '대입 기초·전형 이해·오늘의 대학 가독성과 카드 위계를 개선했습니다.',
+14242:   '전형 이해에서 대학 상세로 이동한 뒤 돌아가기 버튼을 추가했습니다.',
+14243:   '대입상담 본문 글자·행간·대학 버튼을 키우고 상담/주의 정보를 분리했습니다.',
+14244:   '프로그램 최상단에 현재 버전을 항상 표시합니다.',
+14245:   '업데이트 후 새 버전을 처음 실행하면 수정사항 팝업이 자동으로 표시됩니다.'
+14246: ];
+14247: function uep08221EnsureVersionBadge(){document.getElementById('uep-global-version-badge')?.remove();}
+14248: function uep08221CloseReleaseNotes(){
+14249:   const overlay=document.getElementById('uep-release-notes-overlay');if(overlay)overlay.remove();
+14250: }
+14251: function uep08221ShowReleaseNotes(){
+14252:   const key='uep:release-notes:'+APP_VERSION;
+14253:   try{if(localStorage.getItem(key)==='shown')return;}catch{}
+14254:   if(document.getElementById('uep-release-notes-overlay'))return;
+14255:   const overlay=document.createElement('div');overlay.id='uep-release-notes-overlay';
+14256:   overlay.innerHTML=`<div class="uep-release-notes-card"><div class="uep-release-notes-head"><div><small>UPDATE</small><h2>UEP v${escapeHtml(APP_VERSION)} 수정사항</h2><p>이번 버전에 반영된 내용을 확인하세요.</p></div><button type="button" aria-label="닫기" class="uep-release-notes-close">×</button></div><div class="uep-release-notes-list">${UEP_08221_RELEASE_NOTES.map((item,i)=>`<div><span>${i+1}</span><p>${escapeHtml(item)}</p></div>`).join('')}</div><div class="uep-release-notes-actions"><button type="button" class="primary">확인</button></div></div>`;
+14257:   document.body.appendChild(overlay);
+14258:   const close=()=>{try{localStorage.setItem(key,'shown');}catch{}uep08221CloseReleaseNotes();};
+14259:   overlay.querySelector('.uep-release-notes-close')?.addEventListener('click',close);
+14260:   overlay.querySelector('.uep-release-notes-actions .primary')?.addEventListener('click',close);
+14261: }
+14262: function uep08221RemoveAdmissionBack(){document.getElementById('uep-admission-back-button')?.remove();}
+14263: function uep08221ShowAdmissionBack(){
+14264:   uep08221RemoveAdmissionBack();
+14265:   const button=document.createElement('button');button.id='uep-admission-back-button';button.type='button';button.innerHTML='← 전형 이해로 돌아가기';
+14266:   button.onclick=()=>{uep08221RemoveAdmissionBack();openDashboardAdmissionTypes();};
+14267:   document.body.appendChild(button);
+14268: }
+14269: function uep08221OpenUniversityFromTypes(name){window.__uepAdmissionReturn='types';uep08221RemoveAdmissionBack();return openDashboardAdmissionUniversityByName(name);}
+14270: function uep08221BootReleaseUx(){uep08221EnsureVersionBadge();}
+14271: if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',uep08221BootReleaseUx,{once:true});else setTimeout(uep08221BootReleaseUx,0);
+14272: 
+14273: /* UEP_08222_DIALOG_WRAPPER */
+14274: function uep08222ExpandAdmissionDialog(){
+14275:  const flow=document.querySelector('.admission-learning-flow,.uep-admission-university-detail');if(!flow)return;
+14276:  let node=flow.parentElement;for(let i=0;node&&i<6;i++,node=node.parentElement){const w=node.getBoundingClientRect().width;if(w>650&&w<window.innerWidth*.96){node.style.width='min(1460px, calc(100vw - 28px))';node.style.maxWidth='min(1460px, calc(100vw - 28px))';break;}}
+14277: }
+14278: function openDashboardAdmissionDialog(title,html){
+14279:   const isUniversity=String(html||'').includes('주요 전형과 선발방식');
+14280:   if(isUniversity){
+14281:     const origin=window.__uepAdmissionReturn||'today';
+14282:     const label=origin==='types'?'전형 이해로':'오늘의 대학으로';
+14283:     const back=`<div class="uep-admission-backbar"><button type="button" class="uep-admission-back" data-uep-admission-back="${origin}">← ${label}</button></div>`;
+14284:     html=back+`<div class="uep-admission-university-detail">${html}</div>`;
+14285:   }
+14286:   const result=openDashboardAdmissionDialogBase(title,html);
+14287:   setTimeout(()=>{uep08222ExpandAdmissionDialog();document.querySelectorAll('[data-uep-admission-back]').forEach(btn=>btn.onclick=()=>{const o=btn.dataset.uepAdmissionBack;window.__uepAdmissionReturn='';if(o==='types')openDashboardAdmissionTypes();else if(typeof openDashboardTodayUniversity==='function')openDashboardTodayUniversity();else if(typeof openDashboardUniversity==='function')openDashboardUniversity();});},20);
+14288:   return result;
+14289: }
+14290: 
+14291: /* UEP_08222_RELEASE_NOTES */
+14292: (function(){
+14293:  const VERSION='0.82.22', KEY='uep:release-notes:'+VERSION;
+14294:  function show(){
+14295:   try{if(localStorage.getItem(KEY))return;}catch(e){}
+14296:   document.getElementById('uep-release-notes-overlay')?.remove();
+14297:   const box=document.createElement('div');box.className='uep-release-overlay';
+14298:   box.innerHTML=`<div class="uep-release-card"><div class="uep-release-kicker">UEP 업데이트</div><h2>v${VERSION} 수정사항</h2><ul><li>전형 이해 팝업을 넓히고 한 줄 3카드 구조로 개선</li><li>대학 상세 화면을 앞선 대입상담 카드 UI와 통일</li><li>전형 이해/오늘의 대학 진입경로에 맞는 돌아가기 추가</li><li>상단 버전 중복 표시 제거</li><li>새 업데이트가 있으면 현재 버전 → 최신 버전으로 강조 표시</li></ul><button type="button">확인</button></div>`;
+14299:   box.querySelector('button').onclick=()=>{try{localStorage.setItem(KEY,'1')}catch(e){}box.remove();};document.body.appendChild(box);
+14300:  }
+14301:  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(show,900),{once:true});else setTimeout(show,900);
+14302: })();
+14303: 
+14304: /* UEP_08222_VERSION_UPDATE_INDICATOR */
+14305: (function(){
+14306:  const CURRENT='0.82.22';
+14307:  const parse=v=>String(v||'').replace(/^v/i,'').split('.').map(n=>parseInt(n,10)||0);
+14308:  const newer=(a,b)=>{const A=parse(a),B=parse(b);for(let i=0;i<3;i++){if((A[i]||0)!==(B[i]||0))return (A[i]||0)>(B[i]||0)}return false};
+14309:  function versionPill(){return [...document.querySelectorAll('span,button,div')].find(el=>/^v\d+\.\d+\.\d+$/.test((el.textContent||'').trim())&&el.children.length===0)}
+14310:  function removeDuplicate(){document.getElementById('uep-global-version-badge')?.remove();document.querySelectorAll('.uep-top-version-badge').forEach(el=>el.remove());[...document.querySelectorAll('span,button,div')].forEach(el=>{if(/^UEP v\d+\.\d+\.\d+$/.test((el.textContent||'').trim())&&el.children.length===0)el.remove();});}
+14311:  async function check(){removeDuplicate();const pill=versionPill();if(!pill)return;try{const r=await fetch('https://raw.githubusercontent.com/hkhsm00-k81c/UEP-Updates/main/uep-policy.json?ts='+Date.now(),{cache:'no-store'});if(!r.ok)return;const p=await r.json();const latest=String(p.latestVersion||'').replace(/^v/i,'');if(newer(latest,CURRENT)){pill.textContent='v'+CURRENT+' → v'+latest;pill.classList.add('uep-version-update-available');pill.title='새 업데이트 '+latest+' 사용 가능';}else{pill.textContent='v'+CURRENT;pill.classList.remove('uep-version-update-available');}}catch(e){pill.textContent='v'+CURRENT;}}
+14312:  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(check,1200),{once:true});else setTimeout(check,1200);setInterval(check,30*60*1000);
+14313: })();
+===== admissionStructures :: line 8106 =====
+8086: function dashboardAdmissionTodayUniversity(){const rows=dashboardAdmissionUniversities();return rows[dashboardAdmissionTodayIndex(rows.length)]||null;}
+8087: function openDashboardAdmissionDialogBase(title,body){
+8088:   document.querySelector('.dashboard-admission-layer')?.remove();
+8089:   const layer=document.createElement('div');layer.className='dashboard-admission-layer counsel-reason-layer';
+8090:   layer.innerHTML='<div class="dashboard-admission-dialog"><header><div><small>UEP 대입상담 · 교육용 참고</small><h2>'+escapeHtml(title)+'</h2></div><button type="button" data-admission-close>×</button></header><div class="dashboard-admission-body">'+body+'</div></div>';
+8091:   document.body.appendChild(layer);const close=()=>layer.remove();layer.querySelector('[data-admission-close]').onclick=close;layer.onclick=e=>{if(e.target===layer)close();};
+8092: }
+8093: function openDashboardAdmissionBasics(){
+8094:   const rows=dashboardAdmissionRows('admissionBasics','52_대입기초').filter(dashboardAdmissionEnabled).sort((a,b)=>dashboardAdmissionOrder(a)-dashboardAdmissionOrder(b));
+8095:   if(!rows.length)return openDashboardAdmissionDialog('대입 기초','<p>52_대입기초 자료를 읽지 못했습니다.</p>');
+8096:   const groups=[];
+8097:   for(const row of rows){const key=String(row['대분류']||'대입 기초').trim()||'대입 기초';let group=groups.find(x=>x.key===key);if(!group){group={key,rows:[]};groups.push(group);}group.rows.push(row);}
+8098:   const html=groups.map(group=>`<section><h3>${escapeHtml(group.key)}</h3><div class="admission-explain-grid">${group.rows.map(row=>`<article><b>${escapeHtml(row['주제']||'')}</b><p>${escapeHtml(row['카드요약']||row['상세설명']||'')}</p>${row['상세설명']&&row['상세설명']!==row['카드요약']?`<small>${escapeHtml(row['상세설명'])}</small>`:''}${row['상담포인트']?`<small><strong>상담</strong> · ${escapeHtml(row['상담포인트'])}</small>`:''}${row['주의/오해']?`<small><strong>주의</strong> · ${escapeHtml(row['주의/오해'])}</small>`:''}</article>`).join('')}</div></section>`).join('');
+8099:   openDashboardAdmissionDialog('대입 기초',`<div class="admission-learning-flow">${html}<p class="admission-reference-note">52_대입기초 실시간 연결 · 2029 대입 기준, 대학별 세부사항은 최종 모집요강 재확인</p></div>`);
+8100: }
+8101: function dashboardAdmissionMethod(row){
+8102:   const text=[row['선발방식'],row['평가구조요약'],row['핵심평가'],row['주요평가자료'],row['한줄요약'],row['상담표시문구']].filter(Boolean).join(' ');
+8103:   if(row['선발방식'])return String(row['선발방식']);if(row['평가구조요약'])return String(row['평가구조요약']);
+8104:   const out=[];if(/교과|내신/.test(text))out.push('내신');if(/수능최저|최저/.test(text))out.push('수능최저');if(/서류|학생부/.test(text))out.push('서류');if(/면접/.test(text))out.push('면접');if(/논술/.test(text))out.unshift('논술');if(/수능/.test(text)&&/정시|수능/.test(String(row['전형유형']||'')))return '수능100 또는 영역별 반영';return [...new Set(out)].join(' + ')||'대학별 방식 확인';
+8105: }
+8106: function dashboardAdmissionStructureRows(){return dashboardAdmissionRows('admissionStructures','53B_전형유형별대학DB','universityAdmissionStructures');}
+8107: function openDashboardAdmissionUniversityByName(name){const row=dashboardAdmissionUniversities().find(x=>dashboardAdmissionNormalizeUniversity(x['대학명'])===dashboardAdmissionNormalizeUniversity(name));openDashboardUniversityDetail(row||{'대학명':name});}
+8108: function openDashboardAdmissionTypes(){
+8109:   const types=dashboardAdmissionRows('admissionTypes','53_전형이해').filter(dashboardAdmissionEnabled).sort((a,b)=>dashboardAdmissionOrder(a)-dashboardAdmissionOrder(b));
+8110:   const details=dashboardAdmissionRows('admissionTypeDetails','53A_전형세부유형DB').filter(dashboardAdmissionEnabled).sort((a,b)=>dashboardAdmissionOrder(a)-dashboardAdmissionOrder(b));
+8111:   const structures=dashboardAdmissionStructureRows().filter(r=>String(r['UEP노출']??'Y').toUpperCase()!=='N');
+8112:   if(!types.length&&!details.length)return openDashboardAdmissionDialog('전형 이해','<p>53_전형이해·53A_전형세부유형DB 자료를 읽지 못했습니다.</p>');
+8113:   const normalizeType=v=>String(v||'').replace('정시','수능위주').trim();
+8114:   const html=types.map(type=>{
+8115:     const broad=normalizeType(type['전형유형']);
+8116:     const ds=details.filter(d=>normalizeType(d['대전형'])===broad);
+8117:     const cards=(ds.length?ds:[type]).map(d=>{
+8118:       const sid=String(d['세부ID']||'');
+8119:       const linked=structures.filter(s=>normalizeType(s['대전형'])===broad&&(!sid||String(s['세부유형ID']||'').split(',').map(x=>x.trim()).includes(sid)));
+8120:       const names=[...new Set(linked.map(s=>s['대학명']).filter(Boolean))];
+8121:       const buttons=names.length?`<div class="admission-university-buttons">${names.map(name=>`<button data-admission-university="${escapeHtml(name)}">${escapeHtml(name)}</button>`).join('')}</div>`:'';
+8122:       return `<article><b>${escapeHtml(d['세부유형']||type['전형유형']||'')}</b><p>${escapeHtml(d['대표평가구조']||d['한줄요약']||type['한줄요약']||'')}</p>${d['수능최저경향']?`<small><strong>수능최저</strong> · ${escapeHtml(d['수능최저경향'])}</small>`:''}${d['담임상담체크']?`<small><strong>상담체크</strong> · ${escapeHtml(d['담임상담체크'])}</small>`:''}${d['고1준비포인트']?`<small><strong>고1 준비</strong> · ${escapeHtml(d['고1준비포인트'])}</small>`:''}${buttons}</article>`;
+8123:     }).join('');
+8124:     return `<section><h3>${escapeHtml(type['전형유형']||broad)}</h3><p>${escapeHtml(type['한줄요약']||'')}</p><div class="admission-explain-grid">${cards}</div></section>`;
+8125:   }).join('');
+8126:   openDashboardAdmissionDialog('전형 이해 · 대학별 선발방식 비교',`<div class="admission-learning-flow">${html}<p class="admission-reference-note">53_전형이해 + 53A 세부유형 + 53B 실제 대학전형 실시간 연결</p></div>`);
+8127:   document.querySelectorAll('[data-admission-university]').forEach(button=>button.onclick=()=>uep08221OpenUniversityFromTypes(button.dataset.admissionUniversity));
+8128: }
+8129: function openDashboardUniversityDetail(university=dashboardAdmissionTodayUniversity()){
+8130:   if(!university)return openDashboardAdmissionDialog('오늘의 대학','<p>56_대학입시마스터 자료를 읽지 못했습니다.</p>');
+8131:   const name=university['대학명']||'오늘의 대학',norm=dashboardAdmissionNormalizeUniversity(name);
+8132:   const structures=dashboardAdmissionStructureRows().filter(r=>dashboardAdmissionNormalizeUniversity(r['대학명'])===norm);
+8133:   const minimums=dashboardAdmissionRows('admissionMinimums','54_수능최저DB').filter(r=>dashboardAdmissionNormalizeUniversity(r['대학명'])===norm);
+8134:   const results=dashboardAdmissionRows('admissionResults','55_대학입결DB').filter(r=>dashboardAdmissionNormalizeUniversity(r['대학명'])===norm);
+8135:   const admissions=structures.length?structures:minimums;
+8136:   openDashboardAdmissionDialog(name,`<div class="admission-university-detail"><section><h3>주요 전형과 선발방식</h3>${admissions.length?admissions.slice(0,18).map(r=>`<article><b>${escapeHtml(r['전형유형']||r['대전형']||'전형')} · ${escapeHtml(r['전형명']||'전형명 확인')}</b><p>${escapeHtml(r['선발방식']||r['평가구조요약']||dashboardAdmissionMethod(r))}</p><small>수능최저 ${escapeHtml(r['수능최저']||r['수능최저원문']||(String(r['배지사용여부']).toUpperCase()==='N'?'참고/검증중':'미적용 또는 확인 필요'))}</small></article>`).join(''):'<p>대학별 전형구조 자료를 연결 중입니다.</p>'}</section><section><h3>교과·학종·정시 핵심</h3><p>${escapeHtml(university['수시핵심']||'수시 전형별 평가요소를 확인합니다.')}</p><p>${escapeHtml(university['정시핵심']||'정시 영역별 반영비율과 가산점을 확인합니다.')}</p><p><b>과목선택 참고</b> ${escapeHtml(university['과목선택/교과포인트']||'-')}</p></section><section><h3>운호고 실제 입결</h3>${results.length?results.slice(0,12).map(r=>`<article><b>${escapeHtml(r['모집단위']||'모집단위')}</b><p>${escapeHtml(r['전형명(대)']||r['전형명']||'')}</p><small>합격 ${escapeHtml(r['합격자수']||'-')}명 · 최저내신 ${escapeHtml(r['최저내신등급']||'-')}</small></article>`).join(''):'<p>현재 연결된 운호고 실제 입결이 없습니다.</p>'}</section><section><h3>담임 상담 포인트</h3><p>${escapeHtml(university['담임상담체크']||university['카드한줄']||'학생의 내신·선택과목·모의고사·수업 탐구를 대학 전형 구조와 함께 확인합니다.')}</p></section><p class="admission-reference-note">${escapeHtml(university['기준학년도']||'2028')} 기준 · ${escapeHtml(university['자료상태']||'교육용 참고')} · 2029 최종 모집요강 재확인</p></div>`);
+8137: }function dashboardStudentStatusCompactMarkup(){
+8138:   const todayKey=dateKey(today),yesterday=new Date(today);yesterday.setDate(today.getDate()-1);const yesterdayKey=dateKey(yesterday);
+8139:   const official=filterRowsForDashboardStatus(officialAttendanceRowsForDate08162(todayKey));
+8140:   const late=filterRowsForDashboardStatus((readonlyCache?.lateAttendance||[]).filter(row=>uepComparableDate(row.date||row.day)===todayKey));
+8141:   const night=filterRowsForDashboardStatus((readonlyCache?.nightAttendance||readonlyCache?.attendance||[]).filter(row=>String(row.date||row.day||'').slice(0,10)===yesterdayKey&&nightRecordIsAttendance(row)));
+8142:   const currentStudents=filterRowsForDashboardStatus(readonlyCache?.students||[]),u=dashboardAdmissionTodayUniversity();
+8143:   const cards=[['status','late','공결/지각',`공결 ${new Set(official.map(attendanceStudentKey)).size} · 지각 ${new Set(late.map(attendanceStudentKey)).size}`],['status','night','야자출결',`${new Set(night.map(attendanceStudentKey)).size}/${currentStudents.length||259}`],['admission','basics','대입 기초','수시·정시와 고1 준비'],['admission','types','전형 이해','대학별 선발방식 비교'],['admission','university','오늘의 대학',u?.['대학명']||'대학 정보']];
+8144:   return `<div class="uep-student-status-compact uep-dashboard-five-cards">${cards.map(([type,key,label,value])=>`<button class="${type==='admission'?'dashboard-admission-card':''}" ${type==='status'?`data-dashboard-student-status="${key}"`:`data-dashboard-admission="${key}"`}><span>${label}</span><b>${escapeHtml(value)}</b></button>`).join('')}</div>`;
+8145: }
+8146: 
+8147: function dashboardStudentStatusMarkup(){
+8148:   const todayKey=dateKey(today);
+8149:   const yesterday=new Date(today);yesterday.setDate(today.getDate()-1);const yesterdayKey=dateKey(yesterday);
+8150:   const official=filterRowsForDashboardStatus(officialAttendanceRowsForDate08162(todayKey));
+8151:   const late=filterRowsForDashboardStatus((readonlyCache?.lateAttendance||[]).filter(row=>uepComparableDate(row.date||row.day)===todayKey));
+8152:   const night=filterRowsForDashboardStatus((readonlyCache?.nightAttendance||readonlyCache?.attendance||[]).filter(row=>String(row.date||row.day||'').slice(0,10)===yesterdayKey&&nightRecordIsAttendance(row)));
+8153:   const reportRows=filterRowsForDashboardStatus(dashboardReportStatusRows());
+8154:   const targetGroups=dashboardReportGroups(reportRows);
+8155:   const submitted=targetGroups.filter(group=>dashboardReportGroupState(group).state==="complete");
+8156:   const progress=targetGroups.filter(group=>dashboardReportGroupState(group).state==="progress");
+8157:   const missing=targetGroups.filter(group=>dashboardReportGroupState(group).state==="missing");
+8158:   const scope=dashboardGradeScope();
+8159:   const currentStudents=filterRowsForDashboardStatus(readonlyCache?.students||[]);
+8160:   const officialCount=new Set(official.map(attendanceStudentKey)).size;
+8161:   const lateCount=new Set(late.map(attendanceStudentKey)).size;
+8162:   const nightCount=new Set(night.map(attendanceStudentKey)).size;
+8163:   const nightTotal=currentStudents.length||259;
+8164:   const metrics=[
+8165:     ['late','공결/지각',`${officialCount}/${lateCount}`,'attendance',`공결 ${officialCount}명 · 지각 ${lateCount}명`,'명'],
+8166:     ['night','야자출결',`${nightCount}/${nightTotal}`,'attendance','야자 출결 학생','명'],
+8167:     ['submitted','제출완료',submitted.length,'programs','선택활동 보고서 제출완료 학생','명'],
+8168:     ['progress','제출중',progress.length,'programs','선택활동 보고서 일부 제출 학생','명'],
+8169:     ['report','미제출',missing.length,'programs','선택활동 보고서 미제출 학생','명']
+8170:   ];
+8171:   return `<div class="uep-student-scope"><span>조회 기준 · <b>${escapeHtml(scope.label)}</b></span><strong>선택활동 대상 <b>${targetGroups.length}</b>명</strong><em>완료 ${submitted.length}명 · 제출중 ${progress.length}명 · 미제출 ${missing.length}명</em></div><div class="uep-student-kpis">${metrics.map(([kind,label,count,page,desc,unit])=>`<button class="kpi-${kind}" data-dashboard-student-status="${kind}" data-page="${page}" title="${desc} 조회"><span>${label}</span><b>${count}</b><small>${kind==='late'?desc:unit}</small></button>`).join('')}</div>`;
+8172: }
+8173: 
+8174: function dashboardStatusStudentGroups(rows,{report=false,attendance=false}={}){
+8175:   const map=new Map();
+8176:   (rows||[]).forEach((source,index)=>{
+8177:     const row=report?source:normalizeDashboardStudentRow(source);
+8178:     const key=String(row.studentRef?.id||row.studentId||row.studentNo||`${row.classLabel}|${row.name}|${index}`);
+8179:     if(!map.has(key))map.set(key,{...row,key,rows:[],programs:[...(row.programs||[])],statusLabels:[]});
+8180:     const group=map.get(key);group.rows.push(...(row.rows||[row]));
+8181:     if(report){(row.programs||[]).forEach(x=>{if(!group.programs.includes(x))group.programs.push(x);});}
+8182:     if(attendance){
+8183:       const label=String(source.dashboardStatusType||source.detailType||source.type||source.statusType||'').trim();
+8184:       if(label&&!group.statusLabels.includes(label))group.statusLabels.push(label);
+8185:     }
+8186:   });
+8187:   return [...map.values()].sort((a,b)=>String(a.studentNo||'').localeCompare(String(b.studentNo||''),'ko'));
+8188: }
+8189: function dashboardStatusClassNo(row){
+8190:   const gc=recordGradeClass(row.studentRef||row);
+8191:   if(gc.classNo)return String(Number(gc.classNo));
+8192:   const label=String(row.classLabel||row.className||'');
+8193:   const match=label.match(/(?:^|[-\s])([1-9])(?:반)?$/);
+8194:   if(match)return String(Number(match[1]));
+8195:   const studentNo=String(row.studentNo||row.studentRef?.studentNo||'').replace(/\D/g,'');
+8196:   if(/^1[1-9]\d{2}$/.test(studentNo))return studentNo.slice(1,2);
+8197:   return '';
+8198: }
+8199: function dashboardStatusBoardMarkup(rows,kind,{report=false,attendance=false}={}){
+8200:   const ownClass=dashboardOwnClassNo();
+8201:   const groups=dashboardStatusStudentGroups(rows,{report,attendance});
+8202:   const buckets=Array.from({length:9},(_,i)=>({classNo:String(i+1),students:groups.filter(row=>dashboardStatusClassNo(row)===String(i+1))}));
+8203:   const unclassified=groups.filter(row=>!dashboardStatusClassNo(row)||Number(dashboardStatusClassNo(row))<1||Number(dashboardStatusClassNo(row))>9);
+8204:   const studentButton=(row)=>{
+8205:     let extra='';
+8206:     if(report){const st=dashboardReportGroupState(row);extra=st.total?`${st.submitted}/${st.total}`:`${row.programs?.length||0}건`;}
