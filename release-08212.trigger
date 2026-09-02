@@ -27,3 +27,4 @@ Retry: flexible function-boundary matching for renderer replacement
 Release: v0.82.21 admissions UI readability + back navigation + version badge + automatic changelog popup
 Release: v0.82.22 types 3-column layout + unified university detail + route back + updater version arrow + reliable changelog popup
 Release: v0.82.23 wide admissions dialogs + region/prev-next university explorer + enriched admissions basics
+Release: v0.82.24 basics auto-grid + quick badges + three-level university navigation + admission source state reset
