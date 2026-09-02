@@ -1,0 +1,504 @@
+===== async function fetchLiveData :: line 1547 =====
+1535: async function fetchOperationalData({credentials=null}={}){
+1536:   if(!liveDataCache)return {ok:false,requiresFullSync:true,reason:'전체 캐시가 아직 준비되지 않았습니다.'};
+1537:   const auth=await getReadonlySheetsAuth(credentials),token=auth.token;
+1538:   const operationalEntries=UEP_OPERATIONAL_RANGE_NAMES.map(name=>[name,SHEET_RANGES[name]]);
+1539:   const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,operationalEntries.map(([,range])=>range));
+1540:   const matrices={};assignValueRangesByRange(matrices,operationalEntries,result);
+1541:   const partial=parseGoogleSheetData(matrices);
+1542:   const patch={officialAttendance:partial.officialAttendance||[],lateAttendance:partial.lateAttendance||[],notices:partial.notices||[],noticeReceipts:partial.noticeReceipts||[],lunchDuties:partial.lunchDuties||[],nightSupervisors:partial.nightSupervisors||[]};
+1543:   const operationalSyncedAt=new Date().toISOString();liveDataCache={...liveDataCache,...patch,operationalSyncedAt};liveDataFetchedAt=Date.now();
+1544:   return {ok:true,operationalSyncedAt,syncedAt:operationalSyncedAt,patch};
+1545: }
+1546: 
+1547: async function fetchLiveData({ force = false, credentials = null } = {}) {
+1548:   if (!force && liveDataCache && Date.now() - liveDataFetchedAt < 120000) return liveDataCache;
+1549:   // 0.81.40: 관리자 로컬 서비스계정과 담임 School Read API 세션을 동일 읽기 파이프라인으로 연결합니다.
+1550:   const auth = await getReadonlySheetsAuth(credentials);
+1551:   const token = auth.token;
+1552:   const entries = [
+1553:     ...Object.entries(SHEET_RANGES),
+1554:     ["52_대입기초", "'52_대입기초'!A1:N500"],
+1555:     ["53_전형이해", "'53_전형이해'!A1:N500"],
+1556:     ["53A_전형세부유형DB", "'53A_전형세부유형DB'!A1:R500"],
+1557:     ["53B_전형유형별대학DB", "'53B_전형유형별대학DB'!A1:P3000"],
+1558:     ["56_대학입시마스터", "'56_대학입시마스터'!A1:R500"],
+1559:     ["54_수능최저DB", "'54_수능최저DB'!A1:U2000"],
+1560:     ["55_대학입결DB", "'55_대학입결DB'!A1:K5000"],
+1561:   ];
+1562:   const matrices = {};
+1563:   // 기본정보 연결시트를 가장 먼저, 작은 묶음으로 읽습니다.
+1564:   // 탭 추가로 URL이 길어지거나 특정 탭이 잠시 실패해도 전체 연결이 끊기지 않도록 합니다.
+1565:   const chunkSize = 12;
+1566:   const chunks = [];
+1567:   for (let offset = 0; offset < entries.length; offset += chunkSize) {
+1568:     chunks.push({ offset, chunk: entries.slice(offset, offset + chunkSize) });
+1569:   }
+1570:   await mapWithConcurrency(chunks, 1, async ({ offset, chunk }) => {
+1571:     try {
+1572:       const valueRanges = await readSheetBatch(token, UEP_SPREADSHEET_ID, chunk.map(([, range]) => range));
+1573:       assignValueRangesByRange(matrices,chunk,valueRanges);
+1574:     } catch (chunkError) {
+1575:       console.warn(`[UEP] 기본정보 묶음 조회 실패(${offset + 1}~${offset + chunk.length}), 개별 재시도`, chunkError?.message || chunkError);
+1576:       await mapWithConcurrency(chunk, 1, async ([logicalName, range]) => {
+1577:         try {
+1578:           const one = await readSheetBatch(token, UEP_SPREADSHEET_ID, [range]);
+1579:           matrices[logicalName] = one?.[0]?.values || [];
+1580:         } catch (sheetError) {
+1581:           matrices[logicalName] = [];
+1582:           console.warn(`[UEP] 기본정보 탭 조회 실패: ${logicalName}`, sheetError?.message || sheetError);
+1583:         }
+1584:       });
+1585:     }
+1586:   });
+1587:   entries.forEach(([name]) => { if (!matrices[name]) matrices[name] = []; });
+1588: 
+1589:   // 선택보고서 정규화 탭의 구조가 손상된 경우 구글폼 원본으로 복구한 뒤 읽습니다.
+1590:   // 읽기 전용 담임 세션에서는 정규화 탭 자동복구(쓰기)를 실행하지 않습니다.
+1591:   if(auth.mode!=='school_read_api') await ensureSelectedReportNormalization(token);
+1592: 
+1593:   // 학생응답 가공 결과: 현재 실제 존재하는 데이터 처리 탭만 직접 읽습니다.
+1594:   // 선택과목은 응답수집 06_선택과목응답을 별도 읽고 기존 fallback 로직으로 구성합니다.
+1595:   const processingRanges = [
+1596:     ["02_학사외출_일자별", "'02_학사외출_일자별'!A1:AD10000"],
+1597:     ["20_공통보고서_정규화", "'20_공통보고서_정규화'!A1:X5000"],
+1598:     ["21_선택보고서_정규화", "'21_선택보고서_정규화'!A1:X5000"],
+1599:     ["30_야자출결_정규화", "'30_야자출결_정규화'!A1:P70000"],
+1600:     // 학교캘린더는 기본정보 연결시트가 아니라 데이터 처리시트의 직접 이관값만 사용합니다.
+1601:     ["41_학교캘린더", "'41_학교캘린더'!A1:W3000"],
+1602:     ["51_선택과목오류_정규화", "'51_선택과목오류_정규화'!A1:V5000"],
+1603:   ];
+1604:   try {
+1605:     const result = await readSheetBatch(token, UEP_PROCESSING_SPREADSHEET_ID, processingRanges.map(([,range])=>range));
+1606:     assignValueRangesByRange(matrices,processingRanges,result);
+1607:   } catch(error) {
+1608:     // 한 탭의 일시 오류가 보고서·학사외출·선택과목 등 정상 탭까지 모두 비우지 않도록
+1609:     // 묶음 조회 실패 시 각 탭을 독립적으로 재시도합니다. 평상시에는 1회 batchGet으로 quota를 보호합니다.
+1610:     console.warn("[UEP] 처리시트 묶음 조회 실패 - 개별 복구 시도",error?.message||error);
+1611:     await mapWithConcurrency(processingRanges,1,async([logicalName,range])=>{
+1612:       try{const one=await readSheetBatch(token,UEP_PROCESSING_SPREADSHEET_ID,[range]);matrices[logicalName]=one?.[0]?.values||[];}
+1613:       catch(sheetError){matrices[logicalName]=[];console.warn(`[UEP] 처리시트 개별 조회 실패: ${logicalName}`,sheetError?.message||sheetError);}
+1614:     });
+1615:   }
+1616: 
+1617:   // 학사외출은 데이터 처리시트의 02_학사외출_일자별만 조회합니다.
+===== admissionBasics :: line 1719 =====
+1707: 
+1708:   const data = parseGoogleSheetData(matrices);
+1709: 
+1710:   // 0.82.10 admissions reference datasets from basic-info connector
+1711:   const uep08210MatrixObjects=(matrix)=>{
+1712:     const rows=Array.isArray(matrix)?matrix:[];
+1713:     const headers=(rows[2]||[]).map(v=>String(v??'').replace(/\r?\n/g,' ').trim());
+1714:     if(!headers.some(Boolean))return [];
+1715:     return rows.slice(3).filter(row=>Array.isArray(row)&&row.some(v=>String(v??'').trim())).map(row=>{
+1716:       const obj={};headers.forEach((h,i)=>{if(h)obj[h]=row[i]??'';});return obj;
+1717:     });
+1718:   };
+1719:   data.admissionBasics=uep08210MatrixObjects(matrices['52_대입기초']);
+1720:   data.admissionTypes=uep08210MatrixObjects(matrices['53_전형이해']);
+1721:   data.universityAdmissions=uep08210MatrixObjects(matrices['56_대학입시마스터']);
+1722:   data['52_대입기초']=data.admissionBasics;
+1723:   data['53_전형이해']=data.admissionTypes;
+1724:   data['56_대학입시마스터']=data.universityAdmissions;
+1725:   data.admissionMinimums=uep08210MatrixObjects(matrices['54_수능최저DB']);
+1726:   data.admissionResults=uep08210MatrixObjects(matrices['55_대학입결DB']);
+1727:   data['54_수능최저DB']=data.admissionMinimums;
+1728:   data['55_대학입결DB']=data.admissionResults;
+1729: 
+1730:   {
+1731:     const sourceMatrix=matrices["__INPUT_CENTER_SOURCE"]||[];
+1732:     const sourceHeaders=(sourceMatrix[2]||[]).map(v=>String(v||'').trim());
+1733:     const sourceRows=sourceMatrix.slice(3).filter(row=>row.some(v=>String(v||'').trim())).map(row=>{const o=Object.fromEntries(sourceHeaders.map((h,i)=>[h,row[i]??'']));return {id:o['입력ID'],batchId:o['배치ID'],source:o['입력경로'],type:o['자료유형'],subtype:o['세부유형'],schoolYear:o['학년도'],semester:o['학기'],studentId:o['학생ID'],studentNo:o['학번'],name:o['성명'],grade:o['학년'],className:o['반'],fileName:o['원본파일명'],storedPath:o['원본보관경로'],title:o['자료제목'],rawText:o['원본텍스트'],normalizedText:o['구조화데이터'],status:o['처리상태'],matchStatus:o['매칭상태'],programId:o['프로그램ID'],programKind:o['프로그램구분'],teacher:o['등록교사'],createdAt:o['등록일시'],note:o['비고'],storageMode:'uep'};});
+1734:     // 입력센터의 단일 원본은 [UEP]입력센터 원본입니다.
+1735:     // 폐기 대상인 60_외부자료입력_정규화는 더 이상 읽거나 병합하지 않습니다.
+1736:     data.externalInputs=sourceRows;
+1737:     // 입력센터 원본은 03 UEP 적용 전까지 공식 보고서로 노출하지 않습니다.
+1738:     // UEP의 보고서 화면은 20/21 정규화 탭만 단일 진실원천(source of truth)으로 사용합니다.
+1739:   }
+1740:   if (!data.students.length) throw new Error("구글시트의 02_학생마스터에서 학생정보를 찾지 못했습니다.");
+1741:   data.connection = {
+1742:     spreadsheetId: UEP_SPREADSHEET_ID,
+1743:     spreadsheetName: UEP_SPREADSHEET_NAME,
+1744:     spreadsheetUrl: UEP_SPREADSHEET_URL,
+1745:     account: auth.account || "",
+1746:     mode: "read-only-live",
+1747:   };
+1748:   liveDataCache = data;
+1749:   liveDataFetchedAt = Date.now();
+1750:   return data;
+1751: }
+1752: 
+1753: 
+1754: function ymd(value = new Date()) {
+1755:   const date = value instanceof Date ? value : new Date(value);
+1756:   return `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, "0")}${String(date.getDate()).padStart(2, "0")}`;
+1757: }
+1758: 
+1759: function mondayOf(dateValue) {
+1760:   const date = dateValue instanceof Date ? new Date(dateValue) : new Date(dateValue || Date.now());
+1761:   date.setHours(12, 0, 0, 0);
+1762:   const day = date.getDay();
+1763:   date.setDate(date.getDate() - (day === 0 ? 6 : day - 1));
+1764:   return date;
+1765: }
+1766: 
+1767: async function fetchJson(url, timeoutMs = 12000) {
+1768:   const controller = new AbortController();
+1769:   const timer = setTimeout(() => controller.abort(), timeoutMs);
+1770:   try {
+1771:     const response = await fetch(url, {
+1772:       signal: controller.signal,
+1773:       headers: { "user-agent": "UEP/0.42.7 School Operations" },
+1774:     });
+1775:     if (!response.ok) throw new Error(`공공데이터 연결 실패 (${response.status})`);
+1776:     return await response.json();
+1777:   } finally {
+1778:     clearTimeout(timer);
+1779:   }
+1780: }
+1781: 
+1782: function neisRows(payload, key) {
+1783:   const group = payload?.[key];
+1784:   if (!Array.isArray(group)) return [];
+1785:   const rowBlock = group.find((item) => Array.isArray(item?.row));
+1786:   return rowBlock?.row || [];
+1787: }
+1788: 
+1789: function neisResultMessage(payload, key) {
+===== admissionTypes :: line 1720 =====
+1708:   const data = parseGoogleSheetData(matrices);
+1709: 
+1710:   // 0.82.10 admissions reference datasets from basic-info connector
+1711:   const uep08210MatrixObjects=(matrix)=>{
+1712:     const rows=Array.isArray(matrix)?matrix:[];
+1713:     const headers=(rows[2]||[]).map(v=>String(v??'').replace(/\r?\n/g,' ').trim());
+1714:     if(!headers.some(Boolean))return [];
+1715:     return rows.slice(3).filter(row=>Array.isArray(row)&&row.some(v=>String(v??'').trim())).map(row=>{
+1716:       const obj={};headers.forEach((h,i)=>{if(h)obj[h]=row[i]??'';});return obj;
+1717:     });
+1718:   };
+1719:   data.admissionBasics=uep08210MatrixObjects(matrices['52_대입기초']);
+1720:   data.admissionTypes=uep08210MatrixObjects(matrices['53_전형이해']);
+1721:   data.universityAdmissions=uep08210MatrixObjects(matrices['56_대학입시마스터']);
+1722:   data['52_대입기초']=data.admissionBasics;
+1723:   data['53_전형이해']=data.admissionTypes;
+1724:   data['56_대학입시마스터']=data.universityAdmissions;
+1725:   data.admissionMinimums=uep08210MatrixObjects(matrices['54_수능최저DB']);
+1726:   data.admissionResults=uep08210MatrixObjects(matrices['55_대학입결DB']);
+1727:   data['54_수능최저DB']=data.admissionMinimums;
+1728:   data['55_대학입결DB']=data.admissionResults;
+1729: 
+1730:   {
+1731:     const sourceMatrix=matrices["__INPUT_CENTER_SOURCE"]||[];
+1732:     const sourceHeaders=(sourceMatrix[2]||[]).map(v=>String(v||'').trim());
+1733:     const sourceRows=sourceMatrix.slice(3).filter(row=>row.some(v=>String(v||'').trim())).map(row=>{const o=Object.fromEntries(sourceHeaders.map((h,i)=>[h,row[i]??'']));return {id:o['입력ID'],batchId:o['배치ID'],source:o['입력경로'],type:o['자료유형'],subtype:o['세부유형'],schoolYear:o['학년도'],semester:o['학기'],studentId:o['학생ID'],studentNo:o['학번'],name:o['성명'],grade:o['학년'],className:o['반'],fileName:o['원본파일명'],storedPath:o['원본보관경로'],title:o['자료제목'],rawText:o['원본텍스트'],normalizedText:o['구조화데이터'],status:o['처리상태'],matchStatus:o['매칭상태'],programId:o['프로그램ID'],programKind:o['프로그램구분'],teacher:o['등록교사'],createdAt:o['등록일시'],note:o['비고'],storageMode:'uep'};});
+1734:     // 입력센터의 단일 원본은 [UEP]입력센터 원본입니다.
+1735:     // 폐기 대상인 60_외부자료입력_정규화는 더 이상 읽거나 병합하지 않습니다.
+1736:     data.externalInputs=sourceRows;
+1737:     // 입력센터 원본은 03 UEP 적용 전까지 공식 보고서로 노출하지 않습니다.
+1738:     // UEP의 보고서 화면은 20/21 정규화 탭만 단일 진실원천(source of truth)으로 사용합니다.
+1739:   }
+1740:   if (!data.students.length) throw new Error("구글시트의 02_학생마스터에서 학생정보를 찾지 못했습니다.");
+1741:   data.connection = {
+1742:     spreadsheetId: UEP_SPREADSHEET_ID,
+1743:     spreadsheetName: UEP_SPREADSHEET_NAME,
+1744:     spreadsheetUrl: UEP_SPREADSHEET_URL,
+1745:     account: auth.account || "",
+1746:     mode: "read-only-live",
+1747:   };
+1748:   liveDataCache = data;
+1749:   liveDataFetchedAt = Date.now();
+1750:   return data;
+1751: }
+1752: 
+1753: 
+1754: function ymd(value = new Date()) {
+1755:   const date = value instanceof Date ? value : new Date(value);
+1756:   return `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, "0")}${String(date.getDate()).padStart(2, "0")}`;
+1757: }
+1758: 
+1759: function mondayOf(dateValue) {
+1760:   const date = dateValue instanceof Date ? new Date(dateValue) : new Date(dateValue || Date.now());
+1761:   date.setHours(12, 0, 0, 0);
+1762:   const day = date.getDay();
+1763:   date.setDate(date.getDate() - (day === 0 ? 6 : day - 1));
+1764:   return date;
+1765: }
+1766: 
+1767: async function fetchJson(url, timeoutMs = 12000) {
+1768:   const controller = new AbortController();
+1769:   const timer = setTimeout(() => controller.abort(), timeoutMs);
+1770:   try {
+1771:     const response = await fetch(url, {
+1772:       signal: controller.signal,
+1773:       headers: { "user-agent": "UEP/0.42.7 School Operations" },
+1774:     });
+1775:     if (!response.ok) throw new Error(`공공데이터 연결 실패 (${response.status})`);
+1776:     return await response.json();
+1777:   } finally {
+1778:     clearTimeout(timer);
+1779:   }
+1780: }
+1781: 
+1782: function neisRows(payload, key) {
+1783:   const group = payload?.[key];
+1784:   if (!Array.isArray(group)) return [];
+1785:   const rowBlock = group.find((item) => Array.isArray(item?.row));
+1786:   return rowBlock?.row || [];
+1787: }
+1788: 
+1789: function neisResultMessage(payload, key) {
+1790:   const result = payload?.RESULT || payload?.[key]?.[0]?.head?.find?.((item) => item.RESULT)?.RESULT;
+===== admissionMinimums :: line 1725 =====
+1713:     const headers=(rows[2]||[]).map(v=>String(v??'').replace(/\r?\n/g,' ').trim());
+1714:     if(!headers.some(Boolean))return [];
+1715:     return rows.slice(3).filter(row=>Array.isArray(row)&&row.some(v=>String(v??'').trim())).map(row=>{
+1716:       const obj={};headers.forEach((h,i)=>{if(h)obj[h]=row[i]??'';});return obj;
+1717:     });
+1718:   };
+1719:   data.admissionBasics=uep08210MatrixObjects(matrices['52_대입기초']);
+1720:   data.admissionTypes=uep08210MatrixObjects(matrices['53_전형이해']);
+1721:   data.universityAdmissions=uep08210MatrixObjects(matrices['56_대학입시마스터']);
+1722:   data['52_대입기초']=data.admissionBasics;
+1723:   data['53_전형이해']=data.admissionTypes;
+1724:   data['56_대학입시마스터']=data.universityAdmissions;
+1725:   data.admissionMinimums=uep08210MatrixObjects(matrices['54_수능최저DB']);
+1726:   data.admissionResults=uep08210MatrixObjects(matrices['55_대학입결DB']);
+1727:   data['54_수능최저DB']=data.admissionMinimums;
+1728:   data['55_대학입결DB']=data.admissionResults;
+1729: 
+1730:   {
+1731:     const sourceMatrix=matrices["__INPUT_CENTER_SOURCE"]||[];
+1732:     const sourceHeaders=(sourceMatrix[2]||[]).map(v=>String(v||'').trim());
+1733:     const sourceRows=sourceMatrix.slice(3).filter(row=>row.some(v=>String(v||'').trim())).map(row=>{const o=Object.fromEntries(sourceHeaders.map((h,i)=>[h,row[i]??'']));return {id:o['입력ID'],batchId:o['배치ID'],source:o['입력경로'],type:o['자료유형'],subtype:o['세부유형'],schoolYear:o['학년도'],semester:o['학기'],studentId:o['학생ID'],studentNo:o['학번'],name:o['성명'],grade:o['학년'],className:o['반'],fileName:o['원본파일명'],storedPath:o['원본보관경로'],title:o['자료제목'],rawText:o['원본텍스트'],normalizedText:o['구조화데이터'],status:o['처리상태'],matchStatus:o['매칭상태'],programId:o['프로그램ID'],programKind:o['프로그램구분'],teacher:o['등록교사'],createdAt:o['등록일시'],note:o['비고'],storageMode:'uep'};});
+1734:     // 입력센터의 단일 원본은 [UEP]입력센터 원본입니다.
+1735:     // 폐기 대상인 60_외부자료입력_정규화는 더 이상 읽거나 병합하지 않습니다.
+1736:     data.externalInputs=sourceRows;
+1737:     // 입력센터 원본은 03 UEP 적용 전까지 공식 보고서로 노출하지 않습니다.
+1738:     // UEP의 보고서 화면은 20/21 정규화 탭만 단일 진실원천(source of truth)으로 사용합니다.
+1739:   }
+1740:   if (!data.students.length) throw new Error("구글시트의 02_학생마스터에서 학생정보를 찾지 못했습니다.");
+1741:   data.connection = {
+1742:     spreadsheetId: UEP_SPREADSHEET_ID,
+1743:     spreadsheetName: UEP_SPREADSHEET_NAME,
+1744:     spreadsheetUrl: UEP_SPREADSHEET_URL,
+1745:     account: auth.account || "",
+1746:     mode: "read-only-live",
+1747:   };
+1748:   liveDataCache = data;
+1749:   liveDataFetchedAt = Date.now();
+1750:   return data;
+1751: }
+1752: 
+1753: 
+1754: function ymd(value = new Date()) {
+1755:   const date = value instanceof Date ? value : new Date(value);
+1756:   return `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, "0")}${String(date.getDate()).padStart(2, "0")}`;
+1757: }
+1758: 
+1759: function mondayOf(dateValue) {
+1760:   const date = dateValue instanceof Date ? new Date(dateValue) : new Date(dateValue || Date.now());
+1761:   date.setHours(12, 0, 0, 0);
+1762:   const day = date.getDay();
+1763:   date.setDate(date.getDate() - (day === 0 ? 6 : day - 1));
+1764:   return date;
+1765: }
+1766: 
+1767: async function fetchJson(url, timeoutMs = 12000) {
+1768:   const controller = new AbortController();
+1769:   const timer = setTimeout(() => controller.abort(), timeoutMs);
+1770:   try {
+1771:     const response = await fetch(url, {
+1772:       signal: controller.signal,
+1773:       headers: { "user-agent": "UEP/0.42.7 School Operations" },
+1774:     });
+1775:     if (!response.ok) throw new Error(`공공데이터 연결 실패 (${response.status})`);
+1776:     return await response.json();
+1777:   } finally {
+1778:     clearTimeout(timer);
+1779:   }
+1780: }
+1781: 
+1782: function neisRows(payload, key) {
+1783:   const group = payload?.[key];
+1784:   if (!Array.isArray(group)) return [];
+1785:   const rowBlock = group.find((item) => Array.isArray(item?.row));
+1786:   return rowBlock?.row || [];
+1787: }
+1788: 
+1789: function neisResultMessage(payload, key) {
+1790:   const result = payload?.RESULT || payload?.[key]?.[0]?.head?.find?.((item) => item.RESULT)?.RESULT;
+1791:   if (!result) return "";
+1792:   return result.MESSAGE || result.CODE || "";
+1793: }
+1794: 
+1795: function neisUrl(dataset, params, apiKey = "") {
+===== admissionResults :: line 1726 =====
+1714:     if(!headers.some(Boolean))return [];
+1715:     return rows.slice(3).filter(row=>Array.isArray(row)&&row.some(v=>String(v??'').trim())).map(row=>{
+1716:       const obj={};headers.forEach((h,i)=>{if(h)obj[h]=row[i]??'';});return obj;
+1717:     });
+1718:   };
+1719:   data.admissionBasics=uep08210MatrixObjects(matrices['52_대입기초']);
+1720:   data.admissionTypes=uep08210MatrixObjects(matrices['53_전형이해']);
+1721:   data.universityAdmissions=uep08210MatrixObjects(matrices['56_대학입시마스터']);
+1722:   data['52_대입기초']=data.admissionBasics;
+1723:   data['53_전형이해']=data.admissionTypes;
+1724:   data['56_대학입시마스터']=data.universityAdmissions;
+1725:   data.admissionMinimums=uep08210MatrixObjects(matrices['54_수능최저DB']);
+1726:   data.admissionResults=uep08210MatrixObjects(matrices['55_대학입결DB']);
+1727:   data['54_수능최저DB']=data.admissionMinimums;
+1728:   data['55_대학입결DB']=data.admissionResults;
+1729: 
+1730:   {
+1731:     const sourceMatrix=matrices["__INPUT_CENTER_SOURCE"]||[];
+1732:     const sourceHeaders=(sourceMatrix[2]||[]).map(v=>String(v||'').trim());
+1733:     const sourceRows=sourceMatrix.slice(3).filter(row=>row.some(v=>String(v||'').trim())).map(row=>{const o=Object.fromEntries(sourceHeaders.map((h,i)=>[h,row[i]??'']));return {id:o['입력ID'],batchId:o['배치ID'],source:o['입력경로'],type:o['자료유형'],subtype:o['세부유형'],schoolYear:o['학년도'],semester:o['학기'],studentId:o['학생ID'],studentNo:o['학번'],name:o['성명'],grade:o['학년'],className:o['반'],fileName:o['원본파일명'],storedPath:o['원본보관경로'],title:o['자료제목'],rawText:o['원본텍스트'],normalizedText:o['구조화데이터'],status:o['처리상태'],matchStatus:o['매칭상태'],programId:o['프로그램ID'],programKind:o['프로그램구분'],teacher:o['등록교사'],createdAt:o['등록일시'],note:o['비고'],storageMode:'uep'};});
+1734:     // 입력센터의 단일 원본은 [UEP]입력센터 원본입니다.
+1735:     // 폐기 대상인 60_외부자료입력_정규화는 더 이상 읽거나 병합하지 않습니다.
+1736:     data.externalInputs=sourceRows;
+1737:     // 입력센터 원본은 03 UEP 적용 전까지 공식 보고서로 노출하지 않습니다.
+1738:     // UEP의 보고서 화면은 20/21 정규화 탭만 단일 진실원천(source of truth)으로 사용합니다.
+1739:   }
+1740:   if (!data.students.length) throw new Error("구글시트의 02_학생마스터에서 학생정보를 찾지 못했습니다.");
+1741:   data.connection = {
+1742:     spreadsheetId: UEP_SPREADSHEET_ID,
+1743:     spreadsheetName: UEP_SPREADSHEET_NAME,
+1744:     spreadsheetUrl: UEP_SPREADSHEET_URL,
+1745:     account: auth.account || "",
+1746:     mode: "read-only-live",
+1747:   };
+1748:   liveDataCache = data;
+1749:   liveDataFetchedAt = Date.now();
+1750:   return data;
+1751: }
+1752: 
+1753: 
+1754: function ymd(value = new Date()) {
+1755:   const date = value instanceof Date ? value : new Date(value);
+1756:   return `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, "0")}${String(date.getDate()).padStart(2, "0")}`;
+1757: }
+1758: 
+1759: function mondayOf(dateValue) {
+1760:   const date = dateValue instanceof Date ? new Date(dateValue) : new Date(dateValue || Date.now());
+1761:   date.setHours(12, 0, 0, 0);
+1762:   const day = date.getDay();
+1763:   date.setDate(date.getDate() - (day === 0 ? 6 : day - 1));
+1764:   return date;
+1765: }
+1766: 
+1767: async function fetchJson(url, timeoutMs = 12000) {
+1768:   const controller = new AbortController();
+1769:   const timer = setTimeout(() => controller.abort(), timeoutMs);
+1770:   try {
+1771:     const response = await fetch(url, {
+1772:       signal: controller.signal,
+1773:       headers: { "user-agent": "UEP/0.42.7 School Operations" },
+1774:     });
+1775:     if (!response.ok) throw new Error(`공공데이터 연결 실패 (${response.status})`);
+1776:     return await response.json();
+1777:   } finally {
+1778:     clearTimeout(timer);
+1779:   }
+1780: }
+1781: 
+1782: function neisRows(payload, key) {
+1783:   const group = payload?.[key];
+1784:   if (!Array.isArray(group)) return [];
+1785:   const rowBlock = group.find((item) => Array.isArray(item?.row));
+1786:   return rowBlock?.row || [];
+1787: }
+1788: 
+1789: function neisResultMessage(payload, key) {
+1790:   const result = payload?.RESULT || payload?.[key]?.[0]?.head?.find?.((item) => item.RESULT)?.RESULT;
+1791:   if (!result) return "";
+1792:   return result.MESSAGE || result.CODE || "";
+1793: }
+1794: 
+1795: function neisUrl(dataset, params, apiKey = "") {
+1796:   const url = new URL(`https://open.neis.go.kr/hub/${dataset}`);
+===== universityAdmissions :: line 1721 =====
+1709: 
+1710:   // 0.82.10 admissions reference datasets from basic-info connector
+1711:   const uep08210MatrixObjects=(matrix)=>{
+1712:     const rows=Array.isArray(matrix)?matrix:[];
+1713:     const headers=(rows[2]||[]).map(v=>String(v??'').replace(/\r?\n/g,' ').trim());
+1714:     if(!headers.some(Boolean))return [];
+1715:     return rows.slice(3).filter(row=>Array.isArray(row)&&row.some(v=>String(v??'').trim())).map(row=>{
+1716:       const obj={};headers.forEach((h,i)=>{if(h)obj[h]=row[i]??'';});return obj;
+1717:     });
+1718:   };
+1719:   data.admissionBasics=uep08210MatrixObjects(matrices['52_대입기초']);
+1720:   data.admissionTypes=uep08210MatrixObjects(matrices['53_전형이해']);
+1721:   data.universityAdmissions=uep08210MatrixObjects(matrices['56_대학입시마스터']);
+1722:   data['52_대입기초']=data.admissionBasics;
+1723:   data['53_전형이해']=data.admissionTypes;
+1724:   data['56_대학입시마스터']=data.universityAdmissions;
+1725:   data.admissionMinimums=uep08210MatrixObjects(matrices['54_수능최저DB']);
+1726:   data.admissionResults=uep08210MatrixObjects(matrices['55_대학입결DB']);
+1727:   data['54_수능최저DB']=data.admissionMinimums;
+1728:   data['55_대학입결DB']=data.admissionResults;
+1729: 
+1730:   {
+1731:     const sourceMatrix=matrices["__INPUT_CENTER_SOURCE"]||[];
+1732:     const sourceHeaders=(sourceMatrix[2]||[]).map(v=>String(v||'').trim());
+1733:     const sourceRows=sourceMatrix.slice(3).filter(row=>row.some(v=>String(v||'').trim())).map(row=>{const o=Object.fromEntries(sourceHeaders.map((h,i)=>[h,row[i]??'']));return {id:o['입력ID'],batchId:o['배치ID'],source:o['입력경로'],type:o['자료유형'],subtype:o['세부유형'],schoolYear:o['학년도'],semester:o['학기'],studentId:o['학생ID'],studentNo:o['학번'],name:o['성명'],grade:o['학년'],className:o['반'],fileName:o['원본파일명'],storedPath:o['원본보관경로'],title:o['자료제목'],rawText:o['원본텍스트'],normalizedText:o['구조화데이터'],status:o['처리상태'],matchStatus:o['매칭상태'],programId:o['프로그램ID'],programKind:o['프로그램구분'],teacher:o['등록교사'],createdAt:o['등록일시'],note:o['비고'],storageMode:'uep'};});
+1734:     // 입력센터의 단일 원본은 [UEP]입력센터 원본입니다.
+1735:     // 폐기 대상인 60_외부자료입력_정규화는 더 이상 읽거나 병합하지 않습니다.
+1736:     data.externalInputs=sourceRows;
+1737:     // 입력센터 원본은 03 UEP 적용 전까지 공식 보고서로 노출하지 않습니다.
+1738:     // UEP의 보고서 화면은 20/21 정규화 탭만 단일 진실원천(source of truth)으로 사용합니다.
+1739:   }
+1740:   if (!data.students.length) throw new Error("구글시트의 02_학생마스터에서 학생정보를 찾지 못했습니다.");
+1741:   data.connection = {
+1742:     spreadsheetId: UEP_SPREADSHEET_ID,
+1743:     spreadsheetName: UEP_SPREADSHEET_NAME,
+1744:     spreadsheetUrl: UEP_SPREADSHEET_URL,
+1745:     account: auth.account || "",
+1746:     mode: "read-only-live",
+1747:   };
+1748:   liveDataCache = data;
+1749:   liveDataFetchedAt = Date.now();
+1750:   return data;
+1751: }
+1752: 
+1753: 
+1754: function ymd(value = new Date()) {
+1755:   const date = value instanceof Date ? value : new Date(value);
+1756:   return `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, "0")}${String(date.getDate()).padStart(2, "0")}`;
+1757: }
+1758: 
+1759: function mondayOf(dateValue) {
+1760:   const date = dateValue instanceof Date ? new Date(dateValue) : new Date(dateValue || Date.now());
+1761:   date.setHours(12, 0, 0, 0);
+1762:   const day = date.getDay();
+1763:   date.setDate(date.getDate() - (day === 0 ? 6 : day - 1));
+1764:   return date;
+1765: }
+1766: 
+1767: async function fetchJson(url, timeoutMs = 12000) {
+1768:   const controller = new AbortController();
+1769:   const timer = setTimeout(() => controller.abort(), timeoutMs);
+1770:   try {
+1771:     const response = await fetch(url, {
+1772:       signal: controller.signal,
+1773:       headers: { "user-agent": "UEP/0.42.7 School Operations" },
+1774:     });
+1775:     if (!response.ok) throw new Error(`공공데이터 연결 실패 (${response.status})`);
+1776:     return await response.json();
+1777:   } finally {
+1778:     clearTimeout(timer);
+1779:   }
+1780: }
+1781: 
+1782: function neisRows(payload, key) {
+1783:   const group = payload?.[key];
+1784:   if (!Array.isArray(group)) return [];
+1785:   const rowBlock = group.find((item) => Array.isArray(item?.row));
+1786:   return rowBlock?.row || [];
+1787: }
+1788: 
+1789: function neisResultMessage(payload, key) {
+1790:   const result = payload?.RESULT || payload?.[key]?.[0]?.head?.find?.((item) => item.RESULT)?.RESULT;
+1791:   if (!result) return "";
