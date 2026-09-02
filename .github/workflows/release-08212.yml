@@ -1,0 +1,57 @@
+name: Build and Release UEP 0.82.12
+on:
+  push:
+    branches: [main]
+    paths: [release-08212.trigger]
+permissions:
+  contents: write
+jobs:
+  build-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - uses: actions/setup-node@v4
+        with: {node-version: '20'}
+      - shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check scripts/patch-uep-08212-native-dashboard.js
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.82.11 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+          node scripts/patch-uep-08212-native-dashboard.js app
+          node --check app/resources/app/gyomuon.js
+          node --check app/resources/app/electron/main.cjs
+          $g=Get-Content app/resources/app/gyomuon.js -Raw
+          $c=Get-Content app/resources/app/gyomuon.css -Raw
+          foreach($x in @('const APP_VERSION = "0.82.12";','function dashboardStudentStatusCompactMarkup()','uep-dashboard-five-cards','function todayOperationsMarkup()','work-three-grid','학생상담/점검','보고서 미제출 현황','openDashboardAdmissionBasics','openDashboardAdmissionTypes','openDashboardUniversityDetail')){if(-not $g.Contains($x)){throw "missing $x"}}
+          foreach($x in @('UEP_08210_DASHBOARD_INTEGRATION_START','UEP_08211_ADMISSIONS_COUNSELING_START','setInterval(sync,2500)')){if($g.Contains($x)){throw "forbidden legacy patch remains: $x"}}
+          foreach($x in @('UEP_08212_NATIVE_DASHBOARD_CSS','.work-three-grid','.dashboard-admission-dialog')){if(-not $c.Contains($x)){throw "missing css $x"}}
+          if(([regex]::Matches($g,'data-dashboard-admission=')).Count -lt 3){throw 'five-card native admissions missing'}
+          Remove-Item UEP-update.zip,sha256.txt -Force -ErrorAction SilentlyContinue
+          Compress-Archive -Path app\* -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower();"$sha  UEP-update.zip"|Set-Content sha256.txt -Encoding ascii
+          $notes=@'
+          UEP v0.82.12
+          - v0.82.10/0.82.11 대시보드 MutationObserver·2.5초 interval 후처리 제거
+          - 원본 dashboardStudentStatusCompactMarkup에서 공결/지각·야자출결·대입 기초·전형 이해·오늘의 대학 5카드 생성
+          - 원본 todayOperationsMarkup에서 학년공지·학생상담/점검·보고서 미제출 현황 3영역 생성
+          - 내 체크리스트는 중앙 3분할 하단 접이식 원래 기능으로 보존
+          - 대입 기초 교육형, 전형 이해 대학별 비교 허브, 오늘의 대학 통합 상세 연결
+          '@
+          gh release create v0.82.12 UEP-update.zip sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.12' --notes $notes --target $env:GITHUB_SHA
+          $policy=Get-Content uep-policy.json -Raw|ConvertFrom-Json
+          $policy.latestVersion='0.82.12'
+          $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.12/UEP-update.zip'
+          $policy.sha256=$sha
+          $policy.message='UEP 0.82.12 대시보드 원본 렌더러 수정 · 상단 5카드 · 중앙 3영역 · 대입상담 팝업'
+          $policy|ConvertTo-Json -Depth 10|Set-Content uep-policy.json -Encoding utf8
+          @("UEP 0.82.12 RELEASE SUCCESS","sha256=$sha","size=$((Get-Item UEP-update.zip).Length)","commit=$env:GITHUB_SHA")|Set-Content release-08212-status.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add uep-policy.json release-08212-status.txt
+          git commit -m 'Publish UEP 0.82.12 policy and status'
+          git push origin HEAD:main
