@@ -52,7 +52,12 @@ function replaceFunction(source,name,replacement){
   throw new Error(`unclosed function: ${name}`);
 }
 
-const nativeAdmission=fs.readFileSync(__filename,'utf8').split('/* NATIVE_08212_START\n')[1].split('\nNATIVE_08212_END */')[0];
+function embeddedSnippet(start,end){
+  const source=fs.readFileSync(__filename,'utf8'),match=source.match(new RegExp(`${start}\\r?\\n([\\s\\S]*?)\\r?\\n${end}`));
+  if(!match)throw new Error(`embedded snippet missing: ${start}`);
+  return match[1];
+}
+const nativeAdmission=embeddedSnippet('/\\* NATIVE_08212_START','NATIVE_08212_END \\*/');
 /* NATIVE_08212_START
 function dashboardAdmissionRows(...keys){
   for(const key of keys){const rows=readonlyCache?.[key];if(Array.isArray(rows))return rows;}
@@ -107,7 +112,7 @@ const insertAt=g.indexOf('function dashboardStudentStatusCompactMarkup()');
 must(insertAt>=0,'dashboard status renderer missing');
 g=g.slice(0,insertAt)+nativeAdmission+g.slice(insertAt);
 
-const nativeCompact=fs.readFileSync(__filename,'utf8').split('/* NATIVE_COMPACT_START\n')[1].split('\nNATIVE_COMPACT_END */')[0];
+const nativeCompact=embeddedSnippet('/\\* NATIVE_COMPACT_START','NATIVE_COMPACT_END \\*/');
 /* NATIVE_COMPACT_START
 function dashboardStudentStatusCompactMarkup(){
   const todayKey=dateKey(today),yesterday=new Date(today);yesterday.setDate(today.getDate()-1);const yesterdayKey=dateKey(yesterday);
@@ -121,7 +126,7 @@ function dashboardStudentStatusCompactMarkup(){
 NATIVE_COMPACT_END */
 g=replaceFunction(g,'dashboardStudentStatusCompactMarkup',nativeCompact);
 
-const nativeOperations=fs.readFileSync(__filename,'utf8').split('/* NATIVE_OPERATIONS_START\n')[1].split('\nNATIVE_OPERATIONS_END */')[0];
+const nativeOperations=embeddedSnippet('/\\* NATIVE_OPERATIONS_START','NATIVE_OPERATIONS_END \\*/');
 /* NATIVE_OPERATIONS_START
 function todayOperationsMarkup(){
   const direct=directNoticeRows().filter(item=>currentUserCanManageNotices()||!currentNoticeReceipt(item)?.dismissed).slice(0,5);
