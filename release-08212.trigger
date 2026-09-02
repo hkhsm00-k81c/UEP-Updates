@@ -11,3 +11,4 @@ Release: v0.82.15 bundled 2028 admissions education comparison data
 Release: v0.82.16 one-time changelog popup and four status summary cards in one row
 Retry: v0.82.16 release-note validation anchor fix
 Hotfix: v0.82.17 local-first login recovery for School Read API 404
+Recovery: v0.82.18 rebuild from last known good v0.82.14 base; keep popup + four status cards only
