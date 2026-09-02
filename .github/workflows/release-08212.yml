@@ -1,4 +1,4 @@
-name: Build and Release UEP 0.82.19
+name: Inspect UEP 0.82.18 for v0.82.19
 on:
   push:
     branches: [main]
@@ -11,46 +11,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: {fetch-depth: 0}
-      - uses: actions/setup-node@v4
-        with: {node-version: '20'}
       - shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference='Stop'
-          node --check scripts/patch-uep-08219-admissions-live.js
           New-Item -ItemType Directory -Force source,app | Out-Null
           gh release download v0.82.18 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
           Expand-Archive source/UEP-update.zip app -Force
-          node scripts/patch-uep-08219-admissions-live.js app
-          node --check app/resources/app/gyomuon.js
-          node --check app/resources/app/electron/main.cjs
-          $g=Get-Content app/resources/app/gyomuon.js -Raw
-          $c=Get-Content app/resources/app/gyomuon.css -Raw
-          foreach($x in @('const APP_VERSION = "0.82.19";','UEP_08219_ADMISSIONS_LIVE','52_대입기초!A:Z','53_전형이해!A:Z','53A_전형세부유형DB!A:R','53B_전형유형별대학DB!A:Z','54_수능최저DB!A:Z','55_대학입결DB!A:Z','56_대학입시마스터!A:R','openDashboardAdmissionBasics','openDashboardAdmissionTypes','openDashboardUniversityDetail','UEP_08218_CHANGELOG_POPUP','UEP_08218_FOUR_STATUS_CARDS')){if(-not (($g+$c).Contains($x))){throw "missing $x"}}
-          foreach($x in @('UEP_08210_DASHBOARD_INTEGRATION_START','UEP_08211_ADMISSIONS_COUNSELING_START','setInterval(sync,2500)','__UEP_08217_LOGIN_WATCHDOG__')){if($g.Contains($x)){throw "forbidden regression patch remains: $x"}}
-          Remove-Item UEP-update.zip,sha256.txt -Force -ErrorAction SilentlyContinue
-          Compress-Archive -Path app\* -DestinationPath UEP-update.zip -CompressionLevel Optimal
-          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower();"$sha  UEP-update.zip"|Set-Content sha256.txt -Encoding ascii
-          $notes=@'
-          UEP v0.82.19
-          - v0.82.18 정상 구글시트 연결 기준판에서 누적 업데이트
-          - 대입 기초: 52_대입기초 최신 시트 자료 연결
-          - 전형 이해: 53_전형이해 + 53A_전형세부유형DB + 53B_전형유형별대학DB 연결
-          - 오늘의 대학: 54_수능최저DB + 55_대학입결DB + 56_대학입시마스터 연결
-          - 기존 School Read API·로그인·구글시트 연결 로직 변경 없음
-          - v0.82.18 수정내역 팝업·공결/지각 4카드 한 줄 유지
-          '@
-          gh release create v0.82.19 UEP-update.zip sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.19' --notes $notes --target $env:GITHUB_SHA
-          $policy=Get-Content uep-policy.json -Raw|ConvertFrom-Json
-          $policy.latestVersion='0.82.19'
-          $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.19/UEP-update.zip'
-          $policy.sha256=$sha
-          $policy.message='UEP 0.82.19 · 대입 기초/전형 이해/오늘의 대학 최신 시트 데이터 연결'
-          $policy|ConvertTo-Json -Depth 10|Set-Content uep-policy.json -Encoding utf8
-          @("UEP 0.82.19 RELEASE SUCCESS","base=v0.82.18","admissions=52,53,53A,53B,54,55,56","sha256=$sha","size=$((Get-Item UEP-update.zip).Length)","commit=$env:GITHUB_SHA")|Set-Content release-08212-status.txt
+          $files=@('app/resources/app/gyomuon.js','app/resources/app/electron/main.cjs')
+          $patterns=@('batch-read','schoolRead','ranges','readSchool','sheetName','openDashboardAdmissionBasics','openDashboardAdmissionTypes','openDashboardUniversityDetail','dashboardStudentStatusCompactMarkup')
+          $out=@()
+          foreach($f in $files){
+            $lines=Get-Content $f
+            $out += "===== $f ====="
+            for($i=0;$i -lt $lines.Count;$i++){
+              $matched=$false
+              foreach($p in $patterns){ if($lines[$i] -match [regex]::Escape($p)){ $matched=$true; break } }
+              if($matched){
+                $a=[Math]::Max(0,$i-10); $b=[Math]::Min($lines.Count-1,$i+18)
+                $out += "--- around line $($i+1) ---"
+                for($j=$a;$j -le $b;$j++){ $out += ('{0,7}: {1}' -f ($j+1),$lines[$j]) }
+              }
+            }
+          }
+          $out | Set-Content inspect-08218-admissions.txt -Encoding utf8
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add uep-policy.json release-08212-status.txt
-          git commit -m 'Publish UEP 0.82.19 admissions live integration'
+          git add inspect-08218-admissions.txt
+          git commit -m 'Inspect v0.82.18 sheet read hooks for admissions integration'
           git push origin HEAD:main
