@@ -1,0 +1,46 @@
+name: Build and Release UEP 0.82.11
+on:
+  push:
+    branches: [main]
+    paths: [release-08211.trigger]
+permissions:
+  contents: write
+jobs:
+  build-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - uses: actions/setup-node@v4
+        with: {node-version: '20'}
+      - shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check scripts/patch-uep-08211-admissions-dashboard.js
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.82.10 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+          node scripts/patch-uep-08211-admissions-dashboard.js app
+          node --check app/resources/app/gyomuon.js
+          node --check app/resources/app/electron/main.cjs
+          $g=Get-Content app/resources/app/gyomuon.js -Raw;$m=Get-Content app/resources/app/electron/main.cjs -Raw;$c=Get-Content app/resources/app/gyomuon.css -Raw
+          foreach($x in @('const APP_VERSION = "0.82.11";','UEP_08211_ADMISSIONS_COUNSELING_START','대입 기초','전형 이해','운호고 실제 입결')){if(-not $g.Contains($x)){throw "missing $x"}}
+          foreach($x in @("'54_수능최저DB'!A1:U2000","'55_대학입결DB'!A1:K5000",'data.admissionMinimums','data.admissionResults')){if(-not $m.Contains($x)){throw "missing $x"}}
+          if(-not $c.Contains('UEP_08211_ADMISSIONS_COUNSELING_CSS')){throw 'css missing'}
+          Remove-Item UEP-update.zip,sha256.txt -Force -ErrorAction SilentlyContinue
+          Compress-Archive -Path app\* -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower();"$sha  UEP-update.zip"|Set-Content sha256.txt -Encoding ascii
+          $notes=@'
+          UEP v0.82.11
+          - 상단 5개 상태카드를 위젯 내부 5등분으로 정상화
+          - 대입 기초를 수시/정시·전형·시기·내신반영·수능최저 중심 상담 구조로 개편
+          - 전형 이해를 평가요소 중심 상세 상담 화면으로 확대
+          - 오늘의 대학에 54 수능최저DB와 55 운호고 실제 입결DB 연결
+          - 학교업무 중앙을 학년공지·학생상담/점검·보고서 미제출 3영역으로 복원
+          '@
+          gh release create v0.82.11 UEP-update.zip sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.11' --notes $notes --target $env:GITHUB_SHA
+          $policy=Get-Content uep-policy.json -Raw|ConvertFrom-Json;$policy.latestVersion='0.82.11';$policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.11/UEP-update.zip';$policy.sha256=$sha;$policy.message='UEP 0.82.11 대입상담 구조화 · 대학 전형/최저/운호고 입결 연결 · 대시보드 3영역 복원';$policy|ConvertTo-Json -Depth 10|Set-Content uep-policy.json -Encoding utf8
+          @("UEP 0.82.11 RELEASE SUCCESS","sha256=$sha","size=$((Get-Item UEP-update.zip).Length)","commit=$env:GITHUB_SHA")|Set-Content release-08211-status.txt
+          git config user.name 'github-actions[bot]';git config user.email '41898282+github-actions[bot]@users.noreply.github.com';git add uep-policy.json release-08211-status.txt;git commit -m 'Publish UEP 0.82.11 policy and status';git push origin HEAD:main
