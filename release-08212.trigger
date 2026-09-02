@@ -15,3 +15,4 @@ Recovery: v0.82.18 rebuild from last known good v0.82.14 base; keep popup + four
 Release: v0.82.19 connect admissions live sheets 52/53/53A/53B/54/55/56 on stable v0.82.18
 Inspect: exact School Read batch-read hook for v0.82.19 retry
 Inspect retry: registered workflow route
+Build retry: corrected actual 0.82.18 entries and 53B renderer mapping
