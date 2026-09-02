@@ -1,4 +1,4 @@
-name: Build and Release UEP 0.82.16
+name: Build and Release UEP 0.82.17
 on:
   push:
     branches: [main]
@@ -18,46 +18,37 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference='Stop'
-          node --check scripts/patch-uep-08212-native-dashboard.js
-          node --check scripts/patch-uep-08216-popup-fourcards.js
+          node --check scripts/patch-uep-08217-login-localfirst.js
           New-Item -ItemType Directory -Force source,app | Out-Null
-          gh release download v0.82.11 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          gh release download v0.82.16 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
           Expand-Archive source/UEP-update.zip app -Force
-          node scripts/patch-uep-08212-native-dashboard.js app
-          node scripts/patch-uep-08216-popup-fourcards.js app
+          node scripts/patch-uep-08217-login-localfirst.js app
           node --check app/resources/app/gyomuon.js
           node --check app/resources/app/electron/main.cjs
           $g=Get-Content app/resources/app/gyomuon.js -Raw
           $c=Get-Content app/resources/app/gyomuon.css -Raw
-          foreach($x in @('const APP_VERSION = "0.82.16";','function dashboardStudentStatusCompactMarkup()','uep-dashboard-five-cards','function todayOperationsMarkup()','work-three-grid','학생상담/점검','보고서 미제출 현황','openDashboardAdmissionBasics','openDashboardAdmissionTypes','openDashboardUniversityDetail','data-dashboard-official-ledger','1f6moB3bJJjZcAHv6OPRiLq41InvmzTRuh9ANFZmhNhk','dashboardAdmission2028Catalog','dashboardAdmission2028Rows','dashboardAdmission2028Universities','data-admission-source','자동 합격판정용이 아닙니다','UEP_08216_CHANGELOG_POPUP','const STORAGE_KEY=''uep:release-notes:''+VERSION;')){if(-not $g.Contains($x)){throw "missing $x"}}
-          foreach($x in @('서울대','연세대','고려대','서강대','성균관대','한양대','중앙대','경희대','한국외대','서울시립대','건국대','동국대','홍익대','충북대','충남대','부산대','경북대','전남대','전북대','강원대','경상국립대','한국기술교육대','한국교원대')){if(-not $g.Contains("['$x'")){throw "missing 2028 university $x"}}
+          foreach($x in @('const APP_VERSION = "0.82.17";','__UEP_08217_LOGIN_WATCHDOG__','학교 데이터 연결은 로그인 후 별도로 확인합니다.','UEP_08216_CHANGELOG_POPUP','UEP_08216_FOUR_STATUS_CARDS','dashboardAdmission2028Catalog','data-dashboard-official-ledger')){if(-not (($g+$c).Contains($x))){throw "missing $x"}}
           foreach($x in @('UEP_08210_DASHBOARD_INTEGRATION_START','UEP_08211_ADMISSIONS_COUNSELING_START','setInterval(sync,2500)')){if($g.Contains($x)){throw "forbidden legacy patch remains: $x"}}
-          foreach($x in @('UEP_08212_NATIVE_DASHBOARD_CSS','UEP_08214_OFFICIAL_LEDGER_CARD','UEP_08216_FOUR_STATUS_CARDS','UEP_08216_CHANGELOG_POPUP_CSS','.work-three-grid','.dashboard-admission-dialog','.dashboard-official-ledger-card','.uep-release-notes-layer')){if(-not $c.Contains($x)){throw "missing css $x"}}
-          foreach($x in @("'admission','basics','대입 기초'","'admission','types','전형 이해'","'admission','university','오늘의 대학'")){if(-not $g.Contains($x)){throw "missing native admissions card $x"}}
-          foreach($key in @('student-status','admission','missing-class','missing-student')){$singlePattern="(?<!\`$)\`$\('\[data-dashboard-$key\]'\)\.forEach";$multi=([char]36)+([char]36)+"('[data-dashboard-$key]').forEach";if([regex]::IsMatch($g,$singlePattern)){throw "single-selector forEach regression: $key"};if(-not $g.Contains($multi)){throw "missing multi-selector binding: $key"}}
-          foreach($x in @('UEP_08210_DASHBOARD_INTEGRATION_CSS','UEP_08211_ADMISSIONS_COUNSELING_CSS','.uep-top-five-08211')){if($c.Contains($x)){throw "legacy dashboard css remains: $x"}}
           Remove-Item UEP-update.zip,sha256.txt -Force -ErrorAction SilentlyContinue
           Compress-Archive -Path app\* -DestinationPath UEP-update.zip -CompressionLevel Optimal
           $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower();"$sha  UEP-update.zip"|Set-Content sha256.txt -Encoding ascii
           $notes=@'
-          UEP v0.82.16
-          - 새 버전 설치 후 최초 실행 시 업데이트 수정내역 팝업 1회 표시
-          - 공결·지각 학생 팝업 상단의 학교 공결대장·기준일·학생 수·조회 범위 4개 카드를 한 줄 배치
-          - 2028 시행계획·학종 안내·전형구조·수능최저·운호고 입결 연결 자료 유지 및 상담 화면 활용
-          - 오늘의 대학·전형 이해의 교육용 대입 DB 연결 유지
-          - 공결대장 Google Sheets 바로가기 유지
-          - 2029 최종 모집요강 재확인 및 자동 합격판정용 아님 안내 유지
+          UEP v0.82.17
+          - School Read API 404가 사용자 확인 화면에서 UEP 진입을 막지 않도록 로컬 사용자 우선 로그인 복구
+          - 저장된 자동로그인 사용자는 기존 사용자정보가 일치하면 즉시 UEP 진입
+          - 학교 데이터 연결은 로그인 후 별도 동기화 단계에서 확인
+          - v0.82.16 수정내역 1회 팝업·공결/지각 상단 4카드 한 줄·대입 DB 연결 유지
           '@
-          gh release create v0.82.16 UEP-update.zip sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.16' --notes $notes --target $env:GITHUB_SHA
+          gh release create v0.82.17 UEP-update.zip sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.17' --notes $notes --target $env:GITHUB_SHA
           $policy=Get-Content uep-policy.json -Raw|ConvertFrom-Json
-          $policy.latestVersion='0.82.16'
-          $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.16/UEP-update.zip'
+          $policy.latestVersion='0.82.17'
+          $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.17/UEP-update.zip'
           $policy.sha256=$sha
-          $policy.message='UEP 0.82.16 수정내역 1회 팝업 · 공결/지각 상단 4카드 한 줄 · 대입 DB 연결 유지'
+          $policy.message='UEP 0.82.17 School Read API 404 로그인 차단 긴급복구 · 로컬 사용자 우선 진입'
           $policy|ConvertTo-Json -Depth 10|Set-Content uep-policy.json -Encoding utf8
-          @("UEP 0.82.16 RELEASE SUCCESS","sha256=$sha","size=$((Get-Item UEP-update.zip).Length)","commit=$env:GITHUB_SHA")|Set-Content release-08212-status.txt
+          @("UEP 0.82.17 RELEASE SUCCESS","sha256=$sha","size=$((Get-Item UEP-update.zip).Length)","commit=$env:GITHUB_SHA")|Set-Content release-08212-status.txt
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add uep-policy.json release-08212-status.txt
-          git commit -m 'Publish UEP 0.82.16 policy and status'
+          git commit -m 'Publish UEP 0.82.17 policy and status'
           git push origin HEAD:main
