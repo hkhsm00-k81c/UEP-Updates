@@ -23,7 +23,6 @@ Inspect: parser-only output for real sheet-to-cache mapping
 Inspect: exact parser-to-readonlyCache admissions handoff
 Inspect retry: literal Contains matching
 Release: v0.82.20 real admissions cache handoff and sheet-driven renderer
-Retry: flexible function-boundary matching for renderer replacement
 Release: v0.82.21 admissions UI readability + back navigation + version badge + automatic changelog popup
 Release: v0.82.22 types 3-column layout + unified university detail + route back + updater version arrow + reliable changelog popup
 Release: v0.82.23 wide admissions dialogs + region/prev-next university explorer + enriched admissions basics
@@ -35,3 +34,4 @@ Release: v0.82.27 use 18_학교교육과정DB 이수단위 as authoritative weig
 Retry: v0.82.27 route release trigger to actual Build and Release workflow
 Retry 2: v0.82.27 move curriculum matrix handoff to electron main cache and use readonlyCache in renderer
 Release: v0.82.28 fix score recent-semester card and common score statistics/print averages to use curriculum-credit weighting
+Release: v0.82.29 fix combined individual and student dashboard remaining simple-average paths; all common internal averages use curriculum-credit weighting
