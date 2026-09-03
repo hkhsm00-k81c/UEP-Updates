@@ -1,0 +1,41 @@
+name: Inspect UEP 0.82.28 remaining grade averages
+'on':
+  push:
+    branches: [main]
+    paths: [inspect-08228-remaining-average.trigger]
+permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.82.28 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          $patterns=@('학사상담 대시보드','학생 개인 대시보드','성적·입시 요약','5등급제 평균','종합성적','admissionBase\(','gradeValues\.length','reduce\(\(a,b\)=>a\+b','reduce\(\(sum,value\)=>sum\+value','average5:')
+          $out=@('=== UEP v0.82.28 remaining grade average inspection ===')
+          foreach($p in $patterns){
+            $out += "`n### PATTERN: $p"
+            $matches=[regex]::Matches($g,$p,[System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+            $out += "count=$($matches.Count)"
+            foreach($m in ($matches | Select-Object -First 30)){
+              $s=[Math]::Max(0,$m.Index-1100);$l=[Math]::Min(3000,$g.Length-$s)
+              $out += $g.Substring($s,$l)
+              $out += '---'
+            }
+          }
+          $out | Set-Content inspect-08228-remaining-average-report.txt -Encoding utf8
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git pull --rebase origin main
+          git add inspect-08228-remaining-average-report.txt
+          git commit -m 'Inspect 0.82.28 remaining grade average paths'
+          git push origin HEAD:main
