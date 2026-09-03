@@ -1,0 +1,74 @@
+name: Build and Release UEP 0.82.41 CSAT Model Separation
+'on':
+  push:
+    branches: [main]
+    paths: [release-08241.trigger]
+permissions:
+  contents: write
+jobs:
+  build-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - uses: actions/setup-node@v4
+        with: {node-version: '20'}
+      - shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check scripts/patch-uep-08241-csat-model-separation.js
+          node --check scripts/test-uep-08241-csat-model-separation.js
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.82.40 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+          node scripts/patch-uep-08241-csat-model-separation.js app
+          node --check app/resources/app/gyomuon.js
+          node --check app/resources/app/electron/main.cjs
+          node --check app/resources/app/electron/google-data.cjs
+          node scripts/test-uep-08241-csat-model-separation.js app
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          $m=Get-Content app/resources/app/electron/main.cjs -Raw -Encoding UTF8
+          if($m.Contains("data.admissionMinimums=uep08210MatrixObjects(matrices['54_수능최저DB']);")){throw 'raw overwrite leaked into canonical model'}
+          if(-not $m.Contains("data.admissionMinimumRows=uep08210MatrixObjects(matrices['54_수능최저DB']);")){throw 'separate raw model missing'}
+          if(-not $g.Contains("dashboardAdmissionRows('admissionMinimumRows','54_수능최저DB')")){throw 'dashboard raw source missing'}
+          if($g.Contains("dashboardAdmissionRows('admissionMinimums','54_수능최저DB')")){throw 'dashboard canonical/raw collision remains'}
+          if($g.Contains('UEP_08234_TODAY_UNIVERSITY_CLICK_HARD_FIX') -or $g.Contains('UEP_08235_ADMISSION_TOP_BUTTONS_REPAIR') -or $g.Contains('UEP_08239_UNIVERSITY_NAV_BINDINGS')){throw 'old temporary admissions patch leaked'}
+          if($g.Contains('setTimeout(uep08223BindUniversityNavigation,0);')){throw 'broken old university binder leaked'}
+          Remove-Item UEP-update.zip,sha256.txt -Force -ErrorAction SilentlyContinue
+          Compress-Archive -Path app\* -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower();"$sha  UEP-update.zip"|Set-Content sha256.txt -Encoding ascii
+          $notes=@'
+          UEP v0.82.41
+          - 수능최저 계산용 54번 DB 정규화 모델과 대학 상세용 원본 모델이 같은 admissionMinimums 필드를 덮어쓰던 구조 충돌을 제거했습니다.
+          - parseGoogleSheetData의 정규화 admissionMinimums를 그대로 보존하고, 대학 상세용 원본 행은 admissionMinimumRows/54_수능최저DB로 분리했습니다.
+          - 수능최저 표는 다시 university/type/name/minimum/areaCount/sumLimit 필드로 3·6·9월 모의고사를 판정합니다.
+          - 오늘의 대학 상세는 기존 한국어 헤더 원본 데이터를 유지합니다.
+          - 화면 후처리, MutationObserver, 전역 클릭 감지, fallback 렌더링을 추가하지 않았습니다.
+          '@
+          gh release create v0.82.41 UEP-update.zip sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.41' --notes $notes --target $env:GITHUB_SHA
+          $policy=Get-Content uep-policy.json -Raw|ConvertFrom-Json
+          $policy.latestVersion='0.82.41'
+          $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.41/UEP-update.zip'
+          $policy.sha256=$sha
+          $policy.message='UEP 0.82.41 · 수능최저 정규화/원본 모델 구조 분리 복구'
+          $policy|ConvertTo-Json -Depth 10|Set-Content uep-policy.json -Encoding utf8
+          @(
+            'UEP 0.82.41 RELEASE SUCCESS',
+            'base=v0.82.40',
+            'root-cause=raw 54 rows overwrote canonical normalized admissionMinimums in electron/main.cjs',
+            'canonical-admissionMinimums=preserved',
+            'raw-admissionMinimumRows=separated',
+            'dashboard-54-raw-source=PASS',
+            'core-csat-normalized-source=PASS',
+            'september-mock-path=PASS',
+            "sha256=$sha",
+            "size=$((Get-Item UEP-update.zip).Length)"
+          )|Set-Content release-08241-status.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git pull --rebase origin main
+          git add uep-policy.json release-08241-status.txt
+          git commit -m 'Publish UEP 0.82.41 structural CSAT minimum model fix'
+          git push origin HEAD:main
