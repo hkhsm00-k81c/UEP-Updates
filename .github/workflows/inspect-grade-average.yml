@@ -1,0 +1,31 @@
+name: Inspect UEP Grade Average Formula
+'on':
+  push:
+    branches: [main]
+    paths: [inspect-grade-average.trigger]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.82.25 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+          $p='app/resources/app/gyomuon.js'
+          $lines=Get-Content $p -Encoding UTF8
+          $terms=@('5등급','9등급','평균등급','average','avgGrade','gradeAverage','평균','등급')
+          foreach($term in $terms){
+            Write-Host "===== TERM: $term ====="
+            Select-String -Path $p -Pattern $term -Encoding UTF8 -Context 8,12 | Select-Object -First 40 | ForEach-Object {
+              Write-Host ("LINE {0}: {1}" -f $_.LineNumber,$_.Line)
+              foreach($c in $_.Context.PreContext){Write-Host ('  PRE: '+$c)}
+              foreach($c in $_.Context.PostContext){Write-Host (' POST: '+$c)}
+            }
+          }
