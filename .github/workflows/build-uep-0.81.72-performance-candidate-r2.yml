@@ -1,4 +1,4 @@
-name: Inspect UEP 0.82.30 Afterschool Session Logic
+name: Inspect UEP 0.82.30 Afterschool Parser
 'on':
   push:
     branches: [main]
@@ -6,7 +6,7 @@ name: Inspect UEP 0.82.30 Afterschool Session Logic
 permissions:
   contents: write
 jobs:
-  inspect-afterschool:
+  inspect-afterschool-parser:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,38 +22,26 @@ jobs:
           $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
           $m=Get-Content app/resources/app/electron/main.cjs -Raw -Encoding UTF8
           $out=New-Object System.Collections.Generic.List[string]
-          $out.Add('UEP 0.82.30 AFTERSCHOOL INSPECTION')
-          $out.Add('=== gyomuon.js markers ===')
-          $patterns=@('차시별 일정','해당 월','오늘의 프로그램','방과후학교','차시일정','운영일자','운영상태','출석확정','수업완료','예정')
-          foreach($p in $patterns){
-            $matches=[regex]::Matches($g,[regex]::Escape($p))
-            $out.Add("PATTERN [$p] COUNT=$($matches.Count)")
-            $take=[Math]::Min($matches.Count,8)
-            for($i=0;$i -lt $take;$i++){
-              $idx=$matches[$i].Index
-              $start=[Math]::Max(0,$idx-900)
-              $len=[Math]::Min(2200,$g.Length-$start)
-              $snippet=$g.Substring($start,$len).Replace("`r",' ').Replace("`n",' ')
-              $out.Add("--- $p #$($i+1) @ $idx ---")
-              $out.Add($snippet)
+          $out.Add('UEP 0.82.30 AFTERSCHOOL PARSER INSPECTION')
+          function AddSnips([string]$label,[string]$text,[string[]]$patterns,[int]$before=1300,[int]$length=3200){
+            $out.Add("=== $label ===")
+            foreach($p in $patterns){
+              $matches=[regex]::Matches($text,[regex]::Escape($p))
+              $out.Add("PATTERN [$p] COUNT=$($matches.Count)")
+              $take=[Math]::Min($matches.Count,10)
+              for($i=0;$i -lt $take;$i++){
+                $idx=$matches[$i].Index;$start=[Math]::Max(0,$idx-$before);$len=[Math]::Min($length,$text.Length-$start)
+                $out.Add("--- $p #$($i+1) @ $idx ---")
+                $out.Add($text.Substring($start,$len).Replace("`r",' ').Replace("`n",' '))
+              }
             }
           }
-          $out.Add('=== main.cjs markers ===')
-          foreach($p in @('11_방과후학교','12_차시일정','13_출석부','afterSchool','sessions','programSessions')){
-            $matches=[regex]::Matches($m,[regex]::Escape($p))
-            $out.Add("PATTERN [$p] COUNT=$($matches.Count)")
-            $take=[Math]::Min($matches.Count,6)
-            for($i=0;$i -lt $take;$i++){
-              $idx=$matches[$i].Index
-              $start=[Math]::Max(0,$idx-700)
-              $len=[Math]::Min(1800,$m.Length-$start)
-              $out.Add($m.Substring($start,$len).Replace("`r",' ').Replace("`n",' '))
-            }
-          }
-          $out | Set-Content inspect-08230-afterschool.txt -Encoding utf8
+          AddSnips 'GYOMUON' $g @('readonlyCache?.programs','readonlyCache.programs','connectedPrograms','programWithOverride','isCourseMaster','after-course','after-master','after-session','actualDate','actualClassDate','실제수업일','예정일','운영일자','groupedAfterSchoolCourses','todayProgramCollections')
+          AddSnips 'MAIN' $m @("matrices['11_방과후학교']","matrices['12_차시일정']","matrices['13_출석부']",'data.programs','programs=','isCourseMaster','after-course','after-master','after-session','실제수업일','예정일','운영일자','차시번호','강좌ID')
+          $out | Set-Content inspect-08230-afterschool-parser.txt -Encoding utf8
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git pull --rebase origin main
-          git add inspect-08230-afterschool.txt
-          git commit -m 'Inspect v0.82.30 afterschool session logic'
+          git add inspect-08230-afterschool-parser.txt
+          git commit -m 'Inspect v0.82.30 afterschool parser mapping'
           git push origin HEAD:main
