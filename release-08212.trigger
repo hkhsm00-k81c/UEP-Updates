@@ -38,3 +38,4 @@ Release: v0.82.29 fix combined individual and student dashboard remaining simple
 Release: v0.82.30 final admissions graph 53→53A→53B→54 and 56→53B/54/57; use new U001-U068 order and university+campus joins
 Inspect: v0.82.30 afterschool monthly session cards and dashboard today-program filtering
 Inspect 2: v0.82.30 exact 11/12/13 parser-to-readonlyCache mapping for future sessions
+Inspect 3: v0.82.30 locate all 12_차시일정 read-path source code before v0.82.31 patch
