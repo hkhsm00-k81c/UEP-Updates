@@ -1,4 +1,4 @@
-name: Build and Release UEP 0.82.26 Weighted Grade Average
+name: Build and Release UEP 0.82.27 Curriculum Credit Weight
 'on':
   push:
     branches: [main]
@@ -18,38 +18,40 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference='Stop'
-          node --check scripts/patch-uep-08226-weighted-grade-average.js
+          node --check scripts/patch-uep-08227-curriculum-credit-weight.js
           New-Item -ItemType Directory -Force source,app | Out-Null
-          gh release download v0.82.25 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          gh release download v0.82.26 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
           Expand-Archive source/UEP-update.zip app -Force
-          node scripts/patch-uep-08226-weighted-grade-average.js app
+          node scripts/patch-uep-08227-curriculum-credit-weight.js app
           node --check app/resources/app/gyomuon.js
           node --check app/resources/app/electron/main.cjs
           $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
-          foreach($x in @('const APP_VERSION = "0.82.26";','UEP_08225_ADMISSION_CALCULATION_CARDS','UEP_08226_WEIGHTED_GRADE_AVERAGE','UEP_08226_RELEASE_NOTES',"const CURRENT='0.82.26';",'row.level*row.credit','item.result?.grade)*creditOf')){if(-not $g.Contains($x)){throw "missing renderer marker: $x"}}
+          $m=Get-Content app/resources/app/electron/main.cjs -Raw -Encoding UTF8
+          foreach($x in @('const APP_VERSION = "0.82.27";','UEP_08226_WEIGHTED_GRADE_AVERAGE','UEP_08227_CURRICULUM_CREDIT_WEIGHT','UEP_08227_RELEASE_NOTES',"const CURRENT='0.82.27';","data.curriculumDb=uep08210MatrixObjects(matrices['18_학교교육과정DB'])",'return null;')){if(-not $g.Contains($x)){throw "missing renderer marker: $x"}}
+          if(-not $m.Contains("'18_학교교육과정DB'!A1:N1000")){throw 'missing curriculum sheet range'}
           foreach($x in @('__UEP_08217_LOGIN_WATCHDOG__','setInterval(sync,2500)')){if($g.Contains($x)){throw "forbidden regression marker: $x"}}
           Remove-Item UEP-update.zip,sha256.txt -Force -ErrorAction SilentlyContinue
           Compress-Archive -Path app\* -DestinationPath UEP-update.zip -CompressionLevel Optimal
           $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower();"$sha  UEP-update.zip"|Set-Content sha256.txt -Encoding ascii
           $notes=@'
-          UEP v0.82.26
-          - UEP 기본 5등급 평균을 이수학점 가중평균으로 변경
-          - 실제 9등급 평균도 이수학점 가중평균으로 변경
-          - 실제 9등급의 과목별 등급 판정은 기존 석차/수강자수 누적비율 방식 유지
-          - 대학별 내신 환산은 기본 평균과 분리하여 57_내신산정DB 공식 산식 사용
-          - 기존 입시/상담/학생발굴/내신보호 연결 유지
+          UEP v0.82.27
+          - 5등급/실제9등급 가중치를 18_학교교육과정DB 이수단위와 직접 연결
+          - 학생 실제 이수 과목은 50_내신DB 기준, 이수단위만 교육과정DB 사용
+          - 한문/정보, 음악/미술 교차학기 편성은 실제 성적 과목명 기준 매칭
+          - 이수단위 미매칭 시 임의 1단위 fallback 제거
+          - 신승민(1414) 검증 기준 5등급 가중평균 30/26 = 1.15
           '@
-          gh release create v0.82.26 UEP-update.zip sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.26' --notes $notes --target $env:GITHUB_SHA
+          gh release create v0.82.27 UEP-update.zip sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.27' --notes $notes --target $env:GITHUB_SHA
           $policy=Get-Content uep-policy.json -Raw|ConvertFrom-Json
-          $policy.latestVersion='0.82.26'
-          $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.26/UEP-update.zip'
+          $policy.latestVersion='0.82.27'
+          $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.27/UEP-update.zip'
           $policy.sha256=$sha
-          $policy.message='UEP 0.82.26 · 기본 내신 5등급/실제9등급 이수학점 가중평균 적용'
+          $policy.message='UEP 0.82.27 · 교육과정DB 이수단위 기반 5등급/실제9등급 가중평균'
           $policy|ConvertTo-Json -Depth 10|Set-Content uep-policy.json -Encoding utf8
-          @("UEP 0.82.26 RELEASE SUCCESS","base=v0.82.25","grade-average=credit-weighted","avg5=sum(level*credit)/sum(credit)","actual9=sum(actual9*credit)/sum(credit)","university-conversion=separate-57-db","sha256=$sha","size=$((Get-Item UEP-update.zip).Length)","commit=$env:GITHUB_SHA")|Set-Content release-08212-status.txt
+          @("UEP 0.82.27 RELEASE SUCCESS","base=v0.82.26","weight-source=18_학교교육과정DB 이수단위","student-course-source=50_내신DB","cross-semester=subject-name-match","missing-credit=no-fallback","verification-1414=1.15","sha256=$sha","size=$((Get-Item UEP-update.zip).Length)","commit=$env:GITHUB_SHA")|Set-Content release-08212-status.txt
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git pull --rebase origin main
           git add uep-policy.json release-08212-status.txt
-          git commit -m 'Publish UEP 0.82.26 weighted grade averages'
+          git commit -m 'Publish UEP 0.82.27 curriculum credit weighting'
           git push origin HEAD:main
