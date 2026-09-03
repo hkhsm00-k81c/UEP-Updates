@@ -1,0 +1,37 @@
+name: Validate UEP 0.82.38 University Detail Root Cause Fix
+'on':
+  push:
+    branches: [main]
+    paths: [validate-08238.trigger]
+permissions:
+  contents: write
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - uses: actions/setup-node@v4
+        with: {node-version: '20'}
+      - shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check scripts/patch-uep-08238-university-region-helper.js
+          node --check scripts/test-uep-08238-university-detail-nav.js
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.82.37 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+          node scripts/patch-uep-08238-university-region-helper.js app
+          node --check app/resources/app/gyomuon.js
+          node scripts/test-uep-08238-university-detail-nav.js app
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          foreach($x in @('const APP_VERSION = "0.82.38";','function uep08223UniversityRegions(university){','function uep08223TodayNav(university){','UEP_08238_UNIVERSITY_REGION_HELPER',"$$('[data-dashboard-admission]').forEach")){if(-not $g.Contains($x)){throw "missing validated marker: $x"}}
+          if(($g | Select-String -Pattern 'UEP_08234_TODAY_UNIVERSITY_CLICK_HARD_FIX|UEP_08235_ADMISSION_TOP_BUTTONS_REPAIR').Matches.Count -gt 0){throw 'temporary DOM click patch leaked'}
+          @('UEP 0.82.38 VALIDATION SUCCESS','base=v0.82.37','root-cause=missing uep08223UniversityRegions','today-nav-live-shaped-test=PASS','native-router=preserved','no-release-made=true') | Set-Content validate-08238-status.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add validate-08238-status.txt
+          git commit -m 'Validate UEP 0.82.38 university detail root cause fix'
+          git push origin HEAD:main
