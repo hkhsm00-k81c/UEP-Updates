@@ -1,4 +1,4 @@
-name: Build and Release UEP 0.82.32 Track-first Admissions Understanding
+name: Build and Release UEP 0.82.33 Admissions UI Hotfix
 'on':
   push:
     branches: [main]
@@ -18,39 +18,36 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference='Stop'
-          node --check scripts/patch-uep-08232-admission-track-first-types.js
+          node --check scripts/patch-uep-08233-admissions-ui-hotfix.js
           New-Item -ItemType Directory -Force source,app | Out-Null
-          gh release download v0.82.31 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          gh release download v0.82.32 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
           Expand-Archive source/UEP-update.zip app -Force
-          node scripts/patch-uep-08232-admission-track-first-types.js app
+          node scripts/patch-uep-08233-admissions-ui-hotfix.js app
           node --check app/resources/app/gyomuon.js
           $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
-          $c=Get-Content app/resources/app/gyomuon.css -Raw -Encoding UTF8
-          foreach($x in @('const APP_VERSION = "0.82.32";',"const CURRENT='0.82.32';",'UEP_08232_ADMISSION_TRACK_FOCUS','대학 전형을 먼저 모으고, 공통 구조로 이해합니다.','class="admission-track-button"','53B 실제 대학전형 → 53A 공통 구조 → 53 전형 이해')){if(-not $g.Contains($x)){throw "missing admissions renderer marker: $x"}}
-          foreach($x in @('.admission-track-button','.admission-track-card-head','.uep-admission-track-focus')){if(-not $c.Contains($x)){throw "missing admissions css marker: $x"}}
-          if($g.Contains('const APP_VERSION = "0.82.31";')){throw 'old renderer version remains'}
+          foreach($x in @('const APP_VERSION = "0.82.33";',"const CURRENT='0.82.33';",'UEP_08233_ADMISSIONS_RUNTIME_OVERRIDE','window.uep08233OpenAdmissionTypes',"text.includes('오늘의 대학')",'admission-track-button')){if(-not $g.Contains($x)){throw "missing admissions hotfix marker: $x"}}
+          if($g.Contains('const APP_VERSION = "0.82.32";')){throw 'old renderer version remains'}
           Remove-Item UEP-update.zip,sha256.txt -Force -ErrorAction SilentlyContinue
           Compress-Archive -Path app\* -DestinationPath UEP-update.zip -CompressionLevel Optimal
           $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower();"$sha  UEP-update.zip"|Set-Content sha256.txt -Encoding ascii
           $notes=@'
-          UEP v0.82.32
-          - 전형 이해를 53B 실제 대학 전형을 먼저 모아 53A 공통 구조로 묶는 방식으로 재구성
-          - 기존 대학명 단독 버튼을 '대학명 · 실제 전형명' 표시로 변경
-          - 실제 전형별 선발구조와 수능최저 요약을 카드 안에서 바로 표시
-          - 전형 클릭 시 해당 대학 상세로 이동하고 선택 전형을 강조
-          - 기존 오늘의 대학 56→53B·54·57 연결과 0.82.31 방과후 예정차시 기능 유지
+          UEP v0.82.33
+          - 전형 이해 실행시점 렌더러를 마지막에 고정해 대학명 · 실제 전형명이 반드시 표시되도록 수정
+          - 53B 캐시 키 차이를 모두 흡수해 실제 대학 전형 목록을 안정적으로 표시
+          - 대시보드 오늘의 대학 카드 클릭 무반응 문제 복구
+          - 기존 0.82.31 방과후 예정차시 및 0.82.30 입시 DB 연결 유지
           '@
-          gh release create v0.82.32 UEP-update.zip sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.32' --notes $notes --target $env:GITHUB_SHA
+          gh release create v0.82.33 UEP-update.zip sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.33' --notes $notes --target $env:GITHUB_SHA
           $policy=Get-Content uep-policy.json -Raw|ConvertFrom-Json
-          $policy.latestVersion='0.82.32'
-          $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.32/UEP-update.zip'
+          $policy.latestVersion='0.82.33'
+          $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.33/UEP-update.zip'
           $policy.sha256=$sha
-          $policy.message='UEP 0.82.32 · 전형 이해를 실제 대학 전형 중심으로 재구성'
+          $policy.message='UEP 0.82.33 · 전형 이해 실제 전형명 표시·오늘의 대학 클릭 복구'
           $policy|ConvertTo-Json -Depth 10|Set-Content uep-policy.json -Encoding utf8
-          @("UEP 0.82.32 RELEASE SUCCESS","base=v0.82.31","admission-types=track-first","buttons=university-plus-track","source=53B-to-53A-to-53","university-detail-focus=enabled","sha256=$sha","size=$((Get-Item UEP-update.zip).Length)","commit=$env:GITHUB_SHA")|Set-Content release-08212-status.txt
+          @("UEP 0.82.33 RELEASE SUCCESS","base=v0.82.32","admission-types-runtime-override=enabled","buttons=university-plus-track","today-university-click=repaired","sha256=$sha","size=$((Get-Item UEP-update.zip).Length)","commit=$env:GITHUB_SHA")|Set-Content release-08212-status.txt
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git pull --rebase origin main
           git add uep-policy.json release-08212-status.txt
-          git commit -m 'Publish UEP 0.82.32 track-first admissions understanding'
+          git commit -m 'Publish UEP 0.82.33 admissions UI hotfix'
           git push origin HEAD:main
