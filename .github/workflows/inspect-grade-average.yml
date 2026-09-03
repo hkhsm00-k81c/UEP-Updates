@@ -20,17 +20,16 @@ jobs:
           Expand-Archive source/UEP-update.zip app -Force
           $p='app/resources/app/gyomuon.js'
           $lines=Get-Content $p -Encoding UTF8
-          $terms=@('5등급 평균','9등급 평균','평균등급','avgGrade','gradeAverage','weighted','weight','이수학점','이수단위','credit','grade5','grade9','avg5','avg9')
-          foreach($term in $terms){
-            Write-Host "===== TERM: $term ====="
-            Select-String -Path $p -Pattern $term -SimpleMatch -Encoding UTF8 -Context 15,25 | Select-Object -First 80 | ForEach-Object {
-              Write-Host ("LINE {0}: {1}" -f $_.LineNumber,$_.Line)
-              foreach($c in $_.Context.PreContext){Write-Host ('  PRE: '+$c)}
-              foreach($c in $_.Context.PostContext){Write-Host (' POST: '+$c)}
-            }
+          $start=(Select-String -Path $p -Pattern 'function admissionBase' -SimpleMatch -Encoding UTF8 | Select-Object -First 1).LineNumber
+          if(-not $start){ throw 'function admissionBase not found' }
+          $next=(Select-String -Path $p -Pattern '^function ' -Encoding UTF8 | Where-Object {$_.LineNumber -gt $start} | Select-Object -First 1).LineNumber
+          if(-not $next){$next=[Math]::Min($lines.Count,$start+250)}
+          Write-Host ("===== admissionBase lines {0}-{1} =====" -f $start,($next-1))
+          for($i=$start;$i -lt $next;$i++){
+            Write-Host ("{0}: {1}" -f $i,$lines[$i-1])
           }
-          Write-Host '===== CALCULATION-LIKE LINES ====='
-          Select-String -Path $p -Pattern 'reduce\(|Math\.round|toFixed|\/.*length|학점|단위|평균' -Encoding UTF8 -Context 6,10 | Select-Object -First 160 | ForEach-Object {
+          Write-Host '===== DIRECT avg5 / actual9 references ====='
+          Select-String -Path $p -Pattern 'avg5|actual9|actualDetails|rankTo|percentile|enrollment' -Encoding UTF8 -Context 8,12 | Select-Object -First 120 | ForEach-Object {
             Write-Host ("LINE {0}: {1}" -f $_.LineNumber,$_.Line)
             foreach($c in $_.Context.PreContext){Write-Host ('  PRE: '+$c)}
             foreach($c in $_.Context.PostContext){Write-Host (' POST: '+$c)}
