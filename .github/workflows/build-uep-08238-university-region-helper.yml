@@ -1,0 +1,55 @@
+name: Build and Release UEP 0.82.38 University Region Helper
+'on':
+  push:
+    branches: [main]
+    paths: [release-08238.trigger]
+permissions:
+  contents: write
+jobs:
+  build-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - uses: actions/setup-node@v4
+        with: {node-version: '20'}
+      - shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check scripts/patch-uep-08238-university-region-helper.js
+          node --check scripts/test-uep-08238-university-detail-nav.js
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.82.37 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+          node scripts/patch-uep-08238-university-region-helper.js app
+          node --check app/resources/app/gyomuon.js
+          node scripts/test-uep-08238-university-detail-nav.js app
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          foreach($x in @('const APP_VERSION = "0.82.38";','function uep08223UniversityRegions(university){','UEP_08238_UNIVERSITY_REGION_HELPER',"$$('[data-dashboard-admission]').forEach",'UEP_08233_ADMISSIONS_RUNTIME_OVERRIDE')){if(-not $g.Contains($x)){throw "missing release marker: $x"}}
+          if($g.Contains('UEP_08234_TODAY_UNIVERSITY_CLICK_HARD_FIX') -or $g.Contains('UEP_08235_ADMISSION_TOP_BUTTONS_REPAIR')){throw 'temporary DOM click patch leaked'}
+          Remove-Item UEP-update.zip,sha256.txt -Force -ErrorAction SilentlyContinue
+          Compress-Archive -Path app\* -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower();"$sha  UEP-update.zip"|Set-Content sha256.txt -Encoding ascii
+          $notes=@'
+          UEP v0.82.38
+          - 원인 확정: 오늘의 대학 상세의 지역 탐색 함수가 uep08223UniversityRegions를 호출하지만 실제 배포 코드에 함수 정의가 누락되어 있었습니다.
+          - 구글시트 미연결 시에는 대학 데이터가 없어 이 경로를 타지 않아 버튼이 열렸고, 연결 후 실제 대학행이 들어오면 ReferenceError로 상세 팝업이 중단됐습니다.
+          - 누락된 순수 지역 판별 함수를 복구했습니다. 대시보드 클릭 이벤트나 DOM 후처리는 건드리지 않았습니다.
+          - 0.82.37 기준 네이티브 data-dashboard-admission 라우터와 전형 이해 실제 전형 표시를 그대로 유지합니다.
+          - 단국대학교(죽전/천안) 형태의 실제 대학행으로 지역 탐색 실행 테스트를 통과한 뒤 배포했습니다.
+          '@
+          gh release create v0.82.38 UEP-update.zip sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.38' --notes $notes --target $env:GITHUB_SHA
+          $policy=Get-Content uep-policy.json -Raw|ConvertFrom-Json
+          $policy.latestVersion='0.82.38'
+          $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.38/UEP-update.zip'
+          $policy.sha256=$sha
+          $policy.message='UEP 0.82.38 · 오늘의 대학 실제 데이터 상세 연결 오류 원인 수정'
+          $policy|ConvertTo-Json -Depth 10|Set-Content uep-policy.json -Encoding utf8
+          @("UEP 0.82.38 RELEASE SUCCESS","base=v0.82.37","root-cause=missing uep08223UniversityRegions","live-shaped-today-nav-test=PASS","native-router=preserved","temporary-dom-click-patches=absent","sha256=$sha","size=$((Get-Item UEP-update.zip).Length)")|Set-Content release-08238-status.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add uep-policy.json release-08238-status.txt
+          git commit -m 'Publish UEP 0.82.38 university region helper fix'
+          git push origin HEAD:main
