@@ -1,1 +1,1 @@
-inspect 0.82.37 today detail 2026-09-03T21:40+09:00
+inspect 0.82.37 today detail/nav 2026-09-03T21:43+09:00
