@@ -34,3 +34,4 @@ Release: v0.82.26 UEP common 5-grade and actual-9 grade averages use course-cred
 Release: v0.82.27 use 18_학교교육과정DB 이수단위 as authoritative weights; 50_내신DB actual course records; cross-semester subjects match by course name
 Retry: v0.82.27 route release trigger to actual Build and Release workflow
 Retry 2: v0.82.27 move curriculum matrix handoff to electron main cache and use readonlyCache in renderer
+Release: v0.82.28 fix score recent-semester card and common score statistics/print averages to use curriculum-credit weighting
