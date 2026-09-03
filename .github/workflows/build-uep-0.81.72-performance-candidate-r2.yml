@@ -1,4 +1,4 @@
-name: Build and Release UEP 0.82.25 Admissions Calculation Cards
+name: Build and Release UEP 0.82.26 Weighted Grade Average
 'on':
   push:
     branches: [main]
@@ -18,43 +18,38 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference='Stop'
-          node --check scripts/patch-uep-08225-admissions-calculation-cards.js
+          node --check scripts/patch-uep-08226-weighted-grade-average.js
           New-Item -ItemType Directory -Force source,app | Out-Null
-          gh release download v0.82.24 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          gh release download v0.82.25 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
           Expand-Archive source/UEP-update.zip app -Force
-          node scripts/patch-uep-08225-admissions-calculation-cards.js app
+          node scripts/patch-uep-08226-weighted-grade-average.js app
           node --check app/resources/app/gyomuon.js
           node --check app/resources/app/electron/main.cjs
           $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
-          $c=Get-Content app/resources/app/gyomuon.css -Raw -Encoding UTF8
-          $m=Get-Content app/resources/app/electron/main.cjs -Raw -Encoding UTF8
-          foreach($x in @('const APP_VERSION = "0.82.25";','UEP_08220_ADMISSIONS_REAL_CONNECT','UEP_08224_ADMISSION_STATE_RESET','UEP_08225_ADMISSION_CALCULATION_CARDS','UEP_08225_RELEASE_NOTES',"const CURRENT='0.82.25';")){if(-not $g.Contains($x)){throw "missing renderer marker: $x"}}
-          foreach($x in @('57_내신산정DB','admissionGradeCalcs')){if(-not $m.Contains($x)){throw "missing main cache marker: $x"}}
-          foreach($x in @('.uep-uni-detail-line','.uep-uni-min-row','.uep-uni-detail-pending')){if(-not $c.Contains($x)){throw "missing css marker: $x"}}
+          foreach($x in @('const APP_VERSION = "0.82.26";','UEP_08225_ADMISSION_CALCULATION_CARDS','UEP_08226_WEIGHTED_GRADE_AVERAGE','UEP_08226_RELEASE_NOTES',"const CURRENT='0.82.26';",'row.level*row.credit','item.result?.grade)*creditOf')){if(-not $g.Contains($x)){throw "missing renderer marker: $x"}}
           foreach($x in @('__UEP_08217_LOGIN_WATCHDOG__','setInterval(sync,2500)')){if($g.Contains($x)){throw "forbidden regression marker: $x"}}
           Remove-Item UEP-update.zip,sha256.txt -Force -ErrorAction SilentlyContinue
           Compress-Archive -Path app\* -DestinationPath UEP-update.zip -CompressionLevel Optimal
           $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower();"$sha  UEP-update.zip"|Set-Content sha256.txt -Encoding ascii
           $notes=@'
-          UEP v0.82.25
-          - 대학 상세 하단 3카드를 내신성적 산출방법 / 모집단위별 수능최저 / 권장과목으로 교체
-          - 57_내신산정DB 실시간 연결 추가
-          - 등급점수·성취도점수·이수학점 가중·최종 산식을 숫자로 표시
-          - 공식 산식이 미확정인 대학은 추상 문구 대신 검증중으로 표시
-          - 54_수능최저DB의 모집단위별 실제 수능최저 원문 표시
-          - 기존 주요 전형, 대학 탐색, 운호고 입결, 로그인/School Read 연결 구조 유지
+          UEP v0.82.26
+          - UEP 기본 5등급 평균을 이수학점 가중평균으로 변경
+          - 실제 9등급 평균도 이수학점 가중평균으로 변경
+          - 실제 9등급의 과목별 등급 판정은 기존 석차/수강자수 누적비율 방식 유지
+          - 대학별 내신 환산은 기본 평균과 분리하여 57_내신산정DB 공식 산식 사용
+          - 기존 입시/상담/학생발굴/내신보호 연결 유지
           '@
-          gh release create v0.82.25 UEP-update.zip sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.25' --notes $notes --target $env:GITHUB_SHA
+          gh release create v0.82.26 UEP-update.zip sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.26' --notes $notes --target $env:GITHUB_SHA
           $policy=Get-Content uep-policy.json -Raw|ConvertFrom-Json
-          $policy.latestVersion='0.82.25'
-          $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.25/UEP-update.zip'
+          $policy.latestVersion='0.82.26'
+          $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.26/UEP-update.zip'
           $policy.sha256=$sha
-          $policy.message='UEP 0.82.25 · 대학별 내신산식/모집단위 수능최저/권장과목 3카드 개편'
+          $policy.message='UEP 0.82.26 · 기본 내신 5등급/실제9등급 이수학점 가중평균 적용'
           $policy|ConvertTo-Json -Depth 10|Set-Content uep-policy.json -Encoding utf8
-          @("UEP 0.82.25 RELEASE SUCCESS","base=v0.82.24","ui=grade-calculation,minimum-by-major,recommended-courses","data=57-grade-calculation-live,54-minimum-live","rule=unverified-calculation-shows-pending","release-ux=first-run-popup,current-to-latest-version-highlight","sha256=$sha","size=$((Get-Item UEP-update.zip).Length)","commit=$env:GITHUB_SHA")|Set-Content release-08212-status.txt
+          @("UEP 0.82.26 RELEASE SUCCESS","base=v0.82.25","grade-average=credit-weighted","avg5=sum(level*credit)/sum(credit)","actual9=sum(actual9*credit)/sum(credit)","university-conversion=separate-57-db","sha256=$sha","size=$((Get-Item UEP-update.zip).Length)","commit=$env:GITHUB_SHA")|Set-Content release-08212-status.txt
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git pull --rebase origin main
           git add uep-policy.json release-08212-status.txt
-          git commit -m 'Publish UEP 0.82.25 admissions calculation cards'
+          git commit -m 'Publish UEP 0.82.26 weighted grade averages'
           git push origin HEAD:main
