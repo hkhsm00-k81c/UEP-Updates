@@ -37,3 +37,4 @@ Release: v0.82.28 fix score recent-semester card and common score statistics/pri
 Release: v0.82.29 fix combined individual and student dashboard remaining simple-average paths; all common internal averages use curriculum-credit weighting
 Release: v0.82.30 final admissions graph 53→53A→53B→54 and 56→53B/54/57; use new U001-U068 order and university+campus joins
 Inspect: v0.82.30 afterschool monthly session cards and dashboard today-program filtering
+Inspect 2: v0.82.30 exact 11/12/13 parser-to-readonlyCache mapping for future sessions
