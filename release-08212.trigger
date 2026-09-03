@@ -29,3 +29,4 @@ Release: v0.82.22 types 3-column layout + unified university detail + route back
 Release: v0.82.23 wide admissions dialogs + region/prev-next university explorer + enriched admissions basics
 Release: v0.82.24 basics auto-grid + quick badges + three-level university navigation + admission source state reset
 Retry: v0.82.24 relax exact renderer validation anchor
+Release: v0.82.25 university detail 3 cards = exact grade calculation / minimum by major / recommended courses; connect 57_내신산정DB
