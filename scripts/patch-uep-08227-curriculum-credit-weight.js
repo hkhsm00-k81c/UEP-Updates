@@ -11,15 +11,16 @@ must(/const\s+APP_VERSION\s*=\s*["']0\.82\.26["'];/.test(g),'0.82.26 base not fo
 g=g.replace(/const\s+APP_VERSION\s*=\s*["']0\.82\.26["'];/,'const APP_VERSION = "0.82.27";').replace(/const CURRENT='0\.82\.26';/g,"const CURRENT='0.82.27';");
 if(fs.existsSync(pp)){const p=JSON.parse(fs.readFileSync(pp,'utf8'));p.version='0.82.27';fs.writeFileSync(pp,JSON.stringify(p,null,2)+'\n','utf8');}
 
-// Connect school curriculum DB so credit weights come from the authoritative curriculum table.
+// Connect school curriculum DB using the same [sheetName, A1-range] structure as admissions sheets.
 if(!m.includes("'18_학교교육과정DB'!A1:N1000")){
-  const anchor="'57_내신산정DB'!A1:T500";
-  must(m.includes(anchor),'main sheet range anchor not found');
-  m=m.replace(anchor,anchor+", \"'18_학교교육과정DB'!A1:N1000\"");
+  const re=/(\[\s*["']57_내신산정DB["']\s*,\s*["']'57_내신산정DB'!A1:[A-Z]+\d+["']\s*\])/;
+  const hit=m.match(re);
+  must(hit,'57_내신산정DB sheet/range pair not found');
+  m=m.replace(re,hit[1]+",\n    [\"18_학교교육과정DB\", \"'18_학교교육과정DB'!A1:N1000\"]");
 }
 
-// Renderer matrix mapping: keep this tolerant because existing releases use the shared matrix-object helper.
-if(!g.includes('curriculumDb')){
+// Renderer matrix mapping.
+if(!g.includes('data.curriculumDb=')){
   const mapAnchor="data.admissionGradeCalcs=uep08210MatrixObjects(matrices['57_내신산정DB']);";
   must(g.includes(mapAnchor),'renderer 57 mapping anchor not found');
   g=g.replace(mapAnchor,mapAnchor+"\n  data.curriculumDb=uep08210MatrixObjects(matrices['18_학교교육과정DB']);");
@@ -42,7 +43,6 @@ const newCredit=`const curriculumRows=Array.isArray(UEP_DATA?.curriculumDb)?UEP_
   };`;
 g=g.replace(oldCredit,newCredit);
 
-// Do not silently convert missing credit to 1. Exclude unresolved rows and surface diagnostics.
 g=g.replace("const weightedFive=gradeRows.map(row=>({level:Number(row.level),credit:creditOf(row)}));","const weightedFive=gradeRows.map(row=>({level:Number(row.level),credit:creditOf(row)})).filter(row=>Number.isFinite(row.credit)&&row.credit>0);");
 g=g.replace("const actualCredits=actualDetails.reduce((sum,item)=>sum+creditOf(item.row||{}),0);\n  const actual9=actualCredits?actualDetails.reduce((sum,item)=>sum+(Number(item.result?.grade)*creditOf(item.row||{})),0)/actualCredits:null;","const weightedActual=actualDetails.map(item=>({item,credit:creditOf(item.row||{})})).filter(x=>Number.isFinite(x.credit)&&x.credit>0&&Number.isFinite(Number(x.item.result?.grade)));\n  const actualCredits=weightedActual.reduce((sum,x)=>sum+x.credit,0);\n  const actual9=actualCredits?weightedActual.reduce((sum,x)=>sum+(Number(x.item.result.grade)*x.credit),0)/actualCredits:null;");
 
