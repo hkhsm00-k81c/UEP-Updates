@@ -30,3 +30,4 @@ Release: v0.82.23 wide admissions dialogs + region/prev-next university explorer
 Release: v0.82.24 basics auto-grid + quick badges + three-level university navigation + admission source state reset
 Retry: v0.82.24 relax exact renderer validation anchor
 Release: v0.82.25 university detail 3 cards = exact grade calculation / minimum by major / recommended courses; connect 57_내신산정DB
+Release: v0.82.26 UEP common 5-grade and actual-9 grade averages use course-credit weighted mean; university conversion remains separate
