@@ -1,4 +1,4 @@
-name: Build and Release UEP 0.82.30 Admissions Final Link
+name: Inspect UEP 0.82.30 Afterschool Session Logic
 'on':
   push:
     branches: [main]
@@ -6,52 +6,54 @@ name: Build and Release UEP 0.82.30 Admissions Final Link
 permissions:
   contents: write
 jobs:
-  build-release:
+  inspect-afterschool:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
         with: {fetch-depth: 0}
-      - uses: actions/setup-node@v4
-        with: {node-version: '20'}
       - shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference='Stop'
-          node --check scripts/patch-uep-08230-admissions-final-link.js
           New-Item -ItemType Directory -Force source,app | Out-Null
-          gh release download v0.82.29 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          gh release download v0.82.30 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
           Expand-Archive source/UEP-update.zip app -Force
-          node scripts/patch-uep-08230-admissions-final-link.js app
-          node --check app/resources/app/gyomuon.js
-          node --check app/resources/app/electron/main.cjs
           $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
           $m=Get-Content app/resources/app/electron/main.cjs -Raw -Encoding UTF8
-          foreach($x in @('const APP_VERSION = "0.82.30";','UEP_08225_ADMISSION_CALCULATION_CARDS','UEP_08230_ADMISSIONS_FINAL_LINK','UEP_08230_RELEASE_NOTES',"const CURRENT='0.82.30';",'uepAdmissionsGraph','admissionTypeUniversities','대학명+캠퍼스')){if(-not $g.Contains($x)){throw "missing renderer marker: $x"}}
-          foreach($x in @('53_전형이해','53A_전형세부유형DB','53B_전형유형별대학DB','54_수능최저DB','56_대학입시마스터','57_내신산정DB','data.admissionTypes','data.admissionSubtypes','data.admissionTypeUniversities','data.admissionMinimums','data.universityAdmissions','data.admissionGradeCalcs')){if(-not $m.Contains($x)){throw "missing admissions graph marker: $x"}}
-          foreach($x in @('__UEP_08217_LOGIN_WATCHDOG__','setInterval(sync,2500)')){if($g.Contains($x)){throw "forbidden regression marker: $x"}}
-          Remove-Item UEP-update.zip,sha256.txt -Force -ErrorAction SilentlyContinue
-          Compress-Archive -Path app\* -DestinationPath UEP-update.zip -CompressionLevel Optimal
-          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower();"$sha  UEP-update.zip"|Set-Content sha256.txt -Encoding ascii
-          $notes=@'
-          UEP v0.82.30
-          - 전형 이해: 53_전형이해 → 53A_전형세부유형DB → 53B_전형유형별대학DB → 54_수능최저DB 연결 재확인
-          - 오늘의 대학: 56_대학입시마스터 → 53B 주요전형 / 54 수능최저 / 57 내신산정 연결 강화
-          - 새 U001~U068 대학번호 및 56 노출순서를 오늘의 대학 순환 기준으로 사용
-          - 대학 상세에 주요 전형·선발방식을 직접 표시
-          - 옛 U번호 하드코딩 대신 대학명+캠퍼스 기반으로 연결해 재번호 후 단절 방지
-          '@
-          gh release create v0.82.30 UEP-update.zip sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.30' --notes $notes --target $env:GITHUB_SHA
-          $policy=Get-Content uep-policy.json -Raw|ConvertFrom-Json
-          $policy.latestVersion='0.82.30'
-          $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.30/UEP-update.zip'
-          $policy.sha256=$sha
-          $policy.message='UEP 0.82.30 · 전형 이해와 오늘의 대학 입시DB 최종 연결'
-          $policy|ConvertTo-Json -Depth 10|Set-Content uep-policy.json -Encoding utf8
-          @("UEP 0.82.30 RELEASE SUCCESS","base=v0.82.29","admissions-graph=53-53A-53B-54-56-57","today-university-order=U001-U068","link-key=university+campus","sha256=$sha","size=$((Get-Item UEP-update.zip).Length)","commit=$env:GITHUB_SHA")|Set-Content release-08212-status.txt
+          $out=New-Object System.Collections.Generic.List[string]
+          $out.Add('UEP 0.82.30 AFTERSCHOOL INSPECTION')
+          $out.Add('=== gyomuon.js markers ===')
+          $patterns=@('차시별 일정','해당 월','오늘의 프로그램','방과후학교','차시일정','운영일자','운영상태','출석확정','수업완료','예정')
+          foreach($p in $patterns){
+            $matches=[regex]::Matches($g,[regex]::Escape($p))
+            $out.Add("PATTERN [$p] COUNT=$($matches.Count)")
+            $take=[Math]::Min($matches.Count,8)
+            for($i=0;$i -lt $take;$i++){
+              $idx=$matches[$i].Index
+              $start=[Math]::Max(0,$idx-900)
+              $len=[Math]::Min(2200,$g.Length-$start)
+              $snippet=$g.Substring($start,$len).Replace("`r",' ').Replace("`n",' ')
+              $out.Add("--- $p #$($i+1) @ $idx ---")
+              $out.Add($snippet)
+            }
+          }
+          $out.Add('=== main.cjs markers ===')
+          foreach($p in @('11_방과후학교','12_차시일정','13_출석부','afterSchool','sessions','programSessions')){
+            $matches=[regex]::Matches($m,[regex]::Escape($p))
+            $out.Add("PATTERN [$p] COUNT=$($matches.Count)")
+            $take=[Math]::Min($matches.Count,6)
+            for($i=0;$i -lt $take;$i++){
+              $idx=$matches[$i].Index
+              $start=[Math]::Max(0,$idx-700)
+              $len=[Math]::Min(1800,$m.Length-$start)
+              $out.Add($m.Substring($start,$len).Replace("`r",' ').Replace("`n",' '))
+            }
+          }
+          $out | Set-Content inspect-08230-afterschool.txt -Encoding utf8
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git pull --rebase origin main
-          git add uep-policy.json release-08212-status.txt
-          git commit -m 'Publish UEP 0.82.30 admissions final link'
+          git add inspect-08230-afterschool.txt
+          git commit -m 'Inspect v0.82.30 afterschool session logic'
           git push origin HEAD:main
