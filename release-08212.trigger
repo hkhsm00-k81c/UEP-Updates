@@ -31,3 +31,4 @@ Release: v0.82.24 basics auto-grid + quick badges + three-level university navig
 Retry: v0.82.24 relax exact renderer validation anchor
 Release: v0.82.25 university detail 3 cards = exact grade calculation / minimum by major / recommended courses; connect 57_내신산정DB
 Release: v0.82.26 UEP common 5-grade and actual-9 grade averages use course-credit weighted mean; university conversion remains separate
+Release: v0.82.27 use 18_학교교육과정DB 이수단위 as authoritative weights; 50_내신DB actual course records; cross-semester subjects match by course name
