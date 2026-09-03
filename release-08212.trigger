@@ -24,7 +24,7 @@ Inspect: exact parser-to-readonlyCache admissions handoff
 Inspect retry: literal Contains matching
 Release: v0.82.20 real admissions cache handoff and sheet-driven renderer
 Release: v0.82.21 admissions UI readability + back navigation + version badge + automatic changelog popup
-Release: v0.82.22 types 3-column layout + unified university detail + route back + reliable changelog popup
+Release: v0.82.22 types 3-column layout + unified university detail + route back + updater version arrow + reliable changelog popup
 Release: v0.82.23 wide admissions dialogs + region/prev-next university explorer + enriched admissions basics
 Release: v0.82.24 basics auto-grid + quick badges + three-level university navigation + admission source state reset
 Retry: v0.82.24 relax exact renderer validation anchor
@@ -40,3 +40,4 @@ Inspect: v0.82.30 afterschool monthly session cards and dashboard today-program 
 Inspect 2: v0.82.30 exact 11/12/13 parser-to-readonlyCache mapping for future sessions
 Inspect 3: v0.82.30 locate all 12_차시일정 read-path source code before v0.82.31 patch
 Release: v0.82.31 show planned afterschool sessions before class date and expose today's scheduled afterschool sessions on dashboard
+Retry: v0.82.31 whitespace-tolerant actual/planned session parser anchors
