@@ -1,0 +1,57 @@
+name: Build and Release UEP 0.82.40 Native University Navigation
+'on':
+  push:
+    branches: [main]
+    paths: [release-08240.trigger]
+permissions:
+  contents: write
+jobs:
+  build-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - uses: actions/setup-node@v4
+        with: {node-version: '20'}
+      - shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check scripts/patch-uep-08240-native-university-nav.js
+          node --check scripts/test-uep-08240-native-university-nav.js
+          npm install --no-save jsdom@24
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.82.39 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+          node scripts/patch-uep-08240-native-university-nav.js app
+          node --check app/resources/app/gyomuon.js
+          node scripts/test-uep-08240-native-university-nav.js app
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          foreach($x in @('const APP_VERSION = "0.82.40";','function uep08223UniversityRegions(university){','function uep08223TodayNav(university){',"layer.querySelectorAll('[data-uep-region]')", "layer.querySelectorAll('[data-uep-university]')", "layer.querySelectorAll('[data-uep-prev]')", "layer.querySelectorAll('[data-uep-next]')")){if(-not $g.Contains($x)){throw "missing native release marker: $x"}}
+          if($g.Contains('setTimeout(uep08223BindUniversityNavigation,0);')){throw 'broken binder call leaked'}
+          if($g.Contains('UEP_08239_UNIVERSITY_NAV_BINDINGS')){throw '0.82.39 post-render wrapper leaked'}
+          if($g.Contains('UEP_08234_TODAY_UNIVERSITY_CLICK_HARD_FIX') -or $g.Contains('UEP_08235_ADMISSION_TOP_BUTTONS_REPAIR')){throw 'old temporary DOM click patch leaked'}
+          Remove-Item UEP-update.zip,sha256.txt -Force -ErrorAction SilentlyContinue
+          Compress-Archive -Path app\* -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower();"$sha  UEP-update.zip"|Set-Content sha256.txt -Encoding ascii
+          $notes=@'
+          UEP v0.82.40
+          - 대학 상세가 렌더된 뒤 존재하지 않는 uep08223BindUniversityNavigation을 호출해 예외가 발생하던 실제 원인을 제거했습니다.
+          - 0.82.39의 post-render wrapper를 제거하고 지역·대학·이전·다음 이벤트를 openDashboardUniversityDetail 네이티브 렌더러에 직접 연결했습니다.
+          - MutationObserver, 전역 클릭 캡처, DOM 텍스트 탐색 후처리를 사용하지 않습니다.
+          - 실제 DOM을 생성해 지역 → 대학 → 이전 → 다음 네 종류 버튼을 클릭하는 자동 검증을 통과한 빌드만 배포합니다.
+          '@
+          gh release create v0.82.40 UEP-update.zip sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.40' --notes $notes --target $env:GITHUB_SHA
+          $policy=Get-Content uep-policy.json -Raw|ConvertFrom-Json
+          $policy.latestVersion='0.82.40'
+          $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.40/UEP-update.zip'
+          $policy.sha256=$sha
+          $policy.message='UEP 0.82.40 · 오늘의 대학 상세 네이티브 탐색 복구'
+          $policy|ConvertTo-Json -Depth 10|Set-Content uep-policy.json -Encoding utf8
+          @("UEP 0.82.40 RELEASE SUCCESS","base=v0.82.39","root-cause=undefined native binder aborting detail return before 0.82.39 wrapper","native-detail-bindings=region/university/prev/next PASS","actual-dom-click-test=PASS","0.82.39-post-render-wrapper=removed","temporary-dom-click-patches=absent","sha256=$sha","size=$((Get-Item UEP-update.zip).Length)")|Set-Content release-08240-status.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add uep-policy.json release-08240-status.txt
+          git commit -m 'Publish UEP 0.82.40 validated native university navigation'
+          git push origin HEAD:main
