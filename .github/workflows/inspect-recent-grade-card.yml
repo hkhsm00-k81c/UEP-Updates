@@ -1,0 +1,42 @@
+name: Inspect recent grade average card
+'on':
+  push:
+    branches: [main]
+    paths: [inspect-recent-grade.trigger]
+permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.82.27 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+          $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
+          $patterns=@('최근 학기 평균','최근학기','학기 평균','성적행','gradeRows','avg5','reduce\(\(sum','내신 과목별 등급')
+          $out=@()
+          $out += '=== UEP v0.82.27 recent grade card inspection ==='
+          foreach($p in $patterns){
+            $out += "`n### PATTERN: $p"
+            $matches=[regex]::Matches($g,$p,[System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+            $out += "count=$($matches.Count)"
+            foreach($m in ($matches | Select-Object -First 20)){
+              $s=[Math]::Max(0,$m.Index-700);$l=[Math]::Min(1800,$g.Length-$s)
+              $out += $g.Substring($s,$l)
+              $out += '---'
+            }
+          }
+          $out | Set-Content inspect-recent-grade-report.txt -Encoding utf8
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git pull --rebase origin main
+          git add inspect-recent-grade-report.txt
+          git commit -m 'Inspect v0.82.27 recent grade average card'
+          git push origin HEAD:main
