@@ -35,3 +35,4 @@ Retry: v0.82.27 route release trigger to actual Build and Release workflow
 Retry 2: v0.82.27 move curriculum matrix handoff to electron main cache and use readonlyCache in renderer
 Release: v0.82.28 fix score recent-semester card and common score statistics/print averages to use curriculum-credit weighting
 Release: v0.82.29 fix combined individual and student dashboard remaining simple-average paths; all common internal averages use curriculum-credit weighting
+Release: v0.82.30 final admissions graph 53→53A→53B→54 and 56→53B/54/57; use new U001-U068 order and university+campus joins
