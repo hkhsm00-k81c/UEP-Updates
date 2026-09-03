@@ -41,3 +41,4 @@ Inspect 2: v0.82.30 exact 11/12/13 parser-to-readonlyCache mapping for future se
 Inspect 3: v0.82.30 locate all 12_차시일정 read-path source code before v0.82.31 patch
 Release: v0.82.31 show planned afterschool sessions before class date and expose today's scheduled afterschool sessions on dashboard
 Retry: v0.82.31 whitespace-tolerant actual/planned session parser anchors
+Release: v0.82.32 rebuild admission understanding from actual 53B university tracks; show university + real track name and link back to university detail
