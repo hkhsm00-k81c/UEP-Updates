@@ -45,3 +45,4 @@ Release: v0.82.32 rebuild admission understanding from actual 53B university tra
 Hotfix: v0.82.33 force track-first renderer at runtime and repair dashboard today-university click
 Hardfix: v0.82.34 detect today-university card regardless of div/span/button DOM and rebind after rerender
 Repair: v0.82.35 neutralize broad today-university capture matcher; restore basics/types clicks and direct-bind today university only
+Inspect: native admissions top-card markup and click bindings from v0.82.33 before clean rebuild
