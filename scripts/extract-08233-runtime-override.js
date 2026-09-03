@@ -1,0 +1,1 @@
+const fs=require('fs'),path=require('path');const g=fs.readFileSync(path.join(process.argv[2]||'app','resources','app','gyomuon.js'),'utf8');const a=g.indexOf('/* UEP_08233_ADMISSIONS_RUNTIME_OVERRIDE */');const b=g.indexOf('/* UEP_08233_RELEASE_NOTES */',a);fs.writeFileSync('runtime-08233.txt',a>=0?g.slice(a,b>0?b:a+20000):'NOT FOUND','utf8');
