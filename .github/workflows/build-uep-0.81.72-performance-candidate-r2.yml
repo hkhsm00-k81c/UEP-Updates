@@ -1,4 +1,4 @@
-name: Build and Release UEP 0.82.36 Native Admissions Router
+name: Build and Release UEP 0.82.37 Clean Native Admissions Router
 'on':
   push:
     branches: [main]
@@ -18,14 +18,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference='Stop'
-          node --check scripts/patch-uep-08236-admissions-native-router.js
+          node --check scripts/patch-uep-08237-admissions-native-router-clean.js
           New-Item -ItemType Directory -Force source,app | Out-Null
           gh release download v0.82.33 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
           Expand-Archive source/UEP-update.zip app -Force
-          node scripts/patch-uep-08236-admissions-native-router.js app
+          node scripts/patch-uep-08237-admissions-native-router-clean.js app
           node --check app/resources/app/gyomuon.js
           $g=Get-Content app/resources/app/gyomuon.js -Raw -Encoding UTF8
-          foreach($x in @('const APP_VERSION = "0.82.36";',"const CURRENT='0.82.36';",'UEP_08236_NATIVE_ADMISSIONS_ROUTER',"if(key==='university'){window.__uepAdmissionReturn='today'",'UEP_08233_ADMISSIONS_RUNTIME_OVERRIDE','admission-track-button')){if(-not $g.Contains($x)){throw "missing native admissions marker: $x"}}
+          foreach($x in @('const APP_VERSION = "0.82.37";',"const CURRENT='0.82.37';",'UEP_08237_NATIVE_ADMISSIONS_ROUTER_CLEAN',"$$('[data-dashboard-admission]').forEach", "if(key==='university'){window.__uepAdmissionReturn='today'",'UEP_08233_ADMISSIONS_RUNTIME_OVERRIDE','admission-track-button')){if(-not $g.Contains($x)){throw "missing native admissions marker: $x"}}
+          if($g.Contains("$('[data-dashboard-admission]').forEach")){throw 'single-dollar selector regression found'}
           if($g.Contains("Repair the dashboard '오늘의 대학' card even if its old inline binding was lost.")){throw '0.82.33 global today click capture still remains'}
           if($g.Contains('UEP_08234_TODAY_UNIVERSITY_CLICK_HARD_FIX')){throw '0.82.34 hardfix leaked into clean build'}
           if($g.Contains('UEP_08235_ADMISSION_TOP_BUTTONS_REPAIR')){throw '0.82.35 repair leaked into clean build'}
@@ -33,24 +34,24 @@ jobs:
           Compress-Archive -Path app\* -DestinationPath UEP-update.zip -CompressionLevel Optimal
           $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower();"$sha  UEP-update.zip"|Set-Content sha256.txt -Encoding ascii
           $notes=@'
-          UEP v0.82.36
-          - v0.82.33을 깨끗한 기준판으로 다시 사용
-          - 대입기초·전형이해·오늘의 대학을 기존 data-dashboard-admission 네이티브 라우터 하나로 통합
-          - 오늘의 대학은 56_대학입시마스터의 오늘 대학 행을 직접 openDashboardUniversityDetail에 전달
-          - 0.82.34/0.82.35 전역 클릭 감지·MutationObserver·텍스트 변형 패치는 포함하지 않음
-          - 전형 이해 대학명 · 실제 전형명 표시 유지
+          UEP v0.82.37
+          - v0.82.36 대시보드 로딩 오류 수정: JS String.replace의 $$ 치환으로 selector가 $로 축약된 문제 제거
+          - v0.82.33 clean 기준으로 재빌드
+          - 대입기초·전형이해·오늘의 대학 3카드를 기존 data-dashboard-admission 네이티브 라우터 하나로 처리
+          - 오늘의 대학은 56_대학입시마스터 오늘 대학 행을 직접 상세화면에 전달
+          - 0.82.34/0.82.35 전역 클릭 감지·MutationObserver·텍스트 변형 패치 미포함
           '@
-          gh release create v0.82.36 UEP-update.zip sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.36' --notes $notes --target $env:GITHUB_SHA
+          gh release create v0.82.37 UEP-update.zip sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.37' --notes $notes --target $env:GITHUB_SHA
           $policy=Get-Content uep-policy.json -Raw|ConvertFrom-Json
-          $policy.latestVersion='0.82.36'
-          $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.36/UEP-update.zip'
+          $policy.latestVersion='0.82.37'
+          $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.37/UEP-update.zip'
           $policy.sha256=$sha
-          $policy.message='UEP 0.82.36 · 입시 상단 3카드 네이티브 라우터 복구'
+          $policy.message='UEP 0.82.37 · 대시보드 로딩 복구 및 입시 3카드 네이티브 라우터'
           $policy|ConvertTo-Json -Depth 10|Set-Content uep-policy.json -Encoding utf8
-          @("UEP 0.82.36 RELEASE SUCCESS","base=v0.82.33-clean","admissions-top-router=native","temporary-dom-click-patches=removed","track-first=preserved","sha256=$sha","size=$((Get-Item UEP-update.zip).Length)","commit=$env:GITHUB_SHA")|Set-Content release-08212-status.txt
+          @("UEP 0.82.37 RELEASE SUCCESS","base=v0.82.33-clean","dashboard-load=restored","admissions-top-router=native","double-dollar-selector=verified","temporary-dom-click-patches=removed","sha256=$sha","size=$((Get-Item UEP-update.zip).Length)","commit=$env:GITHUB_SHA")|Set-Content release-08212-status.txt
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git pull --rebase origin main
           git add uep-policy.json release-08212-status.txt
-          git commit -m 'Publish UEP 0.82.36 native admissions router'
+          git commit -m 'Publish UEP 0.82.37 clean native admissions router'
           git push origin HEAD:main
