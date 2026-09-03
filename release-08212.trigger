@@ -43,3 +43,4 @@ Release: v0.82.31 show planned afterschool sessions before class date and expose
 Retry: v0.82.31 whitespace-tolerant actual/planned session parser anchors
 Release: v0.82.32 rebuild admission understanding from actual 53B university tracks; show university + real track name and link back to university detail
 Hotfix: v0.82.33 force track-first renderer at runtime and repair dashboard today-university click
+Hardfix: v0.82.34 detect today-university card regardless of div/span/button DOM and rebind after rerender
