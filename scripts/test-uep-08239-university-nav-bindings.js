@@ -1,0 +1,12 @@
+const fs=require('fs'),path=require('path');
+const g=fs.readFileSync(path.join(process.argv[2]||'app','resources','app','gyomuon.js'),'utf8');
+const must=(ok,msg)=>{if(!ok)throw new Error(msg)};
+must(g.includes('const APP_VERSION = "0.82.39";'),'version mismatch');
+must(g.includes('function uep08239BindUniversityNavigation(){'),'binder missing');
+for(const s of ["[data-uep-region]","[data-uep-university]","[data-uep-prev]","[data-uep-next]"])must(g.includes(s),'missing selector '+s);
+must(/openDashboardUniversityDetail=function\(university=dashboardAdmissionTodayUniversity\(\)\)\{[\s\S]{0,500}uep08239BindUniversityNavigation\(\)/.test(g),'detail render does not bind navigation');
+must(/window\.__uepAdmissionRegion=region/.test(g),'region state update missing');
+must(/uep08223UniversityRegions\(r\)\.includes\(region\)/.test(g),'region-to-university resolution missing');
+must(!g.includes('UEP_08234_TODAY_UNIVERSITY_CLICK_HARD_FIX'),'old hard click patch leaked');
+must(!g.includes('UEP_08235_ADMISSION_TOP_BUTTONS_REPAIR'),'old top buttons repair leaked');
+console.log('UEP 0.82.39 university navigation binding validation PASS');
