@@ -1,1 +1,1 @@
-inspect 2026-09-03
+inspect refined 2026-09-03 2
