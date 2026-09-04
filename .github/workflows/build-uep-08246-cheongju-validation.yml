@@ -1,0 +1,43 @@
+name: Build and Release UEP 0.82.46 Cheongju Validation
+on:
+  push:
+    paths:
+      - 'release-08246.trigger'
+permissions:
+  contents: write
+jobs:
+  build-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          function Run-Native([scriptblock]$cmd,[string]$label){ & $cmd; if($LASTEXITCODE -ne 0){ throw "$label failed with exit code $LASTEXITCODE" } }
+          Invoke-WebRequest 'https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.45/UEP-update.zip' -OutFile base.zip
+          Expand-Archive base.zip app -Force
+          Run-Native { node scripts/patch-uep-08246-cheongju-validation.js app } 'patch'
+          Run-Native { node --check app/resources/app/gyomuon.js } 'syntax check'
+          Run-Native { node scripts/test-uep-08246-cheongju-validation.js app } 'validation'
+          if(Test-Path UEP-update.zip){Remove-Item UEP-update.zip -Force}
+          Compress-Archive -Path app/* -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          $hash=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  UEP-update.zip" | Set-Content sha256.txt -Encoding ascii
+          if((Get-Item UEP-update.zip).Length -lt 100MB){throw 'release zip unexpectedly small'}
+          gh release create v0.82.46 UEP-update.zip sha256.txt --title 'UEP v0.82.46' --notes 'UEP v0.82.46 - 청주대학교 2028 시행계획 원문 대조: 전형별 대전형·선발방식·면접·수능최저 적용범위와 학생부 교과 산정 예외를 정밀 보정.'
+          if($LASTEXITCODE -ne 0){throw 'gh release create failed'}
+          $policy=Get-Content uep-policy.json -Raw | ConvertFrom-Json
+          $policy.latestVersion='0.82.46'
+          $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.46/UEP-update.zip'
+          $policy.sha256=$hash
+          $policy.message='UEP 0.82.46 · 청주대학교 2028 시행계획 검증 반영'
+          $policy | ConvertTo-Json -Depth 10 | Set-Content uep-policy.json -Encoding utf8
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add uep-policy.json
+          git commit -m 'Publish UEP 0.82.46 policy'
+          if($LASTEXITCODE -ne 0){throw 'git commit failed'}
+          git push
+          if($LASTEXITCODE -ne 0){throw 'git push failed'}
