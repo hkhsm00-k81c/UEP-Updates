@@ -1,0 +1,23 @@
+name: Inspect UEP 0.82.49 Data Loading
+on:
+  push:
+    paths: ['inspect-08249-data-loading.trigger']
+permissions: {contents: read}
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: |
+          $ErrorActionPreference='Stop'; New-Item -ItemType Directory -Force source,app|Out-Null
+          gh release download v0.82.49 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source; if($LASTEXITCODE){throw 'download'}
+          Expand-Archive source/UEP-update.zip app -Force
+          $files=@('app/resources/app/electron/main.cjs','app/resources/app/electron/google-data.cjs','app/resources/app/gyomuon.js')
+          $patterns=@('getAllData','loadAll','google','readonlyCache','bootstrap','login','admission','sheet','fetch')
+          $out=''
+          foreach($f in $files){$out+="### $f`n"; $lines=Get-Content $f; for($i=0;$i -lt $lines.Count;$i++){foreach($p in $patterns){if($lines[$i] -match $p){$s=[Math]::Max(0,$i-4);$e=[Math]::Min($lines.Count-1,$i+8);$out+=($lines[$s..$e]-join "`n")+"`n---`n";break}}}}
+          $out|Set-Content loading.txt -Encoding utf8
+      - uses: actions/upload-artifact@v4
+        with: {name: data-loading-inspection, path: loading.txt}
