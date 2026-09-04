@@ -1,0 +1,57 @@
+name: Build and Release UEP 0.82.42 Today University Detail
+'on':
+  push:
+    branches: [main]
+    paths: [release-08242.trigger]
+permissions:
+  contents: write
+jobs:
+  build-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.82.41 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+          node scripts/patch-uep-08242-today-university-detail-cleanup.js app
+          node --check app/resources/app/gyomuon.js
+          node scripts/test-uep-08242-today-university-detail.js app
+          Compress-Archive -Path app/* -DestinationPath UEP-update.zip -Force
+          $hash=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  UEP-update.zip" | Set-Content sha256.txt -Encoding utf8
+          gh release create v0.82.42 UEP-update.zip sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.42' --notes @'
+          UEP v0.82.42
+          - 오늘의 대학 상단 전형카드에서 전형유형·전형명 중복 표현을 정리했습니다.
+          - 상단 전형카드와 중복되던 하단 주요 전형·선발방식 카드를 제거했습니다.
+          - 모집단위별 수능최저에 전형유형·전형명을 함께 표시해 동일 모집단위의 전형별 기준 차이를 구분합니다.
+          - 내신산정·수능최저·권장과목을 네이티브 대학 상세 렌더러가 직접 그리도록 옮기고 0.82.25/0.82.30 후처리 래퍼를 제거했습니다.
+          - 0.82.41의 수능최저 정규화/원본 모델 분리는 그대로 유지합니다.
+          '@
+          $policyPath='uep-policy.json'
+          $policy=Get-Content $policyPath -Raw | ConvertFrom-Json
+          $policy.latestVersion='0.82.42'
+          $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.42/UEP-update.zip'
+          $policy.sha256=$hash
+          $policy.message='UEP 0.82.42 · 오늘의 대학 상세 1차 정리'
+          $policy | ConvertTo-Json -Depth 10 | Set-Content $policyPath -Encoding utf8
+          @"
+          UEP 0.82.42 RELEASE SUCCESS
+          base=v0.82.41
+          native-track-title-cleanup=PASS
+          duplicate-linked-track-card-removed=PASS
+          minimum-track-meta=PASS
+          native-detail-cards=PASS
+          csat-model-separation-preserved=PASS
+          sha256=$hash
+          "@ | Set-Content release-08242-status.txt -Encoding utf8
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git pull --rebase origin main
+          git add uep-policy.json release-08242-status.txt
+          git commit -m 'Publish UEP 0.82.42 policy and status'
+          git push origin HEAD:main
