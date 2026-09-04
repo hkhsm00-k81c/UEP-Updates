@@ -1,0 +1,3 @@
+const fs=require('fs'),path=require('path');const r=process.argv[2],g=fs.readFileSync(path.join(r,'gyomuon.js'),'utf8');
+function ok(x,m){if(!x)throw new Error(m)}
+ok(g.includes('UEP_08250_STAGED_DATA_LOADING'),'marker');ok(g.includes("core:'ready',academic:'waiting',admission:'waiting'"),'stages');ok(g.includes('setTimeout(()=>uep08250StartBackgroundStages(),80)'),'background start');ok(g.includes('await uep08250PrioritizeAdmission()'),'priority admission');ok(!g.includes("hideUserAuthGate();const synced=await window.schoolBoard?.previewReadonlySync?.()"),'blocking login remains');ok(g.includes('admissionMinimumRows'),'raw minimum regression');ok(!g.includes("raw.includes('·')?raw.split('·')"),'dot split regression');console.log('08250 staged loading tests passed');
