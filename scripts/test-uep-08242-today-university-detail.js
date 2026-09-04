@@ -1,0 +1,16 @@
+const fs=require('fs');
+const path=require('path');
+const root=process.argv[2]||'app';
+const g=fs.readFileSync(path.join(root,'resources','app','gyomuon.js'),'utf8');
+const must=(ok,msg)=>{if(!ok)throw new Error(msg)};
+must(/const\s+APP_VERSION\s*=\s*["']0\.82\.42["'];/.test(g),'version not 0.82.42');
+must(g.includes("<h4>'+escapeHtml(r['전형명']||r['전형유형']||r['대전형']||'전형명 확인')+'</h4>"),'track title is not native-cleaned');
+must(!g.includes("escapeHtml(r['전형유형']||r['대전형']||'전형')+' · '+escapeHtml(r['전형명']"),'broad type + track duplicate title remains');
+must(!g.includes('uep-08230-linked-tracks'),'duplicate linked-track summary injection remains');
+must(!g.includes('/* UEP_08225_ADMISSION_CALCULATION_CARDS */'),'old calculation post-render wrapper remains');
+must(g.includes('<small>모집단위별 수능최저</small>'),'native minimum card missing');
+must(g.includes("const meta=[type,track].filter((v,i,a)=>v&&a.indexOf(v)===i).join(' · ');"),'minimum type/track metadata missing');
+must(g.includes("minimums:()=>rows('admissionMinimumRows','54_수능최저DB')"),'54 raw model not aligned to 0.82.41 separation');
+for(const marker of ['data-uep-region','data-uep-university','data-uep-prev','data-uep-next'])must(g.includes(marker),`navigation marker missing: ${marker}`);
+must(g.includes("readonlyCache?.admissionMinimums"),'core normalized CSAT model consumer lost');
+console.log('UEP 0.82.42 Today University structural test PASS');
