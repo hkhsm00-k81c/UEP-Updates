@@ -1,0 +1,59 @@
+name: Build and Release UEP 0.82.43 Today University Compact
+on:
+  push:
+    paths: ['release-08243.trigger']
+permissions:
+  contents: write
+jobs:
+  build-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Invoke-WebRequest 'https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.42/UEP-update.zip' -OutFile base.zip
+          Expand-Archive base.zip app -Force
+          node scripts/patch-uep-08243-today-university-compact.js app
+          node --check app/resources/app/gyomuon.js
+          node scripts/test-uep-08243-today-university-compact.js app
+          if(Test-Path UEP-update.zip){Remove-Item UEP-update.zip -Force}
+          Compress-Archive -Path app/* -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          $hash=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  UEP-update.zip" | Set-Content sha256.txt -Encoding ascii
+          @"
+          UEP 0.82.43 RELEASE SUCCESS
+          base=v0.82.42
+          top-admission-minimum-duplicate=REMOVED
+          calc-course-merged=PASS
+          minimum-track-label-dedupe=PASS
+          result-grid-compact=PASS
+          explorer-prevnext-row=REMOVED
+          campus-region-sejong-university=SEOUL
+          campus-region-unist=GYEONGNAM
+          campus-display=PASS
+          sha256=$hash
+          "@ | Set-Content release-08243-status.txt -Encoding utf8
+          gh release create v0.82.43 UEP-update.zip sha256.txt --title 'UEP v0.82.43' --notes @'
+          UEP v0.82.43
+          - 오늘의 대학 상단 전형카드의 수능최저 중복 안내를 제거했습니다.
+          - 내신성적 산출방법과 권장과목을 통합하고 모집단위별 수능최저 영역을 2배 폭으로 확장했습니다.
+          - 수능최저의 전형유형·전형명 중복 표기를 정리했습니다.
+          - 운호고 실제 입결을 4열 compact 카드로 줄여 상세 팝업의 세로 길이를 줄였습니다.
+          - 지역·대학 선택과 중복되던 이전/현재/다음 탐색 줄을 제거했습니다.
+          - 56_대학입시마스터의 캠퍼스 값을 지역 분류의 우선 기준으로 사용합니다. 세종대학교는 서울, 울산과학기술원은 현 지역 체계상 경남으로 분류합니다.
+          - 분리 캠퍼스나 복수 캠퍼스 대학은 대학 선택 목록/제목에 캠퍼스명을 표시하며 데이터 매칭 키는 기존 대학명을 유지합니다.
+          '@
+          $policy=Get-Content uep-policy.json -Raw | ConvertFrom-Json
+          $policy.latestVersion='0.82.43'
+          $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.43/UEP-update.zip'
+          $policy.sha256=$hash
+          $policy.message='UEP 0.82.43 · 오늘의 대학 상세 2차 compact/캠퍼스 정리'
+          $policy | ConvertTo-Json -Depth 10 | Set-Content uep-policy.json -Encoding utf8
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add uep-policy.json release-08243-status.txt
+          git commit -m 'Publish UEP 0.82.43 policy and status'
+          git push
+        env:
+          GH_TOKEN: ${{ github.token }}
