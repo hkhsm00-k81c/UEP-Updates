@@ -1,0 +1,33 @@
+name: Inspect UEP 0.82.48 Admission Dashboard Cards
+on:
+  push:
+    paths:
+      - 'inspect-08248-admission-dashboard.trigger'
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.82.48 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE -ne 0){throw 'download failed'}
+          Expand-Archive source/UEP-update.zip app -Force
+          $g=Get-Content app/resources/app/gyomuon.js -Raw
+          function Snip($needle,$radius=5000){$i=$g.IndexOf($needle);if($i -lt 0){return "NOT FOUND: $needle`n"};$s=[Math]::Max(0,$i-$radius);$l=[Math]::Min($g.Length-$s,$radius*2);return $g.Substring($s,$l)+"`n---`n"}
+          $out=''
+          $out+=Snip '대입 기초' 8000
+          $out+=Snip '전형 이해' 8000
+          $out+=Snip '오늘의 대학' 5000
+          $out+=Snip 'openDashboardAdmission' 9000
+          $out | Set-Content inspection.txt -Encoding utf8
+      - uses: actions/upload-artifact@v4
+        with:
+          name: admission-dashboard-inspection
+          path: inspection.txt
