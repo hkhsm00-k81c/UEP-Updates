@@ -3,8 +3,10 @@ const g=fs.readFileSync(path.join(process.argv[2]||'app','resources','app','gyom
 const must=(v,m)=>{if(!v)throw new Error(m)};
 must(/APP_VERSION\s*=\s*"0\.82\.45"/.test(g),'version not 0.82.45');
 must(g.includes('flatMap(r=>{const raw=String(r[\'전형명\']'),'adaptive admission split missing');
-must(g.includes("type+' · '+track"),'type/track semantic label missing');
+must(g.includes("raw.includes('·')?raw.split('·')"),'middle-dot split rule missing');
+must(!g.includes("raw.includes('/')?raw.split('/')"),'slash must not be split');
+must(g.includes('const minHtml=minimums.length?'),'minimum renderer lost');
 must(g.includes('grid-template-columns:repeat(2,minmax(0,1fr))'),'2-column minimum layout missing');
-must(g.includes('grid-template-columns:minmax(360px,.42fr) minmax(0,.58fr)'),'summary width balance missing');
+must(g.includes('grid-template-columns:minmax(390px,.4fr) minmax(0,.6fr)'),'summary width balance missing');
 must(g.includes('UEP_08245_ADAPTIVE'),'adaptive marker missing');
 console.log('UEP 0.82.45 validation PASS');
