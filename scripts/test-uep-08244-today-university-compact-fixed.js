@@ -1,0 +1,15 @@
+const fs=require('fs'),path=require('path');
+const root=process.argv[2]||'app',gp=path.join(root,'resources','app','gyomuon.js'),pp=path.join(root,'resources','app','package.json');
+const g=fs.readFileSync(gp,'utf8');const p=JSON.parse(fs.readFileSync(pp,'utf8'));
+const must=(v,m)=>{if(!v)throw new Error(m)};
+const fn=name=>{const s=g.indexOf('function '+name+'(');must(s>=0,name+' missing');let b=g.indexOf('{',s),d=0,e=b;for(;e<g.length;e++){if(g[e]==='{')d++;else if(g[e]==='}'&&--d===0){e++;break;}}return g.slice(s,e);};
+must(/const\s+APP_VERSION\s*=\s*"0\.82\.44";/.test(g),'APP_VERSION != 0.82.44');
+must(p.version==='0.82.44','package version != 0.82.44');
+const nav=fn('uep08223TodayNav');must(!nav.includes('data-uep-prev')&&!nav.includes('data-uep-next'),'prev/next row not removed');
+const reg=fn('uep08223UniversityRegions');must(reg.includes("name==='세종대학교'")&&reg.includes("return ['서울']"),'Sejong University Seoul correction missing');must(reg.includes('울산과학기술원')&&reg.includes("return ['경남']"),'UNIST Gyeongnam mapping missing');
+must(g.includes('uep08244UniversityDisplayName'),'campus display helper missing');
+must(g.includes('내신성적 산출방법 및 권장과목'),'calc/course merge missing');
+must(g.includes('grid-template-columns:minmax(0,1fr) minmax(0,2fr)'),'minimum 2x width CSS missing');
+must(g.includes('grid-template-columns:repeat(4,minmax(0,1fr))'),'result compact grid missing');
+must(g.includes('UEP_08244_RELEASE_NOTES'),'release notes missing');
+console.log('UEP 0.82.44 validation PASS');
