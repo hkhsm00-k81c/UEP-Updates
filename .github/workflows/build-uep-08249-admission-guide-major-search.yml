@@ -1,0 +1,27 @@
+name: Build and Release UEP 0.82.49 Admission Guide Major Search
+on:
+  push:
+    paths: ['release-08249.trigger']
+permissions: {contents: write}
+jobs:
+  build-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: |
+          $ErrorActionPreference='Stop'
+          function Run-Native([scriptblock]$cmd,[string]$label){& $cmd;if($LASTEXITCODE -ne 0){throw "$label failed with exit code $LASTEXITCODE"}}
+          New-Item -ItemType Directory -Force source,app,out | Out-Null
+          Run-Native { gh release download v0.82.48 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source } 'download base'
+          Expand-Archive source/UEP-update.zip app -Force
+          Run-Native { node scripts/patch-uep-08249-admission-guide-major-search.js app } 'patch'
+          Run-Native { node --check app/resources/app/gyomuon.js } 'gyomuon syntax'
+          Run-Native { node --check app/resources/app/electron/main.cjs } 'main syntax'
+          Run-Native { node scripts/test-uep-08249-admission-guide-major-search.js app } 'validation'
+          Compress-Archive -Path app/* -DestinationPath out/UEP-update.zip -CompressionLevel Optimal
+          $hash=(Get-FileHash out/UEP-update.zip -Algorithm SHA256).Hash.ToLower(); "$hash  UEP-update.zip" | Set-Content out/sha256.txt -Encoding ascii
+          Run-Native { gh release create v0.82.49 out/UEP-update.zip out/sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.49' --notes 'UEP v0.82.49`r`n- 대입기초 + 전형이해를 대입 이해로 통합`r`n- 전형이해 자리에 전공별 대학 찾기 신설`r`n- 의치한약수 등 빠른 전공 선택 + 지역/전형/수능최저 필터`r`n- 54 모집단위별 수능최저와 53B 실제 전형 연결`r`n- 오늘의 대학 상세 구조 유지' } 'release create'
+          $policy=Get-Content uep-policy.json -Raw | ConvertFrom-Json;$policy.latestVersion='0.82.49';$policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.49/UEP-update.zip';$policy.sha256=$hash;$policy.message='UEP 0.82.49 · 대입 이해 통합 · 전공별 대학 찾기';$policy|ConvertTo-Json -Depth 10|Set-Content uep-policy.json -Encoding utf8
+          Run-Native { git config user.name 'github-actions[bot]'; git config user.email '41898282+github-actions[bot]@users.noreply.github.com'; git add uep-policy.json; git commit -m 'Set stable policy to UEP 0.82.49'; git push } 'policy push'
