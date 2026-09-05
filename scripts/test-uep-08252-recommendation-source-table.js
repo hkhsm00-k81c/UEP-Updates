@@ -1,0 +1,13 @@
+const fs=require('fs'),path=require('path');
+const root=process.argv[2]||'app/resources/app';
+const g=fs.readFileSync(path.join(root,'gyomuon.js'),'utf8');
+const must=(v,m)=>{if(!v)throw new Error(m)};
+must(/APP_VERSION\s*=\s*["']0\.82\.52["']/.test(g),'version');
+must(g.includes("r['모집단위/계열']"),'unit/major field not rendered');
+must(g.includes("r['과목']"),'subject field not rendered');
+must(g.includes('모집단위별 관련·권장과목'),'section label');
+must(g.includes('uep-uni-recommend-source-row'),'source row marker');
+must(!g.includes("recommendations.slice(0,18)"),'old 18-row renderer remains');
+must(g.includes("dashboardAdmissionRows('admissionRecommendations','58_권장과목DB')"),'58 DB connection missing');
+must(g.includes('UEP_08250_STAGED_DATA_LOADING'),'staged loading regression');
+console.log('0.82.52 tests passed');
