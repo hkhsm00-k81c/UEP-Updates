@@ -1,0 +1,25 @@
+name: Build and Release UEP 0.82.53 Admission Layout Counsel
+on: {push: {paths: ['release-08253.trigger']}}
+permissions: {contents: write}
+jobs:
+  build-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: |
+          $ErrorActionPreference='Stop';function Run-Native([scriptblock]$c,[string]$l){&$c;if($LASTEXITCODE -ne 0){throw "$l failed: $LASTEXITCODE"}}
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          Run-Native {gh release download v0.82.52 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source} 'download'
+          Expand-Archive source/UEP-update.zip app -Force;$root='app/resources/app'
+          Run-Native {node scripts/patch-uep-08253-admission-layout-counsel.js $root} 'patch'
+          Run-Native {node --check "$root/gyomuon.js"} 'renderer syntax'
+          Run-Native {node --check "$root/main.cjs"} 'main syntax'
+          Run-Native {node --check "$root/preload.cjs"} 'preload syntax'
+          Run-Native {node scripts/test-uep-08253-admission-layout-counsel.js $root} 'test'
+          Compress-Archive -Path app/* -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower();"$sha  UEP-update.zip"|Set-Content sha256.txt
+          Run-Native {gh release create v0.82.53 UEP-update.zip sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.53' --notes "UEP v0.82.53`n- 대학 상세 공간 재배치: 내신·수능최저 상단 요약, 관련·권장과목 전체폭 2열`n- 권장과목 상태를 자료 입력 전 / 자료 미확보 / 공식 미제시 / 실제 제시로 구분`n- 56A_대학상담포인트DB 연결`n- 관리자·학년부 상담포인트 추가·수정·삭제 및 담임 공유`n- 0.82.50 단계별 연결·0.82.51 캠퍼스 필터·0.82.52 원문형 권장과목 구조 유지"} 'release'
+          $policy=Get-Content uep-policy.json -Raw|ConvertFrom-Json;$policy.latestVersion='0.82.53';$policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.53/UEP-update.zip';$policy.sha256=$sha;$policy.message='UEP 0.82.53 · 대학상세 공간개편 · 권장과목 상태구분 · 상담포인트 공유';$policy|ConvertTo-Json -Depth 10|Set-Content uep-policy.json -Encoding utf8
+          Run-Native {git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add uep-policy.json;git commit -m 'Publish UEP 0.82.53 policy';git push} 'policy push'
