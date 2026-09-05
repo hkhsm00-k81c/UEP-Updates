@@ -1,0 +1,23 @@
+name: Build and Release UEP 0.82.51 Campus Aware University Nav
+on: {push: {paths: ['release-08251.trigger']}}
+permissions: {contents: write}
+jobs:
+  build-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: |
+          $ErrorActionPreference='Stop';function Run-Native([scriptblock]$c,[string]$l){&$c;if($LASTEXITCODE -ne 0){throw "$l failed: $LASTEXITCODE"}}
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          Run-Native {gh release download v0.82.50 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source} 'download'
+          Expand-Archive source/UEP-update.zip app -Force;$root='app/resources/app'
+          Run-Native {node scripts/patch-uep-08251-campus-aware-university-nav.js $root} 'patch'
+          Run-Native {node --check "$root/gyomuon.js"} 'syntax'
+          Run-Native {node scripts/test-uep-08251-campus-aware-university-nav.js $root} 'test'
+          Compress-Archive -Path app/* -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower();"$sha  UEP-update.zip"|Set-Content sha256.txt
+          Run-Native {gh release create v0.82.51 UEP-update.zip sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.51' --notes "UEP v0.82.51`n- 한양대 ERICA 실제 전형별 카드 분리`n- 지역 선택 시 해당 지역 캠퍼스명만 표시`n- 가천 글로벌/메디컬 등 복수 캠퍼스 지역 판별 보정`n- 로그인 단계화 및 대학 3차 연결 구조 유지"} 'release'
+          $policy=Get-Content uep-policy.json -Raw|ConvertFrom-Json;$policy.latestVersion='0.82.51';$policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.51/UEP-update.zip';$policy.sha256=$sha;$policy.message='UEP 0.82.51 · ERICA 전형 분리 · 지역별 캠퍼스 표시';$policy|ConvertTo-Json -Depth 10|Set-Content uep-policy.json -Encoding utf8
+          Run-Native {git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add uep-policy.json;git commit -m 'Publish UEP 0.82.51 policy';git push} 'policy push'
