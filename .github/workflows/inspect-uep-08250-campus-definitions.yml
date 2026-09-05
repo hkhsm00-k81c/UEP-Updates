@@ -1,0 +1,22 @@
+name: Inspect UEP 0.82.50 Campus Definitions
+on:
+  push:
+    paths: ['inspect-08250-campus-definitions.trigger']
+permissions: {contents: read}
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: |
+          $ErrorActionPreference='Stop';mkdir source,app -Force|Out-Null
+          gh release download v0.82.50 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source;if($LASTEXITCODE){throw 'download'}
+          Expand-Archive source/UEP-update.zip app -Force
+          $g=Get-Content app/resources/app/gyomuon.js
+          $patterns=@('uep08223UniversityRegions','uep08244UniversityDisplayName','uep08223TodayNav','uep08244UniversityBaseName')
+          $o='';foreach($p in $patterns){$o+="### $p`n";Select-String -Path app/resources/app/gyomuon.js -Pattern $p -Context 6,16|ForEach-Object{$o+=$_.Context.PreContext+"`n"+$_.Line+"`n"+$_.Context.PostContext+"`n---`n"}}
+          $o|Set-Content defs.txt -Encoding utf8
+      - uses: actions/upload-artifact@v4
+        with: {name: campus-definitions, path: defs.txt}
