@@ -1,0 +1,23 @@
+name: Build and Release UEP 0.82.54 Counsel Modal Layer
+on: {push: {paths: ['release-08254.trigger']}}
+permissions: {contents: write}
+jobs:
+  build-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: |
+          $ErrorActionPreference='Stop';function Run-Native([scriptblock]$c,[string]$l){&$c;if($LASTEXITCODE -ne 0){throw "$l failed: $LASTEXITCODE"}}
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          Run-Native {gh release download v0.82.53 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source} 'download'
+          Expand-Archive source/UEP-update.zip app -Force;$root='app/resources/app'
+          Run-Native {node scripts/patch-uep-08254-counsel-modal-layer.js $root} 'patch'
+          Run-Native {node --check "$root/gyomuon.js"} 'renderer syntax'
+          Run-Native {node scripts/test-uep-08254-counsel-modal-layer.js $root} 'test'
+          Compress-Archive -Path app/* -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower();"$sha  UEP-update.zip"|Set-Content sha256.txt
+          Run-Native {gh release create v0.82.54 UEP-update.zip sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.54' --notes "UEP v0.82.54`n- 오늘의 대학 상담포인트 관리 팝업이 부모 대학상세 팝업 뒤에 숨는 레이어 오류 수정`n- 상담포인트 관리창을 최상위 fixed layer로 표시`n- 0.82.53의 공간 재배치·권장과목 상태구분·56A 상담포인트DB 기능 유지"} 'release'
+          $policy=Get-Content uep-policy.json -Raw|ConvertFrom-Json;$policy.latestVersion='0.82.54';$policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.54/UEP-update.zip';$policy.sha256=$sha;$policy.message='UEP 0.82.54 · 상담포인트 팝업 레이어 오류 수정';$policy|ConvertTo-Json -Depth 10|Set-Content uep-policy.json -Encoding utf8
+          Run-Native {git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add uep-policy.json;git commit -m 'Publish UEP 0.82.54 policy';git push} 'policy push'
