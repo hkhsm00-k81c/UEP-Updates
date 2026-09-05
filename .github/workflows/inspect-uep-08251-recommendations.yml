@@ -1,0 +1,24 @@
+name: Inspect UEP 0.82.51 Recommendation Renderer
+on:
+  push:
+    paths: ['inspect-08251-recommendations.trigger']
+permissions: {contents: read}
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: |
+          $ErrorActionPreference='Stop';mkdir source,app -Force|Out-Null
+          gh release download v0.82.51 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE){throw 'download'}
+          Expand-Archive source/UEP-update.zip app -Force
+          $g=Get-Content app/resources/app/gyomuon.js -Raw
+          $needles=@('58_권장과목DB','admissionRecommendationRows','recommendation','권장과목','관련 교과')
+          $out=''
+          foreach($n in $needles){$i=$g.IndexOf($n);$out+="### $n @ $i`n";if($i -ge 0){$s=[Math]::Max(0,$i-7000);$l=[Math]::Min($g.Length-$s,14000);$out+=$g.Substring($s,$l)+"`n---`n"}}
+          $out|Set-Content rec.txt -Encoding utf8
+      - uses: actions/upload-artifact@v4
+        with: {name: recommendation-renderer, path: rec.txt}
