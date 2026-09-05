@@ -1,0 +1,23 @@
+name: Build and Release UEP 0.82.52 Recommendation Source Table
+on: {push: {paths: ['release-08252.trigger']}}
+permissions: {contents: write}
+jobs:
+  build-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: |
+          $ErrorActionPreference='Stop';function Run-Native([scriptblock]$c,[string]$l){&$c;if($LASTEXITCODE -ne 0){throw "$l failed: $LASTEXITCODE"}}
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          Run-Native {gh release download v0.82.51 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source} 'download'
+          Expand-Archive source/UEP-update.zip app -Force;$root='app/resources/app'
+          Run-Native {node scripts/patch-uep-08252-recommendation-source-table.js $root} 'patch'
+          Run-Native {node --check "$root/gyomuon.js"} 'syntax'
+          Run-Native {node scripts/test-uep-08252-recommendation-source-table.js $root} 'test'
+          Compress-Archive -Path app/* -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower();"$sha  UEP-update.zip"|Set-Content sha256.txt
+          Run-Native {gh release create v0.82.52 UEP-update.zip sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.52' --notes "UEP v0.82.52`n- 58_권장과목DB의 모집단위/계열을 UEP에 직접 표시`n- 관련 교과/핵심과목/권장과목 구분과 과목을 원문 구조대로 표시`n- 충북대처럼 학과-교과 대응관계가 보이지 않던 렌더링 오류 수정`n- 0.82.50 단계별 데이터 연결과 0.82.51 캠퍼스 필터 유지"} 'release'
+          $policy=Get-Content uep-policy.json -Raw|ConvertFrom-Json;$policy.latestVersion='0.82.52';$policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.52/UEP-update.zip';$policy.sha256=$sha;$policy.message='UEP 0.82.52 · 58_DB 모집단위-권장과목 원문표시 수정';$policy|ConvertTo-Json -Depth 10|Set-Content uep-policy.json -Encoding utf8
+          Run-Native {git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add uep-policy.json;git commit -m 'Publish UEP 0.82.52 policy';git push} 'policy push'
