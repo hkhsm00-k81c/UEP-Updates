@@ -1,0 +1,21 @@
+name: Inspect UEP 0.82.50 Campus Filter
+on:
+  push:
+    paths: ['inspect-08250-campus-filter.trigger']
+permissions: {contents: read}
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: |
+          $ErrorActionPreference='Stop';mkdir source,app -Force|Out-Null
+          gh release download v0.82.50 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source;if($LASTEXITCODE){throw 'download'}
+          Expand-Archive source/UEP-update.zip app -Force
+          $g=Get-Content app/resources/app/gyomuon.js -Raw
+          function S($needle,$r=4000){$i=$g.IndexOf($needle);if($i -lt 0){return "NOT FOUND $needle`n"};$s=[Math]::Max(0,$i-$r);$l=[Math]::Min($g.Length-$s,$r*2);return $g.Substring($s,$l)+"`n---`n"}
+          $o='';$o+=S 'uep08223UniversityRegions' 7000;$o+=S 'dashboardAdmissionUniversities' 7000;$o+=S 'data-uep-region' 7000;$o+=S 'uep08223TodayNav' 7000;$o|Set-Content campus.txt -Encoding utf8
+      - uses: actions/upload-artifact@v4
+        with: {name: campus-filter-inspection, path: campus.txt}
