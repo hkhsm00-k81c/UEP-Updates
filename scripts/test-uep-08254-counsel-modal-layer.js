@@ -14,6 +14,6 @@ must(g.includes("schoolRecommendation=/학교장\\s*추천|교장\\s*추천/"),'
 must(g.includes("if(info.restricted)return 90"),'restricted admission group is not ordered last');
 must(g.includes("if(/교과/.test(t))return 10")&&g.includes("if(/종합/.test(t))return 20")&&g.includes("if(/논술/.test(t))return 30"),'subject-holistic-essay ordering missing');
 must(g.includes('uep-admission-subject')&&g.includes('uep-admission-holistic')&&g.includes('uep-admission-essay')&&g.includes('uep-admission-restricted')&&g.includes('uep-admission-unavailable'),'admission card color classes missing');
-must(g.includes('운호고 지원불가')&&g.includes('지원자격 제한'),'eligibility badges missing');
 must(g.includes('/농어촌|서해\\s*5도|특성화고|마이스터고/'),'structural unavailable rule missing');
+must(g.includes('background:#fff2f2')&&g.includes('background:#fff9ed'),'restricted/unavailable visual distinction missing');
 console.log('0.82.54 admission cards + counsel modal + version pill regression checks passed');
