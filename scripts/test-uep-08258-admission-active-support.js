@@ -1,0 +1,21 @@
+const fs=require('fs'),path=require('path');
+const root=process.argv[2]||'app/resources/app';
+const g=fs.readFileSync(path.join(root,'gyomuon.js'),'utf8');
+const must=(v,m)=>{if(!v)throw new Error(m)};
+
+must(/APP_VERSION\s*=\s*["']0\.82\.58["']/.test(g),'version 0.82.58 missing');
+must(g.includes("row?.['UEP활성']??row?.['UEP노출']??'Y'"),'UEP활성/legacy UEP노출 compatibility missing');
+must(g.includes('function uep08258AdmissionActive(row)'),'active row helper missing');
+must(g.includes("const unavailable=support==='불가'||(!support&&legacyUnavailable);"),'binary support unavailable rule missing');
+must(!g.includes("support==='확인필요'"),'legacy 확인필요 support rule remains');
+must(g.includes("const structures=dashboardAdmissionStructureRows().filter(r=>uep08258AdmissionActive(r)&&dashboardAdmissionNormalizeUniversity(r['대학명'])===norm);"),'today university active-row gate missing');
+must(g.includes("structures=uniq(structures.filter(r=>uep08258AdmissionActive(r)&&String(r['대학명']||'').trim()));"),'admission types active-row gate missing');
+must(g.includes('const activeAdmissions=admissions.filter(uep08258AdmissionActive);'),'card renderer active-row gate missing');
+must(g.includes("if(i.unavailable)return '<span class=\"uep-admission-unho-unavailable\">운호고 지원대상 아님</span>'"),'unavailable badge missing');
+must(g.includes("if(i.restricted)return '<span class=\"uep-admission-restricted-badge\">지원자격 확인</span>'"),'qualification badge missing');
+must(g.includes('다른 전형 자세히 보기'),'secondary admissions disclosure regression');
+must(g.includes("if(i.group==='논술')return ' uep-admission-essay'"),'essay card regression');
+must(g.includes("if(i.group==='정시')return ' uep-admission-regular'"),'regular card regression');
+must(g.includes("const host=document.querySelector('.dashboard-admission-layer')||document.body;host.appendChild(layer);"),'counsel editor child-layer regression');
+must(g.includes("const CURRENT='0.82.58';"),'version pill current 0.82.58 missing');
+console.log('0.82.58 admission active/support regression test passed');
