@@ -1,0 +1,35 @@
+name: Build and Release UEP 0.82.63 Admission Support Dorm Report
+on: {push: {paths: ['release-08263.trigger']}}
+permissions: {contents: write}
+jobs:
+  build-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: |
+          $ErrorActionPreference='Stop'
+          function Run-Native([scriptblock]$c,[string]$l){&$c;if($LASTEXITCODE -ne 0){throw "$l failed: $LASTEXITCODE"}}
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          Run-Native {gh release download v0.82.62 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source} 'download'
+          Expand-Archive source/UEP-update.zip app -Force
+          $root='app/resources/app'
+          Run-Native {node scripts/patch-uep-08263-admission-support-dorm-report.js $root} '0.82.63 patch'
+          Run-Native {node --check "$root/gyomuon.js"} 'renderer syntax'
+          Run-Native {node --check "$root/electron/google-data.cjs"} 'google-data syntax'
+          Run-Native {node --check "$root/electron/main.cjs"} 'main syntax'
+          if(Test-Path "$root/tools/UEP-DataProcessor-v1.2.3-daily-dedupe-operational-rules-fullset.js"){Run-Native {node --check "$root/tools/UEP-DataProcessor-v1.2.3-daily-dedupe-operational-rules-fullset.js"} 'dorm processor syntax'}
+          if(Test-Path "$root/tools/UEP-DataProcessor-v1.2.0-dorm-ledger-rules-mail.js"){Run-Native {node --check "$root/tools/UEP-DataProcessor-v1.2.0-dorm-ledger-rules-mail.js"} 'legacy dorm processor syntax'}
+          Run-Native {node scripts/test-uep-08263-admission-support-dorm-report.js $root} 'regression test'
+          Compress-Archive -Path app/* -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "$sha  UEP-update.zip"|Set-Content sha256.txt
+          Run-Native {gh release create v0.82.63 UEP-update.zip sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.63' --notes "UEP v0.82.63`n- 오늘의 대학 전형카드에 53B 추천/지원조건 복원`n- 상세 수능최저는 카드에서 계속 제외하고 하단 모집단위별 수능최저가 전담`n- 한양대 서울·ERICA 체육인재를 개인 지원자격 제한 전형으로 정리`n- 전문사감 보고문: 일요일 입소·금요일 퇴소는 시간→대상학생, 일반 외출은 학생→외출시작→복귀시간`n- 전문사감 보고문 확인과 메일 작성 원문 통일`n- 데이터처리 Apps Script 소스는 15:00 이전 메일 보류, 15:00 이후 최초 현황 발송 및 변경시 재발송 로직 포함`n- 사유·학원명은 전문사감 보고문/메일에서 제외"} 'release'
+          $policy=Get-Content uep-policy.json -Raw|ConvertFrom-Json
+          $policy.latestVersion='0.82.63'
+          $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.63/UEP-update.zip'
+          $policy.sha256=$sha
+          $policy.message='UEP 0.82.63 · 지원조건 복원·학사 보고형식 통일'
+          $policy|ConvertTo-Json -Depth 10|Set-Content uep-policy.json -Encoding utf8
+          Run-Native {git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add uep-policy.json;git commit -m 'Publish UEP 0.82.63 policy';git push} 'policy push'
