@@ -1,0 +1,33 @@
+name: Build and Release UEP 0.82.62 Admission Data Counts
+on: {push: {paths: ['release-08262.trigger']}}
+permissions: {contents: write}
+jobs:
+  build-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: |
+          $ErrorActionPreference='Stop'
+          function Run-Native([scriptblock]$c,[string]$l){&$c;if($LASTEXITCODE -ne 0){throw "$l failed: $LASTEXITCODE"}}
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          Run-Native {gh release download v0.82.61 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source} 'download'
+          Expand-Archive source/UEP-update.zip app -Force
+          $root='app/resources/app'
+          Run-Native {node scripts/patch-uep-08262-admission-data-counts.js $root} 'admission patch'
+          Run-Native {node --check "$root/gyomuon.js"} 'renderer syntax'
+          Run-Native {node --check "$root/electron/google-data.cjs"} 'google-data syntax'
+          Run-Native {node --check "$root/electron/main.cjs"} 'main syntax'
+          Run-Native {node scripts/test-uep-08262-admission-data-counts.js $root} 'regression test'
+          Compress-Archive -Path app/* -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "$sha  UEP-update.zip"|Set-Content sha256.txt
+          Run-Native {gh release create v0.82.62 UEP-update.zip sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.62' --notes "UEP v0.82.62`n- 입시 전형 데이터 정합성 및 지역의사 모집인원 표시`n- 한양대·건국대 구형 중복 활성행 정리 반영`n- 건양대·전북대 등 권역별 지역의사/지역인재의 운호고 지원 가능 여부 정리`n- 53B 모집인원 필드(T) 추가 및 공식 확인값만 사용`n- 오늘의 대학 카드에 명시된 모집인원만 모집 N명으로 표시`n- 53B 로더 A:T 확장, 새 입시DB/기존 안전폴백 동일 계약`n- 0.82.61 전형카드 간소화·공식 대전형 분류·색상체계 유지`n- 0.82.60 School Read 우선조회/안전폴백 유지"} 'release'
+          $policy=Get-Content uep-policy.json -Raw|ConvertFrom-Json
+          $policy.latestVersion='0.82.62'
+          $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.62/UEP-update.zip'
+          $policy.sha256=$sha
+          $policy.message='UEP 0.82.62 · 입시 전형 정합성·지역의사 모집인원'
+          $policy|ConvertTo-Json -Depth 10|Set-Content uep-policy.json -Encoding utf8
+          Run-Native {git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add uep-policy.json;git commit -m 'Publish UEP 0.82.62 policy';git push} 'policy push'
