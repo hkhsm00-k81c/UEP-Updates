@@ -1,0 +1,14 @@
+const fs=require('fs'),path=require('path');
+const root=process.argv[2]||'app/resources/app';
+const g=fs.readFileSync(path.join(root,'gyomuon.js'),'utf8');
+const must=(v,m)=>{if(!v)throw new Error(m)};
+must(/APP_VERSION\s*=\s*["']0\.82\.55["']/.test(g),'version 0.82.55 missing');
+must(g.includes("const host=document.querySelector('.dashboard-admission-layer')||document.body;host.appendChild(layer);"),'counsel editor child-layer host missing');
+must(g.includes("layer.className='uep-admission-counsel-editor-layer';"),'dedicated counsel editor layer class missing');
+must(!g.includes("layer.className='counsel-reason-layer uep-admission-counsel-editor-layer';layer.style.position='fixed'"),'old global counsel layer stacking patch still active');
+must(g.includes('uep-uni-restricted-disclosure'),'restricted admission disclosure missing');
+must(g.includes('경제배려|국가보훈'),'personal eligibility classification missing');
+must(g.includes('unhoRegionalEligible=/충북|충청|충남|대전|세종/'),'Unho regional eligibility rule missing');
+must(g.includes("sort(uep08255AdmissionCompare)"),'0.82.55 admission sorting missing');
+must(g.includes("const CURRENT='0.82.55';"),'version pill current 0.82.55 missing');
+console.log('0.82.55 admission disclosure + counsel layer test passed');
