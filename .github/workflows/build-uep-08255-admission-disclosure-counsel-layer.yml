@@ -1,0 +1,23 @@
+name: Build and Release UEP 0.82.55 Admission Disclosure and Counsel Layer
+on: {push: {paths: ['release-08255.trigger']}}
+permissions: {contents: write}
+jobs:
+  build-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: |
+          $ErrorActionPreference='Stop';function Run-Native([scriptblock]$c,[string]$l){&$c;if($LASTEXITCODE -ne 0){throw "$l failed: $LASTEXITCODE"}}
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          Run-Native {gh release download v0.82.54 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source} 'download'
+          Expand-Archive source/UEP-update.zip app -Force;$root='app/resources/app'
+          Run-Native {node scripts/patch-uep-08255-admission-disclosure-counsel-layer.js $root} 'patch'
+          Run-Native {node --check "$root/gyomuon.js"} 'renderer syntax'
+          Run-Native {node scripts/test-uep-08255-admission-disclosure-counsel-layer.js $root} 'regression test'
+          Compress-Archive -Path app/* -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower();"$sha  UEP-update.zip"|Set-Content sha256.txt
+          Run-Native {gh release create v0.82.55 UEP-update.zip sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.55' --notes "UEP v0.82.55`n- 경제배려·국가보훈·특수교육 등 개인 자격 전형을 지원자격 제한으로 재분류`n- 학교장추천 및 충청권 지역의사·지역인재는 일반 교과·종합 그룹 유지`n- 지원자격 제한 전형은 기본 화면에서 접고 필요 시 펼쳐보기`n- 상담포인트 편집창을 오늘의 대학 부모 레이어 내부에 배치해 뒤로 숨는 문제 수정`n- 0.82.54 대학상세·56A 상담포인트DB 기능 유지"} 'release'
+          $policy=Get-Content uep-policy.json -Raw|ConvertFrom-Json;$policy.latestVersion='0.82.55';$policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.55/UEP-update.zip';$policy.sha256=$sha;$policy.message='UEP 0.82.55 · 지원자격 전형 접기 및 상담포인트 팝업 레이어 수정';$policy|ConvertTo-Json -Depth 10|Set-Content uep-policy.json -Encoding utf8
+          Run-Native {git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add uep-policy.json;git commit -m 'Publish UEP 0.82.55 policy';git push} 'policy push'
