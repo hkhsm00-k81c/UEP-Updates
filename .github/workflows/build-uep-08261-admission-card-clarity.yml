@@ -1,0 +1,33 @@
+name: Build and Release UEP 0.82.61 Admission Card Clarity
+on: {push: {paths: ['release-08261.trigger']}}
+permissions: {contents: write}
+jobs:
+  build-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: |
+          $ErrorActionPreference='Stop'
+          function Run-Native([scriptblock]$c,[string]$l){&$c;if($LASTEXITCODE -ne 0){throw "$l failed: $LASTEXITCODE"}}
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          Run-Native {gh release download v0.82.60 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source} 'download'
+          Expand-Archive source/UEP-update.zip app -Force
+          $root='app/resources/app'
+          Run-Native {node scripts/patch-uep-08261-admission-card-clarity.js $root} 'renderer patch'
+          Run-Native {node --check "$root/gyomuon.js"} 'renderer syntax'
+          Run-Native {node --check "$root/electron/google-data.cjs"} 'google-data syntax'
+          Run-Native {node --check "$root/electron/main.cjs"} 'main syntax'
+          Run-Native {node scripts/test-uep-08261-admission-card-clarity.js $root} 'regression test'
+          Compress-Archive -Path app/* -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "$sha  UEP-update.zip"|Set-Content sha256.txt
+          Run-Native {gh release create v0.82.61 UEP-update.zip sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.61' --notes "UEP v0.82.61`n- 오늘의 대학 전형카드 간소화`n- 53B 대전형(D)의 대학 공식 전형분류를 수시/정시 탭과 기본 카드색의 기준으로 사용`n- 전형카드 제목의 학생부교과·학생부종합·정시 중복명 제거`n- 카드 안 수능최저 상세문구 제거, 최저 O/X 배지만 유지`n- 상세 최저는 하단 모집단위별 수능최저 영역에서만 표시`n- 지역의사제만 자격제한 중 별도 강조, 나머지 자격제한은 다른 전형 자세히 보기`n- 지원불가·지역의사제·자격제한·정시·교과·종합 의미별 카드 색 적용`n- 정시 실기는 정시 탭으로 분류`n- 0.82.60 입시DB School Read 우선조회/안전폴백 유지"} 'release'
+          $policy=Get-Content uep-policy.json -Raw|ConvertFrom-Json
+          $policy.latestVersion='0.82.61'
+          $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.61/UEP-update.zip'
+          $policy.sha256=$sha
+          $policy.message='UEP 0.82.61 · 오늘의 대학 전형카드 간소화'
+          $policy|ConvertTo-Json -Depth 10|Set-Content uep-policy.json -Encoding utf8
+          Run-Native {git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add uep-policy.json;git commit -m 'Publish UEP 0.82.61 policy';git push} 'policy push'
