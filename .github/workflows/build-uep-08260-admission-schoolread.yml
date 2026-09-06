@@ -1,0 +1,25 @@
+name: Build and Release UEP 0.82.60 Admission School Read
+on: {push: {paths: ['release-08260.trigger']}}
+permissions: {contents: write}
+jobs:
+  build-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: |
+          $ErrorActionPreference='Stop';function Run-Native([scriptblock]$c,[string]$l){&$c;if($LASTEXITCODE -ne 0){throw "$l failed: $LASTEXITCODE"}}
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          Run-Native {gh release download v0.82.59 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source} 'download'
+          Expand-Archive source/UEP-update.zip app -Force;$root='app/resources/app'
+          Run-Native {node scripts/patch-uep-08260-admission-schoolread-fallback.js $root} 'loader patch'
+          Run-Native {node --check "$root/gyomuon.js"} 'renderer syntax'
+          Run-Native {node --check "$root/electron/google-data.cjs"} 'google-data syntax'
+          Run-Native {node --check "$root/electron/main.cjs"} 'main syntax'
+          Run-Native {node scripts/test-uep-08260-admission-schoolread-fallback.js $root} 'regression test'
+          Compress-Archive -Path app/* -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower();"$sha  UEP-update.zip"|Set-Content sha256.txt
+          Run-Native {gh release create v0.82.60 UEP-update.zip sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.60' --notes "UEP v0.82.60`n- 입시DB 조회를 UEP School Read 표준 경로로 통일`n- 새 [UEP] 2028학년도 대학입시 데이터 우선 조회`n- School Read 서버가 새 입시DB를 아직 허용하지 않으면 보존 중인 기본정보 연결시트 52~58을 데이터 로더 계층에서 안전 폴백`n- 대입이해·오늘의 대학 빈 화면 방지`n- 53B Q/R/S 및 오늘의 대학 3탭 구조 유지`n- 기존 52~58은 새 입시DB 실연결 검증 완료 전까지 삭제하지 않음"} 'release'
+          $policy=Get-Content uep-policy.json -Raw|ConvertFrom-Json;$policy.latestVersion='0.82.60';$policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.60/UEP-update.zip';$policy.sha256=$sha;$policy.message='UEP 0.82.60 · 입시DB School Read 연결 안정화';$policy|ConvertTo-Json -Depth 10|Set-Content uep-policy.json -Encoding utf8
+          Run-Native {git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add uep-policy.json;git commit -m 'Publish UEP 0.82.60 policy';git push} 'policy push'
