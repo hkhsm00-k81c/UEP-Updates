@@ -1,0 +1,23 @@
+name: Build and Release UEP 0.82.56 Sheet-driven Admission Display
+on: {push: {paths: ['release-08256.trigger']}}
+permissions: {contents: write}
+jobs:
+  build-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: |
+          $ErrorActionPreference='Stop';function Run-Native([scriptblock]$c,[string]$l){&$c;if($LASTEXITCODE -ne 0){throw "$l failed: $LASTEXITCODE"}}
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          Run-Native {gh release download v0.82.55 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source} 'download'
+          Expand-Archive source/UEP-update.zip app -Force;$root='app/resources/app'
+          Run-Native {node scripts/patch-uep-08256-sheet-driven-admission-display.js $root} 'patch'
+          Run-Native {node --check "$root/gyomuon.js"} 'renderer syntax'
+          Run-Native {node scripts/test-uep-08256-sheet-driven-admission-display.js $root} 'regression test'
+          Compress-Archive -Path app/* -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower();"$sha  UEP-update.zip"|Set-Content sha256.txt
+          Run-Native {gh release create v0.82.56 UEP-update.zip sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.56' --notes "UEP v0.82.56`n- 53B UEP전형그룹 / UEP자격제한 / UEP운호고지원 운영필드를 오늘의 대학 표시 기준으로 연결`n- 교과→종합→논술 순서와 카드 구분은 시트 값을 우선 사용`n- 지원자격 제한 전형은 접기영역으로 분리`n- 운호고 구조적 지원불가 전형은 같은 접기영역 안에서 작은 상태표시만 노출`n- 운영필드가 비어있는 기존 행은 0.82.55 분류를 임시 호환값으로 사용`n- 상담포인트 자식 팝업 구조 유지"} 'release'
+          $policy=Get-Content uep-policy.json -Raw|ConvertFrom-Json;$policy.latestVersion='0.82.56';$policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.56/UEP-update.zip';$policy.sha256=$sha;$policy.message='UEP 0.82.56 · 53B 시트기반 대학전형 표시 기준 연결';$policy|ConvertTo-Json -Depth 10|Set-Content uep-policy.json -Encoding utf8
+          Run-Native {git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add uep-policy.json;git commit -m 'Publish UEP 0.82.56 policy';git push} 'policy push'
