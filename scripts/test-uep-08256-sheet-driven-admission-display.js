@@ -1,0 +1,15 @@
+const fs=require('fs'),path=require('path');
+const root=process.argv[2]||'app/resources/app';
+const g=fs.readFileSync(path.join(root,'gyomuon.js'),'utf8');
+const must=(v,m)=>{if(!v)throw new Error(m)};
+must(/APP_VERSION\s*=\s*["']0\.82\.56["']/.test(g),'version 0.82.56 missing');
+must(g.includes("row?.['UEP전형그룹']"),'UEP전형그룹 mapping missing');
+must(g.includes("row?.['UEP자격제한']"),'UEP자격제한 mapping missing');
+must(g.includes("row?.['UEP운호고지원']"),'UEP운호고지원 mapping missing');
+must(g.includes("sort(uep08256AdmissionCompare)"),'sheet-driven admission sorting missing');
+must(g.includes("!uep08256AdmissionMeta(r).restricted"),'ordinary admission split missing');
+must(g.includes("uep08256AdmissionMeta(r).restricted"),'restricted admission split missing');
+must(g.includes('운호고 지원대상 아님'),'unavailable badge missing');
+must(g.includes("const host=document.querySelector('.dashboard-admission-layer')||document.body;host.appendChild(layer);"),'counsel editor child-layer regression');
+must(g.includes("const CURRENT='0.82.56';"),'version pill current 0.82.56 missing');
+console.log('0.82.56 sheet-driven admission display test passed');
