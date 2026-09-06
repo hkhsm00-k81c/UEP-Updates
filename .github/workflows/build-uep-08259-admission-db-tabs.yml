@@ -1,0 +1,25 @@
+name: Build and Release UEP 0.82.59 Admission DB Tabs
+on: {push: {paths: ['release-08259.trigger']}}
+permissions: {contents: write}
+jobs:
+  build-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: |
+          $ErrorActionPreference='Stop';function Run-Native([scriptblock]$c,[string]$l){&$c;if($LASTEXITCODE -ne 0){throw "$l failed: $LASTEXITCODE"}}
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          Run-Native {gh release download v0.82.58 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source} 'download'
+          Expand-Archive source/UEP-update.zip app -Force;$root='app/resources/app'
+          Run-Native {node scripts/patch-uep-08259-admission-db-tabs.js $root} 'patch'
+          Run-Native {node --check "$root/gyomuon.js"} 'renderer syntax'
+          Run-Native {node --check "$root/electron/google-data.cjs"} 'google-data syntax'
+          Run-Native {node --check "$root/electron/main.cjs"} 'main syntax'
+          Run-Native {node scripts/test-uep-08259-admission-db-tabs.js $root} 'regression test'
+          Compress-Archive -Path app/* -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower();"$sha  UEP-update.zip"|Set-Content sha256.txt
+          Run-Native {gh release create v0.82.59 UEP-update.zip sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.59' --notes "UEP v0.82.59`n- 52~58 입시DB를 [UEP] 2028학년도 대학입시 데이터로 분리 연결`n- 53B A:S 로딩으로 Q/R/S 운영필드 실제 반영`n- 오늘의 대학 주요전형: 수시(교과·종합) / 수시(논술·기타) / 정시 3탭`n- 일반전형 우선, UEP상담중요도=주요 자격전형은 하단 별도 표시`n- 그 외 자격제한·운호고 지원불가 전형은 해당 탭의 다른 전형 자세히 보기`n- 기본정보 연결시트의 기존 52~58은 안전을 위해 아직 보존"} 'release'
+          $policy=Get-Content uep-policy.json -Raw|ConvertFrom-Json;$policy.latestVersion='0.82.59';$policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.59/UEP-update.zip';$policy.sha256=$sha;$policy.message='UEP 0.82.59 · 입시DB 분리 + 대학 전형 3탭';$policy|ConvertTo-Json -Depth 10|Set-Content uep-policy.json -Encoding utf8
+          Run-Native {git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add uep-policy.json;git commit -m 'Publish UEP 0.82.59 policy';git push} 'policy push'
