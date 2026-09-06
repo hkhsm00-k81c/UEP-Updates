@@ -20,7 +20,7 @@ g=g.replace(/uep08257AdmissionSupportBadge/g,'uep08258AdmissionSupportBadge');
 
 const oldTypeGate="String(r['UEP노출']??'Y').toUpperCase()!=='N'";
 must(g.includes(oldTypeGate),'legacy 53B UEP노출 gate not found');
-g=g.replace(new RegExp(oldTypeGate.replace(/[.*+?^${}()|[\\]\\]/g,'\\$&'),'g'),'uep08258AdmissionActive(r)');
+g=g.split(oldTypeGate).join('uep08258AdmissionActive(r)');
 
 const structureLine="const structures=dashboardAdmissionStructureRows().filter(r=>dashboardAdmissionNormalizeUniversity(r['대학명'])===norm);";
 must(g.includes(structureLine),'university 53B structure loader not found');
@@ -30,8 +30,7 @@ const primaryLine='  const primaryAdmissions=admissions.filter(r=>uep08258Admiss
 must(g.includes(primaryLine),'0.82.57 admission split renderer not found after helper rename');
 g=g.replace(primaryLine,"  const activeAdmissions=admissions.filter(uep08258AdmissionActive);\n  const primaryAdmissions=activeAdmissions.filter(r=>uep08258AdmissionMeta(r).primary);\n  const detailAdmissions=activeAdmissions.filter(r=>!uep08258AdmissionMeta(r).primary);");
 
-must(!g.includes("String(r['UEP노출']??'Y').toUpperCase()!=='N'"),'legacy exact-header active gate remains');
-
+must(!g.includes(oldTypeGate),'legacy exact-header active gate remains');
 g=g.replace(/const UEP_08221_RELEASE_NOTES=\[[\s\S]*?\];/,"const UEP_08221_RELEASE_NOTES=['0.82.58 · 53B 전형 운영필드 표준화','53B N열은 UEP활성(Y/N) 의미로 통일하고 기존 UEP노출 헤더도 호환','UEP활성=N인 구행·대체행은 전형 이해와 오늘의 대학 모두 제외','UEP운호고지원은 가능/불가 2값으로 단순화','UEP자격제한=Y는 지원자격 확인 배지로 표시','운호고 지원불가 전형도 활성행이면 다른 전형 자세히 보기에서 확인','교과·종합 중심 기본 전형카드 및 상담포인트 구조 유지'];");
 fs.writeFileSync(gp,g);
 console.log('patched 0.82.58 admission active/support schema');
