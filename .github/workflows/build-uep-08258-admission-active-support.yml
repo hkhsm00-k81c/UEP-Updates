@@ -1,0 +1,23 @@
+name: Build and Release UEP 0.82.58 Admission Active Support
+on: {push: {paths: ['release-08258.trigger']}}
+permissions: {contents: write}
+jobs:
+  build-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: |
+          $ErrorActionPreference='Stop';function Run-Native([scriptblock]$c,[string]$l){&$c;if($LASTEXITCODE -ne 0){throw "$l failed: $LASTEXITCODE"}}
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          Run-Native {gh release download v0.82.57 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source} 'download'
+          Expand-Archive source/UEP-update.zip app -Force;$root='app/resources/app'
+          Run-Native {node scripts/patch-uep-08258-admission-active-support.js $root} 'patch'
+          Run-Native {node --check "$root/gyomuon.js"} 'renderer syntax'
+          Run-Native {node scripts/test-uep-08258-admission-active-support.js $root} 'regression test'
+          Compress-Archive -Path app/* -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower();"$sha  UEP-update.zip"|Set-Content sha256.txt
+          Run-Native {gh release create v0.82.58 UEP-update.zip sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.58' --notes "UEP v0.82.58`n- 53B N열 의미를 UEP활성(Y/N)으로 표준화하고 기존 UEP노출 헤더도 호환`n- UEP활성=N 구행·대체행은 전형 이해와 오늘의 대학에서 제외`n- UEP운호고지원은 가능/불가로 단순화하고 개인 자격 확인은 UEP자격제한으로 분리`n- 운호고 지원불가 전형도 활성행이면 다른 전형 자세히 보기에서 확인`n- 기존 교과·종합 기본카드, 논술·실기·정시 분류, 상담포인트 구조 유지"} 'release'
+          $policy=Get-Content uep-policy.json -Raw|ConvertFrom-Json;$policy.latestVersion='0.82.58';$policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.58/UEP-update.zip';$policy.sha256=$sha;$policy.message='UEP 0.82.58 · 53B 전형 운영필드 표준화';$policy|ConvertTo-Json -Depth 10|Set-Content uep-policy.json -Encoding utf8
+          Run-Native {git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add uep-policy.json;git commit -m 'Publish UEP 0.82.58 policy';git push} 'policy push'
