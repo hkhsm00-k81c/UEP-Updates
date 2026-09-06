@@ -1,0 +1,20 @@
+const fs=require('fs'),path=require('path');
+const root=process.argv[2]||'app/resources/app';
+const g=fs.readFileSync(path.join(root,'gyomuon.js'),'utf8');
+const must=(v,m)=>{if(!v)throw new Error(m)};
+must(/APP_VERSION\s*=\s*["']0\.82\.63["']/.test(g),'version 0.82.63 missing');
+must(g.includes("r['추천/지원조건']"),'admission support condition missing');
+must(g.includes('uep-admission-support-condition'),'support condition style missing');
+must(!g.includes("<small><b>수능최저</b>"),'detailed CSAT minimum reintroduced in admission card');
+must(g.includes("[오늘의 1학년 학사 입소 현황]"),'entry report title missing');
+must(g.includes("[오늘의 1학년 학사 퇴소 현황]"),'exit report title missing');
+must(g.includes("[오늘의 1학년 학사 외출 현황]"),'outing report title missing');
+must(g.includes("groupByTime"),'time-first grouping helper missing');
+must(g.includes("who(item)+' / '+out+' → '+ret"),'student-first outing format missing');
+const toolsDir=path.join(root,'tools');
+const tools=fs.readdirSync(toolsDir).filter(n=>/UEP-DataProcessor-v1\.2\.(?:3|0).*dorm|UEP-DataProcessor-v1\.2\.3-daily-dedupe-operational-rules-fullset/.test(n));
+must(tools.length>=1,'dorm processor source missing');
+let checked=0;
+for(const name of tools){const s=fs.readFileSync(path.join(toolsDir,name),'utf8');if(!s.includes('sendTodayDormOutingMailIfNeeded_'))continue;checked++;must(s.includes("hour<15"),'15:00 mail gate missing in '+name);must(s.includes("[변경] "),'change subject marker missing in '+name);must(s.includes("학사 입소 현황"),'entry mail title missing in '+name);must(s.includes("학사 퇴소 현황"),'exit mail title missing in '+name);must(s.includes("학사 외출 현황"),'outing mail title missing in '+name);must(!s.includes("reason||'-'}`"),'reason/destination still embedded in professional mail body '+name);}
+must(checked>=1,'no dorm processor mail source checked');
+console.log('UEP 0.82.63 regression tests passed');
