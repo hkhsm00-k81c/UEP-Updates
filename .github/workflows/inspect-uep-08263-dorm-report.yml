@@ -1,0 +1,35 @@
+name: Inspect UEP 0.82.63 Dorm Reporting
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'inspect-08263-dorm.trigger'
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Invoke-WebRequest -Uri 'https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.62/UEP-update.zip' -OutFile base.zip
+          Expand-Archive base.zip -DestinationPath app -Force
+          $files = Get-ChildItem app -Recurse -File -Include *.js,*.cjs,*.json
+          $terms = @('전문사감','학사 외출','학사외출','늦은 입소','조기 퇴소','조기퇴소','오늘의 1학년 학사','메일 작성','원문 확인','복사할 원문')
+          $out = @()
+          foreach($f in $files){
+            $text = Get-Content $f.FullName -Raw -Encoding UTF8
+            foreach($term in $terms){
+              $idx = $text.IndexOf($term)
+              if($idx -ge 0){
+                $start=[Math]::Max(0,$idx-2200); $len=[Math]::Min(5200,$text.Length-$start)
+                $out += "==== $($f.FullName) :: $term ===="
+                $out += $text.Substring($start,$len)
+              }
+            }
+          }
+          $out | Set-Content inspect-08263-dorm.txt -Encoding UTF8
+      - uses: actions/upload-artifact@v4
+        with:
+          name: inspect-08263-dorm
+          path: inspect-08263-dorm.txt
