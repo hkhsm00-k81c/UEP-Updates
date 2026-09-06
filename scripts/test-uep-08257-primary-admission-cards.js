@@ -1,0 +1,16 @@
+const fs=require('fs'),path=require('path');
+const root=process.argv[2]||'app/resources/app';
+const g=fs.readFileSync(path.join(root,'gyomuon.js'),'utf8');
+const must=(v,m)=>{if(!v)throw new Error(m)};
+must(/APP_VERSION\s*=\s*["']0\.82\.57["']/.test(g),'version 0.82.57 missing');
+must(g.includes("/^(교과|종합|논술|실기|정시|기타)$/"),'expanded UEP전형그룹 values missing');
+must(g.includes("const primary=(group==='교과'||group==='종합')&&!restricted&&!unavailable;"),'primary admission rule missing');
+must(g.includes('다른 전형 자세히 보기'),'more admission disclosure missing');
+must(g.includes("if(i.group==='논술')return ' uep-admission-essay'"),'essay color class missing');
+must(g.includes("if(i.group==='정시')return ' uep-admission-regular'"),'regular admission color class missing');
+must(g.includes('.uep-uni-admission-card.uep-admission-regular'),'regular admission style missing');
+must(g.includes('지원자격 확인'),'restricted badge missing');
+must(g.includes('운호고 지원대상 아님'),'unavailable badge regression');
+must(g.includes("const host=document.querySelector('.dashboard-admission-layer')||document.body;host.appendChild(layer);"),'counsel editor child-layer regression');
+must(g.includes("const CURRENT='0.82.57';"),'version pill current 0.82.57 missing');
+console.log('0.82.57 primary admission cards test passed');
