@@ -1,0 +1,769 @@
+===== main :: fetchOperationalData @ 59434 =====
+||""), String(payload.studentNo||""), String(payload.name||""),
+    String(payload.grade||"1"), String(payload.className||payload.classNo||""), String(payload.date||""),
+    String(payload.attendanceType||"출석인정"), type, start, end,
+    String(payload.reasonText||payload.reason||""), String(payload.place||""),
+    String(payload.evidenceRequired||"N"), String(payload.evidence||"불필요"),
+    String(payload.signatureRequired||"N"), String(payload.signatureStatus||"불필요"),
+    String(payload.registrar||"UEP 직접등록"), now, String(payload.editor||"UEP"), String(payload.note||""),
+    unit, scope, String(payload.originalType||"공결"), String(payload.sourceTab||"UEP 직접등록"), String(payload.sourceRow||"")
+  ]];
+}
+
+async function saveOfficialAttendance(payload={}) {
+  const account=await readEncrypted(credentialPath());
+  if(!validateServiceAccount(account)) throw new Error("저장된 Google 서비스 계정 인증정보가 올바르지 않습니다.");
+  const token=await getSheetsToken(account);
+  const range="'30_공결기록'!A3:Z3000";
+  const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,[range]);
+  const matrix=result?.[0]?.values||[];
+  const rows=matrix.slice(1);
+  let id=String(payload.id||"").trim();
+  let sheetRow=-1;
+  if(id){
+    const pos=rows.findIndex(row=>String(row?.[0]||"").trim()===id);
+    if(pos>=0) sheetRow=pos+4;
+  }else{
+    let max=0;
+    rows.forEach(row=>{const m=String(row?.[0]||"").match(/^ATT-2026-(\\d+)$/);if(m)max=Math.max(max,Number(m[1]));});
+    id=`ATT-2026-${String(max+1).padStart(4,"0")}`;
+  }
+  const values=officialAttendanceRow(payload,id);
+  if(sheetRow>0) await updateSheetValues(token,UEP_SPREADSHEET_ID,`'30_공결기록'!A${sheetRow}:Z${sheetRow}`,values);
+  else await appendSheetValues(token,UEP_SPREADSHEET_ID,"'30_공결기록'!A:Z",values);
+  const operational=await fetchOperationalData();
+  return {ok:true,id,patch:operational.patch||{}};
+}
+
+async function deleteOfficialAttendance(id="") {
+  const key=String(id||"").trim();
+  if(!key) throw new Error("삭제할 공결 ID가 없습니다.");
+  const account=await readEncrypted(credentialPath());
+  if(!validateServiceAccount(account)) throw new Error("저장된 Google 서비스 계정 인증정보가 올바르지 않습니다.");
+  const token=await getSheetsToken(account);
+  const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,["'30_공결기록'!A3:Z3000"]);
+  const rows=(result?.[0]?.values||[]).slice(1);
+  const pos=rows.findIndex(row=>String(row?.[0]||"").trim()===key);
+  if(pos<0) throw new Error("삭제할 공결 기록을 찾지 못했습니다.");
+  const sheetRow=pos+4;
+  await clearSheetValues(token,UEP_SPREADSHEET_ID,`'30_공결기록'!A${sheetRow}:Z${sheetRow}`);
+  const operational=await fetchOperationalData();
+  return {ok:true,patch:operational.patch||{}};
+}
+
+function lateAttendanceRow(payload={}, id=""){
+  const now=new Date().toISOString();
+  return [[id,String(payload.studentId||""),String(payload.studentNo||""),String(payload.name||""),String(payload.grade||"1"),String(payload.className||payload.classNo||""),String(payload.date||""),String(payload.time||""),String(payload.reason||""),String(payload.minutes||0),String(payload.cumulativeCount||""),String(payload.cumulativeMinutes||""),String(payload.guidance||"일반"),now,String(payload.editor||"UEP"),String(payload.note||"")]];
+}
+async function saveLateAttendance(payload={}){
+  const account=await readEncrypted(credentialPath()); if(!validateServiceAccount(account)) throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+  const token=await getSheetsToken(account); const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,["'31_지각기록'!A3:P3000"]); const matrix=result?.[0]?.values||[], rows=matrix.slice(1);
+  let id=String(payload.id||"").trim(), sheetRow=-1;
+  if(id){const pos=rows.findIndex(r=>String(r?.[0]||"").trim()===id); if(pos>=0)sheetRow=pos+4;}
+  else {let max=0;rows.forEach(r=>{const mm=String(r?.[0]||"").match(/^LATE-2026-(\d+)$/);if(mm)max=Math.max(max,Number(mm[1]));});id=`LATE-2026-${String(max+1).padStart(5,"0")}`;}
+  const values=lateAttendanceRow(payload,id);
+  if(sheetRow>0)await updateSheetValues(token,UEP_SPREADSHEET_ID,`'31_지각기록'!A${sheetRow}:P${sheetRow}`,values); else await appendSheetValues(token,UEP_SPREADSHEET_ID,"'31_지각기록'!A:P",values);
+  const operational=await fetchOperationalData();return {ok:true,id,patch:operational.patch||{}};
+}
+async function deleteLateAttendance(id=""){
+  const key=String(id||"").trim(); if(!key)throw new Error("삭제할 지각 ID가 없습니다.");
+  const account=await readEncrypted(credentialPath()); if(!validateServiceAccount(account)) throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+  const token=await getSheetsToken(account); const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,["'31_지각기록'!A3:P3000"]); const rows=(result?.[0]?.values||[]).slice(1);
+  const pos=rows.findIndex(r=>String(r?.[0]||"").trim()===key); if(pos<0)throw new Error("삭제할 지각 기록을 찾지 못했습니다.");
+  await clearSheetValues(token,UEP_SPREADSHEET_ID,`'31_지각기록'!A${pos+4}:P${pos+4}`);const operational=await fetchOperationalData();return {ok:true,patch:operational.patch||{}};
+}
+
+function dormRulePriority(category=""){
+  return ({exception:50,closure:40,exam:30,vacation:25,base:20,period:10})[String(category||"")]||5;
+}
+function dormRuleRow(payload={},id,nowIso){
+  return [[
+    id,
+    String(payload.category||""),
+    String(payload.name||""),
+    String(payload.start||""),
+    String(payload.end||""),
+    String(payload.days||"전체"),
+    String(payload.effect||""),
+    String(payload.entryTime||""),
+    String(payload.exitTime||""),
+    String(payload.lateEntry||""),
+    String(payload.earlyExit||""),
+    String(payload.reason||""),
+    Number(payload.priority||dormRulePriority(payload.category)),
+    payload.active===false?"N":"Y",
+    String(payload.note||""),
+    nowIso,
+    String(payload.writer||"UEP"),
+    String(payload.source||"UEP 규칙센터"),
+    String(payload.operationState||""),
+    String(payload.actualExit||""),
+    String(payload.actualReentry||""),
+    payload.priorNightAcademyHome?"Y":"N",
+    payload.formRequired?"Y":"N",
+    payload.individualOutingAllowed?"Y":"N"
+  ]];
+}
+function dormRuleDateValue(value){
+  if(value===null||value===undefined||value==='')return '';
+  const raw=String(value).trim();
+  if(/^\d+(?:\.\d+)?$/.test(raw)){
+    const serial=Number(raw);
+    if(Number.isFinite(serial)&&serial>20000&&serial<100000){
+      const d=new Date(Date.UTC(1899,11,30)+Math.round(serial*86400000));
+      if(!Number.isNaN(d.getTime())){
+        const y=d.getUTCFullYear(),mo=String(d.getUTCMonth()+1).padStart(2,'0'),day=String(d.getUTCDate()).padStart(2,'0');
+        const hh=String(d.getUTCHours()).padStart(2,'0'),mm=String(d.getUTCMinutes()).padStart(2,'0');
+        return `${y}-${mo}-${day}T${hh}:${mm}`;
+      }
+    }
+  }
+  const mm=raw.replace(' ','T').match(/^(\d{4})-(\d{1,2})-(\d{1,2})T(\d{1,2}):(\d{2})/);
+  return mm?`${mm[1]}-${String(mm[2]).padStart(2,'0')}-${String(mm[3]).padStart(2,'0')}T${String(mm[4]).padStart(2,'0')}:${mm[5]}`:raw;
+}
+function dor
+===== main :: fetchLiveData @ 36816 =====
+t();}catch{}}
+      const suffix=[errCode,detail].filter(Boolean).join(' · ');
+      if(errCode==='invalid_client'){
+        googleOAuthPolicyCache={clientId:'',expiresAt:0};
+        await disconnectGoogleUser();
+        throw googleOAuthError('Google OAuth 토큰 교환이 거부되었습니다. UEP의 Desktop OAuth Client ID와 Google 승인 설정을 확인한 뒤 다시 연결해 주세요.','UEP_GOOGLE_USER_AUTH_REQUIRED');
+      }
+      throw googleOAuthError(`Google 토큰 교환 실패 (${response.status})${suffix?`: ${suffix}`:''}${!suffix&&raw?`: ${raw}`:''}`,'UEP_GOOGLE_OAUTH_TOKEN_FAILED');
+    }
+    const tokenPayload=await response.json();
+    if(!tokenPayload.access_token) throw googleOAuthError('Google 액세스 토큰을 받지 못했습니다.','UEP_GOOGLE_OAUTH_TOKEN_FAILED');
+    let info={};
+    try{info=await googleUserInfo(tokenPayload.access_token);}catch{}
+    let idTokenInfo={};
+    try{
+      const parts=String(tokenPayload.id_token||'').split('.');
+      if(parts.length>=2) idTokenInfo=JSON.parse(Buffer.from(parts[1].replace(/-/g,'+').replace(/_/g,'/'),'base64').toString('utf8'))||{};
+    }catch{}
+    const fallbackEmail=String(loginHint||'').trim();
+    const saved={...tokenPayload,client_id:clientId,email:String(info?.email||idTokenInfo?.email||fallbackEmail||''),sub:String(info?.sub||idTokenInfo?.sub||''),expires_at:Date.now()+Math.max(60,Number(tokenPayload.expires_in||3600))*1000,created_at:new Date().toISOString(),updated_at:new Date().toISOString()};
+    const persistResult=await saveGoogleUserOAuth(saved);
+    const verifySaved=await readGoogleUserOAuth();
+    if(!verifySaved?.access_token) throw googleOAuthError('Google 승인 토큰 저장 확인에 실패했습니다.','UEP_GOOGLE_OAUTH_PERSIST_FAILED');
+    liveDataCache=null;liveDataFetchedAt=0;
+    let syncOk=false, syncError='', syncCode='', data=null;
+    try {
+      data=await fetchLiveData({force:true});
+      syncOk=true;
+    } catch(error) {
+      syncError=String(error?.message||error||'Google 시트 조회 실패');
+      syncCode=String(error?.code||'');
+    }
+    return {ok:true,authorized:true,mode:'user_oauth',account:saved.email,sourceName:data?.sourceName||UEP_SPREADSHEET_NAME,preview:data?.summary||null,syncedAt:data?.syncedAt||'',syncOk,syncError,syncCode};
+  }finally{
+    if(timer)clearTimeout(timer);
+    try{server.close();}catch{}
+  }
+}
+async function disconnectGoogleUser(){
+  for(const file of [googleUserOAuthCanonicalPath(),googleUserOAuthCanonicalRecoveryPath(),googleUserOAuthPath(),googleUserOAuthRecoveryPath()]){
+    try{await fs.unlink(file);}catch(error){if(error?.code!=='ENOENT')throw error;}
+  }
+  liveDataCache=null;liveDataFetchedAt=0;return {ok:true};
+}
+async function getSheetsToken(credentials) {
+  const now = Math.floor(Date.now() / 1000);
+  const header = base64url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
+  const claims = base64url(JSON.stringify({
+    iss: credentials.client_email,
+    scope: "https://www.googleapis.com/auth/spreadsheets",
+    aud: credentials.token_uri,
+    iat: now,
+    exp: now + 3600,
+  }));
+  const unsigned = `${header}.${claims}`;
+  const signature = crypto.sign("RSA-SHA256", Buffer.from(unsigned), credentials.private_key).toString("base64url");
+  const body = new URLSearchParams({
+    grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+    assertion: `${unsigned}.${signature}`,
+  });
+  const response = await fetch(credentials.token_uri, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body,
+  });
+  if (!response.ok) throw new Error(`Google 인증 실패 (${response.status})`);
+  const payload = await response.json();
+  if (!payload.access_token) throw new Error("Google 인증 토큰을 받지 못했습니다.");
+  return payload.access_token;
+}
+
+async function readSheetBatch(token, spreadsheetId, ranges, attempt = 0) {
+  if(String(token||'').startsWith('UEP_SCHOOL_READ:')) return schoolReadBatchRead(spreadsheetId,ranges);
+  const url = new URL(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchGet`);
+  url.searchParams.set("majorDimension", "ROWS");
+  url.searchParams.set("valueRenderOption", "UNFORMATTED_VALUE");
+  url.searchParams.set("dateTimeRenderOption", "SERIAL_NUMBER");
+  ranges.forEach((range) => url.searchParams.append("ranges", range));
+  const response = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
+  if (!response.ok) {
+    let detail = "";
+    try { detail = (await response.json())?.error?.message || ""; } catch {}
+    if ((response.status === 429 || response.status >= 500) && attempt < 3) {
+      const retryAfter = Number(response.headers.get("retry-after") || 0);
+      const waitMs = retryAfter > 0 ? retryAfter * 1000 : 900 * Math.pow(2, attempt);
+      await new Promise(resolve => setTimeout(resolve, waitMs));
+      return readSheetBatch(token, spreadsheetId, ranges, attempt + 1);
+    }
+    throw new Error(`UEP 구글시트 읽기 실패 (${response.status})${detail ? `: ${detail}` : ""}`);
+  }
+  return (await response.json()).valueRanges || [];
+}
+
+function sheetNameFromA1Range(range="") {
+  const prefix=String(range||"").split("!")[0].trim();
+  return prefix.replace(/^'/,"").replace(/'$/,"").replace(/''/g,"'");
+}
+
+function assignValueRangesByRange(target, entries, valueRanges) {
+  const logicalBySheet=new Map(entries.map(([logicalName,range])=>[sheetNameFromA1Range(range),logicalName]));
+  const assigned=new Set();
+  (Array.isArray(valueRanges)?valueRanges:[]).forEach((item,index)=>{
+    const responseSheet=sheetNameFromA1Range(item?.range);
+    // Sheets batchGet may omit empty ranges or return them in a different order.
+    // A response that names its range must only be assigned to that sheet; index is
+    // retained solely for legacy responses that contain no range metadata at all.
+    const logicalName=responseSheet?logicalBySheet.get(responseSheet):entries[index]?.[0];
+    if(!logicalName)return;
+    target[logicalName]=item?.values||[];
+    assigned.add(logicalName);
+  });
+  entries.forEach(([logicalName])=>{if(!assigned.has(logicalName)&&!target[logicalName])target[logicalName]=[];});
+  return target;
+}
+
+async function updateSheetValues(token, spreadsheetId, range, values, attempt=0) {
+  const url = new URL(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`);
+  url.searchParams.set("valueInputOption", "USER_ENTERED");
+  const response = await fetch(url, {
+    method: "PUT",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ majorDimension: "ROWS", values }),
+  });
+  if (!response.ok) {
+    let detail=""; try{ detail=(await response.json())?.error?.message||""; }catch{}
+    if ((response.status===429 || response.status>=500) && attempt<4) {
+      const retryAfter=Number(response.headers.get("retry-after")||0);
+      const waitMs=retryAfter>0?retryAfter*1000:1000*Math.pow(2,attempt);
+      await new Promise(resolve=>setTimeout(resolve,wait
+===== google :: 30_야자출결_정규화 @ 21496 =====
+외출일자", "신청일자", "운영일", "일자", "날짜", "적용일자")),
+        className: enteredClass || classNumberSafe(master?.className),
+        number: String(valueByHeader(row, "번호", "출석번호") || master?.number || "").replace(/\.0$/, ""),
+        name: enteredName || String(master?.name || ""),
+        category: category || (operation === "귀가형" || /귀가|퇴소/.test(`${operation} ${category}`) ? "퇴소" : (operation === "입소형" ? "늦은 입소" : "외출")),
+        outTime: localTime(valueByHeader(row, "외출시간", "출발예정시간", "출발시간", "외출예정시간")),
+        returnTime: /귀가|퇴소/.test(`${operation} ${category}`)
+          ? localTime(valueByHeader(row, "자택도착예정시간", "귀가예정시간", "도착예정시간"))
+          : localTime(valueByHeader(row, "복귀예정시간", "귀사예정시간", "복귀시간", "귀사시간")),
+        reason: String(valueByHeader(row, "사유", "외출사유", "신청사유") || "").trim(),
+        destination: String(valueByHeader(row, "목적지", "외출목적지", "방문장소") || "").trim(),
+        guardian: String(valueByHeader(row, "보호자확인", "보호자 동의", "보호자확인여부") || "").trim(),
+        note: String(valueByHeader(row, "비고", "메모") || "").trim(),
+        confirmed: String(valueByHeader(row, "승인자", "확인자", "담당교사") || "").trim(),
+        status: String(valueByHeader(row, "처리상태", "자동처리상태", "UEP전송상태", "상태") || "예정").trim(),
+        operationPeriod: String(valueByHeader(row, "운영기간") || "").trim(),
+        appliedRuleId: String(valueByHeader(row, "적용규칙ID") || "").trim(),
+        ruleEffect: String(valueByHeader(row, "규칙효과") || "").trim(),
+        operationIncluded: String(valueByHeader(row, "운영포함여부") || "Y").trim().toUpperCase() !== "N",
+        ruleJudgement: String(valueByHeader(row, "규칙판정") || "").trim(),
+        ruleReason: String(valueByHeader(row, "판정사유") || "").trim(),
+      };
+    })
+    .filter((item) => item && item.date && item.name);
+
+  const nightRows = rowsFrom("30_야자출결_정규화").filter((row) => {
+    const sid = String(row["학생ID"] || "").trim();
+    const sno = String(row["학번"] || "").replace(/\.0$/, "");
+    const isFinal = !String(row["최종여부"] || "").trim() || String(row["최종여부"] || "").trim().toUpperCase() === "Y";
+    const isMatched = !String(row["매칭상태"] || "").trim() || String(row["매칭상태"] || "").trim() === "정상";
+    return isFinal && isMatched && (studentIds.has(sid) || studentByNo.has(sno));
+  });
+  const mappedNightRows = nightRows.map((row, index) => {
+    const sno=String(row["학번"] || "").replace(/\.0$/, "");
+    const master=studentById.get(String(row["학생ID"]||"").trim())||studentByNo.get(sno)||{};
+    return {
+      id: String(row["기록ID"] || `night-${index}`).trim(),
+      studentId: String(row["학생ID"] || master.id || "").trim(),
+      studentNo: sno || String(master?.studentNo || ""),
+      name: String(row["학생명"] || master.name || "").trim(),
+      className: classNumberSafe(master.className || (sno.length>=2?sno.slice(1,2):"")),
+      date: localDate(row["운영일"]),
+      time: String(row["시간대"] || "").trim(),
+      type: "야자",
+      affiliation: "",
+      detail: [row["요일"], row["시간대"], row["입력경로"]].filter(Boolean).join(" · "),
+      result: "출석",
+      inputPath: String(row["입력경로"] || "").trim(),
+      submittedAt: String(row["제출일시"] || "").trim(),
+    };
+  });
+  // 야자출결은 학생응답 기반 데이터이므로 데이터 처리시트의 30_야자출결_정규화만 사용합니다.
+  // 기본정보 연결시트의 과거 32번 탭은 더 이상 UEP 조회 원본으로 사용하지 않습니다.
+  const allMappedNightRows = mappedNightRows.slice();
+
+  const isAfterSchool = (row) => /방과후|야간심화(?:모의고사)?|야간모의|방학/.test(`${row.type || ""} ${row.programTitle || ""} ${row.affiliation || ""}`);
+  let afterSchoolAttendance = mappedNightRows.filter(isAfterSchool);
+
+  const commonMasters = rowsFrom("09_공통활동마스터").filter((row) => !/종료|취소|비활성|N/i.test(String(row["운영상태"] || row["상태"] || "")));
+  const selectedMasters = rowsFrom("10_선택활동마스터").filter((row) => !/종료|취소|비활성|N/i.test(String(row["운영상태"] || row["상태"] || "")));
+  const afterSchoolMasters = rowsFrom("11_방과후학교").filter((row) => {
+    const status = String(row["운영상태"] || row["상태"] || "").trim();
+    // "운영완료"는 정상 강좌다. 정확한 비활성 상태만 제외한다.
+    return !/^(종료|폐강|비활성|N)$/i.test(status);
+  });
+  const sessionRows = rowsFrom("12_차시일정")
+    .filter((row) => (row["프로그램ID"] || row["강좌ID"]) && (row["실제수업일"] || row["운영일자"] || row["예정일"]))
+    .map((row) => ({
+      ...row,
+      __programId: String(row["프로그램ID"] || row["강좌ID"] || "").trim().replace(/^CRS-/, ""),
+      __date: localDate(row["실제수업일"] || row["운영일자"] || row["예정일"]),
+      __status: String(row["운영상태"] || "예정").trim(),
+    }));
+  // 13_출석부는 방과후·야간심화의 차시 출석 전용입니다.
+  const rosterRows = rowsFrom("13_출석부").filter((row) => {
+    const programId = row["프로그램ID"] || row["강좌ID"];
+    const state = String(row["참여상태"] || row["등록상태"] || row["신청상태"] || "참여");
+    return programId && !/취소|종료|제외|N/i.test(state);
+  });
+  // 선택활동의 최종 참여학생은 16_프로그램출석실적만 사용합니다.
+  const selectedParticipationRows = rowsFrom("16_프로그램출석실적").filter((row) => {
+    const programId = String(row["프로그램ID"] || "").trim();
+    const state = String(row["참여상태"] || "참여").trim();
+    return programId && !/취소|종료|제외|미참여|N/i.test(state);
+  });
+  const selectedParticipationByProgram = selectedParticipationRows.reduce((map,row)=>{
+    const key=String(row["프로그램ID"]||"").trim();
+    if(!map.has(key))map.set(key,[]);
+    map.get(key).push(row);
+    return map;
+  },new Map());
+  const rosterByProgram = rosterRows.reduce((map, row) => {
+    const key = String(row["프로그램ID"] || row["강좌ID"] || "").trim().replace(/^CRS-/, "");
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(row);
+    return map;
+  }, new Map());
+  const rosterBySession = rosterRows.reduce((map, row) => {
+    const key = String(row["차시ID"] || "").trim();
+    if (!key) return map;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(row);
+    return map;
+  }, new Map());
+  const truthyFlag = (value) => /^(Y|YES|TRUE|1|사용|적용)$/i.test(String(value || "").trim());
+  const selectedParticipantRows = (programId) => {
+    const sourceRows=selectedParticipationByProgram.get(String(programId||"").trim())||[];
+    return sourceRows.map((row)=>{
+      const enteredId=String(row["학생ID"]||"").trim();
+      const enteredNo=String(row["학번"]||"").replace(/\.0$/,"").trim();
+      const master=studentById.get(enteredId)||studentByNo.get(enteredNo)||null;
+      return {
+        studentId:enteredId||String(master?.id||""),
+        studentNo:enteredNo||String(master?.studentNo||""),
+        name:String(row["성명"]||row["학생명"]||master?.name||"").trim(),
+        className:String(row["반"]||master?.className||"").trim(),
+        number:String(row["번호"]||master?.number||"").trim(),
+        attendance:String(row["출석상태"]||"").trim(),
+        participation:String(row["참여상태"]||"참여").trim(),
+        result:String(row["참여상태"]||"참여").trim(),
+        checkMethod:String(row["확인방식"]||"").trim(),
+        source:"16_프로그램출석실적",
+      };
+    });
+  };
+  const participantRows = (programId, sessionId = "") => {
+    const normalizedProgramId = String(programId || "").replace(/^CRS-/, "");
+    const sessionSpecif
+===== google :: nightAttendance @ 46765 =====
+edAt:"", linkedFromAfterSchool:true,
+        };
+        const existingIndex=allMappedNightRows.findIndex(row=>nightRowKey(row.date,row.time,row.studentId,row.studentNo)===key);
+        if(existingIndex>=0) allMappedNightRows.splice(existingIndex,1,programRow);
+        else allMappedNightRows.push(programRow);
+        existingNightKeys.add(key);
+      });
+    });
+  });
+
+  allMappedNightRows.forEach((row) => {
+    if (isAfterSchool(row)) return;
+    const program = connectedPrograms.find(item => item.date === row.date && programOverlaps(item,row) && (item.students || []).some(student => String(student.studentId || "") === String(row.studentId || "") || String(student.studentNo || "") === String(row.studentNo || "")));
+    if (!program) return;
+    const participant = (program.students || []).find(student => String(student.studentId || "") === String(row.studentId || "") || String(student.studentNo || "") === String(row.studentNo || "")) || {};
+    const status = String(participant.result || "대상");
+    const confirmed = /출석|지각|공결|정상|참여|입실/.test(status) || (!participant.attendance && /참여|등록/.test(String(participant.participation||"")));
+    row.originalResult = row.result;
+    row.result = confirmed ? "프로그램 인정" : "프로그램 확인";
+    row.recognizedByProgram = confirmed;
+    row.programPending = !confirmed;
+    row.programTitle = program.actualTitle || program.title;
+    row.programId = program.id || "";
+    row.programKind = program.kind;
+    row.type = program.kind === "after" ? "방과후학교" : (program.type || "프로그램");
+    row.affiliation = row.programTitle;
+    row.detail = [row.programTitle, program.time, program.place].filter(Boolean).join(" · ");
+  });
+  // 방과후 기록도 월간 야자표에서는 상태 표시가 필요하므로 제거하지 않습니다.
+  // 결석·미대상 기록은 화면 판정 단계에서 '기록 없음'으로 처리됩니다.
+  const nightAttendance = allMappedNightRows;
+  afterSchoolAttendance = nightAttendance.filter(row => row.recognizedByProgram || isAfterSchool(row));
+  const attendance = nightAttendance.slice(-500).reverse();
+  const attended = nightRows.filter((row) =>
+    String(row["출결"] || row["입실상태"] || "").includes("출석"),
+  ).length;
+  const outsideQr = nightRows.filter((row) =>
+    String(row["출결"] || "").includes("명단외"),
+  ).length;
+  // v0.69.2: 공결은 순수 출결 데이터로서 기본정보 연결시트의 30_공결기록만 사용합니다.
+  const officialRows = rowsFrom("30_공식출결기록")
+    .map((row, index) => ({
+      id: String(row["출결ID"] || `official-${index}`).trim(),
+      studentId: String(row["학생ID"] || "").trim(),
+      studentNo: String(row["학번"] || "").replace(/\.0$/, ""),
+      name: String(row["성명"] || "").trim(),
+      className: String(row["반"] || "").replace(/\.0$/, ""),
+      date: localDate(row["일자"]),
+      attendanceType: String(row["출결구분"] || "출석인정").trim(),
+      detailType: String(row["세부구분"] || "결석").trim(),
+      type: [row["출결구분"], row["세부구분"]].filter(Boolean).join(" · ") || "공결",
+      startPeriod: String(row["시작교시"] || "").replace(/\.0$/, ""),
+      endPeriod: String(row["종료교시"] || "").replace(/\.0$/, ""),
+      period: [row["시작교시"], row["종료교시"]].filter(Boolean).join("~") || String(row["인정범위"] || "종일").trim(),
+      reasonText: String(row["사유"] || "").trim(),
+      place: String(row["장소"] || "").trim(),
+      reason: [row["사유"], row["장소"]].filter(Boolean).join(" · "),
+      evidenceRequired: String(row["증빙필요"] || "N").trim(),
+      evidence: String(row["증빙상태"] || "").trim(),
+      signatureRequired: String(row["학생서명필요"] || "N").trim(),
+      signatureStatus: String(row["학생서명상태"] || "").trim(),
+      unit: String(row["출결단위"] || "일일").trim(),
+      scope: String(row["인정범위"] || "하루 전체").trim(),
+      originalType: String(row["원본구분"] || "공결").trim(),
+      result: String(row["증빙상태"] || "확인").trim(),
+      sourceTab: String(row["원본탭"] || "30_공결기록").trim(),
+      sourceSpreadsheet: "[UEP] 2026 운호고 기본정보 연결시트",
+      sourceRow: String(row["원본행"] || "").trim(),
+      note: String(row["비고"] || "").trim(),
+    }))
+    .filter((row) => row.studentNo && row.name && row.date);
+  const lateRows = rowsFrom("31_지각기록")
+    .filter((row) => studentIds.has(String(row["학생ID"] || "").trim()))
+    .map((row, index) => ({
+      id: String(row["지각ID"] || `late-${index}`).trim(),
+      studentId: String(row["학생ID"] || "").trim(),
+      studentNo: String(row["학번"] || "").replace(/\.0$/, ""),
+      name: String(row["성명"] || "").trim(),
+      className: String(row["반"] || "").replace(/\.0$/, ""),
+      date: localDate(row["제출일자"]),
+      time: localTime(row["제출시각"]),
+      reason: String(row["사유"] || "").trim(),
+      minutes: Number(row["지각시간분"] || 0),
+      cumulativeCount: Number(row["누적횟수"] || 0),
+      cumulativeMinutes: Number(row["누적지각시간분"] || 0),
+      guidance: String(row["지도상태"] || "일반").trim(),
+    }))
+    .filter((row) => row.studentNo && row.name);
+  const internalScoreRows = rowsFrom("50_내신DB")
+    .filter((row) => studentIds.has(String(row["학생ID"] || "").trim()))
+    .map((row, index) => ({
+      id: String(row["내신성적ID"] || `grade-${index}`).trim(),
+      studentId: String(row["학생ID"] || "").trim(),
+      studentNo: String(row["학번"] || "").replace(/\.0$/, ""),
+      name: String(row["성명"] || "").trim(),
+      schoolYear: String(row["학년도"] || "").replace(/\.0$/, ""),
+      semester: String(row["학기"] || "").trim(),
+      exam: String(row["고사구분"] || "").trim(),
+      subject: String(row["과목명"] || "").trim(),
+      rawScore: row["원점수"] ?? "",
+      standardScore: "",
+      percentile: "",
+      level: row["등급"] ?? "",
+      rank: row["석차"] ?? "",
+      enrollment: row["수강자수"] ?? "",
+      achievement: String(row["성취도"] || "").trim(),
+      source: "50_내신DB",
+      scoreType: "내신",
+    }))
+    .filter((row) => row.studentNo && row.exam && row.subject);
+  const mockScoreRows = rowsFrom("51_모의고사DB")
+    .map((row) => {
+      const enteredId = String(valueByHeader(row, "학생ID", "학생 ID") || "").trim();
+      const enteredNo = String(valueByHeader(row, "학번", "학생학번") || "").replace(/\.0$/, "").trim();
+      const enteredName = String(valueByHeader(row, "성명", "이름", "학생명") || "").trim();
+      const enteredClass = classNumberSafe(valueByHeader(row, "반", "학급", "학급반"));
+      const master = studentById.get(enteredId) || studentByNo.get(enteredNo) || studentByNameClass.get(`${enteredName}|${enteredClass}`) || null;
+      return master ? { row, master, enteredId, enteredNo, enteredName } : null;
+    })
+    .filter(Boolean)
+    .flatMap(({ row, master, enteredId, enteredNo, enteredName }, index) => {
+      const base = {
+        id: String(valueByHeader(row, "모의성적ID", "모의 성적 ID", "성적ID", "기록ID") || `mock-${index}`).trim(),
+        studentId: enteredId || String(master?.id || ""),
+        studentNo: enteredNo || String(master?.studentNo || ""),
+        name: enteredName || String(master?.name || ""),
+        schoolYear: String(valueByHeader(row, "시험년도", "학년도") || "").replace(/\.0$/, ""),
+        semester: "",
+        exam: String(valueByHeader(row, "시험명", "고사명") || `${valueByHeader
+===== renderer :: dashboardNightAttendanceRows @ 749184 =====
+ata-reference="night-supervisor">빠른열기 · 야자감독 전체 보기</button></div>`;
+  $("#drawer").classList.remove("hidden");$("#drawerBackdrop").classList.remove("hidden");
+  $("#drawerBody [data-reference='night-supervisor']")?.addEventListener("click",()=>openReferenceDrawer("night-supervisor"));
+}
+
+function dashboardDutyBadgesMarkup(){
+  const lunch=dashboardDutyStatus("lunch");
+  const night=dashboardDutyStatus("night");
+  const badge=(kind,title,status,icon,reference)=>`<button class="uep-duty-badge ${status.state}" data-reference="${reference}" data-duty-kind="${kind}" data-quick-kind="lookup" title="${title} 상세 확인"><i>${icon}</i><span>${title}</span><b>${status.label}</b>${status.detail?`<small>${escapeHtml(status.detail)}</small>`:""}</button>`;
+  return `<div class="uep-duty-badges">${badge("lunch","급식지도",lunch,"♨","lunch-supervisor-today")}${badge("night","야자감독",night,"◷","night-supervisor-today")}${dashboardStudentStatusCompactMarkup()}</div>`;
+}
+
+function timetableClassColorKey(room){
+  const match=String(room||"").match(/(?:^|\b)([123])-?(\d{1,2})(?:\b|$)/);
+  if(!match)return "";
+  return `${match[1]}-${Number(match[2])}`;
+}
+function timetableClassColorClass(room){
+  const key=timetableClassColorKey(room);
+  if(!key)return "";
+  let hash=0; for(const ch of key)hash=(hash*31+ch.charCodeAt(0))>>>0;
+  return `class-color-${hash%9}`;
+}
+
+
+let dashboardTimetableMode="";
+let studentTimetableSelectedId="";
+function dashboardTimetableAutoMode(){
+  if(dashboardTimetableMode)return dashboardTimetableMode;
+  const now=new Date(),minute=now.getHours()*60+now.getMinutes();
+  const end=(now.getDay()===3)?(14*60+30):(16*60+30);
+  return minute>=end?"night":"day";
+}
+function dashboardNightWeekDates(){
+  return timetableMasterWeekDates(dashboardWeekDate||dateKey(new Date()));
+}
+function dashboardNightAttendanceRows(dayKey,slot){
+  return (readonlyCache?.nightAttendance||readonlyCache?.attendance||[]).filter(row=>{
+    const key=String(row.date||row.day||"").slice(0,10);
+    return key===dayKey&&nightSlotName(row)===slot&&nightRecordIsAttendance(row);
+  });
+}
+function dashboardAfterProgramsForDay(dayKey){
+  // 일정 표시는 강좌 마스터가 아니라 실제 차시만 사용한다.
+  // afterSchoolProgramGroups()가 12_차시일정/실제 일정과 과거 출결 fallback을 단일화한다.
+  const canonical=typeof afterSchoolProgramGroups==="function"?afterSchoolProgramGroups():[];
+  const seen=new Set();
+  return canonical.filter(program=>{
+    if(!program||program.kind!=="after"||program.isCourseMaster) return false;
+    const pday=String(program.date||program.sessionDate||program.operationDate||"").slice(0,10);
+    if(pday!==dayKey||!programHasNightStudyImpact(program)||/취소|휴강|결강|폐강|미운영/.test(String(program.status||program.operationState||program.sessionStatus||""))) return false;
+    const session=String(program.sessionId||"").trim();
+    const course=String(program.courseId||program.programId||program.id||"").replace(/^after-(?:course|master|session)-/,"").trim();
+    const slot=typeof dashboardProgramNightSlot==="function"?dashboardProgramNightSlot(program):String(program.time||"");
+    const title=String(program.actualTitle||program.title||program.type||"").replace(/\s/g,"").trim();
+    const key=session?`session|${session}`:[course,pday,slot,title].join("|");
+    if(seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+function dashboardProgramSessionLabel(program){
+  const raw=String(program?.sessionNo||program?.sourceSessionNo||"").trim();
+  if(!raw) return "";
+  const no=raw.replace(/차시$/,"").trim();
+  return no?`${no}차시`:"";
+}
+function dashboardProgramNightSlot(program){
+  const text=`${program.afterType||""} ${program.type||""} ${program.title||""} ${program.time||""}`;
+  if(/야간심화/.test(text)){
+    const m=String(program.time||"").match(/(\d{1,2}):(\d{2})/); const minute=m?Number(m[1])*60+Number(m[2]):0;
+    return minute>=20*60+20?"야자2":"야자1";
+  }
+  return "오후자습";
+}
+function dashboardNightWeekMarkup(){
+  const dates=dashboardNightWeekDates(),days=["월","화","수","목","금"],slots=[
+    {key:"오후자습",label:"오후자습",time:schoolHourRange("오후자습")||"17:00~18:00"},
+    {key:"야자1",label:"야자1",time:schoolHourRange("야자1")||"19:00~20:10"},
+    {key:"야자2",label:"야자2",time:schoolHourRange("야자2")||"20:20~21:30"}
+  ];
+  const cells=[];
+  slots.forEach(slot=>{
+    cells.push(`<div class="dashboard-night-period"><b>${escapeHtml(slot.label)}</b><small>${escapeHtml(slot.time)}</small></div>`);
+    dates.forEach((date,i)=>{
+      const key=dateKey(date),isWed=i===2,holiday=attendanceIsSchoolHoliday(key);
+      if(holiday){cells.push(`<div class="dashboard-night-cell closed holiday"><b>미운영</b><small>공휴일</small></div>`);return;}
+      if(isWed){cells.push(`<div class="dashboard-night-cell closed"><b>-</b><small>야간 미운영</small></div>`);return;}
+      const rows=dashboardNightAttendanceRows(key,slot.key),students=new Set(rows.map(attendanceStudentKey).filter(Boolean));
+      const programs=dashboardAfterProgramsForDay(key).filter(p=>dashboardProgramNightSlot(p)===slot.key);
+      const programCards=programs.map(p=>{const kind=/야간심화/.test(`${p.afterType||""} ${p.title||""}`)?"야간심화":"방과후";const sessionLabel=dashboardProgramSessionLabel(p);return `<button class="dashboard-night-program-chip" data-dashboard-night-program="${escapeHtml(p.id||p.programId||"")}" data-dashboard-night-program-day="${key}"><b>${escapeHtml([kind,sessionLabel].filter(Boolean).join(" "))}</b><span>${escapeHtml(p.actualTitle||p.title||"프로그램")}</span></button>`;}).join("");
+      cells.push(`<div class="dashboard-night-cell ${students.size||programs.length?'active':'empty'}"><button class="dashboard-night-roster" data-dashboard-night-day="${key}" data-dashboard-night-slot="${escapeHtml(slot.key)}"><b>${students.size?`${students.size}명`:'-'}</b><small>${students.size?'자습인원 보기':'자습 자료 없음'}</small></button>${programCards}</div>`);
+    });
+  });
+  return `<div class="dashboard-night-week"><div class="dashboard-night-corner">시간대</div>${days.map((d,i)=>`<div class="dashboard-night-head"><b>${d}</b><small>${dates[i]?`${dates[i].getMonth()+1}/${dates[i].getDate()}`:""}</small></div>`).join("")}${cells.join("")}</div>`;
+}
+function dashboardTimetableHeaderControlsMarkup(){
+  const mode=dashboardTimetableAutoMode();
+  const dates=dashboardNightWeekDates(),first=dates[0],last=dates[4];
+  const range=first&&last?`${first.getMonth()+1}/${first.getDate()}~${last.getMonth()+1}/${last.getDate()}`:"이번 주";
+  return `<nav class="dashboard-timetable-header-controls"><button class="${mode==='day'?'active':''}" data-dashboard-timetable-mode="day">정규시간</button><button class="${mode==='night'?'active':''}" data-dashboard-timetable-mode="night">야간시간</button><span class="dashboard-tt-week-nav"><button data-dashboard-tt-week-shift="-1" aria-label="이전 주">‹</button><b>${range}</b><button data-dashboard-tt-week-shift="1" aria-label="다음 주">›</button></span></nav>`;
+}
+function dashboardTimetablePanelMarkup(){
+  const mode=dashboardTimetableAutoMode();
+  return mode==='night'?dashboardNightWeekMarkup():dashboardPersonalWeekMarkup(
+===== renderer :: fetchOperationalData @ -1 =====
+===== renderer :: operationalSyncedAt @ 46182 =====
+P 학교 데이터 자동 갱신 실패');
+    }
+    const cached=await window.schoolBoard.readReadonlyCache();
+    if(!cached?.ok) throw new Error(cached?.reason||'UEP 학교 데이터를 읽지 못했습니다.');
+    readonlyCache=uep08123NormalizeReadonlyCache(cached.data);
+    googleConnectionError='';
+    if(typeof studentBadgeCache!=='undefined'&&studentBadgeCache?.clear) studentBadgeCache.clear();
+    updateDormOutingCount();
+    updateTopSyncStatus();
+    if(rerender && !setupWizardActive){
+      const scrollY=window.scrollY;
+      render(state.activePage||'dashboard');
+      requestAnimationFrame(()=>window.scrollTo(0,scrollY));
+    }
+    return true;
+  } catch(error) {
+    googleConnectionError=error?.message||'UEP 학교 데이터 자동 갱신 실패';
+    updateTopSyncStatus();
+    return false;
+  }
+  })();
+  try{return await readonlyRefreshInFlight;}finally{readonlyRefreshInFlight=null;}
+}
+const OPERATIONAL_RENDER_PAGES08172=new Set(['dashboard','attendance','students','alerts','work','duties','settings']);
+function operationalPageNeedsRender08172(page){return OPERATIONAL_RENDER_PAGES08172.has(String(page||''));}
+let operationalRefreshInFlight=null;
+async function refreshOperationalCacheSilently({rerender=true}={}){
+  if(operationalRefreshInFlight)return operationalRefreshInFlight;
+  if(!window.schoolBoard?.previewOperationalSync)return refreshReadonlyCacheSilently({force:true,rerender});
+  operationalRefreshInFlight=(async()=>{
+    if(!googleConnectionStatus?.ok)return false;
+    try{
+      const result=await window.schoolBoard.previewOperationalSync();
+      if(result?.requiresFullSync)return refreshReadonlyCacheSilently({force:true,rerender});
+      if(!result?.ok)throw new Error(result?.reason||'UEP 운영자료 갱신 실패');
+      if(result.patch&&typeof result.patch==='object')readonlyCache={...(readonlyCache||{}),...result.patch,operationalSyncedAt:result.operationalSyncedAt||result.syncedAt||new Date().toISOString()};
+      googleConnectionError='';updateTopSyncStatus();updateDormOutingCount();
+      if(rerender&&state.activePage&&operationalPageNeedsRender08172(state.activePage))render(state.activePage);
+      return true;
+    }catch(error){googleConnectionError=error?.message||String(error);updateTopSyncStatus();return false;}
+  })();
+  try{return await operationalRefreshInFlight;}finally{operationalRefreshInFlight=null;}
+}
+function startReadonlyAutoRefresh(){
+  if(readonlyAutoRefreshTimer) clearInterval(readonlyAutoRefreshTimer);
+  if(!googleConnectionStatus?.ok) return;
+  readonlyAutoRefreshTimer=setInterval(()=>{
+    if(document.hidden) return;
+    readonlyAutoRefreshCycle+=1;
+    const fullSyncedAt=readonlyCache?.syncedAt?new Date(readonlyCache.syncedAt).getTime():0;
+    const fullAge=fullSyncedAt?Date.now()-fullSyncedAt:Number.POSITIVE_INFINITY;
+    const needsFull=!fullSyncedAt||fullAge>=READONLY_FULL_REFRESH_MAX_AGE_MS||readonlyAutoRefreshCycle%6===0;
+    if(needsFull){
+      const jitter=Math.floor(Math.random()*45000);
+      setTimeout(()=>{if(!document.hidden)refreshReadonlyCacheSilently({force:true,rerender:true});},jitter);
+      return;
+    }
+    refreshOperationalCacheSilently({rerender:true});
+  },READONLY_AUTO_REFRESH_MS);
+}
+
+function updateTopSyncStatus() {
+  const button = $("#syncButton");
+  if (!button) return;
+  button.classList.remove("good", "warn", "bad");
+  const label = button.querySelector("span");
+  if (googleConnectionError) {
+    button.classList.add("bad");
+    if (label) label.textContent = "구글시트 오류";
+    button.title = googleConnectionError;
+    return;
+  }
+  if (readonlyCache?.students?.length && neisData?.ok && !neisData.offline) {
+    button.classList.add("good");
+    if (label) label.textContent = "동기화 정상";
+    button.title = "UEP 구글시트와 NEIS 자료가 정상 연결되었습니다.";
+    return;
+  }
+  if (readonlyCache?.students?.length) {
+    button.classList.add("warn");
+    if (label) label.textContent = neisData?.offline ? "NEIS 저장자료" : "NEIS 연결 대기";
+    button.title = neisError || "UEP 구글시트는 연결되었고 NEIS 자료를 확인 중입니다.";
+    return;
+  }
+  if (googleConnectionStatus?.ok) {
+    button.classList.add("bad");
+    if (label) label.textContent = "시트 권한 확인";
+    button.title = googleConnectionError || "서비스 계정 이메일의 구글시트 공유 권한을 확인하세요.";
+    return;
+  }
+  button.classList.add("warn");
+  if (label) label.textContent = "인증 필요";
+  button.title = "교사 이름·이메일 로그인과 기기승인 상태를 확인하세요.";
+}
+
+async function loadNeisDashboard(force = false, requestedDate = "") {
+  if (!window.schoolBoard?.loadNeisDashboard) {
+    neisError = "이 실행환경에서는 NEIS 연결 기능을 사용할 수 없습니다.";
+    updateTopSyncStatus();
+    return;
+  }
+  if (neisLoading) return;
+  neisLoading = true;
+  if (state.activePage === "dashboard" || state.activePage === "timetable" || state.activePage === "settings") render(state.activePage);
+  const options = {
+    schoolName: state.settings.neis.schoolName,
+    officeCode: state.settings.neis.officeCode,
+    schoolCode: state.settings.neis.schoolCode,
+    grade: state.settings.neis.grade,
+    classNo: state.settings.neis.classNo,
+    date: requestedDate || dateKey(new Date()),
+    useApiKey: Boolean(state.settings.neis.useApiKey),
+    comciganSchoolCode: state.settings.neis.comciganSchoolCode || "69092",
+    force,
+  };
+  try {
+    const result = await window.schoolBoard.loadNeisDashboard(options);
+    if (!result?.ok) throw new Error(result?.reason || "NEIS 자료를 불러오지 못했습니다.");
+    neisData = result;
+    neisError = result.offline ? result.staleReason || "실시간 연결 실패로 마지막 저장자료를 표시합니다." : "";
+    if (result.school) {
+      state.settings.neis.schoolName = result.school.schoolName || state.settings.neis.schoolName;
+      state.settings.neis.officeCode = result.school.officeCode || state.settings.neis.officeCode;
+      state.settings.neis.schoolCode = result.school.schoolCode || state.settings.neis.schoolCode;
+      await save();
+    }
+  } catch (error) {
+    neisError = error?.message || String(error);
+    if (!neisData?.ok) neisData = null;
+  } finally {
+    neisLoading = false;
+    updateTopSyncStatus();
+    if (["dashboard", "timetable", "settings"].includes(state.activePage)) render(state.activePage);
+  }
+}
+
+function toggleDashboardEditing() {
+  state.settings.layoutLocked = !state.settings.layoutLocked;
+  save();
+  render("dashboard");
+  toast(state.settings.layoutLocked ? "대시보드 배치를 저장하고 잠갔습니다." : "위젯을 끌어서 순서를 바꾸고 크기를 조절하세요.");
+}
+
+function openWidgetManager() {
+  const labels = { timetable: "개인 시간표", programs: "오늘의 프로그램", weather: "시계·날씨", calendar: "학교 캘린더", operations: "오늘의 업무·공지" };
+  $("#drawerKicker").textContent = "DASHBOARD WIDGETS";
+  $("#drawerTitle").textContent = "대시보드 위젯 관리";
+  $("#drawerBody").innerHTML = `<div class="widget-manager-list">${(state.settings.dashboardOrder || []).map((key) => { const setting = state.settings.widgetSettings[key] || {}; return `<div><span><b>${labels[key] || key}</b><small>${setting.visible === false ? "숨김" : `표시 · ${setting.width || "auto"}`}</small></span><button data-widget-toggle="${key}">${setting.visible === false ? "추가" : "숨김"}</button><button data-widget-settings="${key}">설정</button></div>`; 
