@@ -3,8 +3,8 @@ const root=process.argv[2];if(!root)throw new Error('app root required');
 const gp=path.join(root,'gyomuon.js'),mp=path.join(root,'electron','main.cjs'),pp=path.join(root,'package.json'),lp=path.join(root,'package-lock.json');
 let g=fs.readFileSync(gp,'utf8'),m=fs.readFileSync(mp,'utf8');
 const must=(x,msg)=>{if(!x)throw new Error(msg)};
-must(g.includes('0.82.73'),'expected renderer 0.82.73');must(m.includes('0.82.73'),'expected main 0.82.73');
-g=g.replaceAll('0.82.73','0.82.74');m=m.replaceAll('0.82.73','0.82.74');
+must(g.includes('0.82.73'),'expected renderer 0.82.73');
+g=g.replaceAll('0.82.73','0.82.74');
 for(const p of [pp,lp])if(fs.existsSync(p)){let x=fs.readFileSync(p,'utf8').replaceAll('0.82.73','0.82.74');fs.writeFileSync(p,x,'utf8');}
 
 // 1) Staged loader: backend readonly sync is a full data refresh, so never run it once per pseudo-stage.
@@ -42,8 +42,6 @@ async function uep08250StartBackgroundStages(){
   if(UEP_08250_LOAD.running)return;
   UEP_08250_LOAD.running=true;uep08250Emit();
   try{
-    // readReadonlyCache at login already returns the complete cached dataset when available.
-    // Do not force two identical full synchronizations for academic/admission pseudo-stages.
     if(uep08274AdmissionRowsReady()){UEP_08250_LOAD.academic='ready';UEP_08250_LOAD.admission='ready';uep08250Emit();return;}
     await uep08250RefreshStage('admission');
   }finally{UEP_08250_LOAD.running=false;uep08250Emit();}
