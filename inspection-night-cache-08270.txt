@@ -1,0 +1,358 @@
+UEP 0.82.70 night cache occurrences
+
+===== app/resources/app/gyomuon.js =====
+
+--- hit 2116 ---
+   2112:   const allAfter=unified.afterPrograms||[];
+   2113:   const night=allAfter.filter(p=>/야간심화|심화수업/.test(`${p.afterType||''} ${p.title||''}`));
+   2114:   const after=allAfter.filter(p=>!night.includes(p));
+   2115:   const uniqueTitles=rows=>[...new Set(rows.map(p=>String(p.actualTitle||p.title||'').trim()).filter(Boolean))];
+   2116:   const attendance=(readonlyCache?.nightAttendance||[]).filter(r=>studentMatches(r,student));
+   2117:   const programRows=termStats.programs.map(p=>{
+   2118:     const report=p.report||resolveStudentProgramReport(p,student,termStats.reports);
+   2119:     const submitted=Boolean(report&&report.submitted!==false);return `<li class="${submitted?'has-report':''}"><b>${escapeHtml(p.recordTitle||p.actualTitle||p.title||'프로그램')}</b>${submitted?`<button type="button" class="state positive dorm-report-open" data-dorm-report-id="${escapeHtml(report.id||'')}" data-dorm-report-student="${escapeHtml(student.id||'')}">보고서 제출 · 보기</button>`:`<span class="state warn">보고서 미제출</span>`}</li>`;
+   2120:   }).join('');
+   2121:   return `<div class="dorm-activity-grid"><article><h4>${escapeHtml(dormTermDefinition(termMode)?.label||'현재')} 프로그램·보고서</h4><div class="dorm-cohort-compare"><span><small>본인 프로그램</small><b>${termStats.programs.length}</b></span><span><small>학사생 평균</small><b>${cohort.programs.toFixed(1)}</b></span><span><small>본인 보고서율</small><b>${Math.round(termStats.reportRate)}%</b><em>${termStats.submitted}/${termStats.reportTargets?.length||0}</em></span><span><small>학사생 평균</small><b>${Math.round(cohort.reportRate)}%</b><em>대상 ${cohort.reportTargets.toFixed(1)}</em></span></div><ul>${programRows||'<li class="empty-inline">해당 학기 프로그램 자료 없음</li>'}</ul></article><article><h4>방과후·야간심화 근황</h4><p><b>방과후</b> ${escapeHtml(uniqueTitles(after).join(' · ')||'참여 기록 없음')}</p><p><b>야간심화</b> ${escapeHtml(uniqueTitles(night).join(' · ')||'참여 기록 없음')}</p><p><b>야자 출석기록</b> ${attendance.length}건</p></article></div>`;
+   2122: }
+
+--- hit 2275 ---
+   2271:   if (/결석|미입실|미제출|불참/.test(text)) return false;
+   2272:   return /출석|정상|명단QR|QR|입실/.test(text) || Boolean(row?.time || row?.period);
+   2273: }
+   2274: function openAttendanceHistory(kind, studentKey) {
+   2275:   const source = kind === "late" ? (readonlyCache?.lateAttendance || []) : (readonlyCache?.nightAttendance || readonlyCache?.attendance || []);
+   2276:   const rows = source.filter((row) => attendanceStudentKey(row) === String(studentKey)).sort((a,b)=>String(b.date).localeCompare(String(a.date)) || String(b.time || b.period || "").localeCompare(String(a.time || a.period || "")));
+   2277:   const first = rows[0] || {};
+   2278:   const student = (readonlyCache?.students || []).find((item) => item.id === first.studentId || String(item.studentNo) === String(first.studentNo));
+   2279:   const titleName = student?.name || first.name || "학생";
+   2280:   const studentNo = student?.studentNo || first.studentNo || "-";
+   2281:   const className = student?.className || first.className || "-";
+
+--- hit 2597 ---
+   2593: }
+   2594: function attendanceView() {
+   2595:   const officialRows = readonlyCache?.officialAttendance || [];
+   2596:   const lateRows = readonlyCache?.lateAttendance || [];
+   2597:   const nightRows = readonlyCache?.nightAttendance || readonlyCache?.attendance || [];
+   2598:   if(attendanceMode==="night"&&!isNightOperatingDay(attendanceViewDate)){
+   2599:     attendanceViewDate=nearestNightOperatingDay(attendanceViewDate);
+   2600:     nightViewMonth=attendanceViewDate.slice(0,7);
+   2601:   }
+   2602:   const tabs = `<div class="attendance-tabs attendance-tabs-four"><button data-attendance-mode="official" class="${attendanceMode === "official" ? "active" : ""}">공결</button><button data-attendance-mode="late" class="${attendanceMode === "late" ? "active" : ""}">지각</button><button data-attendance-mode="night" class="${attendanceMode === "night" ? "active" : ""}">야자출결</button><button data-attendance-mode="statistics" class="${attendanceMode === "statistics" ? "active" : ""}">통계</button></div>`;
+   2603:   if(attendanceMode === "statistics") return `<div class="module-page">${tabs}${attendancePersonalStatisticsView(officialRows,lateRows,nightRows)}</div>`;
+
+--- hit 2786 ---
+   2782:   const matrix=dates.length?`<div class="night-month-scroll-hint">선택일 열은 강조 표시됩니다. 월간 운영일은 항상 유지됩니다. ← 좌우로 스크롤하여 월 전체 확인 →</div><div class="night-month-matrix"><table><thead><tr><th rowspan="2" class="student-name-head">학생</th>${dateHead}</tr><tr>${slotHead}</tr></thead><tbody>${bodyRows}</tbody></table></div>`:`<div class="empty-state compact-empty data-card"><b>${nightStudyOperationStatus(attendanceViewDate).operates?`${nightViewMonth} 야자출결 자료가 없습니다.`:`${attendanceViewDate} · ${escapeHtml(nightStudyOperationStatus(attendanceViewDate).reason)}`}</b><span>${nightStudyOperationStatus(attendanceViewDate).operates?'운영일인데 자료가 없다면 데이터 처리시트의 30_야자출결_정규화를 확인하세요.':'미운영일은 결석·미입력으로 집계하지 않습니다.'}</span></div>`;
+   2783:   const gradeSummary=classSummaries.reduce((sum,item)=>({roster:sum.roster+item.roster,participants:sum.participants+item.participants,checks:sum.checks+item.checks}),{roster:0,participants:0,checks:0});
+   2784:   return `<div class="module-page">${tabs}${attendanceDateControls("야자 조회일")}<section class="attendance-dashboard-head night"><div><small>NIGHT STUDY · ${attendanceViewDate} ${escapeHtml(weekdayLabelFromKey(attendanceViewDate,true))}</small><h3>1학년 선택일 참여현황</h3><p>1학년 전체 재적을 기준으로, 오후자습·야자1·야자2 중 출결 기록이 확인된 학생을 참여로 집계합니다.</p></div><div class="attendance-head-metrics"><span><b>${gradeSummary.roster}</b>1학년 재적인원</span><span><b>${gradeSummary.participants}</b>학년 참여인원</span><span><b>${gradeSummary.checks}</b>선택일 출석체크</span><span><b>${dates.length}</b>${nightViewMonth} 운영일</span></div></section>${classCards}<div class="section-title-row monthly-night-title"><div><small>MONTHLY · ${nightViewMonth}</small><h3>${classNo}반 월간 참여현황</h3></div><span class="state">${attendanceViewDate} ${escapeHtml(weekdayLabelFromKey(attendanceViewDate,true))} 선택</span></div><div class="night-matrix-legend"><span class="present">출석</span><span class="dorm">학사</span><span class="after">방과후 강좌명</span><span class="program">프로그램명</span><span class="late">지각</span><span class="pending">확인</span><span class="none">기록 없음</span></div>${matrix}</div>`;
+   2785: }
+   2786: function openNightAttendanceDetail(studentKey, day, slot) {
+   2787:   const students = readonlyCache?.students || [];
+   2788:   const student = students.find(item => attendanceStudentKey(item) === studentKey) || {};
+   2789:   const rows = readonlyCache?.nightAttendance || readonlyCache?.attendance || [];
+   2790:   const row = rows.find(item => item.date === day && nightSlotName(item) === slot && (attendanceStudentKey(item) === studentKey || String(item.studentNo||"") === String(student.studentNo||"")));
+   2791:   openDrawer(`${student.name || "학생"} · ${day} ${slot}`);
+   2792:   $("#drawerTitle")?.classList.add("privacy-sensitive-text");
+
+--- hit 2789 ---
+   2785: }
+   2786: function openNightAttendanceDetail(studentKey, day, slot) {
+   2787:   const students = readonlyCache?.students || [];
+   2788:   const student = students.find(item => attendanceStudentKey(item) === studentKey) || {};
+   2789:   const rows = readonlyCache?.nightAttendance || readonlyCache?.attendance || [];
+   2790:   const row = rows.find(item => item.date === day && nightSlotName(item) === slot && (attendanceStudentKey(item) === studentKey || String(item.studentNo||"") === String(student.studentNo||"")));
+   2791:   openDrawer(`${student.name || "학생"} · ${day} ${slot}`);
+   2792:   $("#drawerTitle")?.classList.add("privacy-sensitive-text");
+   2793:   $("#drawerBody").innerHTML = `<div class="history-summary positive"><span><small>학번</small><b class="privacy-sensitive-text">${escapeHtml(student.studentNo||"-")}</b></span><span><small>학급</small><b>${escapeHtml(student.className||"-")}반</b></span><span><small>일자</small><b>${escapeHtml(day)}</b></span><span><small>시간</small><b>${escapeHtml(slot)}</b></span></div><div class="drawer-section"><h4>야자출결 상세</h4><dl class="detail-list"><dt>결과</dt><dd>${escapeHtml(row?.result||"출석 기록 없음")}</dd><dt>소속·유형</dt><dd>${escapeHtml(row?.affiliation||row?.type||"일반 야자")}</dd><dt>상세</dt><dd>${escapeHtml(row?.detail||"-")}</dd><dt>원본 시간</dt><dd>${escapeHtml(row?.time||row?.period||slot)}</dd></dl></div><p class="drawer-note">방과후·야간심화·추가 프로그램 상태는 해당 프로그램 상세 화면으로 바로 연결됩니다.</p>`;
+   2794: }
+   2795: 
+
+--- hit 4855 ---
+   4851: function uepStudentPerfIndex(){
+   4852:   const scores=readonlyCache?.scoreRecords||[];
+   4853:   const programs=readonlyCache?.programs||state.programs||[];
+   4854:   const reports=readonlyCache?.programReports||readonlyCache?.reports||[];
+   4855:   const night=readonlyCache?.nightAttendance||readonlyCache?.nightRecords||[];
+   4856:   const selected=readonlyCache?.selectedSubjects||[];
+   4857:   const signature=[scores,programs,reports,night,selected, scores.length,programs.length,reports.length,night.length,selected.length];
+   4858:   const cached=__uepStudentPerfIndex;
+   4859:   if(cached&&signature.every((v,i)=>cached.signature[i]===v))return cached;
+   4860:   const scoreByStudent=new Map(), programByStudent=new Map(), reportByStudent=new Map(), nightByStudent=new Map(), selectedByStudent=new Map();
+   4861:   const add=(map,key,value)=>{key=String(key||'').trim();if(!key)return;const list=map.get(key);if(list)list.push(value);else map.set(key,[value]);};
+
+--- hit 4879 ---
+   4875: }
+   4876: let __uepDashboardCounselCache=null;
+   4877: function dashboardCounselCacheSignature(){
+   4878:   const c=readonlyCache||{};
+   4879:   return [c.students,c.scoreRecords,c.programs,c.programReports,c.reports,c.nightAttendance,c.nightRecords,c.selectedSubjects,c.counselRecords,
+   4880:     c.students?.length||0,c.scoreRecords?.length||0,c.programs?.length||0,c.programReports?.length||0,c.counselRecords?.length||0,
+   4881:     state?.growthCounselRecords?.length||0,Object.keys(state?.autoNoticeReceipts||{}).length];
+   4882: }
+   4883: function mockExamNames(studentId) {
+   4884:   const order=["3월모의고사","6월모의고사","9월모의고사","10월모의고사","11월모의고사","수능"];
+   4885:   const rows=uepRowsForStudent(uepStudentPerfIndex().scoreByStudent,String(studentId));
+
+--- hit 5061 ---
+   5057:   const after=programs.filter(p=>/방과후/.test(`${p.kind||''} ${p.afterType||''} ${p.title||''}`)).length;
+   5058:   const night=programs.filter(p=>/야간심화|심화수업/.test(`${p.afterType||''} ${p.title||''}`)).length;
+   5059:   const selected=programs.filter(p=>/선택/.test(`${p.kind||''}`)).length;
+   5060:   const reports=uepRowsForStudent(idx.reportByStudent,student);
+   5061:   const nightAttendance=uepRowsForStudent(idx.nightByStudent,student);
+   5062:   const subjectRows=uepRowsForStudent(idx.selectedByStudent,student);
+   5063:   return {after,night,selected,reports:reports.length,nightStudy:nightAttendance.length,subjects:subjectRows.length};
+   5064: }
+   5065: function admissionManagementDataset(group){
+   5066:   const rule=uepManagementRule(group);
+   5067:   const standard={internal:rule.internal,name:rule.label,mockText:rule.mockText};
+
+--- hit 5063 ---
+   5059:   const selected=programs.filter(p=>/선택/.test(`${p.kind||''}`)).length;
+   5060:   const reports=uepRowsForStudent(idx.reportByStudent,student);
+   5061:   const nightAttendance=uepRowsForStudent(idx.nightByStudent,student);
+   5062:   const subjectRows=uepRowsForStudent(idx.selectedByStudent,student);
+   5063:   return {after,night,selected,reports:reports.length,nightStudy:nightAttendance.length,subjects:subjectRows.length};
+   5064: }
+   5065: function admissionManagementDataset(group){
+   5066:   const rule=uepManagementRule(group);
+   5067:   const standard={internal:rule.internal,name:rule.label,mockText:rule.mockText};
+   5068:   const dataset=(readonlyCache?.students||[]).map(student=>{
+   5069:     const base=admissionBase(student.id),mock=latestMockSnapshot(student.id),prep=studentPreparationStats(student);
+
+--- hit 7900 ---
+   7896: }
+   7897: function dashboardNightWeekDates(){
+   7898:   return timetableMasterWeekDates(dashboardWeekDate||dateKey(new Date()));
+   7899: }
+   7900: function dashboardNightAttendanceRows(dayKey,slot){
+   7901:   return (readonlyCache?.nightAttendance||readonlyCache?.attendance||[]).filter(row=>{
+   7902:     const key=String(row.date||row.day||"").slice(0,10);
+   7903:     return key===dayKey&&nightSlotName(row)===slot&&nightRecordIsAttendance(row);
+   7904:   });
+   7905: }
+   7906: function dashboardAfterProgramsForDay(dayKey){
+
+--- hit 7901 ---
+   7897: function dashboardNightWeekDates(){
+   7898:   return timetableMasterWeekDates(dashboardWeekDate||dateKey(new Date()));
+   7899: }
+   7900: function dashboardNightAttendanceRows(dayKey,slot){
+   7901:   return (readonlyCache?.nightAttendance||readonlyCache?.attendance||[]).filter(row=>{
+   7902:     const key=String(row.date||row.day||"").slice(0,10);
+   7903:     return key===dayKey&&nightSlotName(row)===slot&&nightRecordIsAttendance(row);
+   7904:   });
+   7905: }
+   7906: function dashboardAfterProgramsForDay(dayKey){
+   7907:   // 일정 표시는 강좌 마스터가 아니라 실제 차시만 사용한다.
+
+--- hit 7952 ---
+   7948:     dates.forEach((date,i)=>{
+   7949:       const key=dateKey(date),isWed=i===2,holiday=attendanceIsSchoolHoliday(key);
+   7950:       if(holiday){cells.push(`<div class="dashboard-night-cell closed holiday"><b>미운영</b><small>공휴일</small></div>`);return;}
+   7951:       if(isWed){cells.push(`<div class="dashboard-night-cell closed"><b>-</b><small>야간 미운영</small></div>`);return;}
+   7952:       const rows=dashboardNightAttendanceRows(key,slot.key),students=new Set(rows.map(attendanceStudentKey).filter(Boolean));
+   7953:       const programs=dashboardAfterProgramsForDay(key).filter(p=>dashboardProgramNightSlot(p)===slot.key);
+   7954:       const programCards=programs.map(p=>{const kind=/야간심화/.test(`${p.afterType||""} ${p.title||""}`)?"야간심화":"방과후";const sessionLabel=dashboardProgramSessionLabel(p);return `<button class="dashboard-night-program-chip" data-dashboard-night-program="${escapeHtml(p.id||p.programId||"")}" data-dashboard-night-program-day="${key}"><b>${escapeHtml([kind,sessionLabel].filter(Boolean).join(" "))}</b><span>${escapeHtml(p.actualTitle||p.title||"프로그램")}</span></button>`;}).join("");
+   7955:       cells.push(`<div class="dashboard-night-cell ${students.size||programs.length?'active':'empty'}"><button class="dashboard-night-roster" data-dashboard-night-day="${key}" data-dashboard-night-slot="${escapeHtml(slot.key)}"><b>${students.size?`${students.size}명`:'-'}</b><small>${students.size?'자습인원 보기':'자습 자료 없음'}</small></button>${programCards}</div>`);
+   7956:     });
+   7957:   });
+   7958:   return `<div class="dashboard-night-week"><div class="dashboard-night-corner">시간대</div>${days.map((d,i)=>`<div class="dashboard-night-head"><b>${d}</b><small>${dates[i]?`${dates[i].getMonth()+1}/${dates[i].getDate()}`:""}</small></div>`).join("")}${cells.join("")}</div>`;
+
+--- hit 7971 ---
+   7967:   const mode=dashboardTimetableAutoMode();
+   7968:   return mode==='night'?dashboardNightWeekMarkup():dashboardPersonalWeekMarkup();
+   7969: }
+   7970: function dashboardNightStudentGroups(day,slot){
+   7971:   const rows=dashboardNightAttendanceRows(day,slot).map(normalizeDashboardStudentRow);
+   7972:   const map=new Map();
+   7973:   rows.forEach(row=>{
+   7974:     const gc=recordGradeClass(row.studentRef||row),cls=String(Number(gc.classNo||0)||"");
+   7975:     if(!cls)return;
+   7976:     if(!map.has(cls))map.set(cls,new Map());
+   7977:     const key=String(row.studentRef?.id||row.studentId||row.studentNo||`${row.name}|${cls}`);
+
+--- hit 8007 ---
+   8003:   $("#drawerKicker").textContent="NIGHT STUDY · CLASS ROSTER";$("#drawerTitle").textContent=`${slot} · ${day}`;
+   8004:   $("#drawerBody").innerHTML=`<div class="history-summary positive"><span><small>기준일</small><b>${escapeHtml(day)}</b></span><span><small>시간대</small><b>${escapeHtml(slot)}</b></span><span><small>학생 수</small><b>${total}명</b></span></div><p class="dashboard-night-guide">반별 자습 인원을 한 화면에서 확인합니다.</p><div class="dashboard-night-class-grid">${classes.map(cls=>{const members=[...(groups.get(cls)?.values()||[])].sort((a,b)=>String(a.studentNo||'').localeCompare(String(b.studentNo||''),'ko'));return `<section><header><b>${cls}반</b><span>${members.length}명</span></header><div>${members.length?members.map(m=>`<button data-dashboard-night-student="${escapeHtml(attendanceStudentKey(m))}" data-dashboard-night-student-day="${escapeHtml(day)}" data-dashboard-night-student-slot="${escapeHtml(slot)}"><b>${escapeHtml(m.studentNo||"")} ${escapeHtml(m.name||"")}</b></button>`).join(""):'<small>참여 없음</small>'}</div></section>`;}).join("")}</div><div class="drawer-actions"><button class="btn primary" data-night-attendance-date="${escapeHtml(day)}">상세보기</button></div>`;
+   8005:   $("#drawer").classList.remove("hidden");$("#drawerBackdrop").classList.remove("hidden");
+   8006:   $("#drawerBody [data-night-attendance-date]")?.addEventListener("click",()=>{attendanceViewDate=day;nightViewMonth=day.slice(0,7);window.__uepNightRequestedSlot=slot;closeDrawer();navigate("attendance");attendanceMode="night";render("attendance");window.scrollTo(0,0);requestAnimationFrame(()=>toast(`${day} ${slot} 야자출결로 이동했습니다.`));});
+   8007:   $("#drawerBody").querySelectorAll('[data-dashboard-night-student]').forEach(btn=>btn.onclick=()=>openNightAttendanceDetail(btn.dataset.dashboardNightStudent,btn.dataset.dashboardNightStudentDay,btn.dataset.dashboardNightStudentSlot));
+   8008: }
+   8009: 
+   8010: function dashboardPersonalWeekMarkup(){
+   8011:   const {week,days}=personalTimetableData();
+   8012:   const status=schoolPeriodStatus(new Date());
+   8013:   const todayIndex=Math.max(0,Math.min(4,(today.getDay()+6)%7));
+
+--- hit 8413 ---
+   8409: function dashboardStudentStatusCompactMarkup(){
+   8410:   const todayKey=dateKey(today),yesterday=new Date(today);yesterday.setDate(today.getDate()-1);const yesterdayKey=dateKey(yesterday);
+   8411:   const official=filterRowsForDashboardStatus(officialAttendanceRowsForDate08162(todayKey));
+   8412:   const late=filterRowsForDashboardStatus((readonlyCache?.lateAttendance||[]).filter(row=>uepComparableDate(row.date||row.day)===todayKey));
+   8413:   const night=filterRowsForDashboardStatus((readonlyCache?.nightAttendance||readonlyCache?.attendance||[]).filter(row=>String(row.date||row.day||'').slice(0,10)===yesterdayKey&&nightRecordIsAttendance(row)));
+   8414:   const currentStudents=filterRowsForDashboardStatus(readonlyCache?.students||[]),u=dashboardAdmissionTodayUniversity();
+   8415:   const cards=[['status','late','공결/지각',`공결 ${new Set(official.map(attendanceStudentKey)).size} · 지각 ${new Set(late.map(attendanceStudentKey)).size}`],['status','night','야자출결',`${new Set(night.map(attendanceStudentKey)).size}/${currentStudents.length||259}`],['admission','basics','대입 이해','기초부터 실제 전형까지'],['admission','major','전공별 대학 찾기','전공·지역·전형·최저 검색'],['admission','university','오늘의 대학',u?.['대학명']||'대학 정보']];
+   8416:   return `<div class="uep-student-status-compact uep-dashboard-five-cards">${cards.map(([type,key,label,value])=>`<button class="${type==='admission'?'dashboard-admission-card':''}" ${type==='status'?`data-dashboard-student-status="${key}"`:`data-dashboard-admission="${key}"`}><span>${label}</span><b>${escapeHtml(value)}</b></button>`).join('')}</div>`;
+   8417: }
+   8418: 
+   8419: function dashboardStudentStatusMarkup(){
+
+--- hit 8424 ---
+   8420:   const todayKey=dateKey(today);
+   8421:   const yesterday=new Date(today);yesterday.setDate(today.getDate()-1);const yesterdayKey=dateKey(yesterday);
+   8422:   const official=filterRowsForDashboardStatus(officialAttendanceRowsForDate08162(todayKey));
+   8423:   const late=filterRowsForDashboardStatus((readonlyCache?.lateAttendance||[]).filter(row=>uepComparableDate(row.date||row.day)===todayKey));
+   8424:   const night=filterRowsForDashboardStatus((readonlyCache?.nightAttendance||readonlyCache?.attendance||[]).filter(row=>String(row.date||row.day||'').slice(0,10)===yesterdayKey&&nightRecordIsAttendance(row)));
+   8425:   const reportRows=filterRowsForDashboardStatus(dashboardReportStatusRows());
+   8426:   const targetGroups=dashboardReportGroups(reportRows);
+   8427:   const submitted=targetGroups.filter(group=>dashboardReportGroupState(group).state==="complete");
+   8428:   const progress=targetGroups.filter(group=>dashboardReportGroupState(group).state==="progress");
+   8429:   const missing=targetGroups.filter(group=>dashboardReportGroupState(group).state==="missing");
+   8430:   const scope=dashboardGradeScope();
+
+--- hit 8510 ---
+   8506:   const progressGroups=allReportGroups.filter(group=>dashboardReportGroupState(group).state==="progress").map(group=>reportGroupWithRows(group,group.rows));
+   8507:   const missingGroups=allReportGroups.filter(group=>dashboardReportGroupState(group).state==="missing").map(group=>reportGroupWithRows(group,group.rows));
+   8508:   const configs={
+   8509:     late:{title:'공결·지각 학생',page:'attendance',rows:[...official,...late],attendance:true,dateSelectable:true},
+   8510:     night:{title:'야자 참여 학생',page:'attendance',rows:(readonlyCache?.nightAttendance||readonlyCache?.attendance||[]).filter(r=>uepComparableDate(r.date||r.day)===basisDate&&nightRecordIsAttendance(r)),dateSelectable:true},
+   8511:     submitted:{title:'선택활동 보고서 제출완료 학생',page:'programs',rows:submittedGroups,report:true,reportGrouped:true},
+   8512:     progress:{title:'선택활동 보고서 제출중 학생',page:'programs',rows:progressGroups,report:true,reportGrouped:true},
+   8513:     report:{title:'선택활동 보고서 미제출 학생',page:'programs',rows:missingGroups,report:true,reportGrouped:true},
+   8514:     outing:{title:'오늘 학사 외출 학생',page:'attendance',rows:(readonlyCache?.dormOutings||readonlyCache?.outings||[]).filter(r=>uepComparableDate(r.date||r.day)===basisDate)},
+   8515:     absent:{title:'오늘 프로그램 불참 학생',page:'programs',rows:(readonlyCache?.programAttendance||[]).filter(r=>uepComparableDate(r.date||r.day)===basisDate&&/불참|결석|미참여/.test(String(r.status||r.result||'')))}
+   8516:   };
+
+--- hit 9884 ---
+   9880: function studentAttendanceDetails(student){
+   9881:   const match=x=>studentMatches(x,student)&&studentRecordWithinEnrollment(x,student);
+   9882:   return {
+   9883:     late:(readonlyCache?.lateAttendance||[]).filter(match),
+   9884:     night:(readonlyCache?.nightAttendance||[]).filter(match),
+   9885:     official:(readonlyCache?.officialAttendance||[]).filter(match),
+   9886:     programAbsent:(readonlyCache?.programs||[]).map(programWithOverride).filter(p=>studentRecordWithinEnrollment(p,student)).flatMap(p=>(p.students||[]).filter(x=>studentMatches(x,student)).filter(x=>/결석|불참|미참여/.test(String(x.result||''))).map(x=>({...x,programTitle:p.actualTitle||p.title,date:p.date})))
+   9887:   };
+   9888: }
+   9889: function printStudentDashboard(student){
+   9890:   const source=document.querySelector("#studentDashboardPrint");
+
+--- hit 10161 ---
+  10157: 
+  10158: function studentStatMetric(student){
+  10159:   const matches=row=>studentMatches(row,student);
+  10160:   // 야자는 참여율이 아니라 실제 참여 횟수를 TOP 선정의 1차 기준으로 사용합니다.
+  10161:   const nightRows=(readonlyCache?.nightAttendance||readonlyCache?.attendance||[]).filter(matches);
+  10162:   const nightSeen=new Set(),nightAttendSeen=new Set();
+  10163:   nightRows.forEach(row=>{
+  10164:     const key=[row.date||row.day||'',row.time||row.slot||row.period||row.type||'',row.programId||row.programName||''].join('|');
+  10165:     nightSeen.add(key);
+  10166:     const attended=typeof nightRecordIsAttendance==='function'?nightRecordIsAttendance(row):/출석|정상|입실|참여/.test(String(row.result||row.status||''));
+  10167:     if(attended)nightAttendSeen.add(key);
+
+--- hit 10365 ---
+  10361: }
+  10362: function openStudentStatDetail(studentId,metric){
+  10363:   const student=(readonlyCache?.students||[]).find(s=>String(s.id||'')===String(studentId||''));if(!student)return;
+  10364:   const matches=row=>studentMatches(row,student)&&studentRecordWithinEnrollment(row,student);let title='',rows=[],route='students';
+  10365:   if(metric==='night'){title='야자 참여 이력';route='attendance-night';rows=(readonlyCache?.nightAttendance||readonlyCache?.attendance||[]).filter(matches).filter(r=>typeof nightRecordIsAttendance==='function'?nightRecordIsAttendance(r):/출석|정상|입실|참여/.test(String(r.result||r.status||''))).map(r=>[r.date||r.day||'-',r.time||r.slot||r.period||'야자',r.result||r.status||'출석']);}
+  10366:   else if(metric==='after'){title='방과후 참여 이력';route='programs-after';rows=(typeof afterSchoolProgramGroups==='function'?afterSchoolProgramGroups():[]).filter(p=>p&&p.kind==='after'&&!p.isCourseMaster&&studentRecordWithinEnrollment(p,student)&&(p.students||[]).some(x=>studentMatches(x,student))).map(p=>[p.date||'-',p.actualTitle||p.title||'방과후',p.time||p.session||'수강']);}
+  10367:   else if(metric==='program'){title='프로그램 참여 이력';route='student-participation';const b=studentRecordBundle(student);rows=(b.programs||[]).filter(p=>p.kind==='selected'&&!/취소|폐강/.test(String(p.status||''))).map(p=>[p.date||'-',p.actualTitle||p.title||'선택활동',p.status||'참여']);}
+  10368:   else if(metric==='report'){title='제출 보고서';route='student-participation';rows=studentCanonicalReports(student).map(r=>[r.date||r.submittedAt||'-',r.programTitle||r.programName||r.reportGroup||r.activityTitle||r.title||'보고서',r.status||'제출']);}
+  10369:   else if(metric==='university'){title='대학 배지';route='admissions-combined';rows=studentUniversityBadges(student).map(name=>[name,'대학입결 ✓','수능최저 ✓']);}
+  10370:   else {const m=studentGrowthMetric(studentStatMetric(student)); title=metric==='growth'?'성적 상승 선정 근거':metric==='diversity'?'활동 다양성 선정 근거':'숨은 성장학생 선정 근거'; route='students'; const reason=metric==='growth'?m.growthReason:metric==='diversity'?m.diversityReason:m.hiddenReason; rows=[[title,reason,metric==='growth'?`상승 ${m.growth.toFixed(2)}`:metric==='diversity'?`${m.diversity}영역`:`${m.hidden}점`]];}
+  10371:   $('#drawerTitle').textContent=`${student.name} · ${title}`;
+
+--- hit 10844 ---
+  10840:     const selectedNightDate = document.querySelector('.night-month-matrix th.selected-day');
+  10841:     if (selectedNightDate) requestAnimationFrame(() => selectedNightDate.scrollIntoView({block:'nearest', inline:'center'}));
+  10842:     $$(`[data-late-student]`).forEach((button) => { button.onclick = () => {const rid=button.dataset.lateRecordId;if(currentRoleId()==="admin"&&rid){const row=(readonlyCache?.lateAttendance||[]).find(x=>String(x.id)===String(rid));if(row)return openLateAttendanceEditor(row);}openAttendanceHistory("late", button.dataset.lateStudent);}; });
+  10843:     $$(`[data-night-program]`).forEach((button) => { button.onclick = (event) => { event.stopPropagation(); const id=button.dataset.nightProgram; const kind=button.dataset.nightProgramKind; if(kind==="after") openNightProgramSummary(id,button.dataset.nightStudent,button.dataset.nightDay,button.dataset.nightSlot); else openProgramDrawer(id); }; });
+  10844:     $$(`.night-status-cell[data-night-student]:not([data-night-program])`).forEach((button) => { button.onclick = () => openNightAttendanceDetail(button.dataset.nightStudent, button.dataset.nightDay, button.dataset.nightSlot); });
+  10845:     $$(`.student-name-cell [data-night-student]`).forEach((button) => { button.onclick = () => openAttendanceHistory("night", button.dataset.nightStudent); });
+  10846:   }
+  10847:   if (page === "scores") {
+  10848:     const classSelect=$("#scoreClass"), studentSelect=$("#scoreStudent"), scope=$("#scoreScope");
+  10849:     const updateStudents=()=>{if(studentSelect)studentSelect.innerHTML=`<option value="">학생 선택</option>${optionStudents(classSelect?.value || "")}`;};
+  10850:     if(classSelect)classSelect.onchange=()=>{updateStudents();updateStudentSignalIndicator();};
+
+--- hit 12054 ---
+  12050:       </div>
+  12051:       ${googleConnectionError ? `<div class="connection-error-detail"><b>구글시트 오류</b><span>${escapeHtml(googleConnectionError)}</span></div>` : ""}
+  12052:       ${neisError ? `<div class="connection-error-detail"><b>NEIS 안내</b><span>${escapeHtml(neisError)}</span></div>` : ""}
+  12053:       <div class="drawer-section"><h4>현재 읽은 자료</h4>
+  12054:         <div class="drawer-line"><span>학생·학사·출결</span><b>${readonlyCache?.students?.length || 0}명 · ${readonlyCache?.dormStudents?.length || 0}명 · ${(readonlyCache?.officialAttendance?.length || 0) + (readonlyCache?.lateAttendance?.length || 0) + (readonlyCache?.nightAttendance?.length || 0)}건</b></div>
+  12055:         <div class="drawer-line"><span>성적·입시</span><b>${readonlyCache?.scoreRecords?.length || 0}건 · ${(readonlyCache?.admissionMinimums?.length || 0) + (readonlyCache?.admissionCuts?.length || 0)}건</b></div>
+  12056:         <div class="drawer-line"><span>급식·주간 시간표</span><b>${mealCount}식 · ${timetableDays}일</b></div>
+  12057:       </div>
+  12058:       <div class="drawer-section drawer-button-row"><button class="btn secondary" data-sync-settings>연결 설정</button><button class="btn primary" data-sync-google-retry>구글 새로고침</button><button class="btn primary" data-sync-neis-retry>NEIS 새로고침</button><button class="btn secondary" data-sync-diagnostics>진단 JSON 저장</button></div>`,
+  12059:     ],
+  12060:     notice: [
+
+===== app/resources/app/electron/main.cjs =====
+
+--- hit 1578 ---
+   1574:   ]);
+   1575:   const matrices={};assignValueRangesByRange(matrices,operationalEntries,result);
+   1576:   matrices['30_야자출결_정규화']=nightResult?.[0]?.values||[];
+   1577:   const partial=parseGoogleSheetData(matrices);
+   1578:   const patch={officialAttendance:partial.officialAttendance||[],lateAttendance:partial.lateAttendance||[],notices:partial.notices||[],noticeReceipts:partial.noticeReceipts||[],lunchDuties:partial.lunchDuties||[],nightSupervisors:partial.nightSupervisors||[],nightAttendance:partial.nightAttendance||[]};
+   1579:   const operationalSyncedAt=new Date().toISOString();liveDataCache={...liveDataCache,...patch,operationalSyncedAt};liveDataFetchedAt=Date.now();
+   1580:   return {ok:true,operationalSyncedAt,syncedAt:operationalSyncedAt,patch};
+   1581: }
+   1582: 
+   1583: async function fetchLiveData({ force = false, credentials = null } = {}) {
+   1584:   if (!force && liveDataCache && Date.now() - liveDataFetchedAt < 120000) return liveDataCache;
+
+===== app/resources/app/electron/google-data.cjs =====
+
+--- hit 852 ---
+    848:     row.detail = [row.programTitle, program.time, program.place].filter(Boolean).join(" · ");
+    849:   });
+    850:   // 방과후 기록도 월간 야자표에서는 상태 표시가 필요하므로 제거하지 않습니다.
+    851:   // 결석·미대상 기록은 화면 판정 단계에서 '기록 없음'으로 처리됩니다.
+    852:   const nightAttendance = allMappedNightRows;
+    853:   afterSchoolAttendance = nightAttendance.filter(row => row.recognizedByProgram || isAfterSchool(row));
+    854:   const attendance = nightAttendance.slice(-500).reverse();
+    855:   const attended = nightRows.filter((row) =>
+    856:     String(row["출결"] || row["입실상태"] || "").includes("출석"),
+    857:   ).length;
+    858:   const outsideQr = nightRows.filter((row) =>
+
+--- hit 853 ---
+    849:   });
+    850:   // 방과후 기록도 월간 야자표에서는 상태 표시가 필요하므로 제거하지 않습니다.
+    851:   // 결석·미대상 기록은 화면 판정 단계에서 '기록 없음'으로 처리됩니다.
+    852:   const nightAttendance = allMappedNightRows;
+    853:   afterSchoolAttendance = nightAttendance.filter(row => row.recognizedByProgram || isAfterSchool(row));
+    854:   const attendance = nightAttendance.slice(-500).reverse();
+    855:   const attended = nightRows.filter((row) =>
+    856:     String(row["출결"] || row["입실상태"] || "").includes("출석"),
+    857:   ).length;
+    858:   const outsideQr = nightRows.filter((row) =>
+    859:     String(row["출결"] || "").includes("명단외"),
+
+--- hit 854 ---
+    850:   // 방과후 기록도 월간 야자표에서는 상태 표시가 필요하므로 제거하지 않습니다.
+    851:   // 결석·미대상 기록은 화면 판정 단계에서 '기록 없음'으로 처리됩니다.
+    852:   const nightAttendance = allMappedNightRows;
+    853:   afterSchoolAttendance = nightAttendance.filter(row => row.recognizedByProgram || isAfterSchool(row));
+    854:   const attendance = nightAttendance.slice(-500).reverse();
+    855:   const attended = nightRows.filter((row) =>
+    856:     String(row["출결"] || row["입실상태"] || "").includes("출석"),
+    857:   ).length;
+    858:   const outsideQr = nightRows.filter((row) =>
+    859:     String(row["출결"] || "").includes("명단외"),
+    860:   ).length;
+
+--- hit 1684 ---
+   1680:     pastDormStudents,
+   1681:     dormHistory: [...pastDormStudents, ...dormStudents],
+   1682:     officialAttendance: officialRows,
+   1683:     attendance,
+   1684:     nightAttendance: nightAttendance.slice().reverse(),
+   1685:     nightCalendarDates,
+   1686:     afterSchoolAttendance: afterSchoolAttendance.slice().reverse(),
+   1687:     programs: connectedPrograms,
+   1688:     timetableRows: rowsFrom("17_시간표마스터").filter(row => row["학년도"] && row["학기"] && row["학년"] && row["반"] && row["요일"] && row["교시"]),
+   1689:     teacherTimetableRows: rowsFrom("17A_교사시간표마스터").filter(row => row["학년도"] && row["학기"] && row["교사명"] && row["요일"] && row["교시"]),
+   1690:     studentActivities,
