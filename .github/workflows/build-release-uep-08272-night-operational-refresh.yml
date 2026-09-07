@@ -1,0 +1,176 @@
+name: Build Release UEP 0.82.72 Night Operational Refresh
+on:
+  push:
+    paths:
+      - 'release-08272-night-operational-refresh.trigger'
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          $ErrorActionPreference='Stop'
+          $repo=$env:GITHUB_REPOSITORY
+          $prev='v0.82.71'
+          $next='v0.82.72'
+          $ver='0.82.72'
+          New-Item -ItemType Directory -Force source,app,out | Out-Null
+          gh release download $prev --repo $repo --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE -ne 0){throw "download failed: $LASTEXITCODE"}
+          Expand-Archive source/UEP-update.zip app -Force
+          $root='app/resources/app'
+          $main="$root/electron/main.cjs"
+          if(!(Test-Path $main)){throw 'main.cjs not found'}
+          $text=Get-Content $main -Raw
+
+          $start=$text.IndexOf('async function fetchOperationalData({credentials=null}={}){')
+          $end=$text.IndexOf("`nasync function fetchLiveData",$start)
+          if($start-lt 0 -or $end-lt 0){throw 'fetchOperationalData boundaries not found'}
+          $replacement=@'
+async function fetchOperationalData({credentials=null}={}){
+  if(!liveDataCache)return {ok:false,requiresFullSync:true,reason:'전체 캐시가 아직 준비되지 않았습니다.'};
+  const auth=await getReadonlySheetsAuth(credentials),token=auth.token;
+  const operationalEntries=UEP_OPERATIONAL_RANGE_NAMES.map(name=>[name,SHEET_RANGES[name]]);
+  const [result,nightResult]=await Promise.all([
+    readSheetBatch(token,UEP_SPREADSHEET_ID,operationalEntries.map(([,range])=>range)),
+    // School Read API는 행번호가 있는 bounded A1만 허용한다. A:U 같은 열린 범위는 INVALID_RANGE가 된다.
+    readSheetBatch(token,UEP_PROCESSING_SPREADSHEET_ID,["'30_야자출결_정규화'!A1:U70000"])
+  ]);
+  const matrices={};assignValueRangesByRange(matrices,operationalEntries,result);
+  // 전체 학생마스터를 다시 읽지 않고 현재 캐시 학생정보를 파서용 02_학생마스터로 재구성한다.
+  const cachedStudents=Array.isArray(liveDataCache?.students)?liveDataCache.students:[];
+  matrices['02_학생마스터']=[
+    ['02_학생마스터'],
+    ['UEP operational synthetic student master'],
+    ['학생ID','학년도','학번','성명','사용성명','학년','반','번호','검색표시명','출신중학교','학적상태','학적기준일','학적변동사유','입학일','활성여부','수정일시','수정자','비고'],
+    ...cachedStudents.map((student)=>[
+      String(student?.id||student?.studentId||''),
+      String(student?.schoolYear||student?.year||'2026'),
+      String(student?.studentNo||student?.number||''),
+      String(student?.name||''),
+      String(student?.name||''),
+      String(student?.grade||student?.gradeNo||'1'),
+      String(student?.className||student?.classNo||''),
+      String(student?.studentNumber||student?.numberInClass||''),
+      '', '',
+      String(student?.status||student?.enrollmentStatus||'재학'),
+      '', '', '',
+      String(student?.active||student?.activeYn||'Y'),
+      '', '', ''
+    ])
+  ];
+  matrices['30_야자출결_정규화']=nightResult?.[0]?.values||[];
+  const partial=parseGoogleSheetData(matrices);
+
+  // 운영 갱신에서는 30의 최신 NFC/교사확인 행만 교체하고,
+  // 전체 동기화에서 11_방과후학교→12_차시일정→13_출석부로 만든 프로그램 인정 행은 보존한다.
+  // 같은 학생·날짜·시간대가 겹치면 전체 파서와 동일하게 프로그램 인정 행이 우선한다.
+  const freshRawNight=Array.isArray(partial.nightAttendance)?partial.nightAttendance.filter(row=>!row?.recognizedByProgram&&!row?.linkedFromAfterSchool):[];
+  const retainedProgramNight=Array.isArray(liveDataCache?.nightAttendance)?liveDataCache.nightAttendance.filter(row=>row?.recognizedByProgram===true||row?.linkedFromAfterSchool===true):[];
+  const nightKey=(row)=>[String(row?.date||'').slice(0,10),String(row?.time||row?.period||''),String(row?.studentNo||row?.studentId||'')].join('|');
+  const mergedNightMap=new Map();
+  freshRawNight.forEach(row=>mergedNightMap.set(nightKey(row),row));
+  retainedProgramNight.forEach(row=>mergedNightMap.set(nightKey(row),row));
+  const mergedNightAttendance=[...mergedNightMap.values()];
+
+  const patch={
+    officialAttendance:partial.officialAttendance||[],
+    lateAttendance:partial.lateAttendance||[],
+    notices:partial.notices||[],
+    noticeReceipts:partial.noticeReceipts||[],
+    lunchDuties:partial.lunchDuties||[],
+    nightSupervisors:partial.nightSupervisors||[],
+    nightAttendance:mergedNightAttendance
+  };
+  const operationalSyncedAt=new Date().toISOString();
+  liveDataCache={...liveDataCache,...patch,operationalSyncedAt};liveDataFetchedAt=Date.now();
+  return {ok:true,operationalSyncedAt,syncedAt:operationalSyncedAt,patch};
+}
+'@
+          $text=$text.Substring(0,$start)+$replacement+$text.Substring($end)
+          $text=$text.Replace('0.82.71','0.82.72')
+          Set-Content $main $text -Encoding utf8
+          foreach($f in @("$root/gyomuon.js","$root/package.json","$root/package-lock.json")){
+            if(Test-Path $f){$c=Get-Content $f -Raw;$c=$c.Replace('0.82.71','0.82.72');Set-Content $f $c -Encoding utf8}
+          }
+
+          # Syntax checks
+          node --check $main
+          if($LASTEXITCODE -ne 0){throw 'main.cjs syntax failed'}
+          node --check "$root/electron/google-data.cjs"
+          if($LASTEXITCODE -ne 0){throw 'google-data.cjs syntax failed'}
+          node --check "$root/gyomuon.js"
+          if($LASTEXITCODE -ne 0){throw 'gyomuon.js syntax failed'}
+
+          # Structural regression checks
+          $patched=Get-Content $main -Raw
+          foreach($needle in @("'30_야자출결_정규화'!A1:U70000","freshRawNight","retainedProgramNight","mergedNightAttendance","recognizedByProgram===true","linkedFromAfterSchool===true")){
+            if(!$patched.Contains($needle)){throw "missing patched assertion: $needle"}
+          }
+          if($patched.Contains("'30_야자출결_정규화'!A:U")){throw 'open A:U range remains in operational refresh'}
+
+          # School Read API compatibility model: bounded range only.
+          $safeRange="'30_야자출결_정규화'!A1:U70000"
+          if($safeRange -notmatch "^'((?:[^']|'')+)'![A-Z]+[1-9][0-9]*:[A-Z]+[1-9][0-9]*$"){throw 'School Read safe A1 regression failed'}
+
+          # Merge regression: preserve program-recognized counts while replacing stale raw 20 with fresh raw 39.
+          $reg=@'
+const key=r=>[r.date,r.time,r.studentNo||r.studentId].join('|');
+const staleRaw=Array.from({length:20},(_,i)=>({date:'2026-09-07',time:'야자1',studentNo:`S${i+1}`,result:'출석'}));
+const freshRaw=Array.from({length:39},(_,i)=>({date:'2026-09-07',time:'야자1',studentNo:`S${i+1}`,result:'출석'}));
+const afternoonPrograms=Array.from({length:92},(_,i)=>({date:'2026-09-07',time:'오후자습',studentNo:`A${i+1}`,recognizedByProgram:true,linkedFromAfterSchool:true,result:'프로그램 인정'}));
+const night2Programs=Array.from({length:26},(_,i)=>({date:'2026-09-07',time:'야자2',studentNo:`N${i+1}`,recognizedByProgram:true,linkedFromAfterSchool:true,result:'프로그램 인정'}));
+const existing=[...staleRaw,...afternoonPrograms,...night2Programs];
+const retained=existing.filter(r=>r.recognizedByProgram===true||r.linkedFromAfterSchool===true);
+const map=new Map();freshRaw.forEach(r=>map.set(key(r),r));retained.forEach(r=>map.set(key(r),r));const merged=[...map.values()];
+const count=slot=>new Set(merged.filter(r=>r.date==='2026-09-07'&&r.time===slot).map(r=>r.studentNo||r.studentId)).size;
+if(count('오후자습')!==92)throw new Error(`afternoon expected 92 got ${count('오후자습')}`);
+if(count('야자1')!==39)throw new Error(`night1 expected 39 got ${count('야자1')}`);
+if(count('야자2')!==26)throw new Error(`night2 expected 26 got ${count('야자2')}`);
+const rawOverlap={date:'2026-09-07',time:'야자1',studentNo:'PX',result:'출석'};
+const programOverlap={date:'2026-09-07',time:'야자1',studentNo:'PX',recognizedByProgram:true,result:'프로그램 인정'};
+const m2=new Map();m2.set(key(rawOverlap),rawOverlap);m2.set(key(programOverlap),programOverlap);if(m2.get(key(rawOverlap)).result!=='프로그램 인정')throw new Error('program precedence regression');
+console.log('night merge regression PASS: 92 / 39 / 26');
+'@
+          Set-Content out/night-merge-regression-08272.js $reg -Encoding utf8
+          node out/night-merge-regression-08272.js
+          if($LASTEXITCODE -ne 0){throw 'night merge regression failed'}
+
+          # Existing renderer / feature regressions.
+          $gy=Get-Content "$root/gyomuon.js" -Raw
+          foreach($needle in @('dashboardNightAttendanceRows','dashboardProgramSessionLabel','uep08223UniversityRegions','refreshOperationalCacheSilently','startReadonlyAutoRefresh')){
+            if(!$gy.Contains($needle)){throw "UI regression symbol missing: $needle"}
+          }
+          if($gy.Contains('MutationObserver')){Write-Host 'MutationObserver exists elsewhere in legacy source; no new observer added by this patch.'}
+
+          $pkg=Get-Content "$root/package.json" -Raw | ConvertFrom-Json
+          if([string]$pkg.version -ne $ver){throw "package version mismatch: $($pkg.version)"}
+
+          Compress-Archive -Path app/* -DestinationPath out/UEP-update.zip -CompressionLevel Optimal
+          $hash=(Get-FileHash out/UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  UEP-update.zip" | Set-Content out/sha256.txt -Encoding ascii
+
+          gh release create $next out/UEP-update.zip out/sha256.txt --repo $repo --title "UEP v0.82.72" --notes "UEP v0.82.72`n- School Read API가 허용하지 않는 30_야자출결_정규화 열린 범위(A:U)를 bounded A1:U70000으로 수정`n- 운영 갱신에서 최신 NFC·교사확인·사후보정 출석을 즉시 교체`n- 전체 동기화에서 생성된 방과후·야간심화 프로그램 인정 행은 유지하여 기존 오후자습/야자 통계 보존`n- 동일 학생·날짜·시간대는 기존 전체 파서와 동일하게 프로그램 인정 우선`n- 9/7 회귀 모델 92 / 39 / 26 검증`n- MutationObserver·전역 클릭·렌더 후 DOM 교체 추가 없음"
+          if($LASTEXITCODE -ne 0){throw "release create failed: $LASTEXITCODE"}
+
+          $policyPath='uep-policy.json'
+          $policy=Get-Content $policyPath -Raw | ConvertFrom-Json
+          $policy.latestVersion=$ver
+          $policy.downloadUrl="https://github.com/$repo/releases/download/$next/UEP-update.zip"
+          $policy.sha256=$hash
+          $policy.message='UEP 0.82.72 · 야자출결 운영동기화 범위·프로그램인정 보정'
+          $policy | ConvertTo-Json -Depth 20 | Set-Content $policyPath -Encoding utf8
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add $policyPath
+          git commit -m 'Publish UEP 0.82.72 policy'
+          if($LASTEXITCODE -ne 0){throw "policy commit failed: $LASTEXITCODE"}
+          git pull --rebase origin main
+          if($LASTEXITCODE -ne 0){throw "policy pull failed: $LASTEXITCODE"}
+          git push
+          if($LASTEXITCODE -ne 0){throw "policy push failed: $LASTEXITCODE"}
