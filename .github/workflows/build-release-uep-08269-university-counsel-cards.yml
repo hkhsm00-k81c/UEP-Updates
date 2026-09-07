@@ -1,0 +1,40 @@
+name: Build and Release UEP 0.82.69 University Counseling Cards
+on:
+  push:
+    paths:
+      - 'release-08269.trigger'
+permissions:
+  contents: write
+jobs:
+  build-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          $ErrorActionPreference='Stop'
+          function Run-Native([scriptblock]$c,[string]$l){&$c;if($LASTEXITCODE -ne 0){throw "$l failed: $LASTEXITCODE"}}
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          Run-Native {gh release download v0.82.68 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source} 'download 0.82.68'
+          Expand-Archive source/UEP-update.zip app -Force
+          $root='app/resources/app'
+          Run-Native {node scripts/patch-uep-08269-university-counsel-cards-v2.js $root} '0.82.69 university patch'
+          Run-Native {node --check "$root/gyomuon.js"} 'renderer syntax'
+          Run-Native {node --check "$root/electron/google-data.cjs"} 'google-data syntax'
+          Run-Native {node --check "$root/electron/main.cjs"} 'main syntax'
+          Run-Native {node scripts/test-uep-08269-university-counsel-cards.js $root} 'university regression'
+          $pkg=Get-Content "$root/package.json" -Raw|ConvertFrom-Json
+          if([string]$pkg.version -ne '0.82.69'){throw "package version mismatch: $($pkg.version)"}
+          Compress-Archive -Path app/* -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "$sha  UEP-update.zip"|Set-Content sha256.txt
+          Run-Native {gh release create v0.82.69 UEP-update.zip sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.69' --notes "UEP v0.82.69`n- 오늘의 대학 주요 전형 카드 구조는 그대로 유지`n- 내신성적 산출방법을 핵심 요약 카드 + 세부 산식 구조로 개편`n- 모집단위별 수능최저를 모집단위 카드 안 전형별 조건 비교 구조로 개편`n- 58_권장과목DB의 공식 과목 조합을 우선 표시하고 해당 모집단위를 연결`n- 운호고 실제 합격사례를 기본 접힘으로 정리하고 기준연도 미기록 자료에 연도를 임의 생성하지 않음`n- 대학 로고 URL 필드 지원 및 미등록 대학명 마크 대체`n- MutationObserver·전역 클릭·렌더 후 HTML 재교체 없이 원 렌더링 구조에서 반영"} 'release'
+          $policy=Get-Content uep-policy.json -Raw|ConvertFrom-Json
+          $policy.latestVersion='0.82.69'
+          $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.69/UEP-update.zip'
+          $policy.sha256=$sha
+          $policy.message='UEP 0.82.69 · 오늘의 대학 상담형 카드 UI 개편'
+          $policy|ConvertTo-Json -Depth 10|Set-Content uep-policy.json -Encoding utf8
+          Run-Native {git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add uep-policy.json;git commit -m 'Publish UEP 0.82.69 policy';git pull --rebase origin main;git push} 'policy push'
