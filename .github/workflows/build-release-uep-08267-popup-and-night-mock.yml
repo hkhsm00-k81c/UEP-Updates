@@ -1,0 +1,38 @@
+name: Build and Release UEP 0.82.67 Popup and Night Mock
+on:
+  push:
+    paths:
+      - 'release-08267.trigger'
+permissions:
+  contents: write
+jobs:
+  build-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          $ErrorActionPreference='Stop'
+          function Run-Native([scriptblock]$c,[string]$l){&$c;if($LASTEXITCODE -ne 0){throw "$l failed: $LASTEXITCODE"}}
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          Run-Native {gh release download v0.82.66 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source} 'download'
+          Expand-Archive source/UEP-update.zip app -Force
+          $root='app/resources/app'
+          Run-Native {node scripts/patch-uep-08267-popup-and-night-mock.js $root} '0.82.67 patch'
+          Run-Native {node --check "$root/gyomuon.js"} 'renderer syntax'
+          Run-Native {node --check "$root/electron/google-data.cjs"} 'google-data syntax'
+          Run-Native {node --check "$root/electron/main.cjs"} 'main syntax'
+          Run-Native {node scripts/test-uep-08267-popup-and-night-mock.js $root} 'regression test'
+          Compress-Archive -Path app/* -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "$sha  UEP-update.zip"|Set-Content sha256.txt
+          Run-Native {gh release create v0.82.67 UEP-update.zip sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.67' --notes "UEP v0.82.67`n- 과거 0.82.21 수정이력을 현재 버전 수정사항으로 잘못 다시 표시하던 중복 팝업 제거`n- 버전별 수정사항 팝업은 해당 버전에서 1회만 표시`n- 야간심화모의고사를 12_차시일정의 정식 실제 차시로 인식`n- 방과후·야간심화·야간심화모의고사에 실제 차시 우선 원칙 통일`n- 기존 방과후 주간표 및 자습·야자 출결 집계 유지"} 'release'
+          $policy=Get-Content uep-policy.json -Raw|ConvertFrom-Json
+          $policy.latestVersion='0.82.67'
+          $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.67/UEP-update.zip'
+          $policy.sha256=$sha
+          $policy.message='UEP 0.82.67 · 수정사항 팝업 단일화 및 야간심화모의고사 실제 차시 연결'
+          $policy|ConvertTo-Json -Depth 10|Set-Content uep-policy.json -Encoding utf8
+          Run-Native {git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add uep-policy.json;git commit -m 'Publish UEP 0.82.67 policy';git push} 'policy push'
