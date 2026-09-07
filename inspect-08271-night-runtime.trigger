@@ -1,1 +1,1 @@
-inspect v0.82.71 night runtime
+inspect v0.82.71 night runtime detail 2
