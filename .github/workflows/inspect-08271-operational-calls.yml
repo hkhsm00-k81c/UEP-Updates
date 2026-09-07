@@ -1,0 +1,45 @@
+name: Inspect UEP 0.82.71 Operational Calls
+on:
+  push:
+    paths: ['inspect-08271-operational-calls.trigger']
+permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          gh release download v0.82.71 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE -ne 0){throw 'download failed'}
+          Expand-Archive source/UEP-update.zip app -Force
+          $root='app/resources/app'
+          $files=@("$root/gyomuon.js","$root/electron/main.cjs","$root/electron/preload.cjs")
+          $out=@()
+          foreach($f in $files){
+            if(!(Test-Path $f)){continue}
+            $lines=Get-Content $f
+            $out+="===== FILE $f ====="
+            for($i=0;$i-lt $lines.Count;$i++){
+              if($lines[$i] -match 'operational|Operational|fetchOperationalData|refreshOperational|google:operational|readonly:operational|live:operational'){
+                $s=[Math]::Max(0,$i-6);$e=[Math]::Min($lines.Count-1,$i+12)
+                $out+="--- hit line $($i+1) ---"
+                for($j=$s;$j-le $e;$j++){$out+=("{0,6}: {1}" -f ($j+1),$lines[$j])}
+              }
+            }
+          }
+          $out -join "`r`n" | Set-Content inspection-08271-operational-calls.txt -Encoding utf8
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add inspection-08271-operational-calls.txt
+          git commit -m 'Inspect UEP 0.82.71 operational call sites'
+          if($LASTEXITCODE -ne 0){throw 'commit failed'}
+          git pull --rebase origin main
+          if($LASTEXITCODE -ne 0){throw 'pull failed'}
+          git push
+          if($LASTEXITCODE -ne 0){throw 'push failed'}
