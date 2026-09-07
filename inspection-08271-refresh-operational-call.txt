@@ -1,0 +1,176 @@
+adLogin){
+    const missing={authenticated:false,reason:!name||!email?'저장된 담임 이름·이메일 없음':'School Read 로그인 기능 없음'};
+    uepDiagRecord('session.login.skipped',missing);return status||missing;
+  }
+  let login=null;
+  try{login=await window.schoolBoard.schoolReadLogin({name,email});uepDiagRecord('session.login.result',login);}
+  catch(error){uepDiagRecord('session.login.throw',{name:error?.name,message:error?.message,stack:error?.stack});return {authenticated:false,reason:error?.message||'학교 공용 읽기 로그인 예외'};}
+  if(!login?.ok)return {authenticated:false,reason:login?.message||login?.reason||'학교 공용 읽기 로그인 실패'};
+  try{status=await window.schoolBoard.schoolReadSessionStatus({verify:true});uepDiagRecord('session.status.after',status);}
+  catch(error){uepDiagRecord('session.status.after.throw',{name:error?.name,message:error?.message,stack:error?.stack});return {authenticated:false,reason:error?.message||'로그인 후 세션 검증 예외'};}
+  return status||{authenticated:false};
+}
+
+  const credentialTask = window.schoolBoard?.schoolReadSessionStatus
+    ? withStartupTimeout(ensureSchoolReadSessionForCurrentUser({verify:true}), 8000, null)
+        .then((status) => {
+          if(status) googleConnectionStatus={ok:Boolean(status.authenticated),encryption:true,mode:'school_read_api',endpointReady:status.endpointReady!==false};
+          if(!status?.authenticated && status?.reason) googleConnectionError=status.reason;
+        })
+        .catch((error) => {googleConnectionStatus={ok:false,encryption:true,mode:'school_read_api'};googleConnectionError=error?.message||'학교 공용 읽기 연결 실패';console.warn("[UEP] School Read API 최초 연결 실패", error);})
+    : Promise.resolve();
+  const cacheTask = window.schoolBoard?.readReadonlyCache
+    ? withStartupTimeout(window.schoolBoard.readReadonlyCache(), 8000, null)
+        .then((cached) => {
+          if (cached?.ok) { readonlyCache=uep08123NormalizeReadonlyCache(cached.data); googleConnectionError = ""; }
+          else if (cached) googleConnectionError = cached.reason || "학교 데이터 동기화를 확인하세요. 마지막 저장 자료는 계속 사용할 수 있습니다.";
+        })
+        .catch((error) => {
+          console.warn("[UEP] 읽기 캐시 불러오기 실패", error);
+          googleConnectionError = error?.message || "학교 데이터 동기화를 확인하세요. 마지막 저장 자료는 계속 사용할 수 있습니다.";
+        })
+    : Promise.resolve();
+  await Promise.all([credentialTask, cacheTask]);
+  // 화면은 로컬/메모리 캐시로 먼저 표시한 뒤, 실행당 한 번만 백그라운드 원격 동기화한다.
+  // 사용자는 기다리지 않고 UEP를 사용하며, 최신 Google Sheet가 도착하면 현재 화면만 갱신한다.
+  if(googleConnectionStatus?.ok){
+    const fullSyncedAt=readonlyCache?.syncedAt?new Date(readonlyCache.syncedAt).getTime():0;
+    const fullAge=fullSyncedAt?Date.now()-fullSyncedAt:Number.POSITIVE_INFINITY;
+    const needsFull=!readonlyCache||!fullSyncedAt||fullAge>=READONLY_FULL_REFRESH_MAX_AGE_MS;
+    const jitter=needsFull?(2000+Math.floor(Math.random()*10000)):(500+Math.floor(Math.random()*2500));
+    setTimeout(async()=>{
+      const ok=needsFull
+        ? await refreshReadonlyCacheSilently({force:true,rerender:true})
+        : await refreshOperationalCacheSilently({rerender:true});
+      if(ok){
+        updateTopSyncStatus();
+        if(currentRoleId()==='admin') migrateAdminProgramOverridesToSheetOnce().catch(()=>{});
+      }
+    },jitter);
+  }
+  if(googleConnectionStatus?.ok && readonlyCache) await migrateAdminProgramOverridesToSheetOnce();
+  updateDormOutingCount();
+  updateTopSyncStatus();
+  startReadonlyAutoRefresh();
+  // 여기서는 백그라운드에서 최신 계정 유효성을 재검증한다.
+  // 자동로그인 세션은 이미 화면을 열었으므로 네트워크 지연이 시작 화면을 막지 않는다.
+  await Promise.race([
+    initializeUserSessionGate(),
+    new Promise(resolve=>setTimeout(()=>{
+      try{
+        /* 0.81.20: local remembered state never bypasses School Read session verification */
+      }catch{}
+      resolve(true);
+    },1800))
+  ]);
+  if(authSessionReady && !resumedRememberedSession) navigate(state.activePage || "dashboard");
+  if(false && !googleConnectionStatus?.ok && currentRoleId()==="admin"){
+    // 인증정보가 없거나 복호화/유효성 검증에 실패한 경우에는 기존 setupCompleted 값과 무관하게
+    // 데이터 연결 단계에서 멈춘다. 학생정보 화면을 먼저 열어 권한부여를 건너뛰지 않는다.
+    setTimeout(()=>openSetupWizard(3),50);
+  }else if(!state.settings.setupCompleted){
+    setTimeout(()=>openSetupWizard(0),50);
+  }else{
+    setSetupWizardLock(false);
+  }
+}
+
+function applyProgramWritePatch08172(target,patch){
+  if(!target||!patch)return target;
+  for(const [key,value] of Object.entries(patch)){if(value!==undefined)target[key]=value;}
+  if(patch.commonReportFormUrl!==undefined)target.reportFormUrl=patch.commonReportFormUrl;
+  if(patch.activityType!==undefined)target.type=patch.activityType;
+  if(patch.nightLinked!==undefined)target.affectsAttendance=Boolean(patch.nightLinked);
+  return target;
+}
+
+async function migrateAdminProgramOverridesToSheetOnce(){
+  if(currentRoleId()!=="admin" || state.settings?.programSheetMigrationV07662 || !window.schoolBoard?.saveProgramOperation) return;
+  const overrides=state.programOverrides&&typeof state.programOverrides==="object"?state.programOverrides:{};
+  const programs=Array.isArray(readonlyCache?.programs)?readonlyCache.programs:[];
+  let changed=false, failed=false;
+  for(const [id,override] of Object.entries(overrides)){
+    if(!override || !["date","time","place","teacher"].some(key=>String(override[key]??"").trim())) continue;
+    const program=programs.find(item=>String(item.id||"")===String(id));
+    if(!program?.source) continue;
+    try{
+      const result=await window.schoolBoard.saveProgramOperation({role:"admin",source:program.source,programId:program.programId||program.courseId||"",sessionId:program.sessionId||"",date:override.date??program.date??"",time:override.time??program.time??"",place:override.place??program.place??"",teacher:override.teacher??program.teacher??""});
+      if(!result?.ok) throw new Error(result?.reason||"시트 저장 실패");
+      if(result?.programPatch)applyProgramWritePatch08172(program,result.programPatch);
+      const kept={...override}; ["date","time","place","teacher"].forEach(key=>delete kept[key]);
+      if(Object.keys(kept).length) state.programOverrides[id]=kept; else delete state.programOverrides[id];
+      changed=true;
+    }catch(error){ failed=true; console.warn("[UEP] 프로그램 로컬값 시트 이관 실패",id,error); }
+  }
+  if(!failed){ state.settings.programSheetMigrationV07662=true; changed=true; }
+  if(changed) await save();
+}
+
+let readonlyRefreshInFlight=null;
+async function refreshReadonlyCacheSilently({force=true, rerender=true}={}) {
+  if(readonlyRefreshInFlight)return readonlyRefreshInFlight;
+  readonlyRefreshInFlight=(async()=>{
+  if(!window.schoolBoard?.previewReadonlySync || !window.schoolBoard?.readReadonlyCache)return false;
+  if(!googleConnectionStatus?.ok){
+    const status=await ensureSchoolReadSessionForCurrentUser({verify:true}).catch(()=>null);
+    googleConnectionStatus={ok:Boolean(status?.authenticated),encryption:true,mode:'school_read_api',endpointReady:status?.endpointReady!==false};
+  }
+  if(!googleConnectionStatus?.ok)return false;
+  try {
+    if(force){
+      const sync=await window.schoolBoard.previewReadonlySync();
+      if(!sync?.ok) throw new Error(sync?.reason||'UEP 학교 데이터 자동 갱신 실패');
+    }
+    const cached=await window.schoolBoard.readReadonlyCache();
+    if(!cached?.ok) throw new Error(cached?.reason||'UEP 학교 데이터를 읽지 못했습니다.');
+    readonlyCache=uep08123NormalizeReadonlyCache(cached.data);
+    googleConnectionError='';
+    if(typeof studentBadgeCache!=='undefined'&&studentBadgeCache?.clear) studentBadgeCache.clear();
+    updateDormOutingCount();
+    updateTopSyncStatus();
+    if(rerender && !setupWizardActive){
+      const scrollY=window.scrollY;
+      render(state.activePage||'dashboard');
+      requestAnimationFrame(()=>window.scrollTo(0,scrollY));
+    }
+    return true;
+  } catch(error) {
+    googleConnectionError=error?.message||'UEP 학교 데이터 자동 갱신 실패';
+    updateTopSyncStatus();
+    return false;
+  }
+  })();
+  try{return await readonlyRefreshInFlight;}finally{readonlyRefreshInFlight=null;}
+}
+const OPERATIONAL_RENDER_PAGES08172=new Set(['dashboard','attendance','students','alerts','work','duties','settings']);
+function operationalPageNeedsRender08172(page){return OPERATIONAL_RENDER_PAGES08172.has(String(page||''));}
+let operationalRefreshInFlight=null;
+async function refreshOperationalCacheSilently({rerender=true}={}){
+  if(operationalRefreshInFlight)return operationalRefreshInFlight;
+  if(!window.schoolBoard?.previewOperationalSync)return refreshReadonlyCacheSilently({force:true,rerender});
+  operationalRefreshInFlight=(async()=>{
+    if(!googleConnectionStatus?.ok)return false;
+    try{
+      const result=await window.schoolBoard.previewOperationalSync();
+      if(result?.requiresFullSync)return refreshReadonlyCacheSilently({force:true,rerender});
+      if(!result?.ok)throw new Error(result?.reason||'UEP 운영자료 갱신 실패');
+      if(result.patch&&typeof result.patch==='object')readonlyCache={...(readonlyCache||{}),...result.patch,operationalSyncedAt:result.operationalSyncedAt||result.syncedAt||new Date().toISOString()};
+      googleConnectionError='';updateTopSyncStatus();updateDormOutingCount();
+      if(rerender&&state.activePage&&operationalPageNeedsRender08172(state.activePage))render(state.activePage);
+      return true;
+    }catch(error){googleConnectionError=error?.message||String(error);updateTopSyncStatus();return false;}
+  })();
+  try{return await operationalRefreshInFlight;}finally{operationalRefreshInFlight=null;}
+}
+function startReadonlyAutoRefresh(){
+  if(readonlyAutoRefreshTimer) clearInterval(readonlyAutoRefreshTimer);
+  if(!googleConnectionStatus?.ok) return;
+  readonlyAutoRefreshTimer=setInterval(()=>{
+    if(document.hidden) return;
+    readonlyAutoRefreshCycle+=1;
+    const fullSyncedAt=readonlyCache?.syncedAt?new Date(readonlyCache.syncedAt).getTime():0;
+    const fullAge=fullSyncedAt?Date.now()-fullSyncedAt:Number.POSITIVE_INFINITY;
+    const needsFull=!fullSyncedAt||fullAge>=READONLY_FULL_REFRESH_MAX_AGE_MS||readonlyAutoRefreshCycle%6===0;
+    if(needsFull){
+      const jitter=Math.floor(Math.random()*45000);
+      setTimeo

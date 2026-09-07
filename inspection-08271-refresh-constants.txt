@@ -1,0 +1,161 @@
+pth>6)return '[DEPTH_LIMIT]';
+  if(value==null||typeof value==='number'||typeof value==='boolean')return value;
+  if(typeof value==='string')return value.replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi,'[EMAIL_REDACTED]').slice(0,4000);
+  if(Array.isArray(value))return value.slice(0,30).map(v=>uepDiagSafe(v,depth+1));
+  if(typeof value==='object'){
+    const out={};
+    for(const [k,v] of Object.entries(value)){
+      if(/token|secret|password|authorization|cookie|credential|private|email|name/i.test(k)){out[k]='[REDACTED]';continue;}
+      out[k]=uepDiagSafe(v,depth+1);
+    }
+    return out;
+  }
+  return String(value);
+}
+function uepDiagRecord(stage,value){
+  uepSchoolReadDiagnostics.push({at:new Date().toISOString(),stage,value:uepDiagSafe(value)});
+  if(uepSchoolReadDiagnostics.length>80)uepSchoolReadDiagnostics.shift();
+}
+async function downloadSchoolReadDiagnostics(){
+  let verified=null;
+  try{verified=await window.schoolBoard?.schoolReadSessionStatus?.({verify:true});uepDiagRecord('export.sessionVerify',verified);}
+  catch(error){uepDiagRecord('export.sessionVerify.throw',{name:error?.name,message:error?.message,stack:error?.stack});}
+  const report={
+    schema:'uep-school-read-diagnostic-v1',
+    appVersion:APP_VERSION,
+    exportedAt:new Date().toISOString(),
+    platform:navigator.platform,
+    online:navigator.onLine,
+    schoolReadBridge:{
+      sessionStatus:Boolean(window.schoolBoard?.schoolReadSessionStatus),
+      login:Boolean(window.schoolBoard?.schoolReadLogin),
+      preview:Boolean(window.schoolBoard?.previewReadonlySync),
+      readCache:Boolean(window.schoolBoard?.readReadonlyCache)
+    },
+    googleConnectionStatus:uepDiagSafe(googleConnectionStatus),
+    googleConnectionError:uepDiagSafe(googleConnectionError),
+    cacheSummary:{
+      syncedAt:readonlyCache?.syncedAt||null,
+      students:readonlyCache?.students?.length||0,
+      dormStudents:readonlyCache?.dormStudents?.length||0
+    },
+    verifiedSession:uepDiagSafe(verified),
+    events:uepSchoolReadDiagnostics
+  };
+  const blob=new Blob([JSON.stringify(report,null,2)],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;
+  a.download='UEP-school-read-diagnostic-'+new Date().toISOString().replace(/[:.]/g,'-')+'.json';
+  document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),2000);
+  toast('진단 JSON 파일을 저장했습니다. 이 파일을 채팅에 올려 주세요.');
+}
+let readonlyAutoRefreshTimer = null;
+const READONLY_AUTO_REFRESH_MS = 10 * 60 * 1000;
+const READONLY_FULL_REFRESH_MAX_AGE_MS = 60 * 60 * 1000;
+let readonlyAutoRefreshCycle = 0;
+let neisData = null;
+let neisError = "";
+let neisLoading = false;
+let lastPeriodAlertKey = "";
+let outingViewDate = new Date(today);
+let attendanceMode = "late";
+let attendanceStatStudentFilter = "all";
+let attendanceStatClassFilter = "all";
+let officialClassFilter = "all";
+let officialStudentFilter = "all";
+let lateClassFilter = "all";
+let nightClassFilter = "1";
+let attendanceViewDate = dateKey(today);
+let nightViewMonth = dateKey(today).slice(0, 7);
+let programMode = "home";
+let programPlanningMode = "overview";
+let commonProgramArea="autonomy";
+let commonProgramClassNo="1";
+let commonCareerTerm="1학기";
+let programMonth = dateKey(today).slice(0,7);
+let dormMode = "g1s2";
+let scoreMode = "internal";
+let scorePeriod = "all";
+let scoreStatisticsType = "mock";
+let scoreStatisticsTrendSubject = "";
+let scoreStatisticsExam = "";
+let scoreStatisticsClass = "all";
+let admissionMode = "growth";
+let admissionManagementFilter = "all";
+let recordMode = "activities";
+let recordWriterArea = "autonomy";
+let recordWriterSelected = new Set();
+const recordDraftKey = (studentId,area)=>`uep-record-draft:${studentId}:${area}`;
+let recordAiConfigured = false;
+let recordSdgsDetail = "";
+let recordCareerDateBusy = "";
+let recordCareerAutoRunning = false;
+let recordCareerSemesterScanRunning=false;
+let recordCareerSemesterScanProgress="";
+
+const recordCareerWeekCache = new Map();
+
+const recordCareerDateKey=(activityId,classNo)=>`uep-career-date:${activityId}:${classNo}`;
+const recordObservationKey=(studentId,area)=>`uep-record-observations:${studentId}:${area}`;
+
+
+
+let recordStudentId = "";
+let studentFocusContext = null;
+let recordQueryMode = "class";
+let recordClassNo = "1";
+let recordCurriculumErrorOnly = false;
+let calendarSelectedDate = dateKey(today);
+let calendarFilter = "all";
+let dashboardMonthDate = dateKey(today);
+let dashboardWeekDate = dateKey(today);
+let dashboardSelectedDate = dateKey(today);
+let dashboardCalendarMode = "month";
+let studentPageMode = "list";
+let studentCounselClassFilter = "";
+let studentCounselSelectedStudentId = "";
+let studentStatsClassFilter = "all";
+const studentBadgeCache = new Map();
+let studentDashboardIndex = -1;
+let selectedStudentId = "";
+let studentDashboardSubmode = "dashboard";
+const studentSensitiveRevealKeys = new Set();
+let studentAlertMode = "all";
+let studentAlertClass = "all";
+const APP_VERSION = "0.82.71";
+const SUBJECT_REAPPLICATION_FORM_URL = "https://docs.google.com/forms/d/e/1FAIpQLSd7_E_Kb8HGEgjyEqtXs_Ykvy5L_c96ILIQ06OBV-MV_1dc0A/viewform?usp=dialog";
+const samples = {
+  students: [
+    ["1101", "김도윤", "1반", "재학", "조회 가능"],
+    ["1102", "박서준", "1반", "재학", "확인 필요"],
+    ["1103", "이민준", "1반", "재학", "조회 가능"],
+    ["1201", "최지우", "2반", "재학", "조회 가능"],
+  ],
+  attendance: [
+    ["1101", "김도윤", "야자1", "출석", "정상"],
+    ["1102", "박서준", "오전등교", "지각", "확인 필요"],
+    ["1201", "최지우", "야자2", "결석", "담임 확인"],
+    ["1307", "정하준", "명단 외 QR", "보류", "오류"],
+  ],
+};
+
+
+let calendarHubMode = "schedule";
+let workEmbeddedMode = "home";
+let outputHubMode = "alerts";
+let settingsPanel = "basic";
+
+function normalizeSavedState() {
+  const validPages = new Set(["dashboard","students","dorm","timetable","attendance","scores","admissions","records","programs","alerts","calendar","work","duties","forms","outputs","settings","help"]);
+  if (!validPages.has(state.activePage)) state.activePage = "dashboard";
+  if (!["mine","homeroom","student","teacher"].includes(state.timetableTab)) state.timetableTab = "mine";
+  if (!["month","week"].includes(state.calendarMode)) state.calendarMode = "month";
+
+  state.tasks = Array.isArray(state.tasks) ? state.tasks.filter(Boolean).map(task=>({status:task.done?"done":(task.status||"planned"),...task})) : structuredClone(baseState.tasks);
+  ensureDevelopmentTasks();
+  state.programEvidence = state.programEvidence && typeof state.programEvidence === "object" ? state.programEvidence : {};
+  state.issueReports = Array.isArray(state.issueReports) ? state.issueReports.filter(Boolean) : [];
+  state.programAdminReports = state.programAdminReports && typeof state.programAdminReports === "object" ? state.programAdminReports : {};
+  state.programOverrides = state.programOverrides && typeof state.programOverrides === "object" ? state.programOverrides : {};
+  state.autoAlertAcks = state.autoAlertAcks && typeof state.autoAlertAcks === "object" ? state.autoAlertAcks : 
