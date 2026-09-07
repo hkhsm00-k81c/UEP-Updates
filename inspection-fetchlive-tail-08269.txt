@@ -1,0 +1,88 @@
+   1689:       }
+   1690:     });
+   1691:   }
+   1692:   // v0.76.93: 학사외출 규칙은 화면 운영의 핵심이므로 규칙 묶음 결과와 무관하게 마지막에 단독 재조회합니다.
+   1693:   // batchGet의 일부 누락/순서 문제 또는 다른 규칙 탭 오류가 있어도 40_학사외출규칙 원본을 우선합니다.
+   1694:   try {
+   1695:     const dormRuleResult = await readSheetBatch(
+   1696:       token,
+   1697:       UEP_RULES_SPREADSHEET_ID,
+   1698:       ["'40_학사외출규칙'!A1:X1000"]
+   1699:     );
+   1700:     const dormRuleMatrix = dormRuleResult?.[0]?.values || [];
+   1701:     if (dormRuleMatrix.length >= 3) {
+   1702:       matrices["40_학사외출규칙"] = dormRuleMatrix;
+   1703:       console.log(`[UEP] 40_학사외출규칙 단독 조회 성공: ${Math.max(0,dormRuleMatrix.length-3)}건`);
+   1704:     } else {
+   1705:       console.warn("[UEP] 40_학사외출규칙 단독 조회 결과가 비어 있습니다.");
+   1706:     }
+   1707:   } catch (dormRuleError) {
+   1708:     console.warn("[UEP] 40_학사외출규칙 단독 조회 실패", dormRuleError?.message || dormRuleError);
+   1709:   }
+   1710: 
+   1711:   const curriculumSpreadsheetId = "1fevlAWQZqWQkiYl-eGRCdzidBj59Z8NqOxfCrGvwlHI";
+   1712: const curriculumReads = [
+   1713:   ["__CURRICULUM_09", "'09_수강신청결과'!A1:AG1200"],
+   1714:   ["__CURRICULUM_ERRORS", "'05_오류검토'!A11:Z1200"],
+   1715:   ["__CURRICULUM_STUDENTS", "'02_학생마스터'!A1:AA1200"]
+   1716: ];
+   1717: for (const [logicalName, range] of curriculumReads) {
+   1718:   try {
+   1719:     const one = await readSheetBatch(token, curriculumSpreadsheetId, [range]);
+   1720:     matrices[logicalName] = one?.[0]?.values || [];
+   1721:   } catch (error) {
+   1722:     matrices[logicalName] = [];
+   1723:     console.warn(`[UEP] 선택과목 원본 조회 실패: ${logicalName}`, error?.message || error);
+   1724:   }
+   1725: }
+   1726:   // 2026. 운호고 1학년 공결 현황 원본 시트를 읽기 전용으로 직접 조회합니다.
+   1727:   // 서비스 계정에 열람 권한이 없거나 일부 탭 형식이 달라도 UEP 전체 동기화는 계속됩니다.
+   1728:   try {
+   1729:     const officialSourceId = "1pzu2eEUYJZW7HG2_-GDq2Ujq7ePwvCHKB9UHS4i9SzM";
+   1730:     const officialTabs = ["전체 명렬표","축구부","씨름부","개인학생선수","학사","리더십&스마트폰&두드림","개별","두드림","수련회","챌린지데이"];
+   1731:     try {
+   1732:       const result=await readSheetBatch(token,officialSourceId,officialTabs.map(tab=>`'${tab.replace(/'/g,"''")}'!A1:AM1200`));
+   1733:       officialTabs.forEach((tab,index)=>{matrices[`__OFFICIAL_${tab}`]=result?.[index]?.values||[];});
+   1734:     } catch(tabError) {
+   1735:       officialTabs.forEach(tab=>{matrices[`__OFFICIAL_${tab}`]=[];});
+   1736:       console.warn("[UEP] 공결 원본 묶음 조회 실패",tabError?.message||tabError);
+   1737:     }
+   1738:   } catch (error) {
+   1739:     console.warn("[UEP] 2026. 운호고 1학년 공결 현황 조회 실패", error?.message || error);
+   1740:   }
+   1741: 
+   1742:   const uep08259AdmissionEntries=[['52_대입기초',"'52_대입기초'!A1:N500"],['53_전형이해',"'53_전형이해'!A1:N500"],['53A_전형세부유형DB',"'53A_전형세부유형DB'!A1:R500"],['53B_전형유형별대학DB',"'53B_전형유형별대학DB'!A1:T3000"],['53C_전형DB점검',"'53C_전형DB점검'!A1:T500"],['54_수능최저DB',"'54_수능최저DB'!A1:Z1000"],['55_대학입결DB',"'55_대학입결DB'!A1:Z1000"],['56_대학입시마스터',"'56_대학입시마스터'!A1:R500"],['56A_대학상담포인트DB',"'56A_대학상담포인트DB'!A1:P1200"],['57_내신산정DB',"'57_내신산정DB'!A1:Z1200"],['58_권장과목DB',"'58_권장과목DB'!A1:P2000"]];
+   1743:   try{for(let offset=0;offset<uep08259AdmissionEntries.length;offset+=6){const chunk=uep08259AdmissionEntries.slice(offset,offset+6);let vr;try{vr=await schoolReadBatchRead(UEP_ADMISSIONS_SPREADSHEET_ID,chunk.map(([,range])=>range));}catch(primaryError){console.warn('[UEP] 새 입시DB School Read 실패, 기존 52~58 안전원본으로 전환',primaryError?.message||primaryError);vr=await schoolReadBatchRead(UEP_ADMISSIONS_FALLBACK_SPREADSHEET_ID,chunk.map(([,range])=>range));}assignValueRangesByRange(matrices,chunk,vr);}}catch(admissionError){console.warn('[UEP] 2028 입시DB 조회 실패',admissionError?.message||admissionError);for(const [logicalName] of uep08259AdmissionEntries)matrices[logicalName]=[];}
+   1744:   const data = parseGoogleSheetData(matrices);
+   1745: 
+   1746:   // 0.82.10 admissions reference datasets from basic-info connector
+   1747:   const uep08210MatrixObjects=(matrix)=>{
+   1748:     const rows=Array.isArray(matrix)?matrix:[];
+   1749:     const headers=(rows[2]||[]).map(v=>String(v??'').replace(/\r?\n/g,' ').trim());
+   1750:     if(!headers.some(Boolean))return [];
+   1751:     return rows.slice(3).filter(row=>Array.isArray(row)&&row.some(v=>String(v??'').trim())).map(row=>{
+   1752:       const obj={};headers.forEach((h,i)=>{if(h)obj[h]=row[i]??'';});return obj;
+   1753:     });
+   1754:   };
+   1755:   data.admissionBasics=uep08210MatrixObjects(matrices['52_대입기초']);
+   1756:   data.admissionTypes=uep08210MatrixObjects(matrices['53_전형이해']);
+   1757:   data.admissionTypeDetails=uep08210MatrixObjects(matrices['53A_전형세부유형DB']);
+   1758:   data.admissionStructures=uep08210MatrixObjects(matrices['53B_전형유형별대학DB']);
+   1759:   data.universityAdmissionStructures=data.admissionStructures;
+   1760:   data.universityAdmissions=uep08210MatrixObjects(matrices['56_대학입시마스터']);
+   1761:   data.admissionCounselPoints=uep08210MatrixObjects(matrices['56A_대학상담포인트DB']);
+   1762:   data.admissionTypeUniversities=uep08210MatrixObjects(matrices['53B_전형유형별대학DB']);
+   1763:   data.admissionSubtypes=uep08210MatrixObjects(matrices['53A_전형세부유형DB']);
+   1764:   data.admissionGradeCalcs=uep08210MatrixObjects(matrices['57_내신산정DB']);
+   1765:   data.admissionRecommendations=uep08210MatrixObjects(matrices['58_권장과목DB']);
+   1766:   data.curriculumDb=uep08210MatrixObjects(matrices['18_학교교육과정DB']);
+   1767:   data['52_대입기초']=data.admissionBasics;
+   1768:   data['53_전형이해']=data.admissionTypes;
+   1769:   data['53A_전형세부유형DB']=data.admissionTypeDetails;
+   1770:   data['53B_전형유형별대학DB']=data.admissionStructures;
+   1771:   data['56_대학입시마스터']=data.universityAdmissions;
+   1772:   data['56A_대학상담포인트DB']=data.admissionCounselPoints;
+   1773:   data['53B_전형유형별대학DB']=data.admissionTypeUniversities;
+   1774:   data['53A_전형세부유형DB']=data.admissionSubtypes;
+   1775:   data['18_학교교육과정DB']=data.curriculumDb;
+   1776:   data['57_내신산정DB']=data.admissionGradeCalcs;
