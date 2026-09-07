@@ -1,0 +1,38 @@
+name: Inspect UEP 0.82.71 Night Runtime
+on:
+  push:
+    paths: ['inspect-08271-night-runtime.trigger']
+permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          gh release download v0.82.71 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE -ne 0){throw 'download failed'}
+          Expand-Archive source/UEP-update.zip app -Force
+          $root='app/resources/app'
+          $m=Get-Content "$root/electron/main.cjs" -Raw
+          $g=Get-Content "$root/gyomuon.js" -Raw
+          $d=Get-Content "$root/electron/google-data.cjs" -Raw
+          $out=@()
+          foreach($spec in @(@('main','fetchOperationalData',$m),@('main','fetchLiveData',$m),@('google','30_야자출결_정규화',$d),@('google','nightAttendance',$d),@('renderer','dashboardNightAttendanceRows',$g),@('renderer','fetchOperationalData',$g),@('renderer','operationalSyncedAt',$g))){
+            $name=$spec[0];$needle=$spec[1];$txt=$spec[2];$i=$txt.IndexOf($needle);$out+="===== $name :: $needle @ $i =====";if($i-ge 0){$s=[Math]::Max(0,$i-1800);$len=[Math]::Min(7000,$txt.Length-$s);$out+=$txt.Substring($s,$len)}
+          }
+          $out -join "`r`n" | Set-Content inspection-08271-night-runtime.txt -Encoding utf8
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add inspection-08271-night-runtime.txt
+          git commit -m 'Inspect UEP 0.82.71 night runtime'
+          if($LASTEXITCODE -ne 0){throw 'commit failed'}
+          git pull --rebase origin main
+          if($LASTEXITCODE -ne 0){throw 'pull failed'}
+          git push
+          if($LASTEXITCODE -ne 0){throw 'push failed'}
