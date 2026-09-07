@@ -1,0 +1,74 @@
+  8311 | function openDashboardUniversityDetail(university=dashboardAdmissionTodayUniversity()){
+  8312 |   if(!university)return openDashboardAdmissionDialog('오늘의 대학','<p>56_대학입시마스터 자료를 읽지 못했습니다.</p>');
+  8313 |   const name=university['대학명']||'오늘의 대학',displayName=uep08251UniversityDisplayNameForRegion(university,window.__uepAdmissionRegion)||name,norm=dashboardAdmissionNormalizeUniversity(name);
+  8314 |   const structures=dashboardAdmissionStructureRows().filter(r=>uep08258AdmissionActive(r)&&dashboardAdmissionNormalizeUniversity(r['대학명'])===norm);
+  8315 |   const minimums=dashboardAdmissionRows('admissionMinimumRows','54_수능최저DB').filter(r=>dashboardAdmissionNormalizeUniversity(r['대학명'])===norm);
+  8316 |   const results=dashboardAdmissionRows('admissionResults','55_대학입결DB').filter(r=>dashboardAdmissionNormalizeUniversity(r['대학명'])===norm);
+  8317 |   const admissions=[...(structures.length?structures:minimums)].sort(uep08258AdmissionCompare);
+  8318 |   const origin=['types','guide','major'].includes(window.__uepAdmissionReturn)?window.__uepAdmissionReturn:'today';
+  8319 |   const nav=origin==='types'||origin==='guide'?'<div class="uep-uni-type-back"><button type="button" data-uep-back-types>← 대입 이해로</button></div>':origin==='major'?'<div class="uep-uni-type-back"><button type="button" data-uep-back-major>← 전공별 대학 찾기로</button></div>':uep08223TodayNav(university);
+  8320 |   const visibleAdmissions=admissions.filter(r=>String(r['UEP노출']||'Y').trim().toUpperCase()!=='N');
+  8321 |   const renderAdmissionCard=r=>'<article class="uep-uni-admission-card'+uep08261AdmissionCardClass(r)+'"><div class="uep-uni-badges">'+uep08223UniversityBadges(r)+'</div>'+uep08258AdmissionSupportBadge(r)+(String(r['모집인원']??'').trim()&&!uep08258AdmissionMeta(r).unavailable?'<span class="uep-admission-count-badge">모집 '+escapeHtml(String(r['모집인원']).trim())+'명</span>':'')+'<h4>'+escapeHtml(r['전형명']||'전형명 확인')+'</h4><p>'+escapeHtml(r['선발방식']||r['평가구조요약']||dashboardAdmissionMethod(r))+'</p>'+(String(r['추천/지원조건']??'').trim()?'<p class="uep-admission-support-condition"><b>지원조건</b> '+escapeHtml(String(r['추천/지원조건']).trim())+'</p>':'')+'</article>';
+  8322 |   const activeAdmissions=admissions.filter(uep08258AdmissionActive).sort(uep08258AdmissionCompare);
+  8323 |   const tabKey=r=>{const group=uep08261AdmissionGroup(r);return group==='교과'||group==='종합'?'early':group==='정시'?'regular':'other';};
+  8324 |   const renderTabPanel=(key,label)=>{
+  8325 |     const rows=activeAdmissions.filter(r=>tabKey(r)===key);
+  8326 |     const ordinary=rows.filter(r=>{const i=uep08258AdmissionMeta(r);return !i.restricted&&!i.unavailable;});
+  8327 |     const regionalDoctor=rows.filter(r=>{const i=uep08258AdmissionMeta(r);return uep08261RegionalDoctor(r)&&i.restricted&&!i.unavailable;});
+  8328 |     const detail=rows.filter(r=>{const i=uep08258AdmissionMeta(r);return i.unavailable||(i.restricted&&!regionalDoctor.includes(r));});
+  8329 |     const ordinaryHtml=ordinary.length?'<div class="uep-uni-admission-grid uep-uni-primary-grid">'+ordinary.map(renderAdmissionCard).join('')+'</div>':'<p class="uep-uni-admission-empty">'+escapeHtml(label)+' 일반 전형자료를 연결 중입니다.</p>';
+  8330 |     const regionalDoctorHtml=regionalDoctor.length?'<div class="uep-uni-featured-admissions"><div class="uep-uni-admission-subtitle">지역의사제</div><div class="uep-uni-admission-grid uep-uni-featured-grid">'+regionalDoctor.map(renderAdmissionCard).join('')+'</div></div>':'';
+  8331 |     const detailHtml=detail.length?'<details class="uep-uni-restricted-disclosure uep-uni-more-admissions"><summary>다른 전형 자세히 보기 <b>'+detail.length+'개</b><span>펼쳐보기</span></summary><div class="uep-uni-admission-grid uep-uni-restricted-grid">'+detail.map(renderAdmissionCard).join('')+'</div></details>':'';
+  8332 |     return '<section class="uep-uni-admission-tab-panel uep-uni-admission-tab-'+key+'">'+ordinaryHtml+regionalDoctorHtml+detailHtml+'</section>';
+  8333 |   };
+  8334 |   const admissionHtml='<div class="uep-uni-admission-tabs">'+
+  8335 |     '<input type="radio" name="uep-uni-admission-tab" id="uep-uni-tab-early" checked><input type="radio" name="uep-uni-admission-tab" id="uep-uni-tab-other"><input type="radio" name="uep-uni-admission-tab" id="uep-uni-tab-regular">'+
+  8336 |     '<div class="uep-uni-admission-tab-labels"><label for="uep-uni-tab-early">수시(교과·종합)</label><label for="uep-uni-tab-other">수시(논술·기타)</label><label for="uep-uni-tab-regular">정시</label></div>'+
+  8337 |     '<div class="uep-uni-admission-tab-panels">'+renderTabPanel('early','수시(교과·종합)')+renderTabPanel('other','수시(논술·기타)')+renderTabPanel('regular','정시')+'</div></div>';
+  8338 |   const restrictedHtml='';
+  8339 |   const resultHtml=results.length?results.slice(0,12).map(r=>'<article class="uep-uni-result-card"><h4>'+escapeHtml(r['모집단위']||'모집단위')+'</h4><p>'+escapeHtml(r['전형명(대)']||r['전형명']||'')+'</p><div><b>합격 '+escapeHtml(r['합격자수']||'-')+'명</b><span>최저내신 '+escapeHtml(r['최저내신등급']||'-')+'</span></div></article>').join(''):'<p>현재 연결된 운호고 실제 입결이 없습니다.</p>';
+  8340 |   const calcs=dashboardAdmissionRows('admissionGradeCalcs','57_내신산정DB').filter(r=>dashboardAdmissionNormalizeUniversity(r['대학명'])===norm);
+  8341 |   const calc=calcs.find(r=>String(r['검증상태']||'').startsWith('A-'))||calcs[0]||null;
+  8342 |   const recommendations=dashboardAdmissionRows('admissionRecommendations','58_권장과목DB').filter(r=>dashboardAdmissionNormalizeUniversity(r['대학명'])===norm&&String(r['UEP노출']||'Y').trim().toUpperCase()!=='N');
+  8343 |   const detailLine=(label,value)=>value?'<div class="uep-uni-detail-line"><b>'+escapeHtml(label)+'</b><span>'+escapeHtml(value)+'</span></div>':'';
+  8344 |   const calcHtml=calc?detailLine('반영학년',calc['반영학년'])+detailLine('반영교과·과목',calc['반영교과/과목'])+detailLine('등급점수',calc['석차등급배점'])+detailLine('성취도점수',calc['성취도배점/환산'])+detailLine('등급 미기재',calc['석차등급미기재과목처리'])+detailLine('이수학점·가중',calc['이수학점가중'])+detailLine('최종 산식',calc['내신산식']):'<div class="uep-uni-detail-pending"><b>정확한 숫자 산식 검증중</b><span>등급별 점수·성취도별 점수·가중치가 공식 원문에서 확인된 뒤 표시합니다.</span></div>';
+  8345 |   const minHtml=minimums.length?minimums.slice(0,14).map(r=>{const unit=String(r['모집단위']||'모집단위').trim();const type=String(r['전형유형']||'').trim();const track=String(r['전형명']||'').trim();const nt=type.replace(/\s+/g,'').replace(/전형$/,''),nk=track.replace(/\s+/g,'').replace(/전형$/,'');const meta=track&&(nk.startsWith(nt)||nt.startsWith(nk))?track:[type,track].filter(Boolean).join(' · ');return '<div class="uep-uni-min-row"><b>'+escapeHtml(unit)+'</b><span>'+(meta?'<small>'+escapeHtml(meta)+'</small><br>':'')+escapeHtml(r['수능최저원문']||'')+'</span></div>';}).join(''):'<div class="uep-uni-detail-pending"><b>모집단위별 기준 검증중</b><span>공식 원문 숫자가 확인된 기준만 표시합니다.</span></div>';
+  8346 |   const courseHtml=!recommendations.length?'<div class="uep-uni-detail-pending uep-uni-recommend-status input"><b>자료 입력 전</b><span>58_권장과목DB에 이 대학의 전공 연계 자료가 아직 등록되지 않았습니다.</span></div>':recommendations.slice(0,60).map(r=>{const kind=String(r['구분']||'관련 교과').trim()||'관련 교과';const unit=String(r['모집단위/계열']||'전체').trim()||'전체';const subjects=String(r['과목']||'').trim();const original=String(r['원문']||'').trim();if(/자료미확보/.test(kind))return '<div class="uep-uni-detail-pending uep-uni-recommend-status pending"><b>전공연계 자료 미확보</b><span>'+escapeHtml(original||subjects||'별도 전공 연계 과목 자료가 아직 연결되지 않았습니다.')+'</span></div>';if(/미제시/.test(kind))return '<div class="uep-uni-min-row uep-uni-recommend-source-row missing"><b>'+escapeHtml(unit)+'</b><span><small>공식 자료 확인 · 미제시</small><br>'+escapeHtml(subjects||original||'해당 모집단위의 별도 관련·권장과목 제시 없음')+'</span></div>';const value=subjects||original||'공식 자료 확인 필요';return '<div class="uep-uni-min-row uep-uni-recommend-source-row"><b>'+escapeHtml(unit)+'</b><span><small>'+escapeHtml(kind)+'</small><br>'+escapeHtml(value)+(original&&subjects&&original!==subjects&&!original.includes(subjects)?'<small>'+escapeHtml(original)+'</small>':'')+'</span></div>';}).join('');
+  8347 |   const body='<div class="uep-admission-university-detail uep-admission-university-detail-08223">'+nav+
+  8348 |     '<section class="uep-uni-section"><div class="uep-uni-section-title"><div><small>ADMISSION</small><h3>주요 전형과 선발방식</h3></div><span>'+escapeHtml(university['기준학년도']||'2028')+' 기준</span></div><div class="uep-uni-admission-grid">'+admissionHtml+'</div>'+restrictedHtml+'</section>'+
+  8349 |     '<section class="uep-uni-summary-section"><div class="uep-uni-summary-card uep-uni-calc-card"><small>내신성적 산출방법</small><div class="uep-uni-detail-stack">'+calcHtml+'</div></div><div class="uep-uni-summary-card uep-uni-minimum-card"><small>모집단위별 수능최저</small><div class="uep-uni-detail-stack">'+minHtml+'</div></div></section>'+
+  8350 |     '<section class="uep-uni-section uep-uni-course-section"><div class="uep-uni-section-title"><div><small>COURSE</small><h3>모집단위별 관련·권장과목</h3></div></div><div class="uep-uni-recommend-grid">'+courseHtml+'</div></section>'+
+  8351 |     '<section class="uep-uni-section"><div class="uep-uni-section-title"><div><small>UNHO DATA</small><h3>운호고 실제 입결</h3></div></div><div class="uep-uni-result-grid">'+resultHtml+'</div></section>'+
+  8352 |     uep08253AdmissionCounselMarkup(university)+
+  8353 |     '<p class="admission-reference-note">'+escapeHtml(university['기준학년도']||'2028')+' 기준 · '+escapeHtml(university['자료상태']||'교육용 참고')+' · 2029 최종 모집요강 재확인</p></div>';
+  8354 |   openDashboardAdmissionDialogBase(displayName,body);
+  8355 |   const layer=document.querySelector('.dashboard-admission-layer');
+  8356 |   if(!layer)return;
+  8357 |   layer.querySelector('[data-uep-counsel-edit]')?.addEventListener('click',()=>uep08253OpenAdmissionCounselEditor(university));
+  8358 |   const openByName=targetName=>{
+  8359 |     targetName=String(targetName||'').trim();
+  8360 |     if(!targetName)return;
+  8361 |     const all=dashboardAdmissionUniversities();
+  8362 |     const row=all.find(r=>dashboardAdmissionNormalizeUniversity(r['대학명'])===dashboardAdmissionNormalizeUniversity(targetName));
+  8363 |     if(row)openDashboardUniversityDetail(row);
+  8364 |   };
+  8365 |   layer.querySelectorAll('[data-uep-region]').forEach(button=>{
+  8366 |     button.onclick=event=>{
+  8367 |       event.preventDefault();event.stopPropagation();
+  8368 |       const region=String(button.dataset.uepRegion||'').trim();
+  8369 |       if(!region)return;
+  8370 |       window.__uepAdmissionRegion=region;
+  8371 |       const first=dashboardAdmissionUniversities().find(r=>uep08223UniversityRegions(r).includes(region));
+  8372 |       if(first)openDashboardUniversityDetail(first);
+  8373 |     };
+  8374 |   });
+  8375 |   layer.querySelectorAll('[data-uep-university]').forEach(button=>{
+  8376 |     button.onclick=event=>{event.preventDefault();event.stopPropagation();openByName(button.dataset.uepUniversity);};
+  8377 |   });
+  8378 |   layer.querySelectorAll('[data-uep-prev]').forEach(button=>{
+  8379 |     button.onclick=event=>{event.preventDefault();event.stopPropagation();openByName(button.dataset.uepPrev);};
+  8380 |   });
+  8381 |   layer.querySelectorAll('[data-uep-next]').forEach(button=>{
+  8382 |     button.onclick=event=>{event.preventDefault();event.stopPropagation();openByName(button.dataset.uepNext);};
+  8383 |   });
+  8384 | }
