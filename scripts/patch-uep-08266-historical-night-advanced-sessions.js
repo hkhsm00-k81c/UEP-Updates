@@ -38,7 +38,7 @@ g += `\n/* UEP_08266_HISTORICAL_NIGHT_ADVANCED_SESSIONS */\n(function(){const VE
 
 must(d.includes('supportedAfterSession'),'night advanced session support missing');
 must(d.includes('/야간심화/.test(parentType)'),'parent night advanced recognition missing');
-must(g.includes('UEP_08265_WEEKLY_NIGHT_ACTUAL_SESSIONS'),'0.82.65 weekly-night canonical fix missing');
+must(g.includes('function dashboardAfterProgramsForDay(dayKey)')&&g.includes('afterSchoolProgramGroups()'),'0.82.65 canonical weekly-night renderer path missing');
 fs.writeFileSync(gp,g,'utf8');
 fs.writeFileSync(dp,d,'utf8');
 console.log('UEP 0.82.66 historical night advanced session loader patched');
