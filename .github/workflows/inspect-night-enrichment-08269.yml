@@ -1,0 +1,34 @@
+name: Inspect UEP 0.82.69 Night Enrichment
+on:
+  push:
+    paths:
+      - 'inspect-night-enrichment-08269.trigger'
+permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.82.69 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE -ne 0){throw "download failed: $LASTEXITCODE"}
+          Expand-Archive source/UEP-update.zip app -Force
+          $d=Get-Content 'app/resources/app/electron/google-data.cjs'
+          $out='inspection-night-enrichment-08269.txt'
+          "===== google-data.cjs lines 730-870 =====" | Set-Content $out -Encoding utf8
+          for($i=729;$i -le 869;$i++){ Add-Content $out (("{0,7}: {1}" -f ($i+1),$d[$i])) }
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add $out
+          git commit -m 'Inspect v0.82.69 night attendance enrichment'
+          if($LASTEXITCODE -ne 0){throw "commit failed: $LASTEXITCODE"}
+          git pull --rebase origin main
+          if($LASTEXITCODE -ne 0){throw "pull failed: $LASTEXITCODE"}
+          git push
+          if($LASTEXITCODE -ne 0){throw "push failed: $LASTEXITCODE"}
