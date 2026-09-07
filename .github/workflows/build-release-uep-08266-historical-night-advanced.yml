@@ -1,0 +1,33 @@
+name: Build and Release UEP 0.82.66 Historical Night Advanced
+on: {push: {paths: ['release-08266.trigger']}}
+permissions: {contents: write}
+jobs:
+  build-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: |
+          $ErrorActionPreference='Stop'
+          function Run-Native([scriptblock]$c,[string]$l){&$c;if($LASTEXITCODE -ne 0){throw "$l failed: $LASTEXITCODE"}}
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          Run-Native {gh release download v0.82.65 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source} 'download'
+          Expand-Archive source/UEP-update.zip app -Force
+          $root='app/resources/app'
+          Run-Native {node scripts/patch-uep-08266-historical-night-advanced-sessions.js $root} '0.82.66 patch'
+          Run-Native {node --check "$root/gyomuon.js"} 'renderer syntax'
+          Run-Native {node --check "$root/electron/google-data.cjs"} 'google-data syntax'
+          Run-Native {node --check "$root/electron/main.cjs"} 'main syntax'
+          Run-Native {node scripts/test-uep-08266-historical-night-advanced-sessions.js $root} 'historical-night regression test'
+          Compress-Archive -Path app/* -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "$sha  UEP-update.zip"|Set-Content sha256.txt
+          Run-Native {gh release create v0.82.66 UEP-update.zip sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.66' --notes "UEP v0.82.66`n- 과거 야간심화수업 12_차시일정을 정식 실제 차시로 인식`n- 프로그램유형이 비어 있거나 야간심화인 과거 차시도 부모 강좌 유형으로 연결`n- 실제 차시 우선, 강좌 마스터 제외, 야자출결 파생 일정 fallback 제외 흐름을 야간심화에도 적용`n- 현재 방과후학교 주간표와 자습·야자 출결 집계는 변경하지 않음"} 'release'
+          $policy=Get-Content uep-policy.json -Raw|ConvertFrom-Json
+          $policy.latestVersion='0.82.66'
+          $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.66/UEP-update.zip'
+          $policy.sha256=$sha
+          $policy.message='UEP 0.82.66 · 과거 야간심화 실제 차시 연결 및 중복 수정'
+          $policy|ConvertTo-Json -Depth 10|Set-Content uep-policy.json -Encoding utf8
+          Run-Native {git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git pull --rebase origin main;git add uep-policy.json;git commit -m 'Publish UEP 0.82.66 policy';git push} 'policy push'
