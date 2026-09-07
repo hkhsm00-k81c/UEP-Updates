@@ -1,0 +1,17 @@
+const fs=require('fs');
+const path=require('path');
+const root=process.argv[2]||'app';
+const g=fs.readFileSync(path.join(root,'gyomuon.js'),'utf8');
+const d=fs.readFileSync(path.join(root,'electron','google-data.cjs'),'utf8');
+const p=JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8'));
+const assert=(ok,msg)=>{if(!ok)throw new Error(msg)};
+assert(/const\s+APP_VERSION\s*=\s*["']0\.82\.67["'];/.test(g),'renderer version mismatch');
+assert(p.version==='0.82.67','package version mismatch');
+assert(g.includes("if(String(APP_VERSION)!=='0.82.21') return;"),'legacy 0.82.21 popup is not version-gated');
+assert(g.includes('UEP_08267_RELEASE_NOTES_ONCE'),'0.82.67 popup missing');
+assert(d.includes('/방과후|야간심화(?:모의고사)?|야간모의|방학/'),'night mock attendance classifier missing');
+assert(d.includes('/야간심화(?:모의고사)?|야간모의/.test(programType)'),'night mock session type missing');
+assert(d.includes('/야간심화(?:모의고사)?|야간모의/.test(parentType)'),'night mock parent type missing');
+assert(g.includes('UEP_08265_WEEKLY_NIGHT_ACTUAL_SESSIONS'),'0.82.65 weekly after-school fix missing');
+assert(g.includes('UEP_08266_HISTORICAL_NIGHT_ADVANCED_SESSIONS'),'0.82.66 night advanced fix missing');
+console.log('UEP 0.82.67 popup/night-mock regression tests passed');
