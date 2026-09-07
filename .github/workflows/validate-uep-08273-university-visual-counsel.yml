@@ -1,0 +1,24 @@
+name: Validate UEP 0.82.73 University Visual Counsel
+on:
+  push:
+    paths: ['validate-08273.trigger']
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          $ErrorActionPreference='Stop'
+          function Run-Native([scriptblock]$c,[string]$l){&$c;if($LASTEXITCODE -ne 0){throw "$l failed: $LASTEXITCODE"}}
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          Run-Native {gh release download v0.82.72 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source} 'download 0.82.72'
+          Expand-Archive source/UEP-update.zip app -Force
+          $root='app/resources/app'
+          Run-Native {node scripts/patch-uep-08273-university-visual-counsel.js $root} '08273 patch'
+          Run-Native {node --check "$root/gyomuon.js"} 'gyomuon syntax'
+          Run-Native {node --check "$root/electron/google-data.cjs"} 'google-data syntax'
+          Run-Native {node --check "$root/electron/main.cjs"} 'main syntax'
+          Run-Native {node scripts/test-uep-08273-university-visual-counsel.js $root} '08273 regression'
