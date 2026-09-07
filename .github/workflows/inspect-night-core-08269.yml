@@ -1,0 +1,43 @@
+name: Inspect UEP 0.82.69 Night Core
+on:
+  push:
+    paths:
+      - 'inspect-night-core-08269.trigger'
+permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.82.69 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE -ne 0){throw "download failed: $LASTEXITCODE"}
+          Expand-Archive source/UEP-update.zip app -Force
+          $root='app/resources/app'
+          $g=Get-Content "$root/gyomuon.js"
+          $d=Get-Content "$root/electron/google-data.cjs"
+          $out='inspection-night-core-08269.txt'
+          "===== gyomuon.js lines 2650-2795 =====" | Set-Content $out -Encoding utf8
+          for($i=2649;$i -le 2794;$i++){ Add-Content $out (("{0,7}: {1}" -f ($i+1),$g[$i])) }
+          Add-Content $out "`n===== google-data.cjs: afterSchoolAttendance / 30_야자출결_정규화 matches ====="
+          $hits=for($i=0;$i -lt $d.Count;$i++){if($d[$i] -match 'afterSchoolAttendance|30_야자출결_정규화|nightAttendance|최종여부|출결상태'){ $i }}
+          foreach($h in $hits){
+            Add-Content $out "`n--- around line $($h+1) ---"
+            $s=[Math]::Max(0,$h-12);$e=[Math]::Min($d.Count-1,$h+28)
+            for($i=$s;$i -le $e;$i++){ Add-Content $out (("{0,7}: {1}" -f ($i+1),$d[$i])) }
+          }
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add $out
+          git commit -m 'Inspect v0.82.69 focused night attendance core'
+          if($LASTEXITCODE -ne 0){throw "commit failed: $LASTEXITCODE"}
+          git pull --rebase origin main
+          if($LASTEXITCODE -ne 0){throw "pull failed: $LASTEXITCODE"}
+          git push
+          if($LASTEXITCODE -ne 0){throw "push failed: $LASTEXITCODE"}
