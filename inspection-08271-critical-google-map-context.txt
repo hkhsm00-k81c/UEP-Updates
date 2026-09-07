@@ -1,0 +1,246 @@
+이터") : rowsFrom("05_진로희망이력")).filter(row => String(row["현재여부"] || "Y").trim() !== "N");
+  const careerProfiles = new Map(careerRows.map(row => {
+    const id=String(row["학생ID"] || "").trim();
+    const career=String(row["대학적성데이터"] || row["진로희망분야"] || row["진로희망"] || "").trim();
+    const major=String(row["희망학과"] || row["희망전공"] || "").trim();
+    const track=String(row["희망계열"] || row["계열"] || "").trim();
+    const interest=String(row["흥미"] || row["흥미유형"] || row["관심분야"] || "").trim();
+    const aptitude=String(row["적성"] || row["적성유형"] || row["강점"] || "").trim();
+    return [id,{career,major,track,interest,aptitude}];
+  }));
+  const careers = new Map([...careerProfiles].map(([id,p]) => [id, [p.career,p.major].filter(Boolean).join(" · ")]));
+
+  // 학생 지원·보호 신호 원본. 목록 화면에는 민감 상세를 직접 노출하지 않고,
+  // 학생이 선택된 경우에만 renderer가 신호등과 의도적 확인 UI를 표시합니다.
+  const educationSupportByStudent = new Map(rowsFrom("47_교육비지원")
+    .filter(row => String(row["학생ID"] || "").trim() && String(row["신호등반영"] || "").trim().toUpperCase() === "Y")
+    .map(row => [String(row["학생ID"] || "").trim(), {
+      selected: String(row["선정여부"] || "").trim(),
+      studentQualification: String(row["학생자격"] || "").trim(),
+      householdQualification: String(row["가구자격"] || "").trim(),
+      incomePercent: String(row["중위소득(%)"] || "").trim(),
+      baseDate: localDate(row["기준일"]),
+    }]));
+  const healthProtectionByStudent = new Map(rowsFrom("48_요보호학생")
+    .filter(row => String(row["학생ID"] || "").trim() && String(row["신호등반영"] || "").trim().toUpperCase() === "Y")
+    .map(row => [String(row["학생ID"] || "").trim(), {
+      diagnosis: String(row["진단및증상"] || "").trim(),
+      caution: String(row["주의사항"] || "").trim(),
+      category: String(row["분류"] || "보건/요보호").trim(),
+    }]));
+  const crisisProtectionByStudent = new Map(rowsFrom("49_위기학생관리")
+    .filter(row => String(row["학생ID"] || "").trim()
+      && String(row["신호등반영"] || "").trim().toUpperCase() === "Y"
+      && String(row["매칭상태"] || "").trim() === "정상매칭")
+    .map(row => [String(row["학생ID"] || "").trim(), {
+      result: String(row["검사결과"] || "").trim(),
+      status: String(row["관리상태"] || "").trim(),
+      schoolCounsel: String(row["학교상담"] || "").trim(),
+      externalLink: String(row["외부기관연계"] || "").trim(),
+    }]));
+
+  const students = masters.map((row) => {
+    const id = String(row["학생ID"] || "").trim();
+    const contact = contacts.get(id) || {};
+    const dorm = currentDorm.get(id);
+    const grade = String(row["학년"] || "").trim();
+    const classNo = String(row["반"] || "").trim();
+    const number = String(row["번호"] || "").trim();
+    const studentNo = String(row["학번"] || "").replace(/\.0$/, "") ||
+      `${grade}${classNo}${number.padStart(2, "0")}`;
+    const educationSupport = educationSupportByStudent.get(id) || null;
+    const healthProtection = healthProtectionByStudent.get(id) || null;
+    const crisisProtection = crisisProtectionByStudent.get(id) || null;
+    const signalLevel = (healthProtection || crisisProtection) ? "red" : (educationSupport ? "yellow" : "green");
+    return {
+      id,
+      studentNo,
+      className: classNo ? `${classNo}반` : "-",
+      number,
+      name: String(row["사용성명"] || row["성명"] || "").trim(),
+      officialName: String(row["성명"] || "").trim(),
+      displayName: String(row["검색표시명"] || "").trim(),
+      status: String(row["학적상태"] || "재학").trim(),
+      entryDate: localDate(row["학적기준일"] || row["입학일"]),
+      statusDate: localDate(row["학적기준일"]),
+      enrollmentReason: String(row["학적변동사유"] || "").trim(),
+      dorm: dorm ? "학사" : "-",
+      dormRoom: dorm ? String(dorm["호실"] || "").trim() : "",
+      dormStatus: dorm ? String(dorm["학사상태"] || "재사").trim() : "",
+      dormStart: dorm ? localDate(dorm["적용시작일"]) : "",
+      career: careers.get(id) || "-",
+      careerProfile: careerProfiles.get(id) || {career:"",major:"",track:"",interest:"",aptitude:""},
+      group: "-",
+      phone: String(contact["학생연락처"] || "").trim() || "-",
+      email: String(contact["학생이메일"] || contact["이메일"] || contact["이메일주소"] || "").trim() || "-",
+      guardian1Relation: String(contact["보호자1관계"] || "").trim() || "보호자1",
+      guardian1Phone: String(contact["보호자1연락처"] || "").trim() || "-",
+      guardian2Relation: String(contact["보호자2관계"] || "").trim() || "보호자2",
+      guardian2Phone: String(contact["보호자2연락처"] || "").trim() || "-",
+      nfc: String(contact["NFC_ID"] || "").trim() ? "등록" : "-",
+      middleSchool: String(row["출신중학교"] || "").trim(),
+      supportSignal: {
+        level: signalLevel,
+        hasEducationSupport: Boolean(educationSupport),
+        hasHealthProtection: Boolean(healthProtection),
+        hasCrisisProtection: Boolean(crisisProtection),
+        summary: signalLevel === "red" ? "지도·상담 전 확인할 보호정보가 있습니다." : (signalLevel === "yellow" ? "확인할 지원정보가 있습니다." : "별도 확인사항이 없습니다."),
+        educationSupport,
+        healthProtection,
+        crisisProtection,
+      },
+    };
+  }).filter((student) => student.id && student.name);
+
+  const studentIds = new Set(students.map((student) => student.id));
+  const studentById = new Map(students.map((student) => [String(student.id), student]));
+  const studentByNo = new Map(students.map((student) => [String(student.studentNo), student]));
+  const studentByNameClass = new Map(students.map((student) => [`${String(student.name).trim()}|${classNumberSafe(student.className)}`, student]));
+  const outingRows = outingMatrixToObjectRows(sheetMatrices["02_학사외출_일자별"] || []);
+  const dormOutings = outingRows
+    .map((row, index) => {
+      const enteredId = String(valueByHeader(row, "학생ID", "학생 ID") || "").trim();
+      const enteredNo = String(valueByHeader(row, "학번", "학생학번") || "").replace(/\.0$/, "").trim();
+      const enteredName = String(valueByHeader(row, "성명", "이름", "학생명") || "").trim();
+      const enteredClass = classNumberSafe(valueByHeader(row, "반", "학급", "학급반"));
+      const master = studentById.get(enteredId) || studentByNo.get(enteredNo) || studentByNameClass.get(`${enteredName}|${enteredClass}`) || null;
+      // 표준화 이전 자료는 학생ID가 없거나 반 표기가 달라 마스터 매칭이 실패할 수 있습니다.
+      // 외출 원자료의 학번·성명이 있으면 기록 자체는 보존하고 화면에 표시합니다.
+      if (!master && !enteredNo && !enteredName) return null;
+      const category = String(valueByHeader(row, "외출구분", "신청구분", "구분") || "").trim();
+      const operation = String(valueByHeader(row, "운영형태", "외출형태", "귀가구분") || "").trim();
+      return {
+        id: String(valueByHeader(row, "외출ID", "외출기록ID", "기록ID", "응답ID") || `outing-${index}`).trim(),
+        studentId: enteredId || String(master?.id || ""),
+        studentNo: enteredNo || String(master?.studentNo || ""),
+        date: localDate(valueByHeader(row, "외출일자", "신청일자", "운영일", "일자", "날짜", "적용일자")),
+        className: enteredClass || classNumberSafe(master?.className),
+        number: String(valueByHeader(row, "번호", "출석번호") || master?.number || "").replace(/\.0$/, ""),
+        name: enteredName || String(master?.name || ""),
+        category: category || (operation === "귀가형" || /귀가|퇴소/.test(`${operation} ${category}`) ? "퇴소" : (operation === "입소형" ? "늦은 입소" : "외출")),
+        outTime: localTime(valueByHeader(row, "외출시간", "출발예정시간", "출발시간", "외출예정시간")),
+        returnTime: /귀가|퇴소/.test(`${operation} ${category}`)
+          ? localTime(valueByHeader(row, "자택도착예정시간", "귀가예정시간", "도착예정시간"))
+          : localTime(valueByHeader(row, "복귀예정시간", "귀사예정시간", "복귀시간", "귀사시간")),
+        reason: String(valueByHeader(row, "사유", "외출사유", "신청사유") || "").trim(),
+        destination: String(valueByHeader(row, "목적지", "외출목적지", "방문장소") || "").trim(),
+        guardian: String(valueByHeader(row, "보호자확인", "보호자 동의", "보호자확인여부") || "").trim(),
+        note: String(valueByHeader(row, "비고", "메모") || "").trim(),
+        confirmed: String(valueByHeader(row, "승인자", "확인자", "담당교사") || "").trim(),
+        status: String(valueByHeader(row, "처리상태", "자동처리상태", "UEP전송상태", "상태") || "예정").trim(),
+        operationPeriod: String(valueByHeader(row, "운영기간") || "").trim(),
+        appliedRuleId: String(valueByHeader(row, "적용규칙ID") || "").trim(),
+        ruleEffect: String(valueByHeader(row, "규칙효과") || "").trim(),
+        operationIncluded: String(valueByHeader(row, "운영포함여부") || "Y").trim().toUpperCase() !== "N",
+        ruleJudgement: String(valueByHeader(row, "규칙판정") || "").trim(),
+        ruleReason: String(valueByHeader(row, "판정사유") || "").trim(),
+      };
+    })
+    .filter((item) => item && item.date && item.name);
+
+  const nightRows = rowsFrom("30_야자출결_정규화").filter((row) => {
+    const sid = String(row["학생ID"] || "").trim();
+    const sno = String(row["학번"] || "").replace(/\.0$/, "");
+    const isFinal = !String(row["최종여부"] || "").trim() || String(row["최종여부"] || "").trim().toUpperCase() === "Y";
+    const isMatched = !String(row["매칭상태"] || "").trim() || String(row["매칭상태"] || "").trim() === "정상";
+    return isFinal && isMatched && (studentIds.has(sid) || studentByNo.has(sno));
+  });
+  const mappedNightRows = nightRows.map((row, index) => {
+    const sno=String(row["학번"] || "").replace(/\.0$/, "");
+    const master=studentById.get(String(row["학생ID"]||"").trim())||studentByNo.get(sno)||{};
+    return {
+      id: String(row["기록ID"] || `night-${index}`).trim(),
+      studentId: String(row["학생ID"] || master.id || "").trim(),
+      studentNo: sno || String(master?.studentNo || ""),
+      name: String(row["학생명"] || master.name || "").trim(),
+      className: classNumberSafe(master.className || (sno.length>=2?sno.slice(1,2):"")),
+      date: localDate(row["운영일"]),
+      time: String(row["시간대"] || "").trim(),
+      type: "야자",
+      affiliation: "",
+      detail: [row["요일"], row["시간대"], row["입력경로"]].filter(Boolean).join(" · "),
+      result: "출석",
+      inputPath: String(row["입력경로"] || "").trim(),
+      submittedAt: String(row["제출일시"] || "").trim(),
+    };
+  });
+  // 야자출결은 학생응답 기반 데이터이므로 데이터 처리시트의 30_야자출결_정규화만 사용합니다.
+  // 기본정보 연결시트의 과거 32번 탭은 더 이상 UEP 조회 원본으로 사용하지 않습니다.
+  const allMappedNightRows = mappedNightRows.slice();
+
+  const isAfterSchool = (row) => /방과후|야간심화(?:모의고사)?|야간모의|방학/.test(`${row.type || ""} ${row.programTitle || ""} ${row.affiliation || ""}`);
+  let afterSchoolAttendance = mappedNightRows.filter(isAfterSchool);
+
+  const commonMasters = rowsFrom("09_공통활동마스터").filter((row) => !/종료|취소|비활성|N/i.test(String(row["운영상태"] || row["상태"] || "")));
+  const selectedMasters = rowsFrom("10_선택활동마스터").filter((row) => !/종료|취소|비활성|N/i.test(String(row["운영상태"] || row["상태"] || "")));
+  const afterSchoolMasters = rowsFrom("11_방과후학교").filter((row) => {
+    const status = String(row["운영상태"] || row["상태"] || "").trim();
+    // "운영완료"는 정상 강좌다. 정확한 비활성 상태만 제외한다.
+    return !/^(종료|폐강|비활성|N)$/i.test(status);
+  });
+  const sessionRows = rowsFrom("12_차시일정")
+    .filter((row) => (row["프로그램ID"] || row["강좌ID"]) && (row["실제수업일"] || row["운영일자"] || row["예정일"]))
+    .map((row) => ({
+      ...row,
+      __programId: String(row["프로그램ID"] || row["강좌ID"] || "").trim().replace(/^CRS-/, ""),
+      __date: localDate(row["실제수업일"] || row["운영일자"] || row["예정일"]),
+      __status: String(row["운영상태"] || "예정").trim(),
+    }));
+  // 13_출석부는 방과후·야간심화의 차시 출석 전용입니다.
+  const rosterRows = rowsFrom("13_출석부").filter((row) => {
+    const programId = row["프로그램ID"] || row["강좌ID"];
+    const state = String(row["참여상태"] || row["등록상태"] || row["신청상태"] || "참여");
+    return programId && !/취소|종료|제외|N/i.test(state);
+  });
+  // 선택활동의 최종 참여학생은 16_프로그램출석실적만 사용합니다.
+  const selectedParticipationRows = rowsFrom("16_프로그램출석실적").filter((row) => {
+    const programId = String(row["프로그램ID"] || "").trim();
+    const state = String(row["참여상태"] || "참여").trim();
+    return programId && !/취소|종료|제외|미참여|N/i.test(state);
+  });
+  const selectedParticipationByProgram = selectedParticipationRows.reduce((map,row)=>{
+    const key=String(row["프로그램ID"]||"").trim();
+    if(!map.has(key))map.set(key,[]);
+    map.get(key).push(row);
+    return map;
+  },new Map());
+  const rosterByProgram = rosterRows.reduce((map, row) => {
+    const key = String(row["프로그램ID"] || row["강좌ID"] || "").trim().replace(/^CRS-/, "");
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(row);
+    return map;
+  }, new Map());
+  const rosterBySession = rosterRows.reduce((map, row) => {
+    const key = String(row["차시ID"] || "").trim();
+    if (!key) return map;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(row);
+    return map;
+  }, new Map());
+  const truthyFlag = (value) => /^(Y|YES|TRUE|1|사용|적용)$/i.test(String(value || "").trim());
+  const selectedParticipantRows = (programId) => {
+    const sourceRows=selectedParticipationByProgram.get(String(programId||"").trim())||[];
+    return sourceRows.map((row)=>{
+      const enteredId=String(row["학생ID"]||"").trim();
+      const enteredNo=String(row["학번"]||"").replace(/\.0$/,"").trim();
+      const master=studentById.get(enteredId)||studentByNo.get(enteredNo)||null;
+      return {
+        studentId:enteredId||String(master?.id||""),
+        studentNo:enteredNo||String(master?.studentNo||""),
+        name:String(row["성명"]||row["학생명"]||master?.name||"").trim(),
+        className:String(row["반"]||master?.className||"").trim(),
+        number:String(row["번호"]||master?.number||"").trim(),
+        attendance:String(row["출석상태"]||"").trim(),
+        participation:String(row["참여상태"]||"참여").trim(),
+        result:String(row["참여상태"]||"참여").trim(),
+        checkMethod:String(row["확인방식"]||"").trim(),
+        source:"16_프로그램출석실적",
+      };
+    });
+  };
+  const participantRows = (programId, sessionId = "") => {
+    const normalizedProgramId = String(programId || "").replace(/^CRS-/, "");
+    const sessionSpecific = sessionId ? (rosterBySession.get(String(sessionId)) || []) : [];
+    const sourceRows = sessionSpecific.length ? sessionSpecific : (rosterByProgram.get(normalizedProgramId) || []);
+    return sourceRows.map((row) => {
+      const enteredId = Strin
