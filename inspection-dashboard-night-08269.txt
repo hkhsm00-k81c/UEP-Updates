@@ -1,0 +1,167 @@
+===== gyomuon.js lines 7840-8005 =====
+   7840:   const key=dateKey(today);
+   7841:   const rows=(readonlyCache?.lunchDuties||[]).filter(row=>String(row.date||'').slice(0,10)===key);
+   7842:   $("#drawerKicker").textContent='TODAY LUNCH DUTY';$("#drawerTitle").textContent='오늘의 급식지도';
+   7843:   const body=rows.length?rows.map(row=>`<div class="today-duty-person ${String(row.teacher||'').trim()===currentLoginTeacherName()?'mine':''}"><strong>${escapeHtml(row.teacher||'-')}</strong><span>${escapeHtml(row.dutyType||'급식실')}</span><small>${escapeHtml([row.start,row.end].filter(Boolean).join('~'))}</small></div>`).join(''):`<div class="night-supervisor-empty"><i>◇</i><b>오늘 급식지도 일정이 없습니다</b><span>42_급식지도계획의 오늘 날짜가 비어 있습니다.</span></div>`;
+   7844:   $("#drawerBody").innerHTML=`<div class="today-duty-list"><time>${escapeHtml(key)}</time>${body}</div>${monthlyMealSummaryMarkup()}<div class="drawer-actions"><button class="btn primary" data-reference="lunch-supervisor">빠른열기 · 급식지도 전체 보기</button></div>`;/* __UEP_08166_TODAY_MEAL_IN_DUTY_POPUP__ */
+   7845:   $("#drawer").classList.remove('hidden');$("#drawerBackdrop").classList.remove('hidden');
+   7846:   $("#drawerBody [data-reference='lunch-supervisor']")?.addEventListener("click",()=>openReferenceDrawer("lunch-supervisor"));
+   7847: }
+   7848: 
+   7849: function openLunchDutyEditor(){
+   7850:   const key=dateKey(today);
+   7851:   const saved=state.settings?.lunchDutyOverrides?.[key]||{};
+   7852:   $("#drawerKicker").textContent="TODAY DUTY";
+   7853:   $("#drawerTitle").textContent="점심 급식지도 등록";
+   7854:   $("#drawerBody").innerHTML=`<form class="duty-editor-form" id="lunchDutyForm"><label>일자<input type="date" id="lunchDutyDate" value="${escapeHtml(key)}"></label><label>담당 여부<select id="lunchDutyEnabled"><option value="1" ${saved.enabled!==false?"selected":""}>담당 있음</option><option value="0" ${saved.enabled===false?"selected":""}>담당 없음</option></select></label><label>시간<input id="lunchDutyTime" value="${escapeHtml(saved.time||"12:20~13:10")}" placeholder="12:20~13:10"></label><label>장소·구역<input id="lunchDutyPlace" value="${escapeHtml(saved.place||"")}" placeholder="1학년 급식실"></label><label>함께 근무<input id="lunchDutyPartners" value="${escapeHtml(saved.partners||"")}" placeholder="교사 이름"></label><div class="modal-actions"><button type="button" class="btn secondary" data-close-drawer>취소</button><button class="btn primary">저장</button></div></form><p class="drawer-note">대시보드 시계 아래 급식지도 배지에 오늘 기준으로 표시됩니다.</p>`;
+   7855:   $("#drawer").classList.remove("hidden");$("#drawerBackdrop").classList.remove("hidden");
+   7856:   $("[data-close-drawer]")?.addEventListener("click",closeDrawer);
+   7857:   $("#lunchDutyForm").onsubmit=async event=>{event.preventDefault();const date=$("#lunchDutyDate").value||key;state.settings.lunchDutyOverrides=state.settings.lunchDutyOverrides||{};state.settings.lunchDutyOverrides[date]={enabled:$("#lunchDutyEnabled").value==="1",time:$("#lunchDutyTime").value.trim(),place:$("#lunchDutyPlace").value.trim(),partners:$("#lunchDutyPartners").value.trim()};await save();closeDrawer();render("dashboard");toast("급식지도 일정을 저장했습니다.");};
+   7858: }
+   7859: function openTodayNightSupervisorDrawer(){
+   7860:   const key=dateKey(today);
+   7861:   const rows=(readonlyCache?.nightSupervisors||[]).filter(row=>String(row.date||'').slice(0,10)===key);
+   7862:   $("#drawerKicker").textContent="TODAY NIGHT STUDY";$("#drawerTitle").textContent="오늘의 야자감독";
+   7863:   const body=rows.length?rows.map(row=>`<div class="today-duty-person ${String(row.teacher||'').trim()===currentLoginTeacherName()?'mine':''}"><strong>${escapeHtml(row.teacher||'-')}</strong><span>${escapeHtml(row.place||'면학관 2~3층')}</span><small>${escapeHtml([row.start,row.end].filter(Boolean).join('~'))}</small></div>`).join(''):`<div class="night-supervisor-empty"><i>◇</i><b>오늘 야자감독이 없습니다</b><span>43_야자감독계획의 오늘 날짜가 비어 있습니다.</span></div>`;
+   7864:   $("#drawerBody").innerHTML=`<div class="today-duty-list"><time>${escapeHtml(key)}</time>${body}</div><div class="drawer-actions"><button class="btn primary" data-reference="night-supervisor">빠른열기 · 야자감독 전체 보기</button></div>`;
+   7865:   $("#drawer").classList.remove("hidden");$("#drawerBackdrop").classList.remove("hidden");
+   7866:   $("#drawerBody [data-reference='night-supervisor']")?.addEventListener("click",()=>openReferenceDrawer("night-supervisor"));
+   7867: }
+   7868: 
+   7869: function dashboardDutyBadgesMarkup(){
+   7870:   const lunch=dashboardDutyStatus("lunch");
+   7871:   const night=dashboardDutyStatus("night");
+   7872:   const badge=(kind,title,status,icon,reference)=>`<button class="uep-duty-badge ${status.state}" data-reference="${reference}" data-duty-kind="${kind}" data-quick-kind="lookup" title="${title} 상세 확인"><i>${icon}</i><span>${title}</span><b>${status.label}</b>${status.detail?`<small>${escapeHtml(status.detail)}</small>`:""}</button>`;
+   7873:   return `<div class="uep-duty-badges">${badge("lunch","급식지도",lunch,"♨","lunch-supervisor-today")}${badge("night","야자감독",night,"◷","night-supervisor-today")}${dashboardStudentStatusCompactMarkup()}</div>`;
+   7874: }
+   7875: 
+   7876: function timetableClassColorKey(room){
+   7877:   const match=String(room||"").match(/(?:^|\b)([123])-?(\d{1,2})(?:\b|$)/);
+   7878:   if(!match)return "";
+   7879:   return `${match[1]}-${Number(match[2])}`;
+   7880: }
+   7881: function timetableClassColorClass(room){
+   7882:   const key=timetableClassColorKey(room);
+   7883:   if(!key)return "";
+   7884:   let hash=0; for(const ch of key)hash=(hash*31+ch.charCodeAt(0))>>>0;
+   7885:   return `class-color-${hash%9}`;
+   7886: }
+   7887: 
+   7888: 
+   7889: let dashboardTimetableMode="";
+   7890: let studentTimetableSelectedId="";
+   7891: function dashboardTimetableAutoMode(){
+   7892:   if(dashboardTimetableMode)return dashboardTimetableMode;
+   7893:   const now=new Date(),minute=now.getHours()*60+now.getMinutes();
+   7894:   const end=(now.getDay()===3)?(14*60+30):(16*60+30);
+   7895:   return minute>=end?"night":"day";
+   7896: }
+   7897: function dashboardNightWeekDates(){
+   7898:   return timetableMasterWeekDates(dashboardWeekDate||dateKey(new Date()));
+   7899: }
+   7900: function dashboardNightAttendanceRows(dayKey,slot){
+   7901:   return (readonlyCache?.nightAttendance||readonlyCache?.attendance||[]).filter(row=>{
+   7902:     const key=String(row.date||row.day||"").slice(0,10);
+   7903:     return key===dayKey&&nightSlotName(row)===slot&&nightRecordIsAttendance(row);
+   7904:   });
+   7905: }
+   7906: function dashboardAfterProgramsForDay(dayKey){
+   7907:   // 일정 표시는 강좌 마스터가 아니라 실제 차시만 사용한다.
+   7908:   // afterSchoolProgramGroups()가 12_차시일정/실제 일정과 과거 출결 fallback을 단일화한다.
+   7909:   const canonical=typeof afterSchoolProgramGroups==="function"?afterSchoolProgramGroups():[];
+   7910:   const seen=new Set();
+   7911:   return canonical.filter(program=>{
+   7912:     if(!program||program.kind!=="after"||program.isCourseMaster) return false;
+   7913:     const pday=String(program.date||program.sessionDate||program.operationDate||"").slice(0,10);
+   7914:     if(pday!==dayKey||!programHasNightStudyImpact(program)||/취소|휴강|결강|폐강|미운영/.test(String(program.status||program.operationState||program.sessionStatus||""))) return false;
+   7915:     const session=String(program.sessionId||"").trim();
+   7916:     const course=String(program.courseId||program.programId||program.id||"").replace(/^after-(?:course|master|session)-/,"").trim();
+   7917:     const slot=typeof dashboardProgramNightSlot==="function"?dashboardProgramNightSlot(program):String(program.time||"");
+   7918:     const title=String(program.actualTitle||program.title||program.type||"").replace(/\s/g,"").trim();
+   7919:     const key=session?`session|${session}`:[course,pday,slot,title].join("|");
+   7920:     if(seen.has(key)) return false;
+   7921:     seen.add(key);
+   7922:     return true;
+   7923:   });
+   7924: }
+   7925: function dashboardProgramSessionLabel(program){
+   7926:   const raw=String(program?.sessionNo||program?.sourceSessionNo||"").trim();
+   7927:   if(!raw) return "";
+   7928:   const no=raw.replace(/차시$/,"").trim();
+   7929:   return no?`${no}차시`:"";
+   7930: }
+   7931: function dashboardProgramNightSlot(program){
+   7932:   const text=`${program.afterType||""} ${program.type||""} ${program.title||""} ${program.time||""}`;
+   7933:   if(/야간심화/.test(text)){
+   7934:     const m=String(program.time||"").match(/(\d{1,2}):(\d{2})/); const minute=m?Number(m[1])*60+Number(m[2]):0;
+   7935:     return minute>=20*60+20?"야자2":"야자1";
+   7936:   }
+   7937:   return "오후자습";
+   7938: }
+   7939: function dashboardNightWeekMarkup(){
+   7940:   const dates=dashboardNightWeekDates(),days=["월","화","수","목","금"],slots=[
+   7941:     {key:"오후자습",label:"오후자습",time:schoolHourRange("오후자습")||"17:00~18:00"},
+   7942:     {key:"야자1",label:"야자1",time:schoolHourRange("야자1")||"19:00~20:10"},
+   7943:     {key:"야자2",label:"야자2",time:schoolHourRange("야자2")||"20:20~21:30"}
+   7944:   ];
+   7945:   const cells=[];
+   7946:   slots.forEach(slot=>{
+   7947:     cells.push(`<div class="dashboard-night-period"><b>${escapeHtml(slot.label)}</b><small>${escapeHtml(slot.time)}</small></div>`);
+   7948:     dates.forEach((date,i)=>{
+   7949:       const key=dateKey(date),isWed=i===2,holiday=attendanceIsSchoolHoliday(key);
+   7950:       if(holiday){cells.push(`<div class="dashboard-night-cell closed holiday"><b>미운영</b><small>공휴일</small></div>`);return;}
+   7951:       if(isWed){cells.push(`<div class="dashboard-night-cell closed"><b>-</b><small>야간 미운영</small></div>`);return;}
+   7952:       const rows=dashboardNightAttendanceRows(key,slot.key),students=new Set(rows.map(attendanceStudentKey).filter(Boolean));
+   7953:       const programs=dashboardAfterProgramsForDay(key).filter(p=>dashboardProgramNightSlot(p)===slot.key);
+   7954:       const programCards=programs.map(p=>{const kind=/야간심화/.test(`${p.afterType||""} ${p.title||""}`)?"야간심화":"방과후";const sessionLabel=dashboardProgramSessionLabel(p);return `<button class="dashboard-night-program-chip" data-dashboard-night-program="${escapeHtml(p.id||p.programId||"")}" data-dashboard-night-program-day="${key}"><b>${escapeHtml([kind,sessionLabel].filter(Boolean).join(" "))}</b><span>${escapeHtml(p.actualTitle||p.title||"프로그램")}</span></button>`;}).join("");
+   7955:       cells.push(`<div class="dashboard-night-cell ${students.size||programs.length?'active':'empty'}"><button class="dashboard-night-roster" data-dashboard-night-day="${key}" data-dashboard-night-slot="${escapeHtml(slot.key)}"><b>${students.size?`${students.size}명`:'-'}</b><small>${students.size?'자습인원 보기':'자습 자료 없음'}</small></button>${programCards}</div>`);
+   7956:     });
+   7957:   });
+   7958:   return `<div class="dashboard-night-week"><div class="dashboard-night-corner">시간대</div>${days.map((d,i)=>`<div class="dashboard-night-head"><b>${d}</b><small>${dates[i]?`${dates[i].getMonth()+1}/${dates[i].getDate()}`:""}</small></div>`).join("")}${cells.join("")}</div>`;
+   7959: }
+   7960: function dashboardTimetableHeaderControlsMarkup(){
+   7961:   const mode=dashboardTimetableAutoMode();
+   7962:   const dates=dashboardNightWeekDates(),first=dates[0],last=dates[4];
+   7963:   const range=first&&last?`${first.getMonth()+1}/${first.getDate()}~${last.getMonth()+1}/${last.getDate()}`:"이번 주";
+   7964:   return `<nav class="dashboard-timetable-header-controls"><button class="${mode==='day'?'active':''}" data-dashboard-timetable-mode="day">정규시간</button><button class="${mode==='night'?'active':''}" data-dashboard-timetable-mode="night">야간시간</button><span class="dashboard-tt-week-nav"><button data-dashboard-tt-week-shift="-1" aria-label="이전 주">‹</button><b>${range}</b><button data-dashboard-tt-week-shift="1" aria-label="다음 주">›</button></span></nav>`;
+   7965: }
+   7966: function dashboardTimetablePanelMarkup(){
+   7967:   const mode=dashboardTimetableAutoMode();
+   7968:   return mode==='night'?dashboardNightWeekMarkup():dashboardPersonalWeekMarkup();
+   7969: }
+   7970: function dashboardNightStudentGroups(day,slot){
+   7971:   const rows=dashboardNightAttendanceRows(day,slot).map(normalizeDashboardStudentRow);
+   7972:   const map=new Map();
+   7973:   rows.forEach(row=>{
+   7974:     const gc=recordGradeClass(row.studentRef||row),cls=String(Number(gc.classNo||0)||"");
+   7975:     if(!cls)return;
+   7976:     if(!map.has(cls))map.set(cls,new Map());
+   7977:     const key=String(row.studentRef?.id||row.studentId||row.studentNo||`${row.name}|${cls}`);
+   7978:     map.get(cls).set(key,row);
+   7979:   });
+   7980:   return map;
+   7981: }
+   7982: function openDashboardNightProgram(programId,day){
+   7983:   const program=dashboardAfterProgramsForDay(day).find(p=>String(p.id||p.programId||"")===String(programId));
+   7984:   if(!program)return toast("프로그램 정보를 찾지 못했습니다.");
+   7985:   const isNight=/야간심화/.test(`${program.afterType||""} ${program.type||""} ${program.title||""}`);
+   7986:   const students=Array.isArray(program.students)?program.students:[];
+   7987:   $("#drawerKicker").textContent=isNight?"NIGHT ADVANCED":"AFTER SCHOOL"; $("#drawerTitle").textContent=program.actualTitle||program.title||"프로그램";
+   7988:   $("#drawerBody").innerHTML=`<div class="history-summary positive"><span><small>운영일</small><b>${escapeHtml(day)}</b></span><span><small>시간</small><b>${escapeHtml(program.time||"확인 필요")}</b></span><span><small>참여</small><b>${students.length}명</b></span></div><div class="connection-detail"><div><b>구분</b><span>${isNight?"야간심화":"방과후"}</span></div><div><b>차시</b><span>${escapeHtml(dashboardProgramSessionLabel(program)||"-")}</span></div><div><b>교과</b><span>${escapeHtml(program.subject||"-")}</span></div><div><b>담당교사</b><span>${escapeHtml(program.teacher||"-")}</span></div><div><b>장소</b><span>${escapeHtml(program.place||"-")}</span></div></div><div class="drawer-actions"><button class="btn primary" data-dashboard-night-program-detail="${escapeHtml(program.id||program.programId||"")}">상세보기</button></div>`;
+   7989:   $("#drawer").classList.remove("hidden");$("#drawerBackdrop").classList.remove("hidden");
+   7990:   $("[data-dashboard-night-program-detail]")?.addEventListener("click",()=>openAfterschoolProgramDrawer(program.id||program.programId));
+   7991: }
+   7992: function openDashboardNightSlot(day,slot){
+   7993:   if(slot==="after"){
+   7994:     const programs=dashboardAfterProgramsForDay(day);
+   7995:     $("#drawerKicker").textContent="AFTER SCHOOL · WEEK";$("#drawerTitle").textContent=`방과후 · ${day}`;
+   7996:     $("#drawerBody").innerHTML=programs.length?`<div class="dashboard-after-list">${programs.map(p=>`<button data-program="${escapeHtml(p.id||p.programId||"")}"><span><b>${escapeHtml(p.actualTitle||p.title||"방과후")}</b><small>${escapeHtml(p.time||"시간 미등록")} · ${escapeHtml(p.place||"교실 미등록")} · ${escapeHtml(p.teacher||"담당교사 미등록")}</small></span><em>${(p.students||[]).length}명 ›</em></button>`).join("")}</div>`:`<div class="query-empty"><b>등록된 방과후 강좌가 없습니다.</b><small>${day} 기준</small></div>`;
+   7997:     $("#drawer").classList.remove("hidden");$("#drawerBackdrop").classList.remove("hidden");
+   7998:     $("#drawerBody").querySelectorAll('[data-program]').forEach(btn=>btn.onclick=()=>openProgramDrawer(btn.dataset.program));
+   7999:     return;
+   8000:   }
+   8001:   const groups=dashboardNightStudentGroups(day,slot),classes=Array.from({length:9},(_,i)=>String(i+1));
+   8002:   const total=[...groups.values()].reduce((sum,m)=>sum+m.size,0);
+   8003:   $("#drawerKicker").textContent="NIGHT STUDY · CLASS ROSTER";$("#drawerTitle").textContent=`${slot} · ${day}`;
+   8004:   $("#drawerBody").innerHTML=`<div class="history-summary positive"><span><small>기준일</small><b>${escapeHtml(day)}</b></span><span><small>시간대</small><b>${escapeHtml(slot)}</b></span><span><small>학생 수</small><b>${total}명</b></span></div><p class="dashboard-night-guide">반별 자습 인원을 한 화면에서 확인합니다.</p><div class="dashboard-night-class-grid">${classes.map(cls=>{const members=[...(groups.get(cls)?.values()||[])].sort((a,b)=>String(a.studentNo||'').localeCompare(String(b.studentNo||''),'ko'));return `<section><header><b>${cls}반</b><span>${members.length}명</span></header><div>${members.length?members.map(m=>`<button data-dashboard-night-student="${escapeHtml(attendanceStudentKey(m))}" data-dashboard-night-student-day="${escapeHtml(day)}" data-dashboard-night-student-slot="${escapeHtml(slot)}"><b>${escapeHtml(m.studentNo||"")} ${escapeHtml(m.name||"")}</b></button>`).join(""):'<small>참여 없음</small>'}</div></section>`;}).join("")}</div><div class="drawer-actions"><button class="btn primary" data-night-attendance-date="${escapeHtml(day)}">상세보기</button></div>`;
+   8005:   $("#drawer").classList.remove("hidden");$("#drawerBackdrop").classList.remove("hidden");
