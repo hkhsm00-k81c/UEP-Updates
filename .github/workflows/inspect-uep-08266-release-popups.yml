@@ -1,0 +1,33 @@
+name: Inspect UEP 0.82.66 Release Popups
+on:
+  push:
+    paths: ['inspect-08266-popups.trigger']
+permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          gh release download v0.82.66 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip
+          if($LASTEXITCODE -ne 0){throw 'download failed'}
+          Expand-Archive UEP-update.zip app -Force
+          $g='app/resources/app/gyomuon.js'
+          $patterns=@('수정사항','release-notes','uep-release','지원조건','전문사감','시험기간','보고문','0.82.63','CURRENT','APP_VERSION')
+          $out=@()
+          foreach($p in $patterns){
+            $out += "=== $p ==="
+            $m=Select-String -Path $g -Pattern $p -SimpleMatch -Context 4,8
+            if($m){$out += ($m | ForEach-Object {$_.ToString()})} else {$out += '(none)'}
+          }
+          $out | Set-Content popup-08266-inspection.txt -Encoding utf8
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add popup-08266-inspection.txt
+          git commit -m 'Inspect UEP 0.82.66 release popup paths'
+          if($LASTEXITCODE -eq 0){git push}
