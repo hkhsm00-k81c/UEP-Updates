@@ -1,0 +1,39 @@
+name: Inspect UEP 0.82.70 Night Count
+on:
+  push:
+    paths:
+      - 'inspect-night-count-08270.trigger'
+permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.82.70 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE -ne 0){throw 'download failed'}
+          Expand-Archive source/UEP-update.zip app -Force
+          $root='app/resources/app';$out='inspection-night-count-08270.txt'
+          'UEP v0.82.70 night count inspection' | Set-Content $out -Encoding utf8
+          function DumpAround([string]$file,[string]$pattern,[int]$before=35,[int]$after=90){
+            Add-Content $out "`n===== $file :: $pattern ====="
+            $lines=Get-Content $file
+            $hits=Select-String -Path $file -Pattern $pattern -SimpleMatch
+            if(-not $hits){Add-Content $out '(no match)';return}
+            foreach($hit in $hits){$s=[Math]::Max(0,$hit.LineNumber-1-$before);$e=[Math]::Min($lines.Count-1,$hit.LineNumber-1+$after);for($i=$s;$i -le $e;$i++){Add-Content $out (("{0,7}: {1}" -f ($i+1),$lines[$i]))}}
+          }
+          DumpAround "$root/gyomuon.js" 'dashboardNightAttendanceRows'
+          DumpAround "$root/gyomuon.js" 'dashboardNightWeekMarkup'
+          DumpAround "$root/gyomuon.js" 'dashboardNightStudentGroups'
+          DumpAround "$root/electron/google-data.cjs" 'const nightRows = rowsFrom("30_야자출결_정규화")'
+          DumpAround "$root/electron/google-data.cjs" 'mappedNightRows'
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add $out;git commit -m 'Inspect v0.82.70 night count logic';if($LASTEXITCODE -ne 0){throw 'commit failed'}
+          git pull --rebase origin main;if($LASTEXITCODE -ne 0){throw 'pull failed'}
+          git push;if($LASTEXITCODE -ne 0){throw 'push failed'}
