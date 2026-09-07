@@ -1,0 +1,56 @@
+name: inspect-uep-08265-historical-night-advanced
+on:
+  push:
+    paths:
+      - inspect-08265-night-advanced.trigger
+permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download current release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          gh release download v0.82.65 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip
+          Expand-Archive UEP-update.zip work -Force
+      - name: Inspect renderer and loader
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $files=@('work/resources/app/gyomuon.js','work/resources/app/electron/google-data.cjs')
+          $terms=@('야간심화','afterSchoolProgramGroups','dashboardAfterProgramsForDay','isCourseMaster','sessionId','courseId','afterType','programType','actualTitle','sessionDate','operationDate')
+          $out=New-Object System.Collections.Generic.List[string]
+          $out.Add('UEP 0.82.65 historical night advanced inspection')
+          foreach($p in $files){
+            $out.Add('');$out.Add(('######## FILE: '+$p+' ########'))
+            $s=Get-Content $p -Raw -Encoding UTF8
+            foreach($term in $terms){
+              $out.Add('');$out.Add(('===== TERM: '+$term+' ====='))
+              $start=0;$count=0
+              while($count -lt 20){
+                $i=$s.IndexOf($term,$start,[System.StringComparison]::OrdinalIgnoreCase)
+                if($i -lt 0){break}
+                $a=[Math]::Max(0,$i-3500);$b=[Math]::Min($s.Length,$i+$term.Length+3500)
+                $out.Add(('--- match '+($count+1)+' at '+$i+' ---'))
+                $out.Add($s.Substring($a,$b-$a))
+                $start=$i+$term.Length;$count++
+              }
+              if($count -eq 0){$out.Add('(no match)')}
+            }
+          }
+          $out | Set-Content historical-night-advanced-08265-inspection.txt -Encoding UTF8
+      - name: Commit inspection
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git pull --rebase origin main
+          git add historical-night-advanced-08265-inspection.txt
+          git commit -m 'Inspect UEP 0.82.65 historical night advanced records'
+          git push
