@@ -1,0 +1,396 @@
+=== afterSchoolProgramGroups ===
+function afterSchoolProgramGroups() {
+  const connected = (readonlyCache?.programs || []).map(programWithOverride).filter((program) => program.kind === "after").map((program) => ({...program, reportRequired:false}));
+  const rows = (readonlyCache?.afterSchoolAttendance || []).slice();
+  const groups = new Map();
+  rows.forEach((row) => {
+    const type = String(row.type || "방과후 프로그램").trim() || "방과후 프로그램";
+    const time = String(row.time || row.period || "").trim();
+    const key = [row.date || "", type, time].join("|");
+    if (!groups.has(key)) groups.set(key, { key, id: `after-${encodeURIComponent(key)}`, date: row.date || "", title: type, actualTitle: type, recordTitle: type, time: time || "시간 미등록", place: row.detail || "운영정보 확인", teacher: "", records: [], kind: "after", reportRequired: false, affectsAttendance: /오후자습/.test(type), source:"30_야자출결_정규화" });
+    groups.get(key).records.push(row);
+  });
+  const derived = [...groups.values()].map((program) => {
+    const seen = new Set();
+    program.students = program.records.filter((row) => {
+      const key = attendanceStudentKey(row);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    program.attendedCount = program.students.filter(nightRecordIsAttendance).length;
+    return program;
+  });
+
+  const cleanId=value=>String(value||"").replace(/^after-(?:course|master|session)-/,"").trim();
+  const courseKey=program=>cleanId(program?.courseId||program?.programId||program?.id||"");
+  const slotKey=program=>{
+    const named=typeof nightSlotName==="function"?nightSlotName(program):"";
+    if(["오후자습","야자1","야자2"].includes(named)) return named;
+    return String(program?.time||program?.period||"").replace(/\s/g,"").trim()||"시간미등록";
+  };
+  const eventKey=program=>{
+    const sid=cleanId(program?.sessionId||"");
+    if(sid) return `session|${sid}`;
+    const course=courseKey(program);
+    const date=String(program?.date||"").slice(0,10);
+    const slot=slotKey(program);
+    const title=String(program?.actualTitle||program?.title||program?.type||"").replace(/\s/g,"").trim();
+    return ["event",course,date,slot,title].join("|");
+  };
+
+  // 강좌 마스터와 실제 차시가 함께 들어온 경우 차시가 일정의 원본이다.
+  const sessionCourseKeys=new Set(connected.filter(program=>!program.isCourseMaster).map(courseKey).filter(Boolean));
+  const canonicalConnected=[];
+  const seenConnected=new Set();
+  connected.forEach(program=>{
+    if(program.isCourseMaster&&courseKey(program)&&sessionCourseKeys.has(courseKey(program))) return;
+    const key=eventKey(program);
+    if(seenConnected.has(key)) return;
+    seenConnected.add(key);
+    canonicalConnected.push(program);
+  });
+
+  // 실제 차시가 존재하는 날짜·타임에서는 출결 정규화 행으로 두 번째 일정 카드를 만들지 않는다.
+  const connectedCoverage=new Set(canonicalConnected.filter(program=>!program.isCourseMaster&&program.date).map(program=>`${String(program.date).slice(0,10)}|${slotKey(program)}`));
+  const canonicalDerived=derived.filter(program=>!connectedCoverage.has(`${String(program.date||"").slice(0,10)}|${slotKey(program)}`));
+
+  return [...canonicalConnected, ...canonicalDerived].sort((a,b) => String(b.date).localeCompare(String(a.date)) || String(a.title).localeCompare(String(b.title)));
+}
+
+
+=== dashboardAfterProgramsForDay ===
+function dashboardAfterProgramsForDay(dayKey){
+  // 일정 표시는 강좌 마스터가 아니라 실제 차시만 사용한다.
+  // afterSchoolProgramGroups()가 12_차시일정/실제 일정과 과거 출결 fallback을 단일화한다.
+  const canonical=typeof afterSchoolProgramGroups==="function"?afterSchoolProgramGroups():[];
+  const seen=new Set();
+  return canonical.filter(program=>{
+    if(!program||program.kind!=="after"||program.isCourseMaster) return false;
+    const pday=String(program.date||program.sessionDate||program.operationDate||"").slice(0,10);
+    if(pday!==dayKey||!programHasNightStudyImpact(program)||/취소|휴강|결강|폐강|미운영/.test(String(program.status||program.operationState||program.sessionStatus||""))) return false;
+    const session=String(program.sessionId||"").trim();
+    const course=String(program.courseId||program.programId||program.id||"").replace(/^after-(?:course|master|session)-/,"").trim();
+    const slot=typeof dashboardProgramNightSlot==="function"?dashboardProgramNightSlot(program):String(program.time||"");
+    const title=String(program.actualTitle||program.title||program.type||"").replace(/\s/g,"").trim();
+    const key=session?`session|${session}`:[course,pday,slot,title].join("|");
+    if(seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+
+=== loader lines: 야간심화 / after / course/session/master ===
+00479:   // 기본정보 연결시트의 과거 32번 탭은 더 이상 UEP 조회 원본으로 사용하지 않습니다.
+00480:   const allMappedNightRows = mappedNightRows.slice();
+00481: 
+00482:   const isAfterSchool = (row) => /방과후|야간심화|야간모의|방학/.test(`${row.type || ""} ${row.programTitle || ""} ${row.affiliation || ""}`);
+00483:   let afterSchoolAttendance = mappedNightRows.filter(isAfterSchool);
+00484: 
+00485:   const commonMasters = rowsFrom("09_공통활동마스터").filter((row) => !/종료|취소|비활성|N/i.test(String(row["운영상태"] || row["상태"] || "")));
+---
+00497:       __date: localDate(row["실제수업일"] || row["운영일자"] || row["예정일"]),
+00498:       __status: String(row["운영상태"] || "예정").trim(),
+00499:     }));
+00500:   // 13_출석부는 방과후·야간심화의 차시 출석 전용입니다.
+00501:   const rosterRows = rowsFrom("13_출석부").filter((row) => {
+00502:     const programId = row["프로그램ID"] || row["강좌ID"];
+00503:     const state = String(row["참여상태"] || row["등록상태"] || row["신청상태"] || "참여");
+---
+00549:       };
+00550:     });
+00551:   };
+00552:   const participantRows = (programId, sessionId = "") => {
+00553:     const normalizedProgramId = String(programId || "").replace(/^CRS-/, "");
+00554:     const sessionSpecific = sessionId ? (rosterBySession.get(String(sessionId)) || []) : [];
+00555:     const sourceRows = sessionSpecific.length ? sessionSpecific : (rosterByProgram.get(normalizedProgramId) || []);
+---
+00551:   };
+00552:   const participantRows = (programId, sessionId = "") => {
+00553:     const normalizedProgramId = String(programId || "").replace(/^CRS-/, "");
+00554:     const sessionSpecific = sessionId ? (rosterBySession.get(String(sessionId)) || []) : [];
+00555:     const sourceRows = sessionSpecific.length ? sessionSpecific : (rosterByProgram.get(normalizedProgramId) || []);
+00556:     return sourceRows.map((row) => {
+00557:       const enteredId = String(row["학생ID"] || "").trim();
+---
+00564:       const participation = String(row["참여상태"] || row["등록상태"] || row["신청상태"] || "참여").trim();
+00565:       return {
+00566:         rosterId: String(row["출석부ID"] || row["등록ID"] || "").trim(),
+00567:         sessionId: String(row["차시ID"] || sessionId || "").trim(),
+00568:         studentId: enteredId || String(master?.id || ""),
+00569:         studentNo,
+00570:         name: String(row["성명"] || row["검색표시명"] || master?.name || "이름 미확인").trim(),
+---
+00613:   const selectedActivityReportFormUrl = String(baseSettings["SELECTED_ACTIVITY_REPORT_FORM_URL"] || "").trim();
+00614:   const commonPrograms = commonMasters.map((row, index) => {
+00615:     const programId = String(row["활동ID"] || `COMMON-${index+1}`).trim();
+00616:     const actualTitle = String(row["활동명"] || "공통활동").trim();
+00617:     return {
+00618:       id:`common-${programId}`, source:"09_공통활동마스터", programId, courseId:"", sessionId:"",
+00619:       date:dateFromCommon(row), endDate:localDate(row["운영종료일"]||row["종료일"]||""), scheduleText:[row["월"]?`${row["월"]}월`:"",row["주별"]?`${row["주별"]}주`:"",row["일시"]].filter(Boolean).join(" · "),
+---
+00615:     const programId = String(row["활동ID"] || `COMMON-${index+1}`).trim();
+00616:     const actualTitle = String(row["활동명"] || "공통활동").trim();
+00617:     return {
+00618:       id:`common-${programId}`, source:"09_공통활동마스터", programId, courseId:"", sessionId:"",
+00619:       date:dateFromCommon(row), endDate:localDate(row["운영종료일"]||row["종료일"]||""), scheduleText:[row["월"]?`${row["월"]}월`:"",row["주별"]?`${row["주별"]}주`:"",row["일시"]].filter(Boolean).join(" · "),
+00620:       title:actualTitle, actualTitle, recordTitle:actualTitle, type:String(row["활동영역"]||"자율활동").trim(), kind:"common", semester:String(row["학기"]||"").trim(),
+00621:       time:String(row["운영시간"]||row["시간"]||"").trim()||"시간 미지정", place:String(row["장소"]||"").trim(), teacher:String(row["담당교사"]||row["담당자"]||"").trim(), department:String(row["운영부서"]||row["담당부서"]||row["부서"]||"").trim(), subject:String(row["교과"]||"").trim(), reportFormUrl:commonActivityReportFormUrl,
+---
+00617:     return {
+00618:       id:`common-${programId}`, source:"09_공통활동마스터", programId, courseId:"", sessionId:"",
+00619:       date:dateFromCommon(row), endDate:localDate(row["운영종료일"]||row["종료일"]||""), scheduleText:[row["월"]?`${row["월"]}월`:"",row["주별"]?`${row["주별"]}주`:"",row["일시"]].filter(Boolean).join(" · "),
+00620:       title:actualTitle, actualTitle, recordTitle:actualTitle, type:String(row["활동영역"]||"자율활동").trim(), kind:"common", semester:String(row["학기"]||"").trim(),
+00621:       time:String(row["운영시간"]||row["시간"]||"").trim()||"시간 미지정", place:String(row["장소"]||"").trim(), teacher:String(row["담당교사"]||row["담당자"]||"").trim(), department:String(row["운영부서"]||row["담당부서"]||row["부서"]||"").trim(), subject:String(row["교과"]||"").trim(), reportFormUrl:commonActivityReportFormUrl,
+00622:       students:students.map(s=>({studentId:s.id,studentNo:s.studentNo,name:s.name,className:classNumberSafe(s.className),number:s.number,result:"대상"})), attendedCount:0,
+00623:       reportRequired:truthyFlag(row["보고서사용"]||row["보고서여부"]), reportDeadline:localDate(row["학생보고서마감일"]), reportSubmittedCount:0, reportToAuthority:false, reportAgency:"", reportAfterDays:0, photoRequired:false, affectsAttendance:false,
+---
+00630:   }).filter(item=>item.title);
+00631:   const selectedPrograms = selectedMasters.map((row,index)=>{
+00632:     const programId=String(row["프로그램ID"]||`P-${index+1}`).trim();
+00633:     const actualTitle=String(row["프로그램명"]||"선택활동").trim();
+00634:     const studentsForProgram=selectedParticipantRows(programId);
+00635:     return {id:`selected-${programId}`,source:"10_선택활동마스터",programId,courseId:"",sessionId:"",date:localDate(row["운영시작일"]),
+00636:       title:actualTitle,actualTitle,recordTitle:String(row["생활기록부표기명"]||actualTitle).trim(),type:String(row["프로그램유형"]||row["활동영역"]||"자율활동").trim(),kind:"selected",semester:String(row["학기"]||"").trim(),
+---
+00632:     const programId=String(row["프로그램ID"]||`P-${index+1}`).trim();
+00633:     const actualTitle=String(row["프로그램명"]||"선택활동").trim();
+00634:     const studentsForProgram=selectedParticipantRows(programId);
+00635:     return {id:`selected-${programId}`,source:"10_선택활동마스터",programId,courseId:"",sessionId:"",date:localDate(row["운영시작일"]),
+00636:       title:actualTitle,actualTitle,recordTitle:String(row["생활기록부표기명"]||actualTitle).trim(),type:String(row["프로그램유형"]||row["활동영역"]||"자율활동").trim(),kind:"selected",semester:String(row["학기"]||"").trim(),
+00637:       time:String(row["운영시간"]||"").trim()||"시간 미등록",place:String(row["장소"]||"").trim(),teacher:String(row["담당교사"]||"").trim(),department:String(row["운영부서"]||"").trim(),subject:String(row["교과"]||"").trim(),students:studentsForProgram,attendedCount:studentsForProgram.filter(x=>/출석|정상|참여|입실|등록|신청/.test(String(x.result))).length,
+00638:       reportRequired:truthyFlag(row["보고서사용"]),reportDeadline:localDate(row["학생보고서마감일"]),reportFormUrl:selectedActivityReportFormUrl,reportSubmittedCount:0,
+---
+00633:     const actualTitle=String(row["프로그램명"]||"선택활동").trim();
+00634:     const studentsForProgram=selectedParticipantRows(programId);
+00635:     return {id:`selected-${programId}`,source:"10_선택활동마스터",programId,courseId:"",sessionId:"",date:localDate(row["운영시작일"]),
+00636:       title:actualTitle,actualTitle,recordTitle:String(row["생활기록부표기명"]||actualTitle).trim(),type:String(row["프로그램유형"]||row["활동영역"]||"자율활동").trim(),kind:"selected",semester:String(row["학기"]||"").trim(),
+00637:       time:String(row["운영시간"]||"").trim()||"시간 미등록",place:String(row["장소"]||"").trim(),teacher:String(row["담당교사"]||"").trim(),department:String(row["운영부서"]||"").trim(),subject:String(row["교과"]||"").trim(),students:studentsForProgram,attendedCount:studentsForProgram.filter(x=>/출석|정상|참여|입실|등록|신청/.test(String(x.result))).length,
+00638:       reportRequired:truthyFlag(row["보고서사용"]),reportDeadline:localDate(row["학생보고서마감일"]),reportFormUrl:selectedActivityReportFormUrl,reportSubmittedCount:0,
+00639:       reportToAuthority:truthyFlag(row["기관보고여부"]),reportAgency:String(row["보고대상기관"]||"").trim(),reportAfterDays:Number(row["보고기한일수"]||0)||0,photoRequired:truthyFlag(row["사진증빙사용"]),affectsAttendance:truthyFlag(row["야자영향"]),
+---
+00667:   const validAfterSessionRows = sessionRows
+00668:     .filter((session) => {
+00669:       if (!afterMasterById.has(session.__programId) || !activeSessionStatus(session.__status)) return false;
+00670:       const programType=String(session["프로그램유형"]||"").trim();
+00671:       const actualDate=localDate(session["실제수업일"]||"");
+00672:       const plannedDate=localDate(session["운영일자"]||session["예정일"]||"");
+00673:       const effectiveDate=actualDate||plannedDate||session.__date;
+---
+00674:       // UEP 0.82.31: 미래 '예정' 차시도 월별 일정과 당일 대시보드에 사용한다.
+00675:       // 실제수업일이 기록되면 이를 최우선으로 쓰고, 없으면 운영일자/예정일을 사용한다.
+00676:       // 반복요일을 추정하지 않고 12_차시일정에 명시된 날짜 행만 인정한다.
+00677:       return programType==="방과후학교" && Boolean(effectiveDate) && session.__date===effectiveDate;
+00678:     });
+00679:   // 강좌마다 최초 실제수업을 1차시로 삼아 날짜·시작시간 순으로 연속 차시번호를 부여한다.
+00680:   // 월별 화면에서는 이 전체 차시번호를 유지한 채 선택 월의 차시만 필터링한다.
+---
+00695:     .map((session, index) => {
+00696:       const row = afterMasterById.get(session.__programId);
+00697:       const programId = session.__programId;
+00698:       const sessionId = String(session["차시ID"] || `AFTER-SESSION-${index+1}`).trim();
+00699:       const actualTitle = String(row["프로그램명"] || row["강좌명"] || "방과후학교").trim();
+00700:       const studentsForProgram = participantRows(programId, sessionId);
+00701:       const startTime=localTime(session["시작시각"]||row["시작시간"]);
+---
+00696:       const row = afterMasterById.get(session.__programId);
+00697:       const programId = session.__programId;
+00698:       const sessionId = String(session["차시ID"] || `AFTER-SESSION-${index+1}`).trim();
+00699:       const actualTitle = String(row["프로그램명"] || row["강좌명"] || "방과후학교").trim();
+00700:       const studentsForProgram = participantRows(programId, sessionId);
+00701:       const startTime=localTime(session["시작시각"]||row["시작시간"]);
+00702:       const endTime=localTime(session["종료시각"]||row["종료시간"]);
+---
+00697:       const programId = session.__programId;
+00698:       const sessionId = String(session["차시ID"] || `AFTER-SESSION-${index+1}`).trim();
+00699:       const actualTitle = String(row["프로그램명"] || row["강좌명"] || "방과후학교").trim();
+00700:       const studentsForProgram = participantRows(programId, sessionId);
+00701:       const startTime=localTime(session["시작시각"]||row["시작시간"]);
+00702:       const endTime=localTime(session["종료시각"]||row["종료시간"]);
+00703:       const attendedCount = studentsForProgram.filter(student => /출석|지각|공결|참여/.test(String(student.result || ""))).length;
+---
+00702:       const endTime=localTime(session["종료시각"]||row["종료시간"]);
+00703:       const attendedCount = studentsForProgram.filter(student => /출석|지각|공결|참여/.test(String(student.result || ""))).length;
+00704:       return {
+00705:         id:`after-session-${sessionId}`,
+00706:         source:"12_차시일정 + 13_출석부",
+00707:         programId,
+00708:         courseId:programId,
+---
+00705:         id:`after-session-${sessionId}`,
+00706:         source:"12_차시일정 + 13_출석부",
+00707:         programId,
+00708:         courseId:programId,
+00709:         sessionId,
+00710:         sessionNo:computedSessionNo.get(sessionId) || String(session["차시번호"] || "").trim(),
+00711:         sourceSessionNo:String(session["차시번호"] || "").trim(),
+---
+00706:         source:"12_차시일정 + 13_출석부",
+00707:         programId,
+00708:         courseId:programId,
+00709:         sessionId,
+00710:         sessionNo:computedSessionNo.get(sessionId) || String(session["차시번호"] || "").trim(),
+00711:         sourceSessionNo:String(session["차시번호"] || "").trim(),
+00712:         date:session.__date,
+---
+00707:         programId,
+00708:         courseId:programId,
+00709:         sessionId,
+00710:         sessionNo:computedSessionNo.get(sessionId) || String(session["차시번호"] || "").trim(),
+00711:         sourceSessionNo:String(session["차시번호"] || "").trim(),
+00712:         date:session.__date,
+00713:         plannedDate:localDate(session["예정일"] || session["운영일자"]),
+---
+00711:         sourceSessionNo:String(session["차시번호"] || "").trim(),
+00712:         date:session.__date,
+00713:         plannedDate:localDate(session["예정일"] || session["운영일자"]),
+00714:         title:actualTitle,
+00715:         actualTitle,
+00716:         recordTitle:"생활기록부 기록 대상 아님",
+00717:         type:String(row["운영기간구분"] || "방과후학교").trim(),
+---
+00712:         date:session.__date,
+00713:         plannedDate:localDate(session["예정일"] || session["운영일자"]),
+00714:         title:actualTitle,
+00715:         actualTitle,
+00716:         recordTitle:"생활기록부 기록 대상 아님",
+00717:         type:String(row["운영기간구분"] || "방과후학교").trim(),
+00718:         kind:"after",
+---
+00723:         attendedCount,
+00724:         subject:String(row["교과"] || "").trim(),
+00725:         department:String(row["담당부서"] || "").trim(),
+00726:         afterType:String(row["방과후유형"] || row["운영기간구분"] || "방과후수업").trim(),
+00727:         weekdays:String(row["요일"] || "").trim(),
+00728:         reportRequired:false,
+00729:         reportSubmittedCount:0,
+---
+00740:         nightSlots:(()=>{
+00741:           const explicit=String(session["야자영향타임"] || "").split(/[·,\/]/).map(v=>v.trim()).filter(Boolean);
+00742:           if(explicit.length) return explicit;
+00743:           const afterType=String(row["방과후유형"]||"");
+00744:           const periodText=`${session["교시"]||""} ${session["시간대"]||""} ${session["비고"]||""}`;
+00745:           if(!/야간심화/.test(afterType) && /8교시/.test(periodText)) return ["오후자습"];
+00746:           return [];
+---
+00742:           if(explicit.length) return explicit;
+00743:           const afterType=String(row["방과후유형"]||"");
+00744:           const periodText=`${session["교시"]||""} ${session["시간대"]||""} ${session["비고"]||""}`;
+00745:           if(!/야간심화/.test(afterType) && /8교시/.test(periodText)) return ["오후자습"];
+00746:           return [];
+00747:         })(),
+00748:         memo:String(session["비고"] || row["비고"] || "").trim(),
+---
+00753:     const studentsForProgram=participantRows(programId);
+00754:     const startDate=localDate(row["운영시작일"]||row["시작일"]||row["운영일자"]);
+00755:     const endDate=localDate(row["운영종료일"]||row["종료일"]||startDate);
+00756:     const actualTitle=String(row["프로그램명"]||row["강좌명"]||"방과후학교").trim();
+00757:     return {
+00758:       id:`after-master-${programId}`,source:"11_방과후학교 + 13_출석부",programId,courseId:programId,sessionId:"",sessionNo:"",
+00759:       date:startDate,endDate,title:actualTitle,actualTitle,recordTitle:"생활기록부 기록 대상 아님",
+---
+00755:     const endDate=localDate(row["운영종료일"]||row["종료일"]||startDate);
+00756:     const actualTitle=String(row["프로그램명"]||row["강좌명"]||"방과후학교").trim();
+00757:     return {
+00758:       id:`after-master-${programId}`,source:"11_방과후학교 + 13_출석부",programId,courseId:programId,sessionId:"",sessionNo:"",
+00759:       date:startDate,endDate,title:actualTitle,actualTitle,recordTitle:"생활기록부 기록 대상 아님",
+00760:       type:String(row["운영기간구분"]||"방과후학교").trim(),kind:"after",
+00761:       time:[localTime(row["시작시간"]),localTime(row["종료시간"])].filter(Boolean).join("~")||String(row["요일"]||"시간 미등록"),
+---
+00756:     const actualTitle=String(row["프로그램명"]||row["강좌명"]||"방과후학교").trim();
+00757:     return {
+00758:       id:`after-master-${programId}`,source:"11_방과후학교 + 13_출석부",programId,courseId:programId,sessionId:"",sessionNo:"",
+00759:       date:startDate,endDate,title:actualTitle,actualTitle,recordTitle:"생활기록부 기록 대상 아님",
+00760:       type:String(row["운영기간구분"]||"방과후학교").trim(),kind:"after",
+00761:       time:[localTime(row["시작시간"]),localTime(row["종료시간"])].filter(Boolean).join("~")||String(row["요일"]||"시간 미등록"),
+00762:       place:String(row["장소"]||"").trim(),teacher:String(row["담당교사"]||"").trim(),students:studentsForProgram,
+---
+00762:       place:String(row["장소"]||"").trim(),teacher:String(row["담당교사"]||"").trim(),students:studentsForProgram,
+00763:       attendedCount:studentsForProgram.filter(student=>/출석|지각|공결|참여|등록|신청/.test(String(student.result||""))).length,
+00764:       subject:String(row["교과"]||"").trim(),department:String(row["담당부서"]||"").trim(),
+00765:       afterType:String(row["방과후유형"]||row["운영기간구분"]||"방과후수업").trim(),weekdays:String(row["요일"]||"").trim(),
+00766:       reportRequired:false,reportSubmittedCount:0,reportToAuthority:false,reportAgency:"",reportAfterDays:0,photoRequired:false,
+00767:       affectsAttendance:truthyFlag(row["야자연계여부"]||row["야자영향"]||"Y"),status:String(row["운영상태"]||"예정").trim(),
+00768:       memo:String(row["학생안내"]||row["비고"]||"").trim(),operationPeriod:String(row["운영기간구분"]||"").trim(),targetGrade:String(row["대상학년"]||"").trim(),attendanceMethod:String(row["출석관리방식"]||"").trim(),isCourseMaster:true
+---
+00765:       afterType:String(row["방과후유형"]||row["운영기간구분"]||"방과후수업").trim(),weekdays:String(row["요일"]||"").trim(),
+00766:       reportRequired:false,reportSubmittedCount:0,reportToAuthority:false,reportAgency:"",reportAfterDays:0,photoRequired:false,
+00767:       affectsAttendance:truthyFlag(row["야자연계여부"]||row["야자영향"]||"Y"),status:String(row["운영상태"]||"예정").trim(),
+00768:       memo:String(row["학생안내"]||row["비고"]||"").trim(),operationPeriod:String(row["운영기간구분"]||"").trim(),targetGrade:String(row["대상학년"]||"").trim(),attendanceMethod:String(row["출석관리방식"]||"").trim(),isCourseMaster:true
+00769:     };
+00770:   });
+00771:   const afterPrograms = [...afterMasterPrograms,...afterSessions];
+---
+00809:         const studentNo=String(student.studentNo||student.number||"");
+00810:         const key=nightRowKey(program.date,slot.label,studentId,studentNo);
+00811:         const programRow={
+00812:           id:`after-linked-${program.sessionId||program.programId}-${studentId||studentNo}-${slot.label}-${index}`,
+00813:           studentId, studentNo, name:String(student.name||""), className:classNumberSafe(student.className||""),
+00814:           date:program.date, time:slot.label, type:"방과후학교", affiliation:String(program.actualTitle||program.title||"방과후학교"),
+00815:           detail:[program.actualTitle||program.title, program.time, program.place].filter(Boolean).join(" · "),
+---
+00811:         const programRow={
+00812:           id:`after-linked-${program.sessionId||program.programId}-${studentId||studentNo}-${slot.label}-${index}`,
+00813:           studentId, studentNo, name:String(student.name||""), className:classNumberSafe(student.className||""),
+00814:           date:program.date, time:slot.label, type:"방과후학교", affiliation:String(program.actualTitle||program.title||"방과후학교"),
+00815:           detail:[program.actualTitle||program.title, program.time, program.place].filter(Boolean).join(" · "),
+00816:           result:"프로그램 인정", originalResult:"", recognizedByProgram:true, programPending:false,
+00817:           programTitle:program.actualTitle||program.title, programKind:"after", programId:program.id||"", courseId:program.programId||program.courseId||"", sessionId:program.sessionId||"",
+---
+00812:           id:`after-linked-${program.sessionId||program.programId}-${studentId||studentNo}-${slot.label}-${index}`,
+00813:           studentId, studentNo, name:String(student.name||""), className:classNumberSafe(student.className||""),
+00814:           date:program.date, time:slot.label, type:"방과후학교", affiliation:String(program.actualTitle||program.title||"방과후학교"),
+00815:           detail:[program.actualTitle||program.title, program.time, program.place].filter(Boolean).join(" · "),
+00816:           result:"프로그램 인정", originalResult:"", recognizedByProgram:true, programPending:false,
+00817:           programTitle:program.actualTitle||program.title, programKind:"after", programId:program.id||"", courseId:program.programId||program.courseId||"", sessionId:program.sessionId||"",
+00818:           programType:program.afterType||program.type||"방과후학교", programTime:program.time||"", programPlace:program.place||"", programTeacher:program.teacher||"", programWeekdays:program.weekdays||"",
+---
+00814:           date:program.date, time:slot.label, type:"방과후학교", affiliation:String(program.actualTitle||program.title||"방과후학교"),
+00815:           detail:[program.actualTitle||program.title, program.time, program.place].filter(Boolean).join(" · "),
+00816:           result:"프로그램 인정", originalResult:"", recognizedByProgram:true, programPending:false,
+00817:           programTitle:program.actualTitle||program.title, programKind:"after", programId:program.id||"", courseId:program.programId||program.courseId||"", sessionId:program.sessionId||"",
+00818:           programType:program.afterType||program.type||"방과후학교", programTime:program.time||"", programPlace:program.place||"", programTeacher:program.teacher||"", programWeekdays:program.weekdays||"",
+00819:           inputPath:"12_차시일정·13_출석부 자동연동", submittedAt:"", linkedFromAfterSchool:true,
+00820:         };
+---
+00815:           detail:[program.actualTitle||program.title, program.time, program.place].filter(Boolean).join(" · "),
+00816:           result:"프로그램 인정", originalResult:"", recognizedByProgram:true, programPending:false,
+00817:           programTitle:program.actualTitle||program.title, programKind:"after", programId:program.id||"", courseId:program.programId||program.courseId||"", sessionId:program.sessionId||"",
+00818:           programType:program.afterType||program.type||"방과후학교", programTime:program.time||"", programPlace:program.place||"", programTeacher:program.teacher||"", programWeekdays:program.weekdays||"",
+00819:           inputPath:"12_차시일정·13_출석부 자동연동", submittedAt:"", linkedFromAfterSchool:true,
+00820:         };
+00821:         const existingIndex=allMappedNightRows.findIndex(row=>nightRowKey(row.date,row.time,row.studentId,row.studentNo)===key);
+---
+00837:     row.result = confirmed ? "프로그램 인정" : "프로그램 확인";
+00838:     row.recognizedByProgram = confirmed;
+00839:     row.programPending = !confirmed;
+00840:     row.programTitle = program.actualTitle || program.title;
+00841:     row.programId = program.id || "";
+00842:     row.programKind = program.kind;
+00843:     row.type = program.kind === "after" ? "방과후학교" : (program.type || "프로그램");
+---
+01374:       if(program.kind==="after") return false;
+01375:       if(/공통/.test(kind) && program.kind!=="common") return false;
+01376:       if(/선택/.test(kind) && program.kind!=="selected") return false;
+01377:       const names=[program.actualTitle,program.title].map(normalizeReportProgramLabel).filter(Boolean);
+01378:       if(!names.includes(name)) return false;
+01379:       const pSemester=String(program.semester||"").trim();
+01380:       return !(semester&&pSemester&&semester!==pSemester);
+---
+01489:   const programReportGroup = program => {
+01490:     // 프로그램 식별에는 생활기록부 정제명(recordTitle)을 사용하지 않습니다.
+01491:     // 공군/육군사관학교처럼 서로 다른 실제 프로그램이 같은 생기부표기명으로 일반화될 수 있기 때문입니다.
+01492:     const title=String(program.actualTitle||program.title||"").trim();
+01493:     if(/챌린지\s*데이/.test(title))return `${programSemester(program)||"학기미정"} 챌린지데이`;
+01494:     return title;
+01495:   };
+---
+01510:     if(group && reportGroup && group===reportGroup)return true;
+01511: 
+01512:     const reportName=normalizeProgramName(report.programName);
+01513:     const names=[program.actualTitle,program.title,program.recordTitle].map(normalizeProgramName).filter(Boolean);
+01514:     return names.some(name=>name&&reportName&&(name===reportName||name.includes(reportName)||reportName.includes(name)));
+01515:   });
+01516:   connectedPrograms.forEach(program => {
+---
