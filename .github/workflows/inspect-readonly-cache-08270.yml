@@ -1,0 +1,26 @@
+name: Inspect UEP 0.82.70 Readonly Cache
+on:
+  push:
+    paths:
+      - 'inspect-readonly-cache-08270.trigger'
+permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          $ErrorActionPreference='Stop';New-Item -ItemType Directory -Force source,app|Out-Null
+          gh release download v0.82.70 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source;if($LASTEXITCODE -ne 0){throw 'download failed'}
+          Expand-Archive source/UEP-update.zip app -Force
+          $f='app/resources/app/gyomuon.js';$out='inspection-readonly-cache-08270.txt';'readonly cache inspection'|Set-Content $out
+          $lines=Get-Content $f
+          foreach($p in @('readonlyCache =','readonlyCache=','fetchOperationalData','operationalSyncedAt','google:operational','fetchLiveData','google:live')){
+            Add-Content $out "`n===== $p =====";$hits=Select-String -Path $f -Pattern $p -SimpleMatch
+            foreach($h in $hits){$s=[Math]::Max(0,$h.LineNumber-12);$e=[Math]::Min($lines.Count-1,$h.LineNumber+20);for($i=$s;$i -le $e;$i++){Add-Content $out (("{0,7}: {1}" -f ($i+1),$lines[$i]))}}
+          }
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add $out;git commit -m 'Inspect v0.82.70 readonly cache';if($LASTEXITCODE -ne 0){throw 'commit failed'};git pull --rebase origin main;if($LASTEXITCODE -ne 0){throw 'pull failed'};git push;if($LASTEXITCODE -ne 0){throw 'push failed'}
