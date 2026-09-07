@@ -1,0 +1,28 @@
+name: Inspect UEP 0.82.70 Night Cache
+on:
+  push:
+    paths:
+      - 'inspect-night-cache-08270.trigger'
+permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.82.70 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE -ne 0){throw 'download failed'}
+          Expand-Archive source/UEP-update.zip app -Force
+          $out='inspection-night-cache-08270.txt';'UEP 0.82.70 night cache occurrences'|Set-Content $out
+          foreach($f in @('app/resources/app/gyomuon.js','app/resources/app/electron/main.cjs','app/resources/app/electron/google-data.cjs')){
+            Add-Content $out "`n===== $f =====";$lines=Get-Content $f;$hits=Select-String -Path $f -Pattern 'nightAttendance' -SimpleMatch
+            foreach($hit in $hits){$s=[Math]::Max(0,$hit.LineNumber-5);$e=[Math]::Min($lines.Count-1,$hit.LineNumber+5);Add-Content $out "`n--- hit $($hit.LineNumber) ---";for($i=$s;$i -le $e;$i++){Add-Content $out (("{0,7}: {1}" -f ($i+1),$lines[$i]))}}
+          }
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add $out;git commit -m 'Inspect v0.82.70 night cache';if($LASTEXITCODE -ne 0){throw 'commit failed'};git pull --rebase origin main;if($LASTEXITCODE -ne 0){throw 'pull failed'};git push;if($LASTEXITCODE -ne 0){throw 'push failed'}
