@@ -1,0 +1,57 @@
+name: Inspect UEP 0.82.64 Weekly Night
+
+'on':
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/inspect-uep-08264-weekly-night.yml
+
+permissions:
+  contents: write
+
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download current release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          gh release download v0.82.64 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip
+          Expand-Archive UEP-update.zip work -Force
+      - name: Extract weekly night contexts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $p='work/resources/app/gyomuon.js'
+          $s=Get-Content $p -Raw -Encoding UTF8
+          $terms=@('자습인원 보기','야간 미운영','오후자습','nightWeek','weeklyNight','weekNight','afterSchoolProgramGroups()','programParticipationFor','내 주간시간표')
+          $out=New-Object System.Collections.Generic.List[string]
+          $out.Add('UEP 0.82.64 weekly night runtime inspection')
+          foreach($term in $terms){
+            $out.Add('');$out.Add(('===== TERM: '+$term+' ====='))
+            $start=0;$count=0
+            while($count -lt 12){
+              $i=$s.IndexOf($term,$start,[System.StringComparison]::OrdinalIgnoreCase)
+              if($i -lt 0){break}
+              $a=[Math]::Max(0,$i-5000);$b=[Math]::Min($s.Length,$i+$term.Length+5000)
+              $out.Add(('--- match '+($count+1)+' at '+$i+' ---'))
+              $out.Add($s.Substring($a,$b-$a))
+              $start=$i+$term.Length;$count++
+            }
+            if($count -eq 0){$out.Add('(no match)')}
+          }
+          $out | Set-Content weekly-night-08264-inspection.txt -Encoding UTF8
+      - name: Commit inspection
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git pull --rebase origin main
+          git add weekly-night-08264-inspection.txt
+          git commit -m 'Inspect UEP 0.82.64 weekly night rendering'
+          git push
