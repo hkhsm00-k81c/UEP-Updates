@@ -1,0 +1,35 @@
+name: Inspect UEP 0.82.70 School Read
+on:
+  push:
+    paths:
+      - 'inspect-school-read-08270.trigger'
+permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.82.70 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE -ne 0){throw 'download failed'}
+          Expand-Archive source/UEP-update.zip app -Force
+          $f='app/resources/app/electron/main.cjs';$out='inspection-school-read-08270.txt'
+          'UEP v0.82.70 school read inspection' | Set-Content $out -Encoding utf8
+          function Dump([string]$pattern,[int]$before=25,[int]$after=100){
+            Add-Content $out "`n===== $pattern =====";$lines=Get-Content $f;$hits=Select-String -Path $f -Pattern $pattern -SimpleMatch
+            if(-not $hits){Add-Content $out '(no match)';return}
+            foreach($hit in $hits){$s=[Math]::Max(0,$hit.LineNumber-1-$before);$e=[Math]::Min($lines.Count-1,$hit.LineNumber-1+$after);for($i=$s;$i -le $e;$i++){Add-Content $out (("{0,7}: {1}" -f ($i+1),$lines[$i]))}}
+          }
+          Dump 'async function getReadonlySheetsAuth'
+          Dump 'async function readSheetBatch'
+          Dump 'school_read_api'
+          Dump 'schoolReadApiUrl'
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add $out;git commit -m 'Inspect v0.82.70 school read path';if($LASTEXITCODE -ne 0){throw 'commit failed'}
+          git pull --rebase origin main;if($LASTEXITCODE -ne 0){throw 'pull failed'};git push;if($LASTEXITCODE -ne 0){throw 'push failed'}
