@@ -1,0 +1,2192 @@
+===== app/resources/app/gyomuon.js =====
+   640:   } catch(error) {
+   641:     googleConnectionError=error?.message||'UEP 학교 데이터 자동 갱신 실패';
+   642:     updateTopSyncStatus();
+   643:     return false;
+   644:   }
+   645:   })();
+   646:   try{return await readonlyRefreshInFlight;}finally{readonlyRefreshInFlight=null;}
+   647: }
+   648: const OPERATIONAL_RENDER_PAGES08172=new Set(['dashboard','attendance','students','alerts','work','duties','settings']);
+   649: function operationalPageNeedsRender08172(page){return OPERATIONAL_RENDER_PAGES08172.has(String(page||''));}
+   650: let operationalRefreshInFlight=null;
+   651: async function refreshOperationalCacheSilently({rerender=true}={}){
+   652:   if(operationalRefreshInFlight)return operationalRefreshInFlight;
+   653:   if(!window.schoolBoard?.previewOperationalSync)return refreshReadonlyCacheSilently({force:true,rerender});
+   654:   operationalRefreshInFlight=(async()=>{
+   655:     if(!googleConnectionStatus?.ok)return false;
+   656:     try{
+   657:       const result=await window.schoolBoard.previewOperationalSync();
+   658:       if(result?.requiresFullSync)return refreshReadonlyCacheSilently({force:true,rerender});
+   659:       if(!result?.ok)throw new Error(result?.reason||'UEP 운영자료 갱신 실패');
+   660:       if(result.patch&&typeof result.patch==='object')readonlyCache={...(readonlyCache||{}),...result.patch,operationalSyncedAt:result.operationalSyncedAt||result.syncedAt||new Date().toISOString()};
+   661:       googleConnectionError='';updateTopSyncStatus();updateDormOutingCount();
+   662:       if(rerender&&state.activePage&&operationalPageNeedsRender08172(state.activePage))render(state.activePage);
+   663:       return true;
+   664:     }catch(error){googleConnectionError=error?.message||String(error);updateTopSyncStatus();return false;}
+   665:   })();
+   666:   try{return await operationalRefreshInFlight;}finally{operationalRefreshInFlight=null;}
+   667: }
+   668: function startReadonlyAutoRefresh(){
+   669:   if(readonlyAutoRefreshTimer) clearInterval(readonlyAutoRefreshTimer);
+   670:   if(!googleConnectionStatus?.ok) return;
+   671:   readonlyAutoRefreshTimer=setInterval(()=>{
+   672:     if(document.hidden) return;
+   673:     readonlyAutoRefreshCycle+=1;
+   674:     const fullSyncedAt=readonlyCache?.syncedAt?new Date(readonlyCache.syncedAt).getTime():0;
+   675:     const fullAge=fullSyncedAt?Date.now()-fullSyncedAt:Number.POSITIVE_INFINITY;
+   676:     const needsFull=!fullSyncedAt||fullAge>=READONLY_FULL_REFRESH_MAX_AGE_MS||readonlyAutoRefreshCycle%6===0;
+   677:     if(needsFull){
+   678:       const jitter=Math.floor(Math.random()*45000);
+   679:       setTimeout(()=>{if(!document.hidden)refreshReadonlyCacheSilently({force:true,rerender:true});},jitter);
+   680:       return;
+   681:     }
+   682:     refreshOperationalCacheSilently({rerender:true});
+   683:   },READONLY_AUTO_REFRESH_MS);
+   684: }
+   685: 
+   686: function updateTopSyncStatus() {
+   687:   const button = $("#syncButton");
+   688:   if (!button) return;
+   689:   button.classList.remove("good", "warn", "bad");
+   690:   const label = button.querySelector("span");
+   691:   if (googleConnectionError) {
+   692:     button.classList.add("bad");
+   693:     if (label) label.textContent = "구글시트 오류";
+   694:     button.title = googleConnectionError;
+   695:     return;
+   696:   }
+   697:   if (readonlyCache?.students?.length && neisData?.ok && !neisData.offline) {
+   698:     button.classList.add("good");
+   699:     if (label) label.textContent = "동기화 정상";
+   700:     button.title = "UEP 구글시트와 NEIS 자료가 정상 연결되었습니다.";
+===== app/resources/app/electron/main.cjs =====
+--- hit line 958 ---
+   950:   }else{
+   951:     let max=0;
+   952:     rows.forEach(row=>{const m=String(row?.[0]||"").match(/^ATT-2026-(\\d+)$/);if(m)max=Math.max(max,Number(m[1]));});
+   953:     id=`ATT-2026-${String(max+1).padStart(4,"0")}`;
+   954:   }
+   955:   const values=officialAttendanceRow(payload,id);
+   956:   if(sheetRow>0) await updateSheetValues(token,UEP_SPREADSHEET_ID,`'30_공결기록'!A${sheetRow}:Z${sheetRow}`,values);
+   957:   else await appendSheetValues(token,UEP_SPREADSHEET_ID,"'30_공결기록'!A:Z",values);
+   958:   const operational=await fetchOperationalData();
+   959:   return {ok:true,id,patch:operational.patch||{}};
+   960: }
+   961: 
+   962: async function deleteOfficialAttendance(id="") {
+   963:   const key=String(id||"").trim();
+   964:   if(!key) throw new Error("삭제할 공결 ID가 없습니다.");
+   965:   const account=await readEncrypted(credentialPath());
+   966:   if(!validateServiceAccount(account)) throw new Error("저장된 Google 서비스 계정 인증정보가 올바르지 않습니다.");
+   967:   const token=await getSheetsToken(account);
+   968:   const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,["'30_공결기록'!A3:Z3000"]);
+   969:   const rows=(result?.[0]?.values||[]).slice(1);
+   970:   const pos=rows.findIndex(row=>String(row?.[0]||"").trim()===key);
+   971:   if(pos<0) throw new Error("삭제할 공결 기록을 찾지 못했습니다.");
+   972:   const sheetRow=pos+4;
+   973:   await clearSheetValues(token,UEP_SPREADSHEET_ID,`'30_공결기록'!A${sheetRow}:Z${sheetRow}`);
+   974:   const operational=await fetchOperationalData();
+   975:   return {ok:true,patch:operational.patch||{}};
+   976: }
+--- hit line 974 ---
+   966:   if(!validateServiceAccount(account)) throw new Error("저장된 Google 서비스 계정 인증정보가 올바르지 않습니다.");
+   967:   const token=await getSheetsToken(account);
+   968:   const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,["'30_공결기록'!A3:Z3000"]);
+   969:   const rows=(result?.[0]?.values||[]).slice(1);
+   970:   const pos=rows.findIndex(row=>String(row?.[0]||"").trim()===key);
+   971:   if(pos<0) throw new Error("삭제할 공결 기록을 찾지 못했습니다.");
+   972:   const sheetRow=pos+4;
+   973:   await clearSheetValues(token,UEP_SPREADSHEET_ID,`'30_공결기록'!A${sheetRow}:Z${sheetRow}`);
+   974:   const operational=await fetchOperationalData();
+   975:   return {ok:true,patch:operational.patch||{}};
+   976: }
+   977: 
+   978: function lateAttendanceRow(payload={}, id=""){
+   979:   const now=new Date().toISOString();
+   980:   return [[id,String(payload.studentId||""),String(payload.studentNo||""),String(payload.name||""),String(payload.grade||"1"),String(payload.className||payload.classNo||""),String(payload.date||""),String(payload.time||""),String(payload.reason||""),String(payload.minutes||0),String(payload.cumulativeCount||""),String(payload.cumulativeMinutes||""),String(payload.guidance||"일반"),now,String(payload.editor||"UEP"),String(payload.note||"")]];
+   981: }
+   982: async function saveLateAttendance(payload={}){
+   983:   const account=await readEncrypted(credentialPath()); if(!validateServiceAccount(account)) throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+   984:   const token=await getSheetsToken(account); const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,["'31_지각기록'!A3:P3000"]); const matrix=result?.[0]?.values||[], rows=matrix.slice(1);
+   985:   let id=String(payload.id||"").trim(), sheetRow=-1;
+   986:   if(id){const pos=rows.findIndex(r=>String(r?.[0]||"").trim()===id); if(pos>=0)sheetRow=pos+4;}
+   987:   else {let max=0;rows.forEach(r=>{const mm=String(r?.[0]||"").match(/^LATE-2026-(\d+)$/);if(mm)max=Math.max(max,Number(mm[1]));});id=`LATE-2026-${String(max+1).padStart(5,"0")}`;}
+   988:   const values=lateAttendanceRow(payload,id);
+   989:   if(sheetRow>0)await updateSheetValues(token,UEP_SPREADSHEET_ID,`'31_지각기록'!A${sheetRow}:P${sheetRow}`,values); else await appendSheetValues(token,UEP_SPREADSHEET_ID,"'31_지각기록'!A:P",values);
+   990:   const operational=await fetchOperationalData();return {ok:true,id,patch:operational.patch||{}};
+   991: }
+   992: async function deleteLateAttendance(id=""){
+--- hit line 990 ---
+   982: async function saveLateAttendance(payload={}){
+   983:   const account=await readEncrypted(credentialPath()); if(!validateServiceAccount(account)) throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+   984:   const token=await getSheetsToken(account); const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,["'31_지각기록'!A3:P3000"]); const matrix=result?.[0]?.values||[], rows=matrix.slice(1);
+   985:   let id=String(payload.id||"").trim(), sheetRow=-1;
+   986:   if(id){const pos=rows.findIndex(r=>String(r?.[0]||"").trim()===id); if(pos>=0)sheetRow=pos+4;}
+   987:   else {let max=0;rows.forEach(r=>{const mm=String(r?.[0]||"").match(/^LATE-2026-(\d+)$/);if(mm)max=Math.max(max,Number(mm[1]));});id=`LATE-2026-${String(max+1).padStart(5,"0")}`;}
+   988:   const values=lateAttendanceRow(payload,id);
+   989:   if(sheetRow>0)await updateSheetValues(token,UEP_SPREADSHEET_ID,`'31_지각기록'!A${sheetRow}:P${sheetRow}`,values); else await appendSheetValues(token,UEP_SPREADSHEET_ID,"'31_지각기록'!A:P",values);
+   990:   const operational=await fetchOperationalData();return {ok:true,id,patch:operational.patch||{}};
+   991: }
+   992: async function deleteLateAttendance(id=""){
+   993:   const key=String(id||"").trim(); if(!key)throw new Error("삭제할 지각 ID가 없습니다.");
+   994:   const account=await readEncrypted(credentialPath()); if(!validateServiceAccount(account)) throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+   995:   const token=await getSheetsToken(account); const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,["'31_지각기록'!A3:P3000"]); const rows=(result?.[0]?.values||[]).slice(1);
+   996:   const pos=rows.findIndex(r=>String(r?.[0]||"").trim()===key); if(pos<0)throw new Error("삭제할 지각 기록을 찾지 못했습니다.");
+   997:   await clearSheetValues(token,UEP_SPREADSHEET_ID,`'31_지각기록'!A${pos+4}:P${pos+4}`);const operational=await fetchOperationalData();return {ok:true,patch:operational.patch||{}};
+   998: }
+   999: 
+  1000: function dormRulePriority(category=""){
+  1001:   return ({exception:50,closure:40,exam:30,vacation:25,base:20,period:10})[String(category||"")]||5;
+  1002: }
+  1003: function dormRuleRow(payload={},id,nowIso){
+  1004:   return [[
+  1005:     id,
+  1006:     String(payload.category||""),
+  1007:     String(payload.name||""),
+  1008:     String(payload.start||""),
+--- hit line 997 ---
+   989:   if(sheetRow>0)await updateSheetValues(token,UEP_SPREADSHEET_ID,`'31_지각기록'!A${sheetRow}:P${sheetRow}`,values); else await appendSheetValues(token,UEP_SPREADSHEET_ID,"'31_지각기록'!A:P",values);
+   990:   const operational=await fetchOperationalData();return {ok:true,id,patch:operational.patch||{}};
+   991: }
+   992: async function deleteLateAttendance(id=""){
+   993:   const key=String(id||"").trim(); if(!key)throw new Error("삭제할 지각 ID가 없습니다.");
+   994:   const account=await readEncrypted(credentialPath()); if(!validateServiceAccount(account)) throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+   995:   const token=await getSheetsToken(account); const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,["'31_지각기록'!A3:P3000"]); const rows=(result?.[0]?.values||[]).slice(1);
+   996:   const pos=rows.findIndex(r=>String(r?.[0]||"").trim()===key); if(pos<0)throw new Error("삭제할 지각 기록을 찾지 못했습니다.");
+   997:   await clearSheetValues(token,UEP_SPREADSHEET_ID,`'31_지각기록'!A${pos+4}:P${pos+4}`);const operational=await fetchOperationalData();return {ok:true,patch:operational.patch||{}};
+   998: }
+   999: 
+  1000: function dormRulePriority(category=""){
+  1001:   return ({exception:50,closure:40,exam:30,vacation:25,base:20,period:10})[String(category||"")]||5;
+  1002: }
+  1003: function dormRuleRow(payload={},id,nowIso){
+  1004:   return [[
+  1005:     id,
+  1006:     String(payload.category||""),
+  1007:     String(payload.name||""),
+  1008:     String(payload.start||""),
+  1009:     String(payload.end||""),
+  1010:     String(payload.days||"전체"),
+  1011:     String(payload.effect||""),
+  1012:     String(payload.entryTime||""),
+  1013:     String(payload.exitTime||""),
+  1014:     String(payload.lateEntry||""),
+  1015:     String(payload.earlyExit||""),
+--- hit line 1180 ---
+  1172:   const idCol=headers.indexOf('기록ID'), dateCol=headers.indexOf('운영일'), teacherCol=headers.indexOf('감독교사');
+  1173:   if(teacherCol<0) throw new Error('43_야자감독계획의 감독교사 열을 찾지 못했습니다.');
+  1174:   const rows=matrix.slice(1);
+  1175:   const pos=rows.findIndex(row=> (id&&String(row?.[idCol]||'').trim()===id) || (!id&&String(row?.[dateCol]||'').slice(0,10)===date));
+  1176:   if(pos<0) throw new Error('수정할 야자감독 일정을 찾지 못했습니다.');
+  1177:   const sheetRow=pos+4;
+  1178:   const colLetter=String.fromCharCode(65+teacherCol);
+  1179:   await updateSheetValues(token,UEP_SPREADSHEET_ID,`'43_야자감독계획'!${colLetter}${sheetRow}:${colLetter}${sheetRow}`,[[teacher]]);
+  1180:   const operational=await fetchOperationalData();
+  1181:   return {ok:true,patch:operational.patch||{}};
+  1182: }
+  1183: 
+  1184: async function saveLunchDuty(payload={}) {
+  1185:   const allowedRoles=new Set(['admin','grade_head','grade_manager','homeroom','subject']);
+  1186:   if(payload.role&&!allowedRoles.has(String(payload.role))) throw new Error('급식지도 수정 권한이 없습니다.');
+  1187:   const id=String(payload.id||'').trim();
+  1188:   const date=String(payload.date||'').slice(0,10);
+  1189:   const originalTeacher=String(payload.originalTeacher||payload.teacher||'').trim();
+  1190:   const teacher=String(payload.teacher||'').trim();
+  1191:   const dutyType=String(payload.dutyType||'급식실').trim();
+  1192:   if(!teacher) throw new Error('변경할 급식지도 교사가 없습니다.');
+  1193:   const account=await readEncrypted(credentialPath());
+  1194:   if(!validateServiceAccount(account)) throw new Error('Google 서비스 계정 인증정보가 필요합니다.');
+  1195:   const token=await getSheetsToken(account);
+  1196:   const range="'42_급식지도계획'!A3:K1000";
+  1197:   const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,[range]);
+  1198:   const matrix=result?.[0]?.values||[];
+--- hit line 1215 ---
+  1207:     (id && idCol>=0 && String(row?.[idCol]||'').trim()===id) ||
+  1208:     (!id && dateCol>=0 && String(row?.[dateCol]||'').slice(0,10)===date && String(row?.[teacherCol]||'').trim()===originalTeacher)
+  1209:   );
+  1210:   if(pos<0) throw new Error('수정할 급식지도 일정을 찾지 못했습니다.');
+  1211:   const sheetRow=pos+4;
+  1212:   const colLetter=(index)=>{let n=index+1,out='';while(n){n--;out=String.fromCharCode(65+n%26)+out;n=Math.floor(n/26)}return out};
+  1213:   await updateSheetValues(token,UEP_SPREADSHEET_ID,`'42_급식지도계획'!${colLetter(teacherCol)}${sheetRow}:${colLetter(teacherCol)}${sheetRow}`,[[teacher]]);
+  1214:   if(typeCol>=0) await updateSheetValues(token,UEP_SPREADSHEET_ID,`'42_급식지도계획'!${colLetter(typeCol)}${sheetRow}:${colLetter(typeCol)}${sheetRow}`,[[dutyType]]);
+  1215:   const operational=await fetchOperationalData();
+  1216:   return {ok:true,patch:operational.patch||{}};
+  1217: }
+  1218: 
+  1219: 
+  1220: const inputCenterRoot=()=>path.join(stableUserDataRoot(),'input-center');
+  1221: async function selectInputCenterFiles(event){
+  1222:   const win=BrowserWindow.fromWebContents(event.sender);
+  1223:   const selected=await dialog.showOpenDialog(win,{title:'UEP 입력센터 · 학생 자료 선택',properties:['openFile','multiSelections'],filters:[{name:'학생 자료',extensions:['pdf','jpg','jpeg','png','txt','csv','tsv','json','md','hwp','hwpx','doc','docx','xls','xlsx']},{name:'모든 파일',extensions:['*']}]});
+  1224:   if(selected.canceled)return {ok:false,canceled:true};
+  1225:   const textExt=new Set(['.txt','.csv','.tsv','.json','.md']);
+  1226:   const files=[];
+  1227:   for(const filePath of selected.filePaths||[]){try{const stat=await fs.stat(filePath);const ext=path.extname(filePath).toLowerCase();let text='';if(textExt.has(ext)&&stat.size<=5*1024*1024)text=await fs.readFile(filePath,'utf8');
+  1228:     if(process.platform==='win32'&&['.xls','.xlsx'].includes(ext)){const ps=String.raw`$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[System.Text.UTF8Encoding]::new(); $OutputEncoding=[Console]::OutputEncoding; $p=${JSON.stringify(filePath)}; $xl=New-Object -ComObject Excel.Application; $xl.Visible=$false; $xl.DisplayAlerts=$false; try{$wb=$xl.Workbooks.Open($p); $out=@(); foreach($ws in $wb.Worksheets){$out += ('__UEP_SHEET__' + [char]9 + [string]$ws.Name); $used=$ws.UsedRange; $vals=$used.Value2; if($vals -is [Array]){for($r=1;$r -le $used.Rows.Count;$r++){$cells=@();for($c=1;$c -le $used.Columns.Count;$c++){$v=$vals[$r,$c];if($null -eq $v){$v=''};$sv=[string]$v;$sv=$sv.Replace(([string][char]13+[char]10),'\n').Replace([string][char]10,'\n').Replace([string][char]13,'\n').Replace([string][char]9,' ');$cells += $sv};$out += ($cells -join [char]9)}}}; $out -join [Environment]::NewLine} finally{if($wb){$wb.Close($false)};$xl.Quit()}`;const r=await runProcess('powershell.exe',['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-Command',ps]);if(r.ok)text=r.stdout.trim();}
+  1229:     files.push({path:filePath,name:path.basename(filePath),extension:ext.replace(/^\./,''),size:stat.size,text});}catch{}}
+  1230:   return {ok:true,files};
+  1231: }
+  1232: async function fetchInputCenterSourceData(){
+  1233:   const auth=await getReadonlySheetsAuth();
+--- hit line 1565 ---
+  1557:   if(unmatchedPrograms)throw new Error(`선택보고서 프로그램 매칭 실패 ${unmatchedPrograms}건이 있어 자동 복구를 중단했습니다.`);
+  1558:   await clearSheetValues(token,UEP_PROCESSING_SPREADSHEET_ID,`'${target}'!A3:X5000`);
+  1559:   await updateSheetValues(token,UEP_PROCESSING_SPREADSHEET_ID,`'${target}'!A3:X${rows.length+3}`,[required,...rows]);
+  1560:   console.log(`[UEP] 선택보고서 정규화 자동 복구 완료: ${rows.length}건 · 학생확인 ${unmatchedStudents}건`);
+  1561:   return {ok:true,repaired:true,count:rows.length,unmatchedStudents};
+  1562: }
+  1563: 
+  1564: const UEP_OPERATIONAL_RANGE_NAMES=Object.freeze(['30_공식출결기록','31_지각기록','40_공지마감','44_공지확인현황','42_급식지도계획','43_야자감독계획']);
+  1565: async function fetchOperationalData({credentials=null}={}){
+  1566:   if(!liveDataCache)return {ok:false,requiresFullSync:true,reason:'전체 캐시가 아직 준비되지 않았습니다.'};
+  1567:   const auth=await getReadonlySheetsAuth(credentials),token=auth.token;
+  1568:   const operationalEntries=UEP_OPERATIONAL_RANGE_NAMES.map(name=>[name,SHEET_RANGES[name]]);
+  1569:   const [result,nightResult]=await Promise.all([
+  1570:     readSheetBatch(token,UEP_SPREADSHEET_ID,operationalEntries.map(([,range])=>range)),
+  1571:     readSheetBatch(token,UEP_PROCESSING_SPREADSHEET_ID,["'30_야자출결_정규화'!A:U"])
+  1572:   ]);
+  1573:   const matrices={};assignValueRangesByRange(matrices,operationalEntries,result);
+  1574:   // 운영 증분 갱신은 전체 학생마스터를 다시 읽지 않고 현재 readonlyCache.students를
+  1575:   // parseGoogleSheetData가 기대하는 02_학생마스터 형태로 재구성해 야자출결 매칭에 사용한다.
+  1576:   const cachedStudents=Array.isArray(liveDataCache?.students)?liveDataCache.students:[];
+  1577:   matrices['02_학생마스터']=[
+  1578:     ['02_학생마스터'],
+  1579:     ['UEP operational synthetic student master'],
+  1580:     ['학생ID','학년도','학번','성명','사용성명','학년','반','번호','검색표시명','출신중학교','학적상태','학적기준일','학적변동사유','입학일','활성여부','수정일시','수정자','비고'],
+  1581:     ...cachedStudents.map((student)=>[
+  1582:       String(student?.id||student?.studentId||''),
+  1583:       String(student?.schoolYear||student?.year||'2026'),
+--- hit line 2220 ---
+  2212:     mainWindow = null;
+  2213:     beginCleanShutdown("main-window-closed");
+  2214:   });
+  2215:   win.loadFile(path.join(__dirname, "..", "index.html"));
+  2216: }
+  2217: 
+  2218: app.whenReady().then(async () => {
+  2219:   await migrateStableUserData();
+  2220:   ipcMain.handle("uep:schoolReadLogin", async (_event,payload={}) => { try{return await loginSchoolReadUser(payload);}catch(error){return {ok:false,code:error?.code||'UEP_SCHOOL_READ_ERROR',message:error?.message||String(error)};} });
+  2221: ipcMain.handle("uep:schoolReadSessionStatus", async (_event,payload={}) => { try{return await schoolReadSessionStatus(payload);}catch(error){return {ok:false,authenticated:false,code:error?.code||'UEP_SCHOOL_READ_ERROR',reason:error?.message||String(error),mode:'school_read_api'};} });
+  2222: ipcMain.handle("uep:schoolReadLogout", async () => { try{return await clearSchoolReadSession();}catch(error){return {ok:false,reason:error?.message||String(error)};} });
+  2223: ipcMain.handle("state:load", async () => readState());
+  2224:   ipcMain.handle("state:save", async (_event, value) => writeState(value));
+  2225:   ipcMain.handle("program:selectPhotos", async (event, programId) => {
+  2226:     const win = BrowserWindow.fromWebContents(event.sender);
+  2227:     const selected = await dialog.showOpenDialog(win, {title:"프로그램 사진 등록",properties:["openFile","multiSelections"],filters:[{name:"사진",extensions:["jpg","jpeg","png","webp","heic"]}]});
+  2228:     if (selected.canceled || !selected.filePaths.length) return {ok:false,canceled:true,files:[]};
+  2229:     const target = programEvidencePath(programId); await fs.mkdir(target,{recursive:true});
+  2230:     const files=[];
+  2231:     for (const source of selected.filePaths) {
+  2232:       const ext=path.extname(source); const base=path.basename(source,ext).replace(/[^a-zA-Z0-9가-힣_-]/g,"_");
+  2233:       let destination=path.join(target,`${Date.now()}-${base}${ext}`); await fs.copyFile(source,destination);
+  2234:       files.push({name:path.basename(source),path:destination,addedAt:new Date().toISOString()});
+  2235:     }
+  2236:     return {ok:true,files,folder:target};
+  2237:   });
+  2238:   ipcMain.handle("program:openEvidenceFolder", async (_event, programId) => {const target=programEvidencePath(programId);await fs.mkdir(target,{recursive:true});return {ok:!(await shell.openPath(target)),folder:target};});
+--- hit line 2221 ---
+  2213:     beginCleanShutdown("main-window-closed");
+  2214:   });
+  2215:   win.loadFile(path.join(__dirname, "..", "index.html"));
+  2216: }
+  2217: 
+  2218: app.whenReady().then(async () => {
+  2219:   await migrateStableUserData();
+  2220:   ipcMain.handle("uep:schoolReadLogin", async (_event,payload={}) => { try{return await loginSchoolReadUser(payload);}catch(error){return {ok:false,code:error?.code||'UEP_SCHOOL_READ_ERROR',message:error?.message||String(error)};} });
+  2221: ipcMain.handle("uep:schoolReadSessionStatus", async (_event,payload={}) => { try{return await schoolReadSessionStatus(payload);}catch(error){return {ok:false,authenticated:false,code:error?.code||'UEP_SCHOOL_READ_ERROR',reason:error?.message||String(error),mode:'school_read_api'};} });
+  2222: ipcMain.handle("uep:schoolReadLogout", async () => { try{return await clearSchoolReadSession();}catch(error){return {ok:false,reason:error?.message||String(error)};} });
+  2223: ipcMain.handle("state:load", async () => readState());
+  2224:   ipcMain.handle("state:save", async (_event, value) => writeState(value));
+  2225:   ipcMain.handle("program:selectPhotos", async (event, programId) => {
+  2226:     const win = BrowserWindow.fromWebContents(event.sender);
+  2227:     const selected = await dialog.showOpenDialog(win, {title:"프로그램 사진 등록",properties:["openFile","multiSelections"],filters:[{name:"사진",extensions:["jpg","jpeg","png","webp","heic"]}]});
+  2228:     if (selected.canceled || !selected.filePaths.length) return {ok:false,canceled:true,files:[]};
+  2229:     const target = programEvidencePath(programId); await fs.mkdir(target,{recursive:true});
+  2230:     const files=[];
+  2231:     for (const source of selected.filePaths) {
+  2232:       const ext=path.extname(source); const base=path.basename(source,ext).replace(/[^a-zA-Z0-9가-힣_-]/g,"_");
+  2233:       let destination=path.join(target,`${Date.now()}-${base}${ext}`); await fs.copyFile(source,destination);
+  2234:       files.push({name:path.basename(source),path:destination,addedAt:new Date().toISOString()});
+  2235:     }
+  2236:     return {ok:true,files,folder:target};
+  2237:   });
+  2238:   ipcMain.handle("program:openEvidenceFolder", async (_event, programId) => {const target=programEvidencePath(programId);await fs.mkdir(target,{recursive:true});return {ok:!(await shell.openPath(target)),folder:target};});
+  2239:   ipcMain.handle("google:credentialStatus", async () => {
+--- hit line 2222 ---
+  2214:   });
+  2215:   win.loadFile(path.join(__dirname, "..", "index.html"));
+  2216: }
+  2217: 
+  2218: app.whenReady().then(async () => {
+  2219:   await migrateStableUserData();
+  2220:   ipcMain.handle("uep:schoolReadLogin", async (_event,payload={}) => { try{return await loginSchoolReadUser(payload);}catch(error){return {ok:false,code:error?.code||'UEP_SCHOOL_READ_ERROR',message:error?.message||String(error)};} });
+  2221: ipcMain.handle("uep:schoolReadSessionStatus", async (_event,payload={}) => { try{return await schoolReadSessionStatus(payload);}catch(error){return {ok:false,authenticated:false,code:error?.code||'UEP_SCHOOL_READ_ERROR',reason:error?.message||String(error),mode:'school_read_api'};} });
+  2222: ipcMain.handle("uep:schoolReadLogout", async () => { try{return await clearSchoolReadSession();}catch(error){return {ok:false,reason:error?.message||String(error)};} });
+  2223: ipcMain.handle("state:load", async () => readState());
+  2224:   ipcMain.handle("state:save", async (_event, value) => writeState(value));
+  2225:   ipcMain.handle("program:selectPhotos", async (event, programId) => {
+  2226:     const win = BrowserWindow.fromWebContents(event.sender);
+  2227:     const selected = await dialog.showOpenDialog(win, {title:"프로그램 사진 등록",properties:["openFile","multiSelections"],filters:[{name:"사진",extensions:["jpg","jpeg","png","webp","heic"]}]});
+  2228:     if (selected.canceled || !selected.filePaths.length) return {ok:false,canceled:true,files:[]};
+  2229:     const target = programEvidencePath(programId); await fs.mkdir(target,{recursive:true});
+  2230:     const files=[];
+  2231:     for (const source of selected.filePaths) {
+  2232:       const ext=path.extname(source); const base=path.basename(source,ext).replace(/[^a-zA-Z0-9가-힣_-]/g,"_");
+  2233:       let destination=path.join(target,`${Date.now()}-${base}${ext}`); await fs.copyFile(source,destination);
+  2234:       files.push({name:path.basename(source),path:destination,addedAt:new Date().toISOString()});
+  2235:     }
+  2236:     return {ok:true,files,folder:target};
+  2237:   });
+  2238:   ipcMain.handle("program:openEvidenceFolder", async (_event, programId) => {const target=programEvidencePath(programId);await fs.mkdir(target,{recursive:true});return {ok:!(await shell.openPath(target)),folder:target};});
+  2239:   ipcMain.handle("google:credentialStatus", async () => {
+  2240:   try {
+--- hit line 2223 ---
+  2215:   win.loadFile(path.join(__dirname, "..", "index.html"));
+  2216: }
+  2217: 
+  2218: app.whenReady().then(async () => {
+  2219:   await migrateStableUserData();
+  2220:   ipcMain.handle("uep:schoolReadLogin", async (_event,payload={}) => { try{return await loginSchoolReadUser(payload);}catch(error){return {ok:false,code:error?.code||'UEP_SCHOOL_READ_ERROR',message:error?.message||String(error)};} });
+  2221: ipcMain.handle("uep:schoolReadSessionStatus", async (_event,payload={}) => { try{return await schoolReadSessionStatus(payload);}catch(error){return {ok:false,authenticated:false,code:error?.code||'UEP_SCHOOL_READ_ERROR',reason:error?.message||String(error),mode:'school_read_api'};} });
+  2222: ipcMain.handle("uep:schoolReadLogout", async () => { try{return await clearSchoolReadSession();}catch(error){return {ok:false,reason:error?.message||String(error)};} });
+  2223: ipcMain.handle("state:load", async () => readState());
+  2224:   ipcMain.handle("state:save", async (_event, value) => writeState(value));
+  2225:   ipcMain.handle("program:selectPhotos", async (event, programId) => {
+  2226:     const win = BrowserWindow.fromWebContents(event.sender);
+  2227:     const selected = await dialog.showOpenDialog(win, {title:"프로그램 사진 등록",properties:["openFile","multiSelections"],filters:[{name:"사진",extensions:["jpg","jpeg","png","webp","heic"]}]});
+  2228:     if (selected.canceled || !selected.filePaths.length) return {ok:false,canceled:true,files:[]};
+  2229:     const target = programEvidencePath(programId); await fs.mkdir(target,{recursive:true});
+  2230:     const files=[];
+  2231:     for (const source of selected.filePaths) {
+  2232:       const ext=path.extname(source); const base=path.basename(source,ext).replace(/[^a-zA-Z0-9가-힣_-]/g,"_");
+  2233:       let destination=path.join(target,`${Date.now()}-${base}${ext}`); await fs.copyFile(source,destination);
+  2234:       files.push({name:path.basename(source),path:destination,addedAt:new Date().toISOString()});
+  2235:     }
+  2236:     return {ok:true,files,folder:target};
+  2237:   });
+  2238:   ipcMain.handle("program:openEvidenceFolder", async (_event, programId) => {const target=programEvidencePath(programId);await fs.mkdir(target,{recursive:true});return {ok:!(await shell.openPath(target)),folder:target};});
+  2239:   ipcMain.handle("google:credentialStatus", async () => {
+  2240:   try {
+  2241:     const credentials = await resolveSchoolServiceAccount();
+--- hit line 2224 ---
+  2216: }
+  2217: 
+  2218: app.whenReady().then(async () => {
+  2219:   await migrateStableUserData();
+  2220:   ipcMain.handle("uep:schoolReadLogin", async (_event,payload={}) => { try{return await loginSchoolReadUser(payload);}catch(error){return {ok:false,code:error?.code||'UEP_SCHOOL_READ_ERROR',message:error?.message||String(error)};} });
+  2221: ipcMain.handle("uep:schoolReadSessionStatus", async (_event,payload={}) => { try{return await schoolReadSessionStatus(payload);}catch(error){return {ok:false,authenticated:false,code:error?.code||'UEP_SCHOOL_READ_ERROR',reason:error?.message||String(error),mode:'school_read_api'};} });
+  2222: ipcMain.handle("uep:schoolReadLogout", async () => { try{return await clearSchoolReadSession();}catch(error){return {ok:false,reason:error?.message||String(error)};} });
+  2223: ipcMain.handle("state:load", async () => readState());
+  2224:   ipcMain.handle("state:save", async (_event, value) => writeState(value));
+  2225:   ipcMain.handle("program:selectPhotos", async (event, programId) => {
+  2226:     const win = BrowserWindow.fromWebContents(event.sender);
+  2227:     const selected = await dialog.showOpenDialog(win, {title:"프로그램 사진 등록",properties:["openFile","multiSelections"],filters:[{name:"사진",extensions:["jpg","jpeg","png","webp","heic"]}]});
+  2228:     if (selected.canceled || !selected.filePaths.length) return {ok:false,canceled:true,files:[]};
+  2229:     const target = programEvidencePath(programId); await fs.mkdir(target,{recursive:true});
+  2230:     const files=[];
+  2231:     for (const source of selected.filePaths) {
+  2232:       const ext=path.extname(source); const base=path.basename(source,ext).replace(/[^a-zA-Z0-9가-힣_-]/g,"_");
+  2233:       let destination=path.join(target,`${Date.now()}-${base}${ext}`); await fs.copyFile(source,destination);
+  2234:       files.push({name:path.basename(source),path:destination,addedAt:new Date().toISOString()});
+  2235:     }
+  2236:     return {ok:true,files,folder:target};
+  2237:   });
+  2238:   ipcMain.handle("program:openEvidenceFolder", async (_event, programId) => {const target=programEvidencePath(programId);await fs.mkdir(target,{recursive:true});return {ok:!(await shell.openPath(target)),folder:target};});
+  2239:   ipcMain.handle("google:credentialStatus", async () => {
+  2240:   try {
+  2241:     const credentials = await resolveSchoolServiceAccount();
+  2242:     if (validateServiceAccount(credentials)) return {ok:true,encryption:safeStorage.isEncryptionAvailable(),local:false,mode:"service_account",account:credentials.client_email||"",userOAuth:false,autoConnected:true,loginIdentityGateway:true,approvalRequired:false,tokenExchangeRequired:false};
+--- hit line 2225 ---
+  2217: 
+  2218: app.whenReady().then(async () => {
+  2219:   await migrateStableUserData();
+  2220:   ipcMain.handle("uep:schoolReadLogin", async (_event,payload={}) => { try{return await loginSchoolReadUser(payload);}catch(error){return {ok:false,code:error?.code||'UEP_SCHOOL_READ_ERROR',message:error?.message||String(error)};} });
+  2221: ipcMain.handle("uep:schoolReadSessionStatus", async (_event,payload={}) => { try{return await schoolReadSessionStatus(payload);}catch(error){return {ok:false,authenticated:false,code:error?.code||'UEP_SCHOOL_READ_ERROR',reason:error?.message||String(error),mode:'school_read_api'};} });
+  2222: ipcMain.handle("uep:schoolReadLogout", async () => { try{return await clearSchoolReadSession();}catch(error){return {ok:false,reason:error?.message||String(error)};} });
+  2223: ipcMain.handle("state:load", async () => readState());
+  2224:   ipcMain.handle("state:save", async (_event, value) => writeState(value));
+  2225:   ipcMain.handle("program:selectPhotos", async (event, programId) => {
+  2226:     const win = BrowserWindow.fromWebContents(event.sender);
+  2227:     const selected = await dialog.showOpenDialog(win, {title:"프로그램 사진 등록",properties:["openFile","multiSelections"],filters:[{name:"사진",extensions:["jpg","jpeg","png","webp","heic"]}]});
+  2228:     if (selected.canceled || !selected.filePaths.length) return {ok:false,canceled:true,files:[]};
+  2229:     const target = programEvidencePath(programId); await fs.mkdir(target,{recursive:true});
+  2230:     const files=[];
+  2231:     for (const source of selected.filePaths) {
+  2232:       const ext=path.extname(source); const base=path.basename(source,ext).replace(/[^a-zA-Z0-9가-힣_-]/g,"_");
+  2233:       let destination=path.join(target,`${Date.now()}-${base}${ext}`); await fs.copyFile(source,destination);
+  2234:       files.push({name:path.basename(source),path:destination,addedAt:new Date().toISOString()});
+  2235:     }
+  2236:     return {ok:true,files,folder:target};
+  2237:   });
+  2238:   ipcMain.handle("program:openEvidenceFolder", async (_event, programId) => {const target=programEvidencePath(programId);await fs.mkdir(target,{recursive:true});return {ok:!(await shell.openPath(target)),folder:target};});
+  2239:   ipcMain.handle("google:credentialStatus", async () => {
+  2240:   try {
+  2241:     const credentials = await resolveSchoolServiceAccount();
+  2242:     if (validateServiceAccount(credentials)) return {ok:true,encryption:safeStorage.isEncryptionAvailable(),local:false,mode:"service_account",account:credentials.client_email||"",userOAuth:false,autoConnected:true,loginIdentityGateway:true,approvalRequired:false,tokenExchangeRequired:false};
+  2243:   } catch (error) {}
+--- hit line 2238 ---
+  2230:     const files=[];
+  2231:     for (const source of selected.filePaths) {
+  2232:       const ext=path.extname(source); const base=path.basename(source,ext).replace(/[^a-zA-Z0-9가-힣_-]/g,"_");
+  2233:       let destination=path.join(target,`${Date.now()}-${base}${ext}`); await fs.copyFile(source,destination);
+  2234:       files.push({name:path.basename(source),path:destination,addedAt:new Date().toISOString()});
+  2235:     }
+  2236:     return {ok:true,files,folder:target};
+  2237:   });
+  2238:   ipcMain.handle("program:openEvidenceFolder", async (_event, programId) => {const target=programEvidencePath(programId);await fs.mkdir(target,{recursive:true});return {ok:!(await shell.openPath(target)),folder:target};});
+  2239:   ipcMain.handle("google:credentialStatus", async () => {
+  2240:   try {
+  2241:     const credentials = await resolveSchoolServiceAccount();
+  2242:     if (validateServiceAccount(credentials)) return {ok:true,encryption:safeStorage.isEncryptionAvailable(),local:false,mode:"service_account",account:credentials.client_email||"",userOAuth:false,autoConnected:true,loginIdentityGateway:true,approvalRequired:false,tokenExchangeRequired:false};
+  2243:   } catch (error) {}
+  2244:   return {ok:true,local:true,mode:"login_identity",account:"",userOAuth:false,autoConnected:true,loginIdentityGateway:true,approvalRequired:false,tokenExchangeRequired:false,reason:"UEP 로그인 이름·이메일로 교사·담임을 식별합니다."};
+  2245: });
+  2246: ipcMain.handle("google:authorizeUser", async () => {
+  2247:   return {ok:true,skipped:true,mode:"login_identity",autoConnected:true,approvalRequired:false,tokenExchangeRequired:false,message:"별도 Google 계정 승인은 사용하지 않습니다. UEP 로그인 이름·이메일로 담임 권한을 적용합니다."};
+  2248: });
+  2249: ipcMain.handle("google:diagnoseUserOAuth", async () => {
+  2250:   const result={authorized:false,account:"",tokenOk:false,sheetsOk:false,reason:"",status:0};
+  2251:   try {
+  2252:     const saved=await readGoogleUserOAuth();
+  2253:     if(!saved){result.reason="Google 계정 연결 정보가 없습니다.";return result;}
+  2254:     result.authorized=true;result.account=String(saved.email||"");
+  2255:     const token=await getGoogleUserSheetsToken();
+  2256:     result.tokenOk=Boolean(token);
+--- hit line 2239 ---
+  2231:     for (const source of selected.filePaths) {
+  2232:       const ext=path.extname(source); const base=path.basename(source,ext).replace(/[^a-zA-Z0-9가-힣_-]/g,"_");
+  2233:       let destination=path.join(target,`${Date.now()}-${base}${ext}`); await fs.copyFile(source,destination);
+  2234:       files.push({name:path.basename(source),path:destination,addedAt:new Date().toISOString()});
+  2235:     }
+  2236:     return {ok:true,files,folder:target};
+  2237:   });
+  2238:   ipcMain.handle("program:openEvidenceFolder", async (_event, programId) => {const target=programEvidencePath(programId);await fs.mkdir(target,{recursive:true});return {ok:!(await shell.openPath(target)),folder:target};});
+  2239:   ipcMain.handle("google:credentialStatus", async () => {
+  2240:   try {
+  2241:     const credentials = await resolveSchoolServiceAccount();
+  2242:     if (validateServiceAccount(credentials)) return {ok:true,encryption:safeStorage.isEncryptionAvailable(),local:false,mode:"service_account",account:credentials.client_email||"",userOAuth:false,autoConnected:true,loginIdentityGateway:true,approvalRequired:false,tokenExchangeRequired:false};
+  2243:   } catch (error) {}
+  2244:   return {ok:true,local:true,mode:"login_identity",account:"",userOAuth:false,autoConnected:true,loginIdentityGateway:true,approvalRequired:false,tokenExchangeRequired:false,reason:"UEP 로그인 이름·이메일로 교사·담임을 식별합니다."};
+  2245: });
+  2246: ipcMain.handle("google:authorizeUser", async () => {
+  2247:   return {ok:true,skipped:true,mode:"login_identity",autoConnected:true,approvalRequired:false,tokenExchangeRequired:false,message:"별도 Google 계정 승인은 사용하지 않습니다. UEP 로그인 이름·이메일로 담임 권한을 적용합니다."};
+  2248: });
+  2249: ipcMain.handle("google:diagnoseUserOAuth", async () => {
+  2250:   const result={authorized:false,account:"",tokenOk:false,sheetsOk:false,reason:"",status:0};
+  2251:   try {
+  2252:     const saved=await readGoogleUserOAuth();
+  2253:     if(!saved){result.reason="Google 계정 연결 정보가 없습니다.";return result;}
+  2254:     result.authorized=true;result.account=String(saved.email||"");
+  2255:     const token=await getGoogleUserSheetsToken();
+  2256:     result.tokenOk=Boolean(token);
+  2257:     try {
+--- hit line 2246 ---
+  2238:   ipcMain.handle("program:openEvidenceFolder", async (_event, programId) => {const target=programEvidencePath(programId);await fs.mkdir(target,{recursive:true});return {ok:!(await shell.openPath(target)),folder:target};});
+  2239:   ipcMain.handle("google:credentialStatus", async () => {
+  2240:   try {
+  2241:     const credentials = await resolveSchoolServiceAccount();
+  2242:     if (validateServiceAccount(credentials)) return {ok:true,encryption:safeStorage.isEncryptionAvailable(),local:false,mode:"service_account",account:credentials.client_email||"",userOAuth:false,autoConnected:true,loginIdentityGateway:true,approvalRequired:false,tokenExchangeRequired:false};
+  2243:   } catch (error) {}
+  2244:   return {ok:true,local:true,mode:"login_identity",account:"",userOAuth:false,autoConnected:true,loginIdentityGateway:true,approvalRequired:false,tokenExchangeRequired:false,reason:"UEP 로그인 이름·이메일로 교사·담임을 식별합니다."};
+  2245: });
+  2246: ipcMain.handle("google:authorizeUser", async () => {
+  2247:   return {ok:true,skipped:true,mode:"login_identity",autoConnected:true,approvalRequired:false,tokenExchangeRequired:false,message:"별도 Google 계정 승인은 사용하지 않습니다. UEP 로그인 이름·이메일로 담임 권한을 적용합니다."};
+  2248: });
+  2249: ipcMain.handle("google:diagnoseUserOAuth", async () => {
+  2250:   const result={authorized:false,account:"",tokenOk:false,sheetsOk:false,reason:"",status:0};
+  2251:   try {
+  2252:     const saved=await readGoogleUserOAuth();
+  2253:     if(!saved){result.reason="Google 계정 연결 정보가 없습니다.";return result;}
+  2254:     result.authorized=true;result.account=String(saved.email||"");
+  2255:     const token=await getGoogleUserSheetsToken();
+  2256:     result.tokenOk=Boolean(token);
+  2257:     try {
+  2258:       await readSheetBatch(token,UEP_SPREADSHEET_ID,["'01_사용자계정'!A1:B2"]);
+  2259:       result.sheetsOk=true;
+  2260:     } catch(error) {
+  2261:       result.reason=String(error?.message||error||"Google 시트 조회 실패");
+  2262:       const match=result.reason.match(/\((\d{3})\)/);result.status=match?Number(match[1]):0;
+  2263:     }
+  2264:     return result;
+--- hit line 2249 ---
+  2241:     const credentials = await resolveSchoolServiceAccount();
+  2242:     if (validateServiceAccount(credentials)) return {ok:true,encryption:safeStorage.isEncryptionAvailable(),local:false,mode:"service_account",account:credentials.client_email||"",userOAuth:false,autoConnected:true,loginIdentityGateway:true,approvalRequired:false,tokenExchangeRequired:false};
+  2243:   } catch (error) {}
+  2244:   return {ok:true,local:true,mode:"login_identity",account:"",userOAuth:false,autoConnected:true,loginIdentityGateway:true,approvalRequired:false,tokenExchangeRequired:false,reason:"UEP 로그인 이름·이메일로 교사·담임을 식별합니다."};
+  2245: });
+  2246: ipcMain.handle("google:authorizeUser", async () => {
+  2247:   return {ok:true,skipped:true,mode:"login_identity",autoConnected:true,approvalRequired:false,tokenExchangeRequired:false,message:"별도 Google 계정 승인은 사용하지 않습니다. UEP 로그인 이름·이메일로 담임 권한을 적용합니다."};
+  2248: });
+  2249: ipcMain.handle("google:diagnoseUserOAuth", async () => {
+  2250:   const result={authorized:false,account:"",tokenOk:false,sheetsOk:false,reason:"",status:0};
+  2251:   try {
+  2252:     const saved=await readGoogleUserOAuth();
+  2253:     if(!saved){result.reason="Google 계정 연결 정보가 없습니다.";return result;}
+  2254:     result.authorized=true;result.account=String(saved.email||"");
+  2255:     const token=await getGoogleUserSheetsToken();
+  2256:     result.tokenOk=Boolean(token);
+  2257:     try {
+  2258:       await readSheetBatch(token,UEP_SPREADSHEET_ID,["'01_사용자계정'!A1:B2"]);
+  2259:       result.sheetsOk=true;
+  2260:     } catch(error) {
+  2261:       result.reason=String(error?.message||error||"Google 시트 조회 실패");
+  2262:       const match=result.reason.match(/\((\d{3})\)/);result.status=match?Number(match[1]):0;
+  2263:     }
+  2264:     return result;
+  2265:   } catch(error) {result.reason=String(error?.message||error||"Google OAuth 진단 실패");return result;}
+  2266: });ipcMain.handle("google:disconnectUser", async () => {
+  2267:   try{return await disconnectGoogleUser();}catch(error){return {ok:false,reason:error?.message||String(error)};}
+--- hit line 2266 ---
+  2258:       await readSheetBatch(token,UEP_SPREADSHEET_ID,["'01_사용자계정'!A1:B2"]);
+  2259:       result.sheetsOk=true;
+  2260:     } catch(error) {
+  2261:       result.reason=String(error?.message||error||"Google 시트 조회 실패");
+  2262:       const match=result.reason.match(/\((\d{3})\)/);result.status=match?Number(match[1]):0;
+  2263:     }
+  2264:     return result;
+  2265:   } catch(error) {result.reason=String(error?.message||error||"Google OAuth 진단 실패");return result;}
+  2266: });ipcMain.handle("google:disconnectUser", async () => {
+  2267:   try{return await disconnectGoogleUser();}catch(error){return {ok:false,reason:error?.message||String(error)};}
+  2268: });
+  2269:   ipcMain.handle("google:selectCredential", async (event) => {
+  2270:     const win = BrowserWindow.fromWebContents(event.sender);
+  2271:     const selected = await dialog.showOpenDialog(win, {
+  2272:       title: "Google 서비스 계정 JSON 선택",
+  2273:       properties: ["openFile"],
+  2274:       filters: [{ name: "Google 서비스 계정", extensions: ["json"] }],
+  2275:     });
+  2276:     if (selected.canceled || !selected.filePaths[0]) return { ok: false, canceled: true };
+  2277:     try {
+  2278:       const credentials = JSON.parse(await fs.readFile(selected.filePaths[0], "utf8"));
+  2279:       if (!validateServiceAccount(credentials)) return { ok: false, reason: "Google 서비스 계정 JSON 형식이 아닙니다." };
+  2280:       const data = await fetchLiveData({ force: true, credentials });
+  2281:       await saveEncrypted(credentialPath(), credentials);
+  2282:       return {
+  2283:         ok: true,
+  2284:         account: credentials.client_email,
+--- hit line 2269 ---
+  2261:       result.reason=String(error?.message||error||"Google 시트 조회 실패");
+  2262:       const match=result.reason.match(/\((\d{3})\)/);result.status=match?Number(match[1]):0;
+  2263:     }
+  2264:     return result;
+  2265:   } catch(error) {result.reason=String(error?.message||error||"Google OAuth 진단 실패");return result;}
+  2266: });ipcMain.handle("google:disconnectUser", async () => {
+  2267:   try{return await disconnectGoogleUser();}catch(error){return {ok:false,reason:error?.message||String(error)};}
+  2268: });
+  2269:   ipcMain.handle("google:selectCredential", async (event) => {
+  2270:     const win = BrowserWindow.fromWebContents(event.sender);
+  2271:     const selected = await dialog.showOpenDialog(win, {
+  2272:       title: "Google 서비스 계정 JSON 선택",
+  2273:       properties: ["openFile"],
+  2274:       filters: [{ name: "Google 서비스 계정", extensions: ["json"] }],
+  2275:     });
+  2276:     if (selected.canceled || !selected.filePaths[0]) return { ok: false, canceled: true };
+  2277:     try {
+  2278:       const credentials = JSON.parse(await fs.readFile(selected.filePaths[0], "utf8"));
+  2279:       if (!validateServiceAccount(credentials)) return { ok: false, reason: "Google 서비스 계정 JSON 형식이 아닙니다." };
+  2280:       const data = await fetchLiveData({ force: true, credentials });
+  2281:       await saveEncrypted(credentialPath(), credentials);
+  2282:       return {
+  2283:         ok: true,
+  2284:         account: credentials.client_email,
+  2285:         sourceName: UEP_SPREADSHEET_NAME,
+  2286:         preview: data.summary,
+  2287:       };
+--- hit line 2294 ---
+  2286:         preview: data.summary,
+  2287:       };
+  2288:     } catch (error) {
+  2289:       liveDataCache = null;
+  2290:       liveDataFetchedAt = 0;
+  2291:       return { ok: false, reason: `${error.message || "구글시트 연결 실패"} 서비스 계정 이메일에 UEP 구글시트 보기 권한이 있는지 확인하세요.` };
+  2292:     }
+  2293:   });
+  2294:   ipcMain.handle("google:previewOperationalSync", async () => {try{return await fetchOperationalData();}catch(error){return {ok:false,reason:error?.message||'UEP 운영자료 갱신 실패'};}});
+  2295:   ipcMain.handle("google:previewReadonlySync", async () => {
+  2296:     try {
+  2297:       const data = await fetchLiveData({ force: true });
+  2298:       return { ok: true, syncedAt: data.syncedAt, preview: data.summary, nightPreview: data.summary, sourceName: data.sourceName };
+  2299:     } catch (error) {
+  2300:       liveDataCache = null;
+  2301:       liveDataFetchedAt = 0;
+  2302:       return { ok: false, reason: error.message || "UEP 구글시트 새로고침 실패" };
+  2303:     }
+  2304:   });
+  2305:   ipcMain.handle("google:readReadonlyCache", async () => {
+  2306:     try { return { ok: true, data: await fetchLiveData() }; }
+  2307:     catch (error) { return { ok: false, reason: error.message || "UEP 구글시트를 읽지 못했습니다." }; }
+  2308:   });
+  2309:   
+  2310: 
+  2311: function inputCenterNatureToStoredType(nature=""){
+  2312:   const n=String(nature||"");
+--- hit line 2295 ---
+  2287:       };
+  2288:     } catch (error) {
+  2289:       liveDataCache = null;
+  2290:       liveDataFetchedAt = 0;
+  2291:       return { ok: false, reason: `${error.message || "구글시트 연결 실패"} 서비스 계정 이메일에 UEP 구글시트 보기 권한이 있는지 확인하세요.` };
+  2292:     }
+  2293:   });
+  2294:   ipcMain.handle("google:previewOperationalSync", async () => {try{return await fetchOperationalData();}catch(error){return {ok:false,reason:error?.message||'UEP 운영자료 갱신 실패'};}});
+  2295:   ipcMain.handle("google:previewReadonlySync", async () => {
+  2296:     try {
+  2297:       const data = await fetchLiveData({ force: true });
+  2298:       return { ok: true, syncedAt: data.syncedAt, preview: data.summary, nightPreview: data.summary, sourceName: data.sourceName };
+  2299:     } catch (error) {
+  2300:       liveDataCache = null;
+  2301:       liveDataFetchedAt = 0;
+  2302:       return { ok: false, reason: error.message || "UEP 구글시트 새로고침 실패" };
+  2303:     }
+  2304:   });
+  2305:   ipcMain.handle("google:readReadonlyCache", async () => {
+  2306:     try { return { ok: true, data: await fetchLiveData() }; }
+  2307:     catch (error) { return { ok: false, reason: error.message || "UEP 구글시트를 읽지 못했습니다." }; }
+  2308:   });
+  2309:   
+  2310: 
+  2311: function inputCenterNatureToStoredType(nature=""){
+  2312:   const n=String(nature||"");
+  2313:   if(n==="보고서")return "보고서·탐구보고서";
+--- hit line 2305 ---
+  2297:       const data = await fetchLiveData({ force: true });
+  2298:       return { ok: true, syncedAt: data.syncedAt, preview: data.summary, nightPreview: data.summary, sourceName: data.sourceName };
+  2299:     } catch (error) {
+  2300:       liveDataCache = null;
+  2301:       liveDataFetchedAt = 0;
+  2302:       return { ok: false, reason: error.message || "UEP 구글시트 새로고침 실패" };
+  2303:     }
+  2304:   });
+  2305:   ipcMain.handle("google:readReadonlyCache", async () => {
+  2306:     try { return { ok: true, data: await fetchLiveData() }; }
+  2307:     catch (error) { return { ok: false, reason: error.message || "UEP 구글시트를 읽지 못했습니다." }; }
+  2308:   });
+  2309:   
+  2310: 
+  2311: function inputCenterNatureToStoredType(nature=""){
+  2312:   const n=String(nature||"");
+  2313:   if(n==="보고서")return "보고서·탐구보고서";
+  2314:   if(n==="신청")return "프로그램 신청서";
+  2315:   if(n==="만족도조사")return "만족도·설문조사";
+  2316:   if(n==="출결·명단")return "출결·참여명단";
+  2317:   return n||"기타";
+  2318: }
+  2319: function inputCenterProgramIdRaw(id=""){return String(id||"").replace(/^(common|selected)-/,'');}
+  2320: function inputCenterSemester(value="",submittedAt=""){
+  2321:   const t=String(value||""); if(/(^|[^0-9])1([^0-9]|$)|1학기/.test(t))return "1학기"; if(/(^|[^0-9])2([^0-9]|$)|2학기/.test(t))return "2학기";
+  2322:   const m=String(submittedAt||"").match(/\d{4}[-/.](\d{1,2})/);return m&&Number(m[1])<=7?"1학기":"2학기";
+  2323: }
+--- hit line 2447 ---
+  2439:     // 본문이 없어 prepared에서 제외된 원본까지 완료되는 기존 문제도 함께 차단합니다.
+  2440:     const verifiedIds=new Set(actions.map(a=>String(a.rec?.id||'')).filter(Boolean));const statusWrites=[];
+  2441:     for(let i=0;i<src.length;i++)if(verifiedIds.has(String(src[i]?.[0]||'')))statusWrites.push({range:`'02_자료원본'!R${i+4}:R${i+4}`,values:[['정규화완료']]});
+  2442:     await batchUpdateSheetValues(token,UEP_INPUT_CENTER_SPREADSHEET_ID,statusWrites);
+  2443:     liveDataCache=null;liveDataFetchedAt=0;return {ok:true,targetSheet,programName,newCount,duplicateCount,updateCount,errorCount:0,count:newCount+updateCount,verifiedCount:actions.length};
+  2444:   }catch(error){return {ok:false,reason:error?.message||String(error)};}
+  2445: }
+  2446: 
+  2447: ipcMain.handle("inputCenter:refreshSource", async () => {try{return await fetchInputCenterSourceData();}catch(error){return {ok:false,reason:error?.message||'입력센터 원본 갱신 실패'};}});
+  2448: ipcMain.handle("inputCenter:selectFiles", async (event) => selectInputCenterFiles(event));
+  2449: ipcMain.handle("inputCenter:save", async (_event,payload={}) => saveInputCenterRecords(payload));
+  2450: ipcMain.handle("inputCenter:classifyBatch", async (_event,payload={}) => classifyInputCenterBatch(payload));
+  2451: ipcMain.handle("inputCenter:normalizeBatch", async (_event,payload={}) => normalizeInputCenterBatch(payload));
+  2452: ipcMain.handle("inputCenter:openFolder", async () => openInputCenterFolder());
+  2453: ipcMain.handle("inputCenter:readAsset", async (_event,filePath="") => readInputCenterAsset(filePath));
+  2454: ipcMain.handle("inputCenter:openAsset", async (_event,filePath="") => openInputCenterAsset(filePath));
+  2455: ipcMain.handle("inputCenter:ocrBatch", async (_event,payload={}) => ocrInputCenterBatch(payload));
+  2456: ipcMain.handle("student:contactSave", async (_event, payload={}) => saveStudentContact(payload));
+  2457: ipcMain.handle("program:operationSave", async (_event, payload={}) => saveProgramOperation(payload));
+  2458: ipcMain.handle("attendance:officialSave", async (_event, payload={}) => saveOfficialAttendance(payload));
+  2459: ipcMain.handle("attendance:officialDelete", async (_event, id="") => deleteOfficialAttendance(id));
+  2460: ipcMain.handle("attendance:lateSave", async (_event, payload={}) => saveLateAttendance(payload));
+  2461: ipcMain.handle("attendance:lateDelete", async (_event, id="") => deleteLateAttendance(id));
+  2462: ipcMain.handle("admission:counselPointSave", async (_event, payload={}) => saveAdmissionCounselPoint(payload));
+  2463: ipcMain.handle("counsel:save", async (_event, payload={}) => saveCounselRecord(payload));
+  2464: ipcMain.handle("studentGuidance:save", async (_event, payload={}) => saveStudentGuidanceRecord(payload));
+  2465:   ipcMain.handle("dormOuting:save", async (_event, payload={}) => saveDormOuting(payload));
+--- hit line 2448 ---
+  2440:     const verifiedIds=new Set(actions.map(a=>String(a.rec?.id||'')).filter(Boolean));const statusWrites=[];
+  2441:     for(let i=0;i<src.length;i++)if(verifiedIds.has(String(src[i]?.[0]||'')))statusWrites.push({range:`'02_자료원본'!R${i+4}:R${i+4}`,values:[['정규화완료']]});
+  2442:     await batchUpdateSheetValues(token,UEP_INPUT_CENTER_SPREADSHEET_ID,statusWrites);
+  2443:     liveDataCache=null;liveDataFetchedAt=0;return {ok:true,targetSheet,programName,newCount,duplicateCount,updateCount,errorCount:0,count:newCount+updateCount,verifiedCount:actions.length};
+  2444:   }catch(error){return {ok:false,reason:error?.message||String(error)};}
+  2445: }
+  2446: 
+  2447: ipcMain.handle("inputCenter:refreshSource", async () => {try{return await fetchInputCenterSourceData();}catch(error){return {ok:false,reason:error?.message||'입력센터 원본 갱신 실패'};}});
+  2448: ipcMain.handle("inputCenter:selectFiles", async (event) => selectInputCenterFiles(event));
+  2449: ipcMain.handle("inputCenter:save", async (_event,payload={}) => saveInputCenterRecords(payload));
+  2450: ipcMain.handle("inputCenter:classifyBatch", async (_event,payload={}) => classifyInputCenterBatch(payload));
+  2451: ipcMain.handle("inputCenter:normalizeBatch", async (_event,payload={}) => normalizeInputCenterBatch(payload));
+  2452: ipcMain.handle("inputCenter:openFolder", async () => openInputCenterFolder());
+  2453: ipcMain.handle("inputCenter:readAsset", async (_event,filePath="") => readInputCenterAsset(filePath));
+  2454: ipcMain.handle("inputCenter:openAsset", async (_event,filePath="") => openInputCenterAsset(filePath));
+  2455: ipcMain.handle("inputCenter:ocrBatch", async (_event,payload={}) => ocrInputCenterBatch(payload));
+  2456: ipcMain.handle("student:contactSave", async (_event, payload={}) => saveStudentContact(payload));
+  2457: ipcMain.handle("program:operationSave", async (_event, payload={}) => saveProgramOperation(payload));
+  2458: ipcMain.handle("attendance:officialSave", async (_event, payload={}) => saveOfficialAttendance(payload));
+  2459: ipcMain.handle("attendance:officialDelete", async (_event, id="") => deleteOfficialAttendance(id));
+  2460: ipcMain.handle("attendance:lateSave", async (_event, payload={}) => saveLateAttendance(payload));
+  2461: ipcMain.handle("attendance:lateDelete", async (_event, id="") => deleteLateAttendance(id));
+  2462: ipcMain.handle("admission:counselPointSave", async (_event, payload={}) => saveAdmissionCounselPoint(payload));
+  2463: ipcMain.handle("counsel:save", async (_event, payload={}) => saveCounselRecord(payload));
+  2464: ipcMain.handle("studentGuidance:save", async (_event, payload={}) => saveStudentGuidanceRecord(payload));
+  2465:   ipcMain.handle("dormOuting:save", async (_event, payload={}) => saveDormOuting(payload));
+  2466: ipcMain.handle("dormRule:save", async (_event, payload={}) => saveDormRule(payload));
+--- hit line 2449 ---
+  2441:     for(let i=0;i<src.length;i++)if(verifiedIds.has(String(src[i]?.[0]||'')))statusWrites.push({range:`'02_자료원본'!R${i+4}:R${i+4}`,values:[['정규화완료']]});
+  2442:     await batchUpdateSheetValues(token,UEP_INPUT_CENTER_SPREADSHEET_ID,statusWrites);
+  2443:     liveDataCache=null;liveDataFetchedAt=0;return {ok:true,targetSheet,programName,newCount,duplicateCount,updateCount,errorCount:0,count:newCount+updateCount,verifiedCount:actions.length};
+  2444:   }catch(error){return {ok:false,reason:error?.message||String(error)};}
+  2445: }
+  2446: 
+  2447: ipcMain.handle("inputCenter:refreshSource", async () => {try{return await fetchInputCenterSourceData();}catch(error){return {ok:false,reason:error?.message||'입력센터 원본 갱신 실패'};}});
+  2448: ipcMain.handle("inputCenter:selectFiles", async (event) => selectInputCenterFiles(event));
+  2449: ipcMain.handle("inputCenter:save", async (_event,payload={}) => saveInputCenterRecords(payload));
+  2450: ipcMain.handle("inputCenter:classifyBatch", async (_event,payload={}) => classifyInputCenterBatch(payload));
+  2451: ipcMain.handle("inputCenter:normalizeBatch", async (_event,payload={}) => normalizeInputCenterBatch(payload));
+  2452: ipcMain.handle("inputCenter:openFolder", async () => openInputCenterFolder());
+  2453: ipcMain.handle("inputCenter:readAsset", async (_event,filePath="") => readInputCenterAsset(filePath));
+  2454: ipcMain.handle("inputCenter:openAsset", async (_event,filePath="") => openInputCenterAsset(filePath));
+  2455: ipcMain.handle("inputCenter:ocrBatch", async (_event,payload={}) => ocrInputCenterBatch(payload));
+  2456: ipcMain.handle("student:contactSave", async (_event, payload={}) => saveStudentContact(payload));
+  2457: ipcMain.handle("program:operationSave", async (_event, payload={}) => saveProgramOperation(payload));
+  2458: ipcMain.handle("attendance:officialSave", async (_event, payload={}) => saveOfficialAttendance(payload));
+  2459: ipcMain.handle("attendance:officialDelete", async (_event, id="") => deleteOfficialAttendance(id));
+  2460: ipcMain.handle("attendance:lateSave", async (_event, payload={}) => saveLateAttendance(payload));
+  2461: ipcMain.handle("attendance:lateDelete", async (_event, id="") => deleteLateAttendance(id));
+  2462: ipcMain.handle("admission:counselPointSave", async (_event, payload={}) => saveAdmissionCounselPoint(payload));
+  2463: ipcMain.handle("counsel:save", async (_event, payload={}) => saveCounselRecord(payload));
+  2464: ipcMain.handle("studentGuidance:save", async (_event, payload={}) => saveStudentGuidanceRecord(payload));
+  2465:   ipcMain.handle("dormOuting:save", async (_event, payload={}) => saveDormOuting(payload));
+  2466: ipcMain.handle("dormRule:save", async (_event, payload={}) => saveDormRule(payload));
+  2467: ipcMain.handle("dormRule:delete", async (_event, id="") => deleteDormRule(id));
+--- hit line 2450 ---
+  2442:     await batchUpdateSheetValues(token,UEP_INPUT_CENTER_SPREADSHEET_ID,statusWrites);
+  2443:     liveDataCache=null;liveDataFetchedAt=0;return {ok:true,targetSheet,programName,newCount,duplicateCount,updateCount,errorCount:0,count:newCount+updateCount,verifiedCount:actions.length};
+  2444:   }catch(error){return {ok:false,reason:error?.message||String(error)};}
+  2445: }
+  2446: 
+  2447: ipcMain.handle("inputCenter:refreshSource", async () => {try{return await fetchInputCenterSourceData();}catch(error){return {ok:false,reason:error?.message||'입력센터 원본 갱신 실패'};}});
+  2448: ipcMain.handle("inputCenter:selectFiles", async (event) => selectInputCenterFiles(event));
+  2449: ipcMain.handle("inputCenter:save", async (_event,payload={}) => saveInputCenterRecords(payload));
+  2450: ipcMain.handle("inputCenter:classifyBatch", async (_event,payload={}) => classifyInputCenterBatch(payload));
+  2451: ipcMain.handle("inputCenter:normalizeBatch", async (_event,payload={}) => normalizeInputCenterBatch(payload));
+  2452: ipcMain.handle("inputCenter:openFolder", async () => openInputCenterFolder());
+  2453: ipcMain.handle("inputCenter:readAsset", async (_event,filePath="") => readInputCenterAsset(filePath));
+  2454: ipcMain.handle("inputCenter:openAsset", async (_event,filePath="") => openInputCenterAsset(filePath));
+  2455: ipcMain.handle("inputCenter:ocrBatch", async (_event,payload={}) => ocrInputCenterBatch(payload));
+  2456: ipcMain.handle("student:contactSave", async (_event, payload={}) => saveStudentContact(payload));
+  2457: ipcMain.handle("program:operationSave", async (_event, payload={}) => saveProgramOperation(payload));
+  2458: ipcMain.handle("attendance:officialSave", async (_event, payload={}) => saveOfficialAttendance(payload));
+  2459: ipcMain.handle("attendance:officialDelete", async (_event, id="") => deleteOfficialAttendance(id));
+  2460: ipcMain.handle("attendance:lateSave", async (_event, payload={}) => saveLateAttendance(payload));
+  2461: ipcMain.handle("attendance:lateDelete", async (_event, id="") => deleteLateAttendance(id));
+  2462: ipcMain.handle("admission:counselPointSave", async (_event, payload={}) => saveAdmissionCounselPoint(payload));
+  2463: ipcMain.handle("counsel:save", async (_event, payload={}) => saveCounselRecord(payload));
+  2464: ipcMain.handle("studentGuidance:save", async (_event, payload={}) => saveStudentGuidanceRecord(payload));
+  2465:   ipcMain.handle("dormOuting:save", async (_event, payload={}) => saveDormOuting(payload));
+  2466: ipcMain.handle("dormRule:save", async (_event, payload={}) => saveDormRule(payload));
+  2467: ipcMain.handle("dormRule:delete", async (_event, id="") => deleteDormRule(id));
+  2468: ipcMain.handle("nightDuty:save", async (_event, payload={}) => saveNightSupervisor(payload));
+--- hit line 2451 ---
+  2443:     liveDataCache=null;liveDataFetchedAt=0;return {ok:true,targetSheet,programName,newCount,duplicateCount,updateCount,errorCount:0,count:newCount+updateCount,verifiedCount:actions.length};
+  2444:   }catch(error){return {ok:false,reason:error?.message||String(error)};}
+  2445: }
+  2446: 
+  2447: ipcMain.handle("inputCenter:refreshSource", async () => {try{return await fetchInputCenterSourceData();}catch(error){return {ok:false,reason:error?.message||'입력센터 원본 갱신 실패'};}});
+  2448: ipcMain.handle("inputCenter:selectFiles", async (event) => selectInputCenterFiles(event));
+  2449: ipcMain.handle("inputCenter:save", async (_event,payload={}) => saveInputCenterRecords(payload));
+  2450: ipcMain.handle("inputCenter:classifyBatch", async (_event,payload={}) => classifyInputCenterBatch(payload));
+  2451: ipcMain.handle("inputCenter:normalizeBatch", async (_event,payload={}) => normalizeInputCenterBatch(payload));
+  2452: ipcMain.handle("inputCenter:openFolder", async () => openInputCenterFolder());
+  2453: ipcMain.handle("inputCenter:readAsset", async (_event,filePath="") => readInputCenterAsset(filePath));
+  2454: ipcMain.handle("inputCenter:openAsset", async (_event,filePath="") => openInputCenterAsset(filePath));
+  2455: ipcMain.handle("inputCenter:ocrBatch", async (_event,payload={}) => ocrInputCenterBatch(payload));
+  2456: ipcMain.handle("student:contactSave", async (_event, payload={}) => saveStudentContact(payload));
+  2457: ipcMain.handle("program:operationSave", async (_event, payload={}) => saveProgramOperation(payload));
+  2458: ipcMain.handle("attendance:officialSave", async (_event, payload={}) => saveOfficialAttendance(payload));
+  2459: ipcMain.handle("attendance:officialDelete", async (_event, id="") => deleteOfficialAttendance(id));
+  2460: ipcMain.handle("attendance:lateSave", async (_event, payload={}) => saveLateAttendance(payload));
+  2461: ipcMain.handle("attendance:lateDelete", async (_event, id="") => deleteLateAttendance(id));
+  2462: ipcMain.handle("admission:counselPointSave", async (_event, payload={}) => saveAdmissionCounselPoint(payload));
+  2463: ipcMain.handle("counsel:save", async (_event, payload={}) => saveCounselRecord(payload));
+  2464: ipcMain.handle("studentGuidance:save", async (_event, payload={}) => saveStudentGuidanceRecord(payload));
+  2465:   ipcMain.handle("dormOuting:save", async (_event, payload={}) => saveDormOuting(payload));
+  2466: ipcMain.handle("dormRule:save", async (_event, payload={}) => saveDormRule(payload));
+  2467: ipcMain.handle("dormRule:delete", async (_event, id="") => deleteDormRule(id));
+  2468: ipcMain.handle("nightDuty:save", async (_event, payload={}) => saveNightSupervisor(payload));
+  2469: ipcMain.handle("lunchDuty:save", async (_event, payload={}) => saveLunchDuty(payload));
+--- hit line 2452 ---
+  2444:   }catch(error){return {ok:false,reason:error?.message||String(error)};}
+  2445: }
+  2446: 
+  2447: ipcMain.handle("inputCenter:refreshSource", async () => {try{return await fetchInputCenterSourceData();}catch(error){return {ok:false,reason:error?.message||'입력센터 원본 갱신 실패'};}});
+  2448: ipcMain.handle("inputCenter:selectFiles", async (event) => selectInputCenterFiles(event));
+  2449: ipcMain.handle("inputCenter:save", async (_event,payload={}) => saveInputCenterRecords(payload));
+  2450: ipcMain.handle("inputCenter:classifyBatch", async (_event,payload={}) => classifyInputCenterBatch(payload));
+  2451: ipcMain.handle("inputCenter:normalizeBatch", async (_event,payload={}) => normalizeInputCenterBatch(payload));
+  2452: ipcMain.handle("inputCenter:openFolder", async () => openInputCenterFolder());
+  2453: ipcMain.handle("inputCenter:readAsset", async (_event,filePath="") => readInputCenterAsset(filePath));
+  2454: ipcMain.handle("inputCenter:openAsset", async (_event,filePath="") => openInputCenterAsset(filePath));
+  2455: ipcMain.handle("inputCenter:ocrBatch", async (_event,payload={}) => ocrInputCenterBatch(payload));
+  2456: ipcMain.handle("student:contactSave", async (_event, payload={}) => saveStudentContact(payload));
+  2457: ipcMain.handle("program:operationSave", async (_event, payload={}) => saveProgramOperation(payload));
+  2458: ipcMain.handle("attendance:officialSave", async (_event, payload={}) => saveOfficialAttendance(payload));
+  2459: ipcMain.handle("attendance:officialDelete", async (_event, id="") => deleteOfficialAttendance(id));
+  2460: ipcMain.handle("attendance:lateSave", async (_event, payload={}) => saveLateAttendance(payload));
+  2461: ipcMain.handle("attendance:lateDelete", async (_event, id="") => deleteLateAttendance(id));
+  2462: ipcMain.handle("admission:counselPointSave", async (_event, payload={}) => saveAdmissionCounselPoint(payload));
+  2463: ipcMain.handle("counsel:save", async (_event, payload={}) => saveCounselRecord(payload));
+  2464: ipcMain.handle("studentGuidance:save", async (_event, payload={}) => saveStudentGuidanceRecord(payload));
+  2465:   ipcMain.handle("dormOuting:save", async (_event, payload={}) => saveDormOuting(payload));
+  2466: ipcMain.handle("dormRule:save", async (_event, payload={}) => saveDormRule(payload));
+  2467: ipcMain.handle("dormRule:delete", async (_event, id="") => deleteDormRule(id));
+  2468: ipcMain.handle("nightDuty:save", async (_event, payload={}) => saveNightSupervisor(payload));
+  2469: ipcMain.handle("lunchDuty:save", async (_event, payload={}) => saveLunchDuty(payload));
+  2470: 
+--- hit line 2453 ---
+  2445: }
+  2446: 
+  2447: ipcMain.handle("inputCenter:refreshSource", async () => {try{return await fetchInputCenterSourceData();}catch(error){return {ok:false,reason:error?.message||'입력센터 원본 갱신 실패'};}});
+  2448: ipcMain.handle("inputCenter:selectFiles", async (event) => selectInputCenterFiles(event));
+  2449: ipcMain.handle("inputCenter:save", async (_event,payload={}) => saveInputCenterRecords(payload));
+  2450: ipcMain.handle("inputCenter:classifyBatch", async (_event,payload={}) => classifyInputCenterBatch(payload));
+  2451: ipcMain.handle("inputCenter:normalizeBatch", async (_event,payload={}) => normalizeInputCenterBatch(payload));
+  2452: ipcMain.handle("inputCenter:openFolder", async () => openInputCenterFolder());
+  2453: ipcMain.handle("inputCenter:readAsset", async (_event,filePath="") => readInputCenterAsset(filePath));
+  2454: ipcMain.handle("inputCenter:openAsset", async (_event,filePath="") => openInputCenterAsset(filePath));
+  2455: ipcMain.handle("inputCenter:ocrBatch", async (_event,payload={}) => ocrInputCenterBatch(payload));
+  2456: ipcMain.handle("student:contactSave", async (_event, payload={}) => saveStudentContact(payload));
+  2457: ipcMain.handle("program:operationSave", async (_event, payload={}) => saveProgramOperation(payload));
+  2458: ipcMain.handle("attendance:officialSave", async (_event, payload={}) => saveOfficialAttendance(payload));
+  2459: ipcMain.handle("attendance:officialDelete", async (_event, id="") => deleteOfficialAttendance(id));
+  2460: ipcMain.handle("attendance:lateSave", async (_event, payload={}) => saveLateAttendance(payload));
+  2461: ipcMain.handle("attendance:lateDelete", async (_event, id="") => deleteLateAttendance(id));
+  2462: ipcMain.handle("admission:counselPointSave", async (_event, payload={}) => saveAdmissionCounselPoint(payload));
+  2463: ipcMain.handle("counsel:save", async (_event, payload={}) => saveCounselRecord(payload));
+  2464: ipcMain.handle("studentGuidance:save", async (_event, payload={}) => saveStudentGuidanceRecord(payload));
+  2465:   ipcMain.handle("dormOuting:save", async (_event, payload={}) => saveDormOuting(payload));
+  2466: ipcMain.handle("dormRule:save", async (_event, payload={}) => saveDormRule(payload));
+  2467: ipcMain.handle("dormRule:delete", async (_event, id="") => deleteDormRule(id));
+  2468: ipcMain.handle("nightDuty:save", async (_event, payload={}) => saveNightSupervisor(payload));
+  2469: ipcMain.handle("lunchDuty:save", async (_event, payload={}) => saveLunchDuty(payload));
+  2470: 
+  2471: async function readNoticeSheetMatrix(token, sheetName, range) {
+--- hit line 2454 ---
+  2446: 
+  2447: ipcMain.handle("inputCenter:refreshSource", async () => {try{return await fetchInputCenterSourceData();}catch(error){return {ok:false,reason:error?.message||'입력센터 원본 갱신 실패'};}});
+  2448: ipcMain.handle("inputCenter:selectFiles", async (event) => selectInputCenterFiles(event));
+  2449: ipcMain.handle("inputCenter:save", async (_event,payload={}) => saveInputCenterRecords(payload));
+  2450: ipcMain.handle("inputCenter:classifyBatch", async (_event,payload={}) => classifyInputCenterBatch(payload));
+  2451: ipcMain.handle("inputCenter:normalizeBatch", async (_event,payload={}) => normalizeInputCenterBatch(payload));
+  2452: ipcMain.handle("inputCenter:openFolder", async () => openInputCenterFolder());
+  2453: ipcMain.handle("inputCenter:readAsset", async (_event,filePath="") => readInputCenterAsset(filePath));
+  2454: ipcMain.handle("inputCenter:openAsset", async (_event,filePath="") => openInputCenterAsset(filePath));
+  2455: ipcMain.handle("inputCenter:ocrBatch", async (_event,payload={}) => ocrInputCenterBatch(payload));
+  2456: ipcMain.handle("student:contactSave", async (_event, payload={}) => saveStudentContact(payload));
+  2457: ipcMain.handle("program:operationSave", async (_event, payload={}) => saveProgramOperation(payload));
+  2458: ipcMain.handle("attendance:officialSave", async (_event, payload={}) => saveOfficialAttendance(payload));
+  2459: ipcMain.handle("attendance:officialDelete", async (_event, id="") => deleteOfficialAttendance(id));
+  2460: ipcMain.handle("attendance:lateSave", async (_event, payload={}) => saveLateAttendance(payload));
+  2461: ipcMain.handle("attendance:lateDelete", async (_event, id="") => deleteLateAttendance(id));
+  2462: ipcMain.handle("admission:counselPointSave", async (_event, payload={}) => saveAdmissionCounselPoint(payload));
+  2463: ipcMain.handle("counsel:save", async (_event, payload={}) => saveCounselRecord(payload));
+  2464: ipcMain.handle("studentGuidance:save", async (_event, payload={}) => saveStudentGuidanceRecord(payload));
+  2465:   ipcMain.handle("dormOuting:save", async (_event, payload={}) => saveDormOuting(payload));
+  2466: ipcMain.handle("dormRule:save", async (_event, payload={}) => saveDormRule(payload));
+  2467: ipcMain.handle("dormRule:delete", async (_event, id="") => deleteDormRule(id));
+  2468: ipcMain.handle("nightDuty:save", async (_event, payload={}) => saveNightSupervisor(payload));
+  2469: ipcMain.handle("lunchDuty:save", async (_event, payload={}) => saveLunchDuty(payload));
+  2470: 
+  2471: async function readNoticeSheetMatrix(token, sheetName, range) {
+  2472:   const result = await readSheetBatch(token, UEP_SPREADSHEET_ID, [`'${sheetName}'!${range}`]);
+--- hit line 2455 ---
+  2447: ipcMain.handle("inputCenter:refreshSource", async () => {try{return await fetchInputCenterSourceData();}catch(error){return {ok:false,reason:error?.message||'입력센터 원본 갱신 실패'};}});
+  2448: ipcMain.handle("inputCenter:selectFiles", async (event) => selectInputCenterFiles(event));
+  2449: ipcMain.handle("inputCenter:save", async (_event,payload={}) => saveInputCenterRecords(payload));
+  2450: ipcMain.handle("inputCenter:classifyBatch", async (_event,payload={}) => classifyInputCenterBatch(payload));
+  2451: ipcMain.handle("inputCenter:normalizeBatch", async (_event,payload={}) => normalizeInputCenterBatch(payload));
+  2452: ipcMain.handle("inputCenter:openFolder", async () => openInputCenterFolder());
+  2453: ipcMain.handle("inputCenter:readAsset", async (_event,filePath="") => readInputCenterAsset(filePath));
+  2454: ipcMain.handle("inputCenter:openAsset", async (_event,filePath="") => openInputCenterAsset(filePath));
+  2455: ipcMain.handle("inputCenter:ocrBatch", async (_event,payload={}) => ocrInputCenterBatch(payload));
+  2456: ipcMain.handle("student:contactSave", async (_event, payload={}) => saveStudentContact(payload));
+  2457: ipcMain.handle("program:operationSave", async (_event, payload={}) => saveProgramOperation(payload));
+  2458: ipcMain.handle("attendance:officialSave", async (_event, payload={}) => saveOfficialAttendance(payload));
+  2459: ipcMain.handle("attendance:officialDelete", async (_event, id="") => deleteOfficialAttendance(id));
+  2460: ipcMain.handle("attendance:lateSave", async (_event, payload={}) => saveLateAttendance(payload));
+  2461: ipcMain.handle("attendance:lateDelete", async (_event, id="") => deleteLateAttendance(id));
+  2462: ipcMain.handle("admission:counselPointSave", async (_event, payload={}) => saveAdmissionCounselPoint(payload));
+  2463: ipcMain.handle("counsel:save", async (_event, payload={}) => saveCounselRecord(payload));
+  2464: ipcMain.handle("studentGuidance:save", async (_event, payload={}) => saveStudentGuidanceRecord(payload));
+  2465:   ipcMain.handle("dormOuting:save", async (_event, payload={}) => saveDormOuting(payload));
+  2466: ipcMain.handle("dormRule:save", async (_event, payload={}) => saveDormRule(payload));
+  2467: ipcMain.handle("dormRule:delete", async (_event, id="") => deleteDormRule(id));
+  2468: ipcMain.handle("nightDuty:save", async (_event, payload={}) => saveNightSupervisor(payload));
+  2469: ipcMain.handle("lunchDuty:save", async (_event, payload={}) => saveLunchDuty(payload));
+  2470: 
+  2471: async function readNoticeSheetMatrix(token, sheetName, range) {
+  2472:   const result = await readSheetBatch(token, UEP_SPREADSHEET_ID, [`'${sheetName}'!${range}`]);
+  2473:   return result?.[0]?.values || [];
+--- hit line 2456 ---
+  2448: ipcMain.handle("inputCenter:selectFiles", async (event) => selectInputCenterFiles(event));
+  2449: ipcMain.handle("inputCenter:save", async (_event,payload={}) => saveInputCenterRecords(payload));
+  2450: ipcMain.handle("inputCenter:classifyBatch", async (_event,payload={}) => classifyInputCenterBatch(payload));
+  2451: ipcMain.handle("inputCenter:normalizeBatch", async (_event,payload={}) => normalizeInputCenterBatch(payload));
+  2452: ipcMain.handle("inputCenter:openFolder", async () => openInputCenterFolder());
+  2453: ipcMain.handle("inputCenter:readAsset", async (_event,filePath="") => readInputCenterAsset(filePath));
+  2454: ipcMain.handle("inputCenter:openAsset", async (_event,filePath="") => openInputCenterAsset(filePath));
+  2455: ipcMain.handle("inputCenter:ocrBatch", async (_event,payload={}) => ocrInputCenterBatch(payload));
+  2456: ipcMain.handle("student:contactSave", async (_event, payload={}) => saveStudentContact(payload));
+  2457: ipcMain.handle("program:operationSave", async (_event, payload={}) => saveProgramOperation(payload));
+  2458: ipcMain.handle("attendance:officialSave", async (_event, payload={}) => saveOfficialAttendance(payload));
+  2459: ipcMain.handle("attendance:officialDelete", async (_event, id="") => deleteOfficialAttendance(id));
+  2460: ipcMain.handle("attendance:lateSave", async (_event, payload={}) => saveLateAttendance(payload));
+  2461: ipcMain.handle("attendance:lateDelete", async (_event, id="") => deleteLateAttendance(id));
+  2462: ipcMain.handle("admission:counselPointSave", async (_event, payload={}) => saveAdmissionCounselPoint(payload));
+  2463: ipcMain.handle("counsel:save", async (_event, payload={}) => saveCounselRecord(payload));
+  2464: ipcMain.handle("studentGuidance:save", async (_event, payload={}) => saveStudentGuidanceRecord(payload));
+  2465:   ipcMain.handle("dormOuting:save", async (_event, payload={}) => saveDormOuting(payload));
+  2466: ipcMain.handle("dormRule:save", async (_event, payload={}) => saveDormRule(payload));
+  2467: ipcMain.handle("dormRule:delete", async (_event, id="") => deleteDormRule(id));
+  2468: ipcMain.handle("nightDuty:save", async (_event, payload={}) => saveNightSupervisor(payload));
+  2469: ipcMain.handle("lunchDuty:save", async (_event, payload={}) => saveLunchDuty(payload));
+  2470: 
+  2471: async function readNoticeSheetMatrix(token, sheetName, range) {
+  2472:   const result = await readSheetBatch(token, UEP_SPREADSHEET_ID, [`'${sheetName}'!${range}`]);
+  2473:   return result?.[0]?.values || [];
+  2474: }
+--- hit line 2457 ---
+  2449: ipcMain.handle("inputCenter:save", async (_event,payload={}) => saveInputCenterRecords(payload));
+  2450: ipcMain.handle("inputCenter:classifyBatch", async (_event,payload={}) => classifyInputCenterBatch(payload));
+  2451: ipcMain.handle("inputCenter:normalizeBatch", async (_event,payload={}) => normalizeInputCenterBatch(payload));
+  2452: ipcMain.handle("inputCenter:openFolder", async () => openInputCenterFolder());
+  2453: ipcMain.handle("inputCenter:readAsset", async (_event,filePath="") => readInputCenterAsset(filePath));
+  2454: ipcMain.handle("inputCenter:openAsset", async (_event,filePath="") => openInputCenterAsset(filePath));
+  2455: ipcMain.handle("inputCenter:ocrBatch", async (_event,payload={}) => ocrInputCenterBatch(payload));
+  2456: ipcMain.handle("student:contactSave", async (_event, payload={}) => saveStudentContact(payload));
+  2457: ipcMain.handle("program:operationSave", async (_event, payload={}) => saveProgramOperation(payload));
+  2458: ipcMain.handle("attendance:officialSave", async (_event, payload={}) => saveOfficialAttendance(payload));
+  2459: ipcMain.handle("attendance:officialDelete", async (_event, id="") => deleteOfficialAttendance(id));
+  2460: ipcMain.handle("attendance:lateSave", async (_event, payload={}) => saveLateAttendance(payload));
+  2461: ipcMain.handle("attendance:lateDelete", async (_event, id="") => deleteLateAttendance(id));
+  2462: ipcMain.handle("admission:counselPointSave", async (_event, payload={}) => saveAdmissionCounselPoint(payload));
+  2463: ipcMain.handle("counsel:save", async (_event, payload={}) => saveCounselRecord(payload));
+  2464: ipcMain.handle("studentGuidance:save", async (_event, payload={}) => saveStudentGuidanceRecord(payload));
+  2465:   ipcMain.handle("dormOuting:save", async (_event, payload={}) => saveDormOuting(payload));
+  2466: ipcMain.handle("dormRule:save", async (_event, payload={}) => saveDormRule(payload));
+  2467: ipcMain.handle("dormRule:delete", async (_event, id="") => deleteDormRule(id));
+  2468: ipcMain.handle("nightDuty:save", async (_event, payload={}) => saveNightSupervisor(payload));
+  2469: ipcMain.handle("lunchDuty:save", async (_event, payload={}) => saveLunchDuty(payload));
+  2470: 
+  2471: async function readNoticeSheetMatrix(token, sheetName, range) {
+  2472:   const result = await readSheetBatch(token, UEP_SPREADSHEET_ID, [`'${sheetName}'!${range}`]);
+  2473:   return result?.[0]?.values || [];
+  2474: }
+  2475: function noticePayloadRow(payload={}, id, nowIso, headerNames=[]) {
+--- hit line 2458 ---
+  2450: ipcMain.handle("inputCenter:classifyBatch", async (_event,payload={}) => classifyInputCenterBatch(payload));
+  2451: ipcMain.handle("inputCenter:normalizeBatch", async (_event,payload={}) => normalizeInputCenterBatch(payload));
+  2452: ipcMain.handle("inputCenter:openFolder", async () => openInputCenterFolder());
+  2453: ipcMain.handle("inputCenter:readAsset", async (_event,filePath="") => readInputCenterAsset(filePath));
+  2454: ipcMain.handle("inputCenter:openAsset", async (_event,filePath="") => openInputCenterAsset(filePath));
+  2455: ipcMain.handle("inputCenter:ocrBatch", async (_event,payload={}) => ocrInputCenterBatch(payload));
+  2456: ipcMain.handle("student:contactSave", async (_event, payload={}) => saveStudentContact(payload));
+  2457: ipcMain.handle("program:operationSave", async (_event, payload={}) => saveProgramOperation(payload));
+  2458: ipcMain.handle("attendance:officialSave", async (_event, payload={}) => saveOfficialAttendance(payload));
+  2459: ipcMain.handle("attendance:officialDelete", async (_event, id="") => deleteOfficialAttendance(id));
+  2460: ipcMain.handle("attendance:lateSave", async (_event, payload={}) => saveLateAttendance(payload));
+  2461: ipcMain.handle("attendance:lateDelete", async (_event, id="") => deleteLateAttendance(id));
+  2462: ipcMain.handle("admission:counselPointSave", async (_event, payload={}) => saveAdmissionCounselPoint(payload));
+  2463: ipcMain.handle("counsel:save", async (_event, payload={}) => saveCounselRecord(payload));
+  2464: ipcMain.handle("studentGuidance:save", async (_event, payload={}) => saveStudentGuidanceRecord(payload));
+  2465:   ipcMain.handle("dormOuting:save", async (_event, payload={}) => saveDormOuting(payload));
+  2466: ipcMain.handle("dormRule:save", async (_event, payload={}) => saveDormRule(payload));
+  2467: ipcMain.handle("dormRule:delete", async (_event, id="") => deleteDormRule(id));
+  2468: ipcMain.handle("nightDuty:save", async (_event, payload={}) => saveNightSupervisor(payload));
+  2469: ipcMain.handle("lunchDuty:save", async (_event, payload={}) => saveLunchDuty(payload));
+  2470: 
+  2471: async function readNoticeSheetMatrix(token, sheetName, range) {
+  2472:   const result = await readSheetBatch(token, UEP_SPREADSHEET_ID, [`'${sheetName}'!${range}`]);
+  2473:   return result?.[0]?.values || [];
+  2474: }
+  2475: function noticePayloadRow(payload={}, id, nowIso, headerNames=[]) {
+  2476:   const now = new Date(nowIso);
+--- hit line 2459 ---
+  2451: ipcMain.handle("inputCenter:normalizeBatch", async (_event,payload={}) => normalizeInputCenterBatch(payload));
+  2452: ipcMain.handle("inputCenter:openFolder", async () => openInputCenterFolder());
+  2453: ipcMain.handle("inputCenter:readAsset", async (_event,filePath="") => readInputCenterAsset(filePath));
+  2454: ipcMain.handle("inputCenter:openAsset", async (_event,filePath="") => openInputCenterAsset(filePath));
+  2455: ipcMain.handle("inputCenter:ocrBatch", async (_event,payload={}) => ocrInputCenterBatch(payload));
+  2456: ipcMain.handle("student:contactSave", async (_event, payload={}) => saveStudentContact(payload));
+  2457: ipcMain.handle("program:operationSave", async (_event, payload={}) => saveProgramOperation(payload));
+  2458: ipcMain.handle("attendance:officialSave", async (_event, payload={}) => saveOfficialAttendance(payload));
+  2459: ipcMain.handle("attendance:officialDelete", async (_event, id="") => deleteOfficialAttendance(id));
+  2460: ipcMain.handle("attendance:lateSave", async (_event, payload={}) => saveLateAttendance(payload));
+  2461: ipcMain.handle("attendance:lateDelete", async (_event, id="") => deleteLateAttendance(id));
+  2462: ipcMain.handle("admission:counselPointSave", async (_event, payload={}) => saveAdmissionCounselPoint(payload));
+  2463: ipcMain.handle("counsel:save", async (_event, payload={}) => saveCounselRecord(payload));
+  2464: ipcMain.handle("studentGuidance:save", async (_event, payload={}) => saveStudentGuidanceRecord(payload));
+  2465:   ipcMain.handle("dormOuting:save", async (_event, payload={}) => saveDormOuting(payload));
+  2466: ipcMain.handle("dormRule:save", async (_event, payload={}) => saveDormRule(payload));
+  2467: ipcMain.handle("dormRule:delete", async (_event, id="") => deleteDormRule(id));
+  2468: ipcMain.handle("nightDuty:save", async (_event, payload={}) => saveNightSupervisor(payload));
+  2469: ipcMain.handle("lunchDuty:save", async (_event, payload={}) => saveLunchDuty(payload));
+  2470: 
+  2471: async function readNoticeSheetMatrix(token, sheetName, range) {
+  2472:   const result = await readSheetBatch(token, UEP_SPREADSHEET_ID, [`'${sheetName}'!${range}`]);
+  2473:   return result?.[0]?.values || [];
+  2474: }
+  2475: function noticePayloadRow(payload={}, id, nowIso, headerNames=[]) {
+  2476:   const now = new Date(nowIso);
+  2477:   const values={
+--- hit line 2460 ---
+  2452: ipcMain.handle("inputCenter:openFolder", async () => openInputCenterFolder());
+  2453: ipcMain.handle("inputCenter:readAsset", async (_event,filePath="") => readInputCenterAsset(filePath));
+  2454: ipcMain.handle("inputCenter:openAsset", async (_event,filePath="") => openInputCenterAsset(filePath));
+  2455: ipcMain.handle("inputCenter:ocrBatch", async (_event,payload={}) => ocrInputCenterBatch(payload));
+  2456: ipcMain.handle("student:contactSave", async (_event, payload={}) => saveStudentContact(payload));
+  2457: ipcMain.handle("program:operationSave", async (_event, payload={}) => saveProgramOperation(payload));
+  2458: ipcMain.handle("attendance:officialSave", async (_event, payload={}) => saveOfficialAttendance(payload));
+  2459: ipcMain.handle("attendance:officialDelete", async (_event, id="") => deleteOfficialAttendance(id));
+  2460: ipcMain.handle("attendance:lateSave", async (_event, payload={}) => saveLateAttendance(payload));
+  2461: ipcMain.handle("attendance:lateDelete", async (_event, id="") => deleteLateAttendance(id));
+  2462: ipcMain.handle("admission:counselPointSave", async (_event, payload={}) => saveAdmissionCounselPoint(payload));
+  2463: ipcMain.handle("counsel:save", async (_event, payload={}) => saveCounselRecord(payload));
+  2464: ipcMain.handle("studentGuidance:save", async (_event, payload={}) => saveStudentGuidanceRecord(payload));
+  2465:   ipcMain.handle("dormOuting:save", async (_event, payload={}) => saveDormOuting(payload));
+  2466: ipcMain.handle("dormRule:save", async (_event, payload={}) => saveDormRule(payload));
+  2467: ipcMain.handle("dormRule:delete", async (_event, id="") => deleteDormRule(id));
+  2468: ipcMain.handle("nightDuty:save", async (_event, payload={}) => saveNightSupervisor(payload));
+  2469: ipcMain.handle("lunchDuty:save", async (_event, payload={}) => saveLunchDuty(payload));
+  2470: 
+  2471: async function readNoticeSheetMatrix(token, sheetName, range) {
+  2472:   const result = await readSheetBatch(token, UEP_SPREADSHEET_ID, [`'${sheetName}'!${range}`]);
+  2473:   return result?.[0]?.values || [];
+  2474: }
+  2475: function noticePayloadRow(payload={}, id, nowIso, headerNames=[]) {
+  2476:   const now = new Date(nowIso);
+  2477:   const values={
+  2478:     "공지ID":id,"학년도":String(payload.schoolYear||now.getFullYear()),"구분":String(payload.type||"공지"),
+--- hit line 2461 ---
+  2453: ipcMain.handle("inputCenter:readAsset", async (_event,filePath="") => readInputCenterAsset(filePath));
+  2454: ipcMain.handle("inputCenter:openAsset", async (_event,filePath="") => openInputCenterAsset(filePath));
+  2455: ipcMain.handle("inputCenter:ocrBatch", async (_event,payload={}) => ocrInputCenterBatch(payload));
+  2456: ipcMain.handle("student:contactSave", async (_event, payload={}) => saveStudentContact(payload));
+  2457: ipcMain.handle("program:operationSave", async (_event, payload={}) => saveProgramOperation(payload));
+  2458: ipcMain.handle("attendance:officialSave", async (_event, payload={}) => saveOfficialAttendance(payload));
+  2459: ipcMain.handle("attendance:officialDelete", async (_event, id="") => deleteOfficialAttendance(id));
+  2460: ipcMain.handle("attendance:lateSave", async (_event, payload={}) => saveLateAttendance(payload));
+  2461: ipcMain.handle("attendance:lateDelete", async (_event, id="") => deleteLateAttendance(id));
+  2462: ipcMain.handle("admission:counselPointSave", async (_event, payload={}) => saveAdmissionCounselPoint(payload));
+  2463: ipcMain.handle("counsel:save", async (_event, payload={}) => saveCounselRecord(payload));
+  2464: ipcMain.handle("studentGuidance:save", async (_event, payload={}) => saveStudentGuidanceRecord(payload));
+  2465:   ipcMain.handle("dormOuting:save", async (_event, payload={}) => saveDormOuting(payload));
+  2466: ipcMain.handle("dormRule:save", async (_event, payload={}) => saveDormRule(payload));
+  2467: ipcMain.handle("dormRule:delete", async (_event, id="") => deleteDormRule(id));
+  2468: ipcMain.handle("nightDuty:save", async (_event, payload={}) => saveNightSupervisor(payload));
+  2469: ipcMain.handle("lunchDuty:save", async (_event, payload={}) => saveLunchDuty(payload));
+  2470: 
+  2471: async function readNoticeSheetMatrix(token, sheetName, range) {
+  2472:   const result = await readSheetBatch(token, UEP_SPREADSHEET_ID, [`'${sheetName}'!${range}`]);
+  2473:   return result?.[0]?.values || [];
+  2474: }
+  2475: function noticePayloadRow(payload={}, id, nowIso, headerNames=[]) {
+  2476:   const now = new Date(nowIso);
+  2477:   const values={
+  2478:     "공지ID":id,"학년도":String(payload.schoolYear||now.getFullYear()),"구분":String(payload.type||"공지"),
+  2479:     "제목":String(payload.title||"").trim(),"내용":String(payload.content||"").trim(),
+--- hit line 2462 ---
+  2454: ipcMain.handle("inputCenter:openAsset", async (_event,filePath="") => openInputCenterAsset(filePath));
+  2455: ipcMain.handle("inputCenter:ocrBatch", async (_event,payload={}) => ocrInputCenterBatch(payload));
+  2456: ipcMain.handle("student:contactSave", async (_event, payload={}) => saveStudentContact(payload));
+  2457: ipcMain.handle("program:operationSave", async (_event, payload={}) => saveProgramOperation(payload));
+  2458: ipcMain.handle("attendance:officialSave", async (_event, payload={}) => saveOfficialAttendance(payload));
+  2459: ipcMain.handle("attendance:officialDelete", async (_event, id="") => deleteOfficialAttendance(id));
+  2460: ipcMain.handle("attendance:lateSave", async (_event, payload={}) => saveLateAttendance(payload));
+  2461: ipcMain.handle("attendance:lateDelete", async (_event, id="") => deleteLateAttendance(id));
+  2462: ipcMain.handle("admission:counselPointSave", async (_event, payload={}) => saveAdmissionCounselPoint(payload));
+  2463: ipcMain.handle("counsel:save", async (_event, payload={}) => saveCounselRecord(payload));
+  2464: ipcMain.handle("studentGuidance:save", async (_event, payload={}) => saveStudentGuidanceRecord(payload));
+  2465:   ipcMain.handle("dormOuting:save", async (_event, payload={}) => saveDormOuting(payload));
+  2466: ipcMain.handle("dormRule:save", async (_event, payload={}) => saveDormRule(payload));
+  2467: ipcMain.handle("dormRule:delete", async (_event, id="") => deleteDormRule(id));
+  2468: ipcMain.handle("nightDuty:save", async (_event, payload={}) => saveNightSupervisor(payload));
+  2469: ipcMain.handle("lunchDuty:save", async (_event, payload={}) => saveLunchDuty(payload));
+  2470: 
+  2471: async function readNoticeSheetMatrix(token, sheetName, range) {
+  2472:   const result = await readSheetBatch(token, UEP_SPREADSHEET_ID, [`'${sheetName}'!${range}`]);
+  2473:   return result?.[0]?.values || [];
+  2474: }
+  2475: function noticePayloadRow(payload={}, id, nowIso, headerNames=[]) {
+  2476:   const now = new Date(nowIso);
+  2477:   const values={
+  2478:     "공지ID":id,"학년도":String(payload.schoolYear||now.getFullYear()),"구분":String(payload.type||"공지"),
+  2479:     "제목":String(payload.title||"").trim(),"내용":String(payload.content||"").trim(),
+  2480:     "대상학년":String(payload.targetGrade||"1"),"대상반":String(payload.targetClass||"전체"),
+--- hit line 2463 ---
+  2455: ipcMain.handle("inputCenter:ocrBatch", async (_event,payload={}) => ocrInputCenterBatch(payload));
+  2456: ipcMain.handle("student:contactSave", async (_event, payload={}) => saveStudentContact(payload));
+  2457: ipcMain.handle("program:operationSave", async (_event, payload={}) => saveProgramOperation(payload));
+  2458: ipcMain.handle("attendance:officialSave", async (_event, payload={}) => saveOfficialAttendance(payload));
+  2459: ipcMain.handle("attendance:officialDelete", async (_event, id="") => deleteOfficialAttendance(id));
+  2460: ipcMain.handle("attendance:lateSave", async (_event, payload={}) => saveLateAttendance(payload));
+  2461: ipcMain.handle("attendance:lateDelete", async (_event, id="") => deleteLateAttendance(id));
+  2462: ipcMain.handle("admission:counselPointSave", async (_event, payload={}) => saveAdmissionCounselPoint(payload));
+  2463: ipcMain.handle("counsel:save", async (_event, payload={}) => saveCounselRecord(payload));
+  2464: ipcMain.handle("studentGuidance:save", async (_event, payload={}) => saveStudentGuidanceRecord(payload));
+  2465:   ipcMain.handle("dormOuting:save", async (_event, payload={}) => saveDormOuting(payload));
+  2466: ipcMain.handle("dormRule:save", async (_event, payload={}) => saveDormRule(payload));
+  2467: ipcMain.handle("dormRule:delete", async (_event, id="") => deleteDormRule(id));
+  2468: ipcMain.handle("nightDuty:save", async (_event, payload={}) => saveNightSupervisor(payload));
+  2469: ipcMain.handle("lunchDuty:save", async (_event, payload={}) => saveLunchDuty(payload));
+  2470: 
+  2471: async function readNoticeSheetMatrix(token, sheetName, range) {
+  2472:   const result = await readSheetBatch(token, UEP_SPREADSHEET_ID, [`'${sheetName}'!${range}`]);
+  2473:   return result?.[0]?.values || [];
+  2474: }
+  2475: function noticePayloadRow(payload={}, id, nowIso, headerNames=[]) {
+  2476:   const now = new Date(nowIso);
+  2477:   const values={
+  2478:     "공지ID":id,"학년도":String(payload.schoolYear||now.getFullYear()),"구분":String(payload.type||"공지"),
+  2479:     "제목":String(payload.title||"").trim(),"내용":String(payload.content||"").trim(),
+  2480:     "대상학년":String(payload.targetGrade||"1"),"대상반":String(payload.targetClass||"전체"),
+  2481:     "게시일":String(payload.postDate||nowIso.slice(0,10)),"마감일시":String(payload.deadline||""),
+--- hit line 2464 ---
+  2456: ipcMain.handle("student:contactSave", async (_event, payload={}) => saveStudentContact(payload));
+  2457: ipcMain.handle("program:operationSave", async (_event, payload={}) => saveProgramOperation(payload));
+  2458: ipcMain.handle("attendance:officialSave", async (_event, payload={}) => saveOfficialAttendance(payload));
+  2459: ipcMain.handle("attendance:officialDelete", async (_event, id="") => deleteOfficialAttendance(id));
+  2460: ipcMain.handle("attendance:lateSave", async (_event, payload={}) => saveLateAttendance(payload));
+  2461: ipcMain.handle("attendance:lateDelete", async (_event, id="") => deleteLateAttendance(id));
+  2462: ipcMain.handle("admission:counselPointSave", async (_event, payload={}) => saveAdmissionCounselPoint(payload));
+  2463: ipcMain.handle("counsel:save", async (_event, payload={}) => saveCounselRecord(payload));
+  2464: ipcMain.handle("studentGuidance:save", async (_event, payload={}) => saveStudentGuidanceRecord(payload));
+  2465:   ipcMain.handle("dormOuting:save", async (_event, payload={}) => saveDormOuting(payload));
+  2466: ipcMain.handle("dormRule:save", async (_event, payload={}) => saveDormRule(payload));
+  2467: ipcMain.handle("dormRule:delete", async (_event, id="") => deleteDormRule(id));
+  2468: ipcMain.handle("nightDuty:save", async (_event, payload={}) => saveNightSupervisor(payload));
+  2469: ipcMain.handle("lunchDuty:save", async (_event, payload={}) => saveLunchDuty(payload));
+  2470: 
+  2471: async function readNoticeSheetMatrix(token, sheetName, range) {
+  2472:   const result = await readSheetBatch(token, UEP_SPREADSHEET_ID, [`'${sheetName}'!${range}`]);
+  2473:   return result?.[0]?.values || [];
+  2474: }
+  2475: function noticePayloadRow(payload={}, id, nowIso, headerNames=[]) {
+  2476:   const now = new Date(nowIso);
+  2477:   const values={
+  2478:     "공지ID":id,"학년도":String(payload.schoolYear||now.getFullYear()),"구분":String(payload.type||"공지"),
+  2479:     "제목":String(payload.title||"").trim(),"내용":String(payload.content||"").trim(),
+  2480:     "대상학년":String(payload.targetGrade||"1"),"대상반":String(payload.targetClass||"전체"),
+  2481:     "게시일":String(payload.postDate||nowIso.slice(0,10)),"마감일시":String(payload.deadline||""),
+  2482:     "확인필요":payload.confirmRequired===false?"N":"Y","제출필요":payload.submitRequired?"Y":"N",
+--- hit line 2465 ---
+  2457: ipcMain.handle("program:operationSave", async (_event, payload={}) => saveProgramOperation(payload));
+  2458: ipcMain.handle("attendance:officialSave", async (_event, payload={}) => saveOfficialAttendance(payload));
+  2459: ipcMain.handle("attendance:officialDelete", async (_event, id="") => deleteOfficialAttendance(id));
+  2460: ipcMain.handle("attendance:lateSave", async (_event, payload={}) => saveLateAttendance(payload));
+  2461: ipcMain.handle("attendance:lateDelete", async (_event, id="") => deleteLateAttendance(id));
+  2462: ipcMain.handle("admission:counselPointSave", async (_event, payload={}) => saveAdmissionCounselPoint(payload));
+  2463: ipcMain.handle("counsel:save", async (_event, payload={}) => saveCounselRecord(payload));
+  2464: ipcMain.handle("studentGuidance:save", async (_event, payload={}) => saveStudentGuidanceRecord(payload));
+  2465:   ipcMain.handle("dormOuting:save", async (_event, payload={}) => saveDormOuting(payload));
+  2466: ipcMain.handle("dormRule:save", async (_event, payload={}) => saveDormRule(payload));
+  2467: ipcMain.handle("dormRule:delete", async (_event, id="") => deleteDormRule(id));
+  2468: ipcMain.handle("nightDuty:save", async (_event, payload={}) => saveNightSupervisor(payload));
+  2469: ipcMain.handle("lunchDuty:save", async (_event, payload={}) => saveLunchDuty(payload));
+  2470: 
+  2471: async function readNoticeSheetMatrix(token, sheetName, range) {
+  2472:   const result = await readSheetBatch(token, UEP_SPREADSHEET_ID, [`'${sheetName}'!${range}`]);
+  2473:   return result?.[0]?.values || [];
+  2474: }
+  2475: function noticePayloadRow(payload={}, id, nowIso, headerNames=[]) {
+  2476:   const now = new Date(nowIso);
+  2477:   const values={
+  2478:     "공지ID":id,"학년도":String(payload.schoolYear||now.getFullYear()),"구분":String(payload.type||"공지"),
+  2479:     "제목":String(payload.title||"").trim(),"내용":String(payload.content||"").trim(),
+  2480:     "대상학년":String(payload.targetGrade||"1"),"대상반":String(payload.targetClass||"전체"),
+  2481:     "게시일":String(payload.postDate||nowIso.slice(0,10)),"마감일시":String(payload.deadline||""),
+  2482:     "확인필요":payload.confirmRequired===false?"N":"Y","제출필요":payload.submitRequired?"Y":"N",
+  2483:     "담당부서":String(payload.department||"1학년부"),"담당자":String(payload.author||""),"상태":String(payload.status||"게시"),
+--- hit line 2466 ---
+  2458: ipcMain.handle("attendance:officialSave", async (_event, payload={}) => saveOfficialAttendance(payload));
+  2459: ipcMain.handle("attendance:officialDelete", async (_event, id="") => deleteOfficialAttendance(id));
+  2460: ipcMain.handle("attendance:lateSave", async (_event, payload={}) => saveLateAttendance(payload));
+  2461: ipcMain.handle("attendance:lateDelete", async (_event, id="") => deleteLateAttendance(id));
+  2462: ipcMain.handle("admission:counselPointSave", async (_event, payload={}) => saveAdmissionCounselPoint(payload));
+  2463: ipcMain.handle("counsel:save", async (_event, payload={}) => saveCounselRecord(payload));
+  2464: ipcMain.handle("studentGuidance:save", async (_event, payload={}) => saveStudentGuidanceRecord(payload));
+  2465:   ipcMain.handle("dormOuting:save", async (_event, payload={}) => saveDormOuting(payload));
+  2466: ipcMain.handle("dormRule:save", async (_event, payload={}) => saveDormRule(payload));
+  2467: ipcMain.handle("dormRule:delete", async (_event, id="") => deleteDormRule(id));
+  2468: ipcMain.handle("nightDuty:save", async (_event, payload={}) => saveNightSupervisor(payload));
+  2469: ipcMain.handle("lunchDuty:save", async (_event, payload={}) => saveLunchDuty(payload));
+  2470: 
+  2471: async function readNoticeSheetMatrix(token, sheetName, range) {
+  2472:   const result = await readSheetBatch(token, UEP_SPREADSHEET_ID, [`'${sheetName}'!${range}`]);
+  2473:   return result?.[0]?.values || [];
+  2474: }
+  2475: function noticePayloadRow(payload={}, id, nowIso, headerNames=[]) {
+  2476:   const now = new Date(nowIso);
+  2477:   const values={
+  2478:     "공지ID":id,"학년도":String(payload.schoolYear||now.getFullYear()),"구분":String(payload.type||"공지"),
+  2479:     "제목":String(payload.title||"").trim(),"내용":String(payload.content||"").trim(),
+  2480:     "대상학년":String(payload.targetGrade||"1"),"대상반":String(payload.targetClass||"전체"),
+  2481:     "게시일":String(payload.postDate||nowIso.slice(0,10)),"마감일시":String(payload.deadline||""),
+  2482:     "확인필요":payload.confirmRequired===false?"N":"Y","제출필요":payload.submitRequired?"Y":"N",
+  2483:     "담당부서":String(payload.department||"1학년부"),"담당자":String(payload.author||""),"상태":String(payload.status||"게시"),
+  2484:     "수정일시":nowIso,"수정자":String(payload.author||"UEP"),"비고":String(payload.note||"UEP 화면 입력"),
+--- hit line 2467 ---
+  2459: ipcMain.handle("attendance:officialDelete", async (_event, id="") => deleteOfficialAttendance(id));
+  2460: ipcMain.handle("attendance:lateSave", async (_event, payload={}) => saveLateAttendance(payload));
+  2461: ipcMain.handle("attendance:lateDelete", async (_event, id="") => deleteLateAttendance(id));
+  2462: ipcMain.handle("admission:counselPointSave", async (_event, payload={}) => saveAdmissionCounselPoint(payload));
+  2463: ipcMain.handle("counsel:save", async (_event, payload={}) => saveCounselRecord(payload));
+  2464: ipcMain.handle("studentGuidance:save", async (_event, payload={}) => saveStudentGuidanceRecord(payload));
+  2465:   ipcMain.handle("dormOuting:save", async (_event, payload={}) => saveDormOuting(payload));
+  2466: ipcMain.handle("dormRule:save", async (_event, payload={}) => saveDormRule(payload));
+  2467: ipcMain.handle("dormRule:delete", async (_event, id="") => deleteDormRule(id));
+  2468: ipcMain.handle("nightDuty:save", async (_event, payload={}) => saveNightSupervisor(payload));
+  2469: ipcMain.handle("lunchDuty:save", async (_event, payload={}) => saveLunchDuty(payload));
+  2470: 
+  2471: async function readNoticeSheetMatrix(token, sheetName, range) {
+  2472:   const result = await readSheetBatch(token, UEP_SPREADSHEET_ID, [`'${sheetName}'!${range}`]);
+  2473:   return result?.[0]?.values || [];
+  2474: }
+  2475: function noticePayloadRow(payload={}, id, nowIso, headerNames=[]) {
+  2476:   const now = new Date(nowIso);
+  2477:   const values={
+  2478:     "공지ID":id,"학년도":String(payload.schoolYear||now.getFullYear()),"구분":String(payload.type||"공지"),
+  2479:     "제목":String(payload.title||"").trim(),"내용":String(payload.content||"").trim(),
+  2480:     "대상학년":String(payload.targetGrade||"1"),"대상반":String(payload.targetClass||"전체"),
+  2481:     "게시일":String(payload.postDate||nowIso.slice(0,10)),"마감일시":String(payload.deadline||""),
+  2482:     "확인필요":payload.confirmRequired===false?"N":"Y","제출필요":payload.submitRequired?"Y":"N",
+  2483:     "담당부서":String(payload.department||"1학년부"),"담당자":String(payload.author||""),"상태":String(payload.status||"게시"),
+  2484:     "수정일시":nowIso,"수정자":String(payload.author||"UEP"),"비고":String(payload.note||"UEP 화면 입력"),
+  2485:     "공지성격":String(payload.noticeKind||payload.type||"일반공지"),"종례전달":payload.homeroomNotice?"Y":"N",
+--- hit line 2468 ---
+  2460: ipcMain.handle("attendance:lateSave", async (_event, payload={}) => saveLateAttendance(payload));
+  2461: ipcMain.handle("attendance:lateDelete", async (_event, id="") => deleteLateAttendance(id));
+  2462: ipcMain.handle("admission:counselPointSave", async (_event, payload={}) => saveAdmissionCounselPoint(payload));
+  2463: ipcMain.handle("counsel:save", async (_event, payload={}) => saveCounselRecord(payload));
+  2464: ipcMain.handle("studentGuidance:save", async (_event, payload={}) => saveStudentGuidanceRecord(payload));
+  2465:   ipcMain.handle("dormOuting:save", async (_event, payload={}) => saveDormOuting(payload));
+  2466: ipcMain.handle("dormRule:save", async (_event, payload={}) => saveDormRule(payload));
+  2467: ipcMain.handle("dormRule:delete", async (_event, id="") => deleteDormRule(id));
+  2468: ipcMain.handle("nightDuty:save", async (_event, payload={}) => saveNightSupervisor(payload));
+  2469: ipcMain.handle("lunchDuty:save", async (_event, payload={}) => saveLunchDuty(payload));
+  2470: 
+  2471: async function readNoticeSheetMatrix(token, sheetName, range) {
+  2472:   const result = await readSheetBatch(token, UEP_SPREADSHEET_ID, [`'${sheetName}'!${range}`]);
+  2473:   return result?.[0]?.values || [];
+  2474: }
+  2475: function noticePayloadRow(payload={}, id, nowIso, headerNames=[]) {
+  2476:   const now = new Date(nowIso);
+  2477:   const values={
+  2478:     "공지ID":id,"학년도":String(payload.schoolYear||now.getFullYear()),"구분":String(payload.type||"공지"),
+  2479:     "제목":String(payload.title||"").trim(),"내용":String(payload.content||"").trim(),
+  2480:     "대상학년":String(payload.targetGrade||"1"),"대상반":String(payload.targetClass||"전체"),
+  2481:     "게시일":String(payload.postDate||nowIso.slice(0,10)),"마감일시":String(payload.deadline||""),
+  2482:     "확인필요":payload.confirmRequired===false?"N":"Y","제출필요":payload.submitRequired?"Y":"N",
+  2483:     "담당부서":String(payload.department||"1학년부"),"담당자":String(payload.author||""),"상태":String(payload.status||"게시"),
+  2484:     "수정일시":nowIso,"수정자":String(payload.author||"UEP"),"비고":String(payload.note||"UEP 화면 입력"),
+  2485:     "공지성격":String(payload.noticeKind||payload.type||"일반공지"),"종례전달":payload.homeroomNotice?"Y":"N",
+  2486:     "중요":payload.important?"Y":"N","상단알림":payload.topAlert?"Y":"N","게시종료일":String(payload.endDate||""),
+--- hit line 2469 ---
+  2461: ipcMain.handle("attendance:lateDelete", async (_event, id="") => deleteLateAttendance(id));
+  2462: ipcMain.handle("admission:counselPointSave", async (_event, payload={}) => saveAdmissionCounselPoint(payload));
+  2463: ipcMain.handle("counsel:save", async (_event, payload={}) => saveCounselRecord(payload));
+  2464: ipcMain.handle("studentGuidance:save", async (_event, payload={}) => saveStudentGuidanceRecord(payload));
+  2465:   ipcMain.handle("dormOuting:save", async (_event, payload={}) => saveDormOuting(payload));
+  2466: ipcMain.handle("dormRule:save", async (_event, payload={}) => saveDormRule(payload));
+  2467: ipcMain.handle("dormRule:delete", async (_event, id="") => deleteDormRule(id));
+  2468: ipcMain.handle("nightDuty:save", async (_event, payload={}) => saveNightSupervisor(payload));
+  2469: ipcMain.handle("lunchDuty:save", async (_event, payload={}) => saveLunchDuty(payload));
+  2470: 
+  2471: async function readNoticeSheetMatrix(token, sheetName, range) {
+  2472:   const result = await readSheetBatch(token, UEP_SPREADSHEET_ID, [`'${sheetName}'!${range}`]);
+  2473:   return result?.[0]?.values || [];
+  2474: }
+  2475: function noticePayloadRow(payload={}, id, nowIso, headerNames=[]) {
+  2476:   const now = new Date(nowIso);
+  2477:   const values={
+  2478:     "공지ID":id,"학년도":String(payload.schoolYear||now.getFullYear()),"구분":String(payload.type||"공지"),
+  2479:     "제목":String(payload.title||"").trim(),"내용":String(payload.content||"").trim(),
+  2480:     "대상학년":String(payload.targetGrade||"1"),"대상반":String(payload.targetClass||"전체"),
+  2481:     "게시일":String(payload.postDate||nowIso.slice(0,10)),"마감일시":String(payload.deadline||""),
+  2482:     "확인필요":payload.confirmRequired===false?"N":"Y","제출필요":payload.submitRequired?"Y":"N",
+  2483:     "담당부서":String(payload.department||"1학년부"),"담당자":String(payload.author||""),"상태":String(payload.status||"게시"),
+  2484:     "수정일시":nowIso,"수정자":String(payload.author||"UEP"),"비고":String(payload.note||"UEP 화면 입력"),
+  2485:     "공지성격":String(payload.noticeKind||payload.type||"일반공지"),"종례전달":payload.homeroomNotice?"Y":"N",
+  2486:     "중요":payload.important?"Y":"N","상단알림":payload.topAlert?"Y":"N","게시종료일":String(payload.endDate||""),
+  2487:     "마감유형":String(payload.deadlineType||"")
+--- hit line 2492 ---
+  2484:     "수정일시":nowIso,"수정자":String(payload.author||"UEP"),"비고":String(payload.note||"UEP 화면 입력"),
+  2485:     "공지성격":String(payload.noticeKind||payload.type||"일반공지"),"종례전달":payload.homeroomNotice?"Y":"N",
+  2486:     "중요":payload.important?"Y":"N","상단알림":payload.topAlert?"Y":"N","게시종료일":String(payload.endDate||""),
+  2487:     "마감유형":String(payload.deadlineType||"")
+  2488:   };
+  2489:   if(Array.isArray(headerNames)&&headerNames.length)return headerNames.map(name=>values[name]??"");
+  2490:   return Object.values(values).slice(0,22);
+  2491: }
+  2492: ipcMain.handle("userAccount:update", async (_event, payload = {}) => {
+  2493:   try {
+  2494:     const account = await readEncrypted(credentialPath());
+  2495:     if (!validateServiceAccount(account)) throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+  2496:     const token = await getSheetsToken(account);
+  2497:     const matrix = await readNoticeSheetMatrix(token, "01_사용자계정", "A1:Z500");
+  2498:     const header = findHeaderRowByRequired(matrix,["사용자ID","이메일","성명","역할","사용여부"]);
+  2499:     if(!header) throw new Error("01_사용자계정 헤더를 찾지 못했습니다.");
+  2500:     const headers=header.headers, idx=name=>headers.indexOf(name), id=String(payload.id||"").trim();
+  2501:     const rowIndex=matrix.findIndex((row,i)=>i>header.index&&String(row?.[idx("사용자ID")]||"").trim()===id);
+  2502:     if(rowIndex<0) throw new Error("수정할 사용자를 찾지 못했습니다.");
+  2503:     const updates={
+  2504:       "역할":String(payload.role??matrix[rowIndex]?.[idx("역할")]??"").trim(),
+  2505:       "관리자여부":payload.admin!=null?(payload.admin?"Y":"N"):String(matrix[rowIndex]?.[idx("관리자여부")]||"N"),
+  2506:       "담당학년":String(payload.grade??matrix[rowIndex]?.[idx("담당학년")]??"1").trim(),
+  2507:       "담당반":String(payload.classNo??matrix[rowIndex]?.[idx("담당반")]??"").trim(),
+  2508:       "조회범위":String(payload.viewScope??matrix[rowIndex]?.[idx("조회범위")]??"").trim(),
+  2509:       "수정범위":String(payload.editScope??matrix[rowIndex]?.[idx("수정범위")]??"").trim(),
+  2510:       "사용여부":payload.active!=null?(payload.active?"Y":"N"):String(matrix[rowIndex]?.[idx("사용여부")]||"Y")
+--- hit line 2521 ---
+  2513:     for (const [name,value] of Object.entries(updates)) { const col=idx(name); if(col>=0) row[col]=value; }
+  2514:     await updateSheetValues(token,UEP_SPREADSHEET_ID,`'01_사용자계정'!A${rowIndex+1}:${columnLetter(headers.length-1)}${rowIndex+1}`,[row]);
+  2515:     liveDataCache=null; liveDataFetchedAt=0;
+  2516:     return {ok:true,id};
+  2517:   } catch(error) { return {ok:false,reason:error?.message||"사용자 권한 저장 실패"}; }
+  2518: });
+  2519: 
+  2520: // __UEP_08166_SHARED_SECURITY_AND_AUTOSTART__
+  2521: ipcMain.handle("securityConfig:save", async (_event, payload={}) => {
+  2522:   try {
+  2523:     const key=String(payload.key||'').trim(), value=String(payload.value||'').trim();
+  2524:     if(!key||!value) throw new Error('설정키와 설정값이 필요합니다.');
+  2525:     if(!['SENSITIVE_PIN_HASH','SUBJECT_CONFIDENTIAL_PIN_HASH'].includes(key)) throw new Error('허용되지 않은 보안 설정키입니다.');
+  2526:     const account=await readEncrypted(credentialPath());
+  2527:     if(!validateServiceAccount(account)) throw new Error('관리자 Google 연결이 필요합니다.');
+  2528:     const token=await getSheetsToken(account);
+  2529:     const matrix=await readNoticeSheetMatrix(token,'00_UEP설정','A1:F500');
+  2530:     const header=findHeaderRowByRequired(matrix,['설정키','설정값']);
+  2531:     if(!header) throw new Error('00_UEP설정 헤더를 찾지 못했습니다.');
+  2532:     const headers=header.headers.slice(), idx=name=>headers.indexOf(name), keyCol=idx('설정키');
+  2533:     const now=new Date().toISOString(), editor=String(payload.editor||'관리자').trim();
+  2534:     const values={'설정키':key,'설정값':value,'설명':String(payload.description||'UEP 공용 보안설정'),'수정일시':now,'수정자':editor};
+  2535:     const rowIndex=matrix.findIndex((r,i)=>i>header.index&&String(r?.[keyCol]||'').trim()===key);
+  2536:     if(rowIndex>=0){
+  2537:       const row=Array.from({length:headers.length},(_,i)=>matrix[rowIndex]?.[i]??'');
+  2538:       for(const [name,v] of Object.entries(values)){const c=idx(name);if(c>=0)row[c]=v;}
+  2539:       await updateSheetValues(token,UEP_SPREADSHEET_ID,`'00_UEP설정'!A${rowIndex+1}:${columnLetter(headers.length-1)}${rowIndex+1}`,[row]);
+--- hit line 2550 ---
+  2542:       for(const [name,v] of Object.entries(values)){const c=idx(name);if(c>=0)row[c]=v;}
+  2543:       await appendSheetValues(token,UEP_SPREADSHEET_ID,`'00_UEP설정'!A:${columnLetter(headers.length-1)}`,[row]);
+  2544:     }
+  2545:     liveDataCache=null;liveDataFetchedAt=0;
+  2546:     return {ok:true,key,value};
+  2547:   } catch(error){return {ok:false,reason:error?.message||'공용 보안설정 저장 실패'};}
+  2548: });
+  2549: // __UEP_08168_SHARED_SECURITY_READ__
+  2550: ipcMain.handle("securityConfig:readShared", async () => {
+  2551:   try{
+  2552:     let values=[];
+  2553:     const session=await readSchoolReadSession().catch(()=>null);
+  2554:     if(session?.token&&session?.deviceId){
+  2555:       const ranges=await schoolReadBatchRead(UEP_SPREADSHEET_ID,["'00_UEP설정'!A3:E100"]);
+  2556:       values=ranges?.[0]?.values||[];
+  2557:     }else{
+  2558:       const account=await readEncrypted(credentialPath());
+  2559:       if(!validateServiceAccount(account))throw new Error('UEP 로그인이 필요합니다.');
+  2560:       const token=await getSheetsToken(account);
+  2561:       const matrix=await readNoticeSheetMatrix(token,'00_UEP설정','A3:E100');
+  2562:       values=matrix||[];
+  2563:     }
+  2564:     if(!values.length)return {ok:true,settings:[]};
+  2565:     const headers=(values[0]||[]).map(v=>String(v||'').trim());
+  2566:     const idx=name=>headers.indexOf(name);
+  2567:     const keyCol=idx('설정키'),valueCol=idx('설정값'),descCol=idx('설명');
+  2568:     if(keyCol<0||valueCol<0)throw new Error('00_UEP설정 헤더를 찾지 못했습니다.');
+--- hit line 2576 ---
+  2568:     if(keyCol<0||valueCol<0)throw new Error('00_UEP설정 헤더를 찾지 못했습니다.');
+  2569:     const allowed=new Set(['SENSITIVE_PIN_HASH','SUBJECT_CONFIDENTIAL_PIN_HASH']);
+  2570:     const settings=values.slice(1).map(r=>({key:String(r?.[keyCol]||'').trim(),value:String(r?.[valueCol]||'').trim(),description:descCol>=0?String(r?.[descCol]||''):''})).filter(r=>allowed.has(r.key)&&r.value);
+  2571:     return {ok:true,settings};
+  2572:   }catch(error){return {ok:false,reason:error?.message||'공용 보안설정 읽기 실패'};}
+  2573: });
+  2574: 
+  2575: // __UEP_08168_PASSWORD_RESET__
+  2576: ipcMain.handle("securityConfig:reset", async (_event,payload={}) => {
+  2577:   try{
+  2578:     const key=String(payload.key||'').trim();
+  2579:     if(!['SENSITIVE_PIN_HASH','SUBJECT_CONFIDENTIAL_PIN_HASH'].includes(key))throw new Error('허용되지 않은 보안 설정키입니다.');
+  2580:     const account=await readEncrypted(credentialPath());
+  2581:     if(!validateServiceAccount(account))throw new Error('관리자 Google 연결이 필요합니다.');
+  2582:     const token=await getSheetsToken(account);
+  2583:     const matrix=await readNoticeSheetMatrix(token,'00_UEP설정','A1:F500');
+  2584:     const header=findHeaderRowByRequired(matrix,['설정키','설정값']);
+  2585:     if(!header)throw new Error('00_UEP설정 헤더를 찾지 못했습니다.');
+  2586:     const headers=header.headers.slice(),idx=name=>headers.indexOf(name),keyCol=idx('설정키');
+  2587:     const rowIndex=matrix.findIndex((r,i)=>i>header.index&&String(r?.[keyCol]||'').trim()===key);
+  2588:     if(rowIndex>=0){
+  2589:       const row=Array.from({length:headers.length},(_,i)=>matrix[rowIndex]?.[i]??'');
+  2590:       const vals={'설정키':key,'설정값':'','설명':'비밀번호 초기화','수정일시':new Date().toISOString(),'수정자':String(payload.editor||'관리자')};
+  2591:       for(const [name,v] of Object.entries(vals)){const c=idx(name);if(c>=0)row[c]=v;}
+  2592:       await updateSheetValues(token,UEP_SPREADSHEET_ID,`'00_UEP설정'!A${rowIndex+1}:${columnLetter(headers.length-1)}${rowIndex+1}`,[row]);
+  2593:     }
+  2594:     liveDataCache=null;liveDataFetchedAt=0;return {ok:true,key};
+--- hit line 2598 ---
+  2590:       const vals={'설정키':key,'설정값':'','설명':'비밀번호 초기화','수정일시':new Date().toISOString(),'수정자':String(payload.editor||'관리자')};
+  2591:       for(const [name,v] of Object.entries(vals)){const c=idx(name);if(c>=0)row[c]=v;}
+  2592:       await updateSheetValues(token,UEP_SPREADSHEET_ID,`'00_UEP설정'!A${rowIndex+1}:${columnLetter(headers.length-1)}${rowIndex+1}`,[row]);
+  2593:     }
+  2594:     liveDataCache=null;liveDataFetchedAt=0;return {ok:true,key};
+  2595:   }catch(error){return {ok:false,reason:error?.message||'공용 비밀번호 초기화 실패'};}
+  2596: });
+  2597: 
+  2598: ipcMain.handle("system:autoStartGet",()=>{
+  2599:   try{return {ok:true,enabled:Boolean(app.getLoginItemSettings().openAtLogin)};}catch(error){return {ok:false,reason:error?.message||'자동실행 상태 확인 실패'};}
+  2600: });
+  2601: ipcMain.handle("system:autoStartSet",(_event,enabled)=>{
+  2602:   try{app.setLoginItemSettings({openAtLogin:Boolean(enabled),path:process.execPath});return {ok:true,enabled:Boolean(app.getLoginItemSettings().openAtLogin)};}catch(error){return {ok:false,reason:error?.message||'자동실행 설정 실패'};}
+  2603: });
+  2604: 
+  2605: ipcMain.handle("notice:save", async (_event, payload = {}) => {
+  2606:   try {
+  2607:     const account = await readEncrypted(credentialPath());
+  2608:     if (!validateServiceAccount(account)) throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+  2609:     const token = await getSheetsToken(account);
+  2610:     const nowIso = new Date().toISOString();
+  2611:     const id = String(payload.id || `NTC-${nowIso.replace(/[-:.TZ]/g, "").slice(0,14)}`);
+  2612:     const matrix = await readNoticeSheetMatrix(token, "40_공지마감", "A1:AZ2000");
+  2613:     const header = findHeaderRowByRequired(matrix,["공지ID","제목","상태"]);
+  2614:     if(!header) throw new Error("40_공지마감 헤더를 찾지 못했습니다.");
+  2615:     const headers=header.headers.slice(), idCol=headers.indexOf("공지ID");
+  2616:     if(!payload.id){
+--- hit line 2601 ---
+  2593:     }
+  2594:     liveDataCache=null;liveDataFetchedAt=0;return {ok:true,key};
+  2595:   }catch(error){return {ok:false,reason:error?.message||'공용 비밀번호 초기화 실패'};}
+  2596: });
+  2597: 
+  2598: ipcMain.handle("system:autoStartGet",()=>{
+  2599:   try{return {ok:true,enabled:Boolean(app.getLoginItemSettings().openAtLogin)};}catch(error){return {ok:false,reason:error?.message||'자동실행 상태 확인 실패'};}
+  2600: });
+  2601: ipcMain.handle("system:autoStartSet",(_event,enabled)=>{
+  2602:   try{app.setLoginItemSettings({openAtLogin:Boolean(enabled),path:process.execPath});return {ok:true,enabled:Boolean(app.getLoginItemSettings().openAtLogin)};}catch(error){return {ok:false,reason:error?.message||'자동실행 설정 실패'};}
+  2603: });
+  2604: 
+  2605: ipcMain.handle("notice:save", async (_event, payload = {}) => {
+  2606:   try {
+  2607:     const account = await readEncrypted(credentialPath());
+  2608:     if (!validateServiceAccount(account)) throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+  2609:     const token = await getSheetsToken(account);
+  2610:     const nowIso = new Date().toISOString();
+  2611:     const id = String(payload.id || `NTC-${nowIso.replace(/[-:.TZ]/g, "").slice(0,14)}`);
+  2612:     const matrix = await readNoticeSheetMatrix(token, "40_공지마감", "A1:AZ2000");
+  2613:     const header = findHeaderRowByRequired(matrix,["공지ID","제목","상태"]);
+  2614:     if(!header) throw new Error("40_공지마감 헤더를 찾지 못했습니다.");
+  2615:     const headers=header.headers.slice(), idCol=headers.indexOf("공지ID");
+  2616:     if(!payload.id){
+  2617:       const idx=name=>headers.indexOf(name), same=matrix.find((r,i)=>i>header.index&&String(r?.[idx("제목")]||"").trim()===String(payload.title||"").trim()&&String(r?.[idx("내용")]||"").trim()===String(payload.content||"").trim()&&String(r?.[idx("대상반")]||"전체").trim()===String(payload.targetClass||"전체").trim()&&String(r?.[idx("게시일")]||"").slice(0,10)===String(payload.postDate||"").slice(0,10)&&!["삭제","종료"].includes(String(r?.[idx("상태")]||"게시")));
+  2618:       if(same)return {ok:true,id:String(same[idCol]||id),duplicate:true};
+  2619:     }
+--- hit line 2605 ---
+  2597: 
+  2598: ipcMain.handle("system:autoStartGet",()=>{
+  2599:   try{return {ok:true,enabled:Boolean(app.getLoginItemSettings().openAtLogin)};}catch(error){return {ok:false,reason:error?.message||'자동실행 상태 확인 실패'};}
+  2600: });
+  2601: ipcMain.handle("system:autoStartSet",(_event,enabled)=>{
+  2602:   try{app.setLoginItemSettings({openAtLogin:Boolean(enabled),path:process.execPath});return {ok:true,enabled:Boolean(app.getLoginItemSettings().openAtLogin)};}catch(error){return {ok:false,reason:error?.message||'자동실행 설정 실패'};}
+  2603: });
+  2604: 
+  2605: ipcMain.handle("notice:save", async (_event, payload = {}) => {
+  2606:   try {
+  2607:     const account = await readEncrypted(credentialPath());
+  2608:     if (!validateServiceAccount(account)) throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+  2609:     const token = await getSheetsToken(account);
+  2610:     const nowIso = new Date().toISOString();
+  2611:     const id = String(payload.id || `NTC-${nowIso.replace(/[-:.TZ]/g, "").slice(0,14)}`);
+  2612:     const matrix = await readNoticeSheetMatrix(token, "40_공지마감", "A1:AZ2000");
+  2613:     const header = findHeaderRowByRequired(matrix,["공지ID","제목","상태"]);
+  2614:     if(!header) throw new Error("40_공지마감 헤더를 찾지 못했습니다.");
+  2615:     const headers=header.headers.slice(), idCol=headers.indexOf("공지ID");
+  2616:     if(!payload.id){
+  2617:       const idx=name=>headers.indexOf(name), same=matrix.find((r,i)=>i>header.index&&String(r?.[idx("제목")]||"").trim()===String(payload.title||"").trim()&&String(r?.[idx("내용")]||"").trim()===String(payload.content||"").trim()&&String(r?.[idx("대상반")]||"전체").trim()===String(payload.targetClass||"전체").trim()&&String(r?.[idx("게시일")]||"").slice(0,10)===String(payload.postDate||"").slice(0,10)&&!["삭제","종료"].includes(String(r?.[idx("상태")]||"게시")));
+  2618:       if(same)return {ok:true,id:String(same[idCol]||id),duplicate:true};
+  2619:     }
+  2620:     // 기존 시트에 마감유형 컬럼이 아직 없으면 데이터 손상 없이 마지막 열에 자동 추가한다.
+  2621:     if(headers.indexOf("마감유형")<0){
+  2622:       const col=headers.length;
+  2623:       await updateSheetValues(token,UEP_SPREADSHEET_ID,`'40_공지마감'!${columnLetter(col)}${header.index+1}:${columnLetter(col)}${header.index+1}`,[["마감유형"]]);
+--- hit line 2639 ---
+  2631:       await updateSheetValues(token, UEP_SPREADSHEET_ID, `'40_공지마감'!A${rowIndex+1}:${endCol}${rowIndex+1}`, [row]);
+  2632:     } else {
+  2633:       await appendSheetValues(token, UEP_SPREADSHEET_ID, `'40_공지마감'!A:${endCol}`, [row]);
+  2634:     }
+  2635:     liveDataCache = null; liveDataFetchedAt = 0;
+  2636:     return { ok: true, id };
+  2637:   } catch(error) { return {ok:false,reason:error?.message||"공지 저장 실패"}; }
+  2638: });
+  2639: ipcMain.handle("notice:delete", async (_event, id = "") => {
+  2640:   try {
+  2641:     const account=await readEncrypted(credentialPath()); if(!validateServiceAccount(account)) throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+  2642:     const token=await getSheetsToken(account), matrix=await readNoticeSheetMatrix(token,"40_공지마감","A1:V2000");
+  2643:     const header=findHeaderRowByRequired(matrix,["공지ID","상태"]); if(!header) throw new Error("40_공지마감 헤더를 찾지 못했습니다.");
+  2644:     const h=header.index, headers=header.headers, idCol=headers.indexOf("공지ID"), statusCol=headers.indexOf("상태"), modifiedCol=headers.indexOf("수정일시");
+  2645:     const rowIndex=matrix.findIndex((r,i)=>i>h&&String(r?.[idCol]||"")===String(id)); if(rowIndex<0) throw new Error("삭제할 공지를 찾지 못했습니다.");
+  2646:     if(statusCol>=0) await updateSheetValues(token,UEP_SPREADSHEET_ID,`'40_공지마감'!${columnLetter(statusCol)}${rowIndex+1}:${columnLetter(statusCol)}${rowIndex+1}` ,[["삭제"]]);
+  2647:     if(modifiedCol>=0) await updateSheetValues(token,UEP_SPREADSHEET_ID,`'40_공지마감'!${columnLetter(modifiedCol)}${rowIndex+1}:${columnLetter(modifiedCol)}${rowIndex+1}` ,[[new Date().toISOString()]]);
+  2648:     liveDataCache=null;liveDataFetchedAt=0;return {ok:true,id};
+  2649:   } catch(error){return {ok:false,reason:error?.message||"공지 삭제 실패"};}
+  2650: });
+  2651: ipcMain.handle("notice:receiptSave", async (_event, payload={}) => {
+  2652:   try {
+  2653:     const schoolSession=await readSchoolReadSession().catch(()=>null);
+  2654:     if(schoolSession?.token&&schoolSession?.deviceId){
+  2655:       // __UEP_08168_NOTICE_RECEIPT_SCHOOL_READ_FIRST__
+  2656:       const result=await schoolReadPost('notice-receipt-save',{token:schoolSession.token,deviceId:schoolSession.deviceId,noticeId:String(payload.noticeId||'').trim(),teacher:String(payload.teacher||'').trim(),userId:String(payload.userId||'').trim(),grade:String(payload.grade||''),classNo:String(payload.classNo||''),confirmed:payload.confirmed!==false,submitted:Boolean(payload.submitted),read:payload.read!==false,dismissed:Boolean(payload.dismissed),detailViewed:Boolean(payload.detailViewed),sourceType:String(payload.sourceType||'직접공지'),note:String(payload.note||'UEP 담임 확인')}).catch(error=>({ok:false,reason:error?.message||'School Read 공지확인 저장 실패'}));
+  2657:       if(result?.ok)return result;
+--- hit line 2651 ---
+  2643:     const header=findHeaderRowByRequired(matrix,["공지ID","상태"]); if(!header) throw new Error("40_공지마감 헤더를 찾지 못했습니다.");
+  2644:     const h=header.index, headers=header.headers, idCol=headers.indexOf("공지ID"), statusCol=headers.indexOf("상태"), modifiedCol=headers.indexOf("수정일시");
+  2645:     const rowIndex=matrix.findIndex((r,i)=>i>h&&String(r?.[idCol]||"")===String(id)); if(rowIndex<0) throw new Error("삭제할 공지를 찾지 못했습니다.");
+  2646:     if(statusCol>=0) await updateSheetValues(token,UEP_SPREADSHEET_ID,`'40_공지마감'!${columnLetter(statusCol)}${rowIndex+1}:${columnLetter(statusCol)}${rowIndex+1}` ,[["삭제"]]);
+  2647:     if(modifiedCol>=0) await updateSheetValues(token,UEP_SPREADSHEET_ID,`'40_공지마감'!${columnLetter(modifiedCol)}${rowIndex+1}:${columnLetter(modifiedCol)}${rowIndex+1}` ,[[new Date().toISOString()]]);
+  2648:     liveDataCache=null;liveDataFetchedAt=0;return {ok:true,id};
+  2649:   } catch(error){return {ok:false,reason:error?.message||"공지 삭제 실패"};}
+  2650: });
+  2651: ipcMain.handle("notice:receiptSave", async (_event, payload={}) => {
+  2652:   try {
+  2653:     const schoolSession=await readSchoolReadSession().catch(()=>null);
+  2654:     if(schoolSession?.token&&schoolSession?.deviceId){
+  2655:       // __UEP_08168_NOTICE_RECEIPT_SCHOOL_READ_FIRST__
+  2656:       const result=await schoolReadPost('notice-receipt-save',{token:schoolSession.token,deviceId:schoolSession.deviceId,noticeId:String(payload.noticeId||'').trim(),teacher:String(payload.teacher||'').trim(),userId:String(payload.userId||'').trim(),grade:String(payload.grade||''),classNo:String(payload.classNo||''),confirmed:payload.confirmed!==false,submitted:Boolean(payload.submitted),read:payload.read!==false,dismissed:Boolean(payload.dismissed),detailViewed:Boolean(payload.detailViewed),sourceType:String(payload.sourceType||'직접공지'),note:String(payload.note||'UEP 담임 확인')}).catch(error=>({ok:false,reason:error?.message||'School Read 공지확인 저장 실패'}));
+  2657:       if(result?.ok)return result;
+  2658:       return {ok:false,reason:result?.reason||result?.message||'학교 공용 확인저장 기능이 아직 배포되지 않았습니다.',requiresSchoolReadWrite:true};
+  2659:     }
+  2660:     const auth=await resolveGoogleReadAuth().catch(()=>null);
+  2661:     if(auth?.mode==='school_read_api'){
+  2662:       // __UEP_08164_NOTICE_RECEIPT_SCHOOL_READ__
+  2663:       const result=await schoolReadApiRequest(auth,{action:'notice-receipt-save',noticeId:String(payload.noticeId||'').trim(),teacher:String(payload.teacher||'').trim(),userId:String(payload.userId||'').trim(),confirmedAt:new Date().toISOString()}).catch(error=>({ok:false,reason:error?.message||'School Read 공지확인 저장 실패'}));
+  2664:       if(result?.ok)return result;
+  2665:       return {ok:false,reason:result?.reason||result?.message||'School Read 공지확인 저장 기능이 아직 배포되지 않았습니다.',requiresSchoolReadWrite:true};
+  2666:     }
+  2667:     const account=await readEncrypted(credentialPath()); if(!validateServiceAccount(account)) throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+  2668:     const token=await getSheetsToken(account), now=new Date().toISOString();
+  2669:     const noticeId=String(payload.noticeId||"").trim(), teacher=String(payload.teacher||"").trim(), userId=String(payload.userId||"").trim();
+--- hit line 2691 ---
+  2683:     const confirmedAt=confirmed?(String(current?.[idx("확인일시")]||"")||now):"";
+  2684:     const submittedAt=submitted?(String(current?.[idx("제출일시")]||"")||now):"";
+  2685:     const row=[recordId,noticeId,userId,teacher,String(payload.grade||""),String(payload.classNo||""),confirmed?"Y":"N",confirmedAt,submitted?"Y":"N",submittedAt,now,teacher,String(payload.note||"UEP 상태 처리"),sourceType,read?"Y":"N",dismissed?"Y":"N",detailViewed?"Y":"N"];
+  2686:     if(rowIndex>=0) await updateSheetValues(token,UEP_SPREADSHEET_ID,`'44_공지확인현황'!A${rowIndex+1}:Q${rowIndex+1}`,[row]);
+  2687:     else await appendSheetValues(token,UEP_SPREADSHEET_ID,"'44_공지확인현황'!A:Q",[row]);
+  2688:     liveDataCache=null;liveDataFetchedAt=0;return {ok:true,recordId,confirmed,submitted,read,dismissed,detailViewed};
+  2689:   } catch(error){return {ok:false,reason:error?.message||"공지 확인상태 저장 실패"};}
+  2690: });
+  2691: ipcMain.handle("calendar:syncSchool", async () => ({
+  2692:     ok:false,
+  2693:     reason:"학교일정은 데이터처리시트 41_학교캘린더의 직접 이관값만 사용합니다. 자동 가져오기와 IMPORTRANGE는 비활성화되었습니다."
+  2694:   }));
+  2695:   ipcMain.handle("calendar:savePersonal", async (_event, payload={}) => {
+  2696:     try {
+  2697:       const credentials=await readEncrypted(credentialPath()); const token=await getSheetsToken(credentials); await ensureCalendarSchema(token); const existing=await currentCalendarRows(token);
+  2698:       const id=`PER-${crypto.randomUUID()}`; const date=String(payload.date||""); const now=new Date().toISOString();
+  2699:       const row={"일정ID":id,"학년도":date.slice(0,4),"시작일":date,"종료일":date,"시작시각":String(payload.start||""),"종료시각":String(payload.end||""),"종일":payload.start?"N":"Y","일정명":String(payload.title||""),"상세내용":String(payload.note||""),"일정구분":"개인 일정","대상":String(payload.target||""),"장소":String(payload.place||""),"부서":String(payload.department||""),"담당자":String(payload.manager||""),"상태":String(payload.status||"확정"),"검증상태":"정상","출처":"UEP 개인입력","원본일정ID":"","이관방식":"직접기록","수정일시":now,"비고":String(payload.note||"")};
+  2700:       await replaceCalendarRows(token,[...existing.map(calendarObjectToRow),calendarObjectToRow(row)]);
+  2701:       liveDataCache=null;liveDataFetchedAt=0; return {ok:true,id};
+  2702:     } catch(error){return {ok:false,reason:error?.message||"개인 일정 저장 실패"};}
+  2703:   });
+  2704: 
+  2705:   ipcMain.handle("calendar:update", async (_event, payload={}) => {
+  2706:     try {
+  2707:       const credentials=await readEncrypted(credentialPath()); const token=await getSheetsToken(credentials); await ensureCalendarSchema(token); const existing=await currentCalendarRows(token);
+  2708:       const index=existing.findIndex(row=>String(row["일정ID"]||"")===String(payload.id||""));
+  2709:       if(index<0) return {ok:false,reason:"수정할 일정이 데이터처리시트 41_학교캘린더에 없습니다."};
+--- hit line 2695 ---
+  2687:     else await appendSheetValues(token,UEP_SPREADSHEET_ID,"'44_공지확인현황'!A:Q",[row]);
+  2688:     liveDataCache=null;liveDataFetchedAt=0;return {ok:true,recordId,confirmed,submitted,read,dismissed,detailViewed};
+  2689:   } catch(error){return {ok:false,reason:error?.message||"공지 확인상태 저장 실패"};}
+  2690: });
+  2691: ipcMain.handle("calendar:syncSchool", async () => ({
+  2692:     ok:false,
+  2693:     reason:"학교일정은 데이터처리시트 41_학교캘린더의 직접 이관값만 사용합니다. 자동 가져오기와 IMPORTRANGE는 비활성화되었습니다."
+  2694:   }));
+  2695:   ipcMain.handle("calendar:savePersonal", async (_event, payload={}) => {
+  2696:     try {
+  2697:       const credentials=await readEncrypted(credentialPath()); const token=await getSheetsToken(credentials); await ensureCalendarSchema(token); const existing=await currentCalendarRows(token);
+  2698:       const id=`PER-${crypto.randomUUID()}`; const date=String(payload.date||""); const now=new Date().toISOString();
+  2699:       const row={"일정ID":id,"학년도":date.slice(0,4),"시작일":date,"종료일":date,"시작시각":String(payload.start||""),"종료시각":String(payload.end||""),"종일":payload.start?"N":"Y","일정명":String(payload.title||""),"상세내용":String(payload.note||""),"일정구분":"개인 일정","대상":String(payload.target||""),"장소":String(payload.place||""),"부서":String(payload.department||""),"담당자":String(payload.manager||""),"상태":String(payload.status||"확정"),"검증상태":"정상","출처":"UEP 개인입력","원본일정ID":"","이관방식":"직접기록","수정일시":now,"비고":String(payload.note||"")};
+  2700:       await replaceCalendarRows(token,[...existing.map(calendarObjectToRow),calendarObjectToRow(row)]);
+  2701:       liveDataCache=null;liveDataFetchedAt=0; return {ok:true,id};
+  2702:     } catch(error){return {ok:false,reason:error?.message||"개인 일정 저장 실패"};}
+  2703:   });
+  2704: 
+  2705:   ipcMain.handle("calendar:update", async (_event, payload={}) => {
+  2706:     try {
+  2707:       const credentials=await readEncrypted(credentialPath()); const token=await getSheetsToken(credentials); await ensureCalendarSchema(token); const existing=await currentCalendarRows(token);
+  2708:       const index=existing.findIndex(row=>String(row["일정ID"]||"")===String(payload.id||""));
+  2709:       if(index<0) return {ok:false,reason:"수정할 일정이 데이터처리시트 41_학교캘린더에 없습니다."};
+  2710:       const current=existing[index],now=new Date().toISOString(),date=String(payload.date||current["시작일"]||"");
+  2711:       existing[index]={...current,"학년도":date.slice(0,4),"시작일":date,"종료일":current["종료일"]||date,"시작시각":String(payload.start||""),"종료시각":String(payload.end||""),"종일":payload.start?"N":"Y","일정명":String(payload.title||""),"상세내용":String(payload.note||""),"대상":String(payload.target||""),"장소":String(payload.place||""),"부서":String(payload.department||""),"담당자":String(payload.manager||""),"상태":String(payload.status||"확정"),"검증상태":"정상","수정일시":now,"비고":String(payload.note||"")};
+  2712:       await replaceCalendarRows(token,existing.map(calendarObjectToRow));
+  2713:       liveDataCache=null;liveDataFetchedAt=0; return {ok:true,id:payload.id,modifiedAt:now};
+--- hit line 2705 ---
+  2697:       const credentials=await readEncrypted(credentialPath()); const token=await getSheetsToken(credentials); await ensureCalendarSchema(token); const existing=await currentCalendarRows(token);
+  2698:       const id=`PER-${crypto.randomUUID()}`; const date=String(payload.date||""); const now=new Date().toISOString();
+  2699:       const row={"일정ID":id,"학년도":date.slice(0,4),"시작일":date,"종료일":date,"시작시각":String(payload.start||""),"종료시각":String(payload.end||""),"종일":payload.start?"N":"Y","일정명":String(payload.title||""),"상세내용":String(payload.note||""),"일정구분":"개인 일정","대상":String(payload.target||""),"장소":String(payload.place||""),"부서":String(payload.department||""),"담당자":String(payload.manager||""),"상태":String(payload.status||"확정"),"검증상태":"정상","출처":"UEP 개인입력","원본일정ID":"","이관방식":"직접기록","수정일시":now,"비고":String(payload.note||"")};
+  2700:       await replaceCalendarRows(token,[...existing.map(calendarObjectToRow),calendarObjectToRow(row)]);
+  2701:       liveDataCache=null;liveDataFetchedAt=0; return {ok:true,id};
+  2702:     } catch(error){return {ok:false,reason:error?.message||"개인 일정 저장 실패"};}
+  2703:   });
+  2704: 
+  2705:   ipcMain.handle("calendar:update", async (_event, payload={}) => {
+  2706:     try {
+  2707:       const credentials=await readEncrypted(credentialPath()); const token=await getSheetsToken(credentials); await ensureCalendarSchema(token); const existing=await currentCalendarRows(token);
+  2708:       const index=existing.findIndex(row=>String(row["일정ID"]||"")===String(payload.id||""));
+  2709:       if(index<0) return {ok:false,reason:"수정할 일정이 데이터처리시트 41_학교캘린더에 없습니다."};
+  2710:       const current=existing[index],now=new Date().toISOString(),date=String(payload.date||current["시작일"]||"");
+  2711:       existing[index]={...current,"학년도":date.slice(0,4),"시작일":date,"종료일":current["종료일"]||date,"시작시각":String(payload.start||""),"종료시각":String(payload.end||""),"종일":payload.start?"N":"Y","일정명":String(payload.title||""),"상세내용":String(payload.note||""),"대상":String(payload.target||""),"장소":String(payload.place||""),"부서":String(payload.department||""),"담당자":String(payload.manager||""),"상태":String(payload.status||"확정"),"검증상태":"정상","수정일시":now,"비고":String(payload.note||"")};
+  2712:       await replaceCalendarRows(token,existing.map(calendarObjectToRow));
+  2713:       liveDataCache=null;liveDataFetchedAt=0; return {ok:true,id:payload.id,modifiedAt:now};
+  2714:     } catch(error){return {ok:false,reason:error?.message||"일정 수정 실패"};}
+  2715:   });
+  2716:   ipcMain.handle("neis:saveApiKey", async (_event, key) => {
+  2717:     try {
+  2718:       const value=String(key||"").trim();
+  2719:       if(!value) return {ok:false,reason:"인증키가 비어 있습니다."};
+  2720:       await saveEncrypted(neisApiKeyPath(), {key:value});
+  2721:       return {ok:true};
+  2722:     } catch(error){ return {ok:false,reason:error?.message||"인증키 저장 실패"}; }
+  2723:   });
+--- hit line 2716 ---
+  2708:       const index=existing.findIndex(row=>String(row["일정ID"]||"")===String(payload.id||""));
+  2709:       if(index<0) return {ok:false,reason:"수정할 일정이 데이터처리시트 41_학교캘린더에 없습니다."};
+  2710:       const current=existing[index],now=new Date().toISOString(),date=String(payload.date||current["시작일"]||"");
+  2711:       existing[index]={...current,"학년도":date.slice(0,4),"시작일":date,"종료일":current["종료일"]||date,"시작시각":String(payload.start||""),"종료시각":String(payload.end||""),"종일":payload.start?"N":"Y","일정명":String(payload.title||""),"상세내용":String(payload.note||""),"대상":String(payload.target||""),"장소":String(payload.place||""),"부서":String(payload.department||""),"담당자":String(payload.manager||""),"상태":String(payload.status||"확정"),"검증상태":"정상","수정일시":now,"비고":String(payload.note||"")};
+  2712:       await replaceCalendarRows(token,existing.map(calendarObjectToRow));
+  2713:       liveDataCache=null;liveDataFetchedAt=0; return {ok:true,id:payload.id,modifiedAt:now};
+  2714:     } catch(error){return {ok:false,reason:error?.message||"일정 수정 실패"};}
+  2715:   });
+  2716:   ipcMain.handle("neis:saveApiKey", async (_event, key) => {
+  2717:     try {
+  2718:       const value=String(key||"").trim();
+  2719:       if(!value) return {ok:false,reason:"인증키가 비어 있습니다."};
+  2720:       await saveEncrypted(neisApiKeyPath(), {key:value});
+  2721:       return {ok:true};
+  2722:     } catch(error){ return {ok:false,reason:error?.message||"인증키 저장 실패"}; }
+  2723:   });
+  2724:   ipcMain.handle("neis:apiKeyStatus", async () => {
+  2725:     try { const saved=await readEncrypted(neisApiKeyPath()); return {ok:Boolean(saved?.key),encryption:safeStorage.isEncryptionAvailable()}; }
+  2726:     catch { return {ok:false,encryption:safeStorage.isEncryptionAvailable()}; }
+  2727:   });
+  2728:   ipcMain.handle("neis:loadDashboard", async (_event, options) => {
+  2729:     try { return await fetchNeisDashboard(options || {}); }
+  2730:     catch (error) { return { ok: false, reason: error.message || "나이스 급식·시간표를 불러오지 못했습니다." }; }
+  2731:   });
+  2732:   ipcMain.handle("comcigan:test", async (_event, options) => {
+  2733:     try { return await fetchComciganTimetable(options || {}); }
+  2734:     catch (error) { return {ok:false,reason:error?.message||"컴시간 웹 시간표를 불러오지 못했습니다."}; }
+--- hit line 2724 ---
+  2716:   ipcMain.handle("neis:saveApiKey", async (_event, key) => {
+  2717:     try {
+  2718:       const value=String(key||"").trim();
+  2719:       if(!value) return {ok:false,reason:"인증키가 비어 있습니다."};
+  2720:       await saveEncrypted(neisApiKeyPath(), {key:value});
+  2721:       return {ok:true};
+  2722:     } catch(error){ return {ok:false,reason:error?.message||"인증키 저장 실패"}; }
+  2723:   });
+  2724:   ipcMain.handle("neis:apiKeyStatus", async () => {
+  2725:     try { const saved=await readEncrypted(neisApiKeyPath()); return {ok:Boolean(saved?.key),encryption:safeStorage.isEncryptionAvailable()}; }
+  2726:     catch { return {ok:false,encryption:safeStorage.isEncryptionAvailable()}; }
+  2727:   });
+  2728:   ipcMain.handle("neis:loadDashboard", async (_event, options) => {
+  2729:     try { return await fetchNeisDashboard(options || {}); }
+  2730:     catch (error) { return { ok: false, reason: error.message || "나이스 급식·시간표를 불러오지 못했습니다." }; }
+  2731:   });
+  2732:   ipcMain.handle("comcigan:test", async (_event, options) => {
+  2733:     try { return await fetchComciganTimetable(options || {}); }
+  2734:     catch (error) { return {ok:false,reason:error?.message||"컴시간 웹 시간표를 불러오지 못했습니다."}; }
+  2735:   });
+  2736:   ipcMain.handle("app:applyUpdate", async (_event, payload = {}) => {
+  2737:     try {
+  2738:       if (process.platform !== "win32") return {ok:false,reason:"현재 자동 업데이트는 Windows 배포판에서만 지원합니다."};
+  2739:       const downloadUrl=String(payload.downloadUrl||"").trim();
+  2740:       const expectedSha256=String(payload.sha256||"").trim().toLowerCase();
+  2741:       const version=String(payload.version||"").trim();
+  2742:       if(!/^https:\/\//i.test(downloadUrl)) return {ok:false,reason:"HTTPS 업데이트 파일 주소가 필요합니다."};
+--- hit line 2728 ---
+  2720:       await saveEncrypted(neisApiKeyPath(), {key:value});
+  2721:       return {ok:true};
+  2722:     } catch(error){ return {ok:false,reason:error?.message||"인증키 저장 실패"}; }
+  2723:   });
+  2724:   ipcMain.handle("neis:apiKeyStatus", async () => {
+  2725:     try { const saved=await readEncrypted(neisApiKeyPath()); return {ok:Boolean(saved?.key),encryption:safeStorage.isEncryptionAvailable()}; }
+  2726:     catch { return {ok:false,encryption:safeStorage.isEncryptionAvailable()}; }
+  2727:   });
+  2728:   ipcMain.handle("neis:loadDashboard", async (_event, options) => {
+  2729:     try { return await fetchNeisDashboard(options || {}); }
+  2730:     catch (error) { return { ok: false, reason: error.message || "나이스 급식·시간표를 불러오지 못했습니다." }; }
+  2731:   });
+  2732:   ipcMain.handle("comcigan:test", async (_event, options) => {
+  2733:     try { return await fetchComciganTimetable(options || {}); }
+  2734:     catch (error) { return {ok:false,reason:error?.message||"컴시간 웹 시간표를 불러오지 못했습니다."}; }
+  2735:   });
+  2736:   ipcMain.handle("app:applyUpdate", async (_event, payload = {}) => {
+  2737:     try {
+  2738:       if (process.platform !== "win32") return {ok:false,reason:"현재 자동 업데이트는 Windows 배포판에서만 지원합니다."};
+  2739:       const downloadUrl=String(payload.downloadUrl||"").trim();
+  2740:       const expectedSha256=String(payload.sha256||"").trim().toLowerCase();
+  2741:       const version=String(payload.version||"").trim();
+  2742:       if(!/^https:\/\//i.test(downloadUrl)) return {ok:false,reason:"HTTPS 업데이트 파일 주소가 필요합니다."};
+  2743:       if(!/^\d+\.\d+\.\d+/.test(version)) return {ok:false,reason:"업데이트 버전 정보가 올바르지 않습니다."};
+  2744:       if(!/^[a-f0-9]{64}$/.test(expectedSha256)) return {ok:false,reason:"안전한 자동 업데이트를 위해 SHA-256 값이 필요합니다."};
+  2745:       const updateRoot=path.join(stableUserDataRoot(),"updates",version);
+  2746:       const zipPath=path.join(updateRoot,`UEP-${version}.zip`);
+--- hit line 2732 ---
+  2724:   ipcMain.handle("neis:apiKeyStatus", async () => {
+  2725:     try { const saved=await readEncrypted(neisApiKeyPath()); return {ok:Boolean(saved?.key),encryption:safeStorage.isEncryptionAvailable()}; }
+  2726:     catch { return {ok:false,encryption:safeStorage.isEncryptionAvailable()}; }
+  2727:   });
+  2728:   ipcMain.handle("neis:loadDashboard", async (_event, options) => {
+  2729:     try { return await fetchNeisDashboard(options || {}); }
+  2730:     catch (error) { return { ok: false, reason: error.message || "나이스 급식·시간표를 불러오지 못했습니다." }; }
+  2731:   });
+  2732:   ipcMain.handle("comcigan:test", async (_event, options) => {
+  2733:     try { return await fetchComciganTimetable(options || {}); }
+  2734:     catch (error) { return {ok:false,reason:error?.message||"컴시간 웹 시간표를 불러오지 못했습니다."}; }
+  2735:   });
+  2736:   ipcMain.handle("app:applyUpdate", async (_event, payload = {}) => {
+  2737:     try {
+  2738:       if (process.platform !== "win32") return {ok:false,reason:"현재 자동 업데이트는 Windows 배포판에서만 지원합니다."};
+  2739:       const downloadUrl=String(payload.downloadUrl||"").trim();
+  2740:       const expectedSha256=String(payload.sha256||"").trim().toLowerCase();
+  2741:       const version=String(payload.version||"").trim();
+  2742:       if(!/^https:\/\//i.test(downloadUrl)) return {ok:false,reason:"HTTPS 업데이트 파일 주소가 필요합니다."};
+  2743:       if(!/^\d+\.\d+\.\d+/.test(version)) return {ok:false,reason:"업데이트 버전 정보가 올바르지 않습니다."};
+  2744:       if(!/^[a-f0-9]{64}$/.test(expectedSha256)) return {ok:false,reason:"안전한 자동 업데이트를 위해 SHA-256 값이 필요합니다."};
+  2745:       const updateRoot=path.join(stableUserDataRoot(),"updates",version);
+  2746:       const zipPath=path.join(updateRoot,`UEP-${version}.zip`);
+  2747:       const stagePath=path.join(updateRoot,"stage");
+  2748:       await fs.rm(updateRoot,{recursive:true,force:true}); await fs.mkdir(updateRoot,{recursive:true});
+  2749:       // Download the release asset from Electron's main process.
+  2750:       // Node global fetch was unreliable on some school Windows networks ("fetch failed"),
+--- hit line 2736 ---
+  2728:   ipcMain.handle("neis:loadDashboard", async (_event, options) => {
+  2729:     try { return await fetchNeisDashboard(options || {}); }
+  2730:     catch (error) { return { ok: false, reason: error.message || "나이스 급식·시간표를 불러오지 못했습니다." }; }
+  2731:   });
+  2732:   ipcMain.handle("comcigan:test", async (_event, options) => {
+  2733:     try { return await fetchComciganTimetable(options || {}); }
+  2734:     catch (error) { return {ok:false,reason:error?.message||"컴시간 웹 시간표를 불러오지 못했습니다."}; }
+  2735:   });
+  2736:   ipcMain.handle("app:applyUpdate", async (_event, payload = {}) => {
+  2737:     try {
+  2738:       if (process.platform !== "win32") return {ok:false,reason:"현재 자동 업데이트는 Windows 배포판에서만 지원합니다."};
+  2739:       const downloadUrl=String(payload.downloadUrl||"").trim();
+  2740:       const expectedSha256=String(payload.sha256||"").trim().toLowerCase();
+  2741:       const version=String(payload.version||"").trim();
+  2742:       if(!/^https:\/\//i.test(downloadUrl)) return {ok:false,reason:"HTTPS 업데이트 파일 주소가 필요합니다."};
+  2743:       if(!/^\d+\.\d+\.\d+/.test(version)) return {ok:false,reason:"업데이트 버전 정보가 올바르지 않습니다."};
+  2744:       if(!/^[a-f0-9]{64}$/.test(expectedSha256)) return {ok:false,reason:"안전한 자동 업데이트를 위해 SHA-256 값이 필요합니다."};
+  2745:       const updateRoot=path.join(stableUserDataRoot(),"updates",version);
+  2746:       const zipPath=path.join(updateRoot,`UEP-${version}.zip`);
+  2747:       const stagePath=path.join(updateRoot,"stage");
+  2748:       await fs.rm(updateRoot,{recursive:true,force:true}); await fs.mkdir(updateRoot,{recursive:true});
+  2749:       // Download the release asset from Electron's main process.
+  2750:       // Node global fetch was unreliable on some school Windows networks ("fetch failed"),
+  2751:       // while Electron net.fetch uses Chromium's network stack and follows GitHub redirects.
+  2752:       let response;
+  2753:       try {
+  2754:         response=await net.fetch(downloadUrl,{
+--- hit line 2813 ---
+  2805:         try { BrowserWindow.getAllWindows().forEach(win=>{try{win.destroy();}catch{}}); } catch {}
+  2806:         try { beginCleanShutdown("update-apply"); } catch {}
+  2807:         try { app.quit(); } catch { try { app.exit(0); } catch {} }
+  2808:       },300);
+  2809:       return {ok:true,installing:true,version};
+  2810:     } catch(error){return {ok:false,reason:error?.message||"업데이트 적용 준비 중 오류가 발생했습니다."};}
+  2811:   });
+  2812: 
+  2813:   ipcMain.handle("app:checkUpdate", async (_event, payload = {}) => {
+  2814:     try {
+  2815:       const rawUrl=String(payload.url||"").trim();
+  2816:       if (!/^https:\/\//i.test(rawUrl)) return { ok:false, reason:"HTTPS 업데이트 정보 주소가 필요합니다." };
+  2817: 
+  2818:       // Always resolve the freshest manifest we can find. During school-wide use,
+  2819:       // raw.githubusercontent.com / CDN caches can be stale or rate-limited, so:
+  2820:       //   1) derive GitHub Contents API + raw + jsDelivr candidates,
+  2821:       //   2) cache-bust non-API candidates,
+  2822:       //   3) read every reachable candidate and choose the HIGHEST semantic version.
+  2823:       const stamp=Date.now();
+  2824:       const candidates=[];
+  2825:       const push=(url,kind)=>{if(url && !candidates.some(x=>x.url===url))candidates.push({url,kind});};
+  2826:       let canonical=rawUrl;
+  2827:       try {
+  2828:         const u=new URL(rawUrl);
+  2829:         u.search=""; u.hash="";
+  2830:         canonical=u.toString();
+  2831:         if(u.hostname.toLowerCase()==="raw.githubusercontent.com"){
+--- hit line 2896 ---
+  2888:         sha256:String(data.sha256||data.sha256sum||"").trim().toLowerCase(),
+  2889:         notes:String(data.notes||data.releaseNotes||""),
+  2890:         source:chosen.source,
+  2891:         checkedVersions:successes.map(x=>`${x.source}:${x.version}`)
+  2892:       };
+  2893:     } catch(error){return {ok:false,reason:error?.message||"업데이트 확인 중 오류가 발생했습니다."};}
+  2894:   });
+  2895: 
+  2896:   ipcMain.handle("ai:status", async () => ({
+  2897:     configured:Boolean(process.env.UEP_AI_ENDPOINT && process.env.UEP_AI_API_KEY),
+  2898:     endpoint:process.env.UEP_AI_ENDPOINT?"configured":"",
+  2899:     model:process.env.UEP_AI_MODEL||""
+  2900:   }));
+  2901:   ipcMain.handle("ai:generateRecord", async (_event, payload={}) => {
+  2902:     const endpoint=process.env.UEP_AI_ENDPOINT;
+  2903:     const apiKey=process.env.UEP_AI_API_KEY;
+  2904:     const model=process.env.UEP_AI_MODEL;
+  2905:     if(!endpoint||!apiKey)return {ok:false,code:"NOT_CONFIGURED",message:"AI 중계 API가 설정되지 않았습니다."};
+  2906:     const prompt=[
+  2907:       "당신은 대한민국 고등학교 생활기록부 작성 지원 도구입니다.",
+  2908:       "학생 자기평가를 그대로 복사하지 말고 교사 관찰형 문장으로 작성하십시오.",
+  2909:       "각 활동은 반드시 프로그램명(운영기간)에 참여하여 형식으로 시작하십시오.",
+  2910:       "선택한 모든 근거를 빠뜨리지 말고 중복을 제거해 통합하십시오.",
+  2911:       "금지표현과 과장된 평가를 피하고 입력된 글자 수를 넘지 마십시오.",
+  2912:       payload.areaLabel||"", payload.rules||"", JSON.stringify(payload.evidence||[])
+  2913:     ].join("\n");
+  2914:     try{
+--- hit line 2901 ---
+  2893:     } catch(error){return {ok:false,reason:error?.message||"업데이트 확인 중 오류가 발생했습니다."};}
+  2894:   });
+  2895: 
+  2896:   ipcMain.handle("ai:status", async () => ({
+  2897:     configured:Boolean(process.env.UEP_AI_ENDPOINT && process.env.UEP_AI_API_KEY),
+  2898:     endpoint:process.env.UEP_AI_ENDPOINT?"configured":"",
+  2899:     model:process.env.UEP_AI_MODEL||""
+  2900:   }));
+  2901:   ipcMain.handle("ai:generateRecord", async (_event, payload={}) => {
+  2902:     const endpoint=process.env.UEP_AI_ENDPOINT;
+  2903:     const apiKey=process.env.UEP_AI_API_KEY;
+  2904:     const model=process.env.UEP_AI_MODEL;
+  2905:     if(!endpoint||!apiKey)return {ok:false,code:"NOT_CONFIGURED",message:"AI 중계 API가 설정되지 않았습니다."};
+  2906:     const prompt=[
+  2907:       "당신은 대한민국 고등학교 생활기록부 작성 지원 도구입니다.",
+  2908:       "학생 자기평가를 그대로 복사하지 말고 교사 관찰형 문장으로 작성하십시오.",
+  2909:       "각 활동은 반드시 프로그램명(운영기간)에 참여하여 형식으로 시작하십시오.",
+  2910:       "선택한 모든 근거를 빠뜨리지 말고 중복을 제거해 통합하십시오.",
+  2911:       "금지표현과 과장된 평가를 피하고 입력된 글자 수를 넘지 마십시오.",
+  2912:       payload.areaLabel||"", payload.rules||"", JSON.stringify(payload.evidence||[])
+  2913:     ].join("\n");
+  2914:     try{
+  2915:       const response=await fetch(endpoint,{
+  2916:         method:"POST",
+  2917:         headers:{"content-type":"application/json","authorization":`Bearer ${apiKey}`},
+  2918:         body:JSON.stringify({model,input:prompt,max_output_chars:Number(payload.limit||500)})
+  2919:       });
+--- hit line 2927 ---
+  2919:       });
+  2920:       const body=await response.json().catch(()=>({}));
+  2921:       if(!response.ok)return {ok:false,code:"API_ERROR",message:body?.error?.message||`AI 요청 실패 (${response.status})`};
+  2922:       const text=body.output_text||body.text||body.result||body?.choices?.[0]?.message?.content||"";
+  2923:       return {ok:Boolean(text),text:String(text||""),raw:body};
+  2924:     }catch(error){return {ok:false,code:"NETWORK_ERROR",message:String(error?.message||error)};}
+  2925:   });
+  2926: 
+  2927:   ipcMain.handle("neis:clearCache", async () => {
+  2928:     try { await fs.unlink(neisCachePath()); } catch {}
+  2929:     return { ok: true };
+  2930:   });
+  2931:   ipcMain.handle("window:minimize", (event) => BrowserWindow.fromWebContents(event.sender)?.minimize());
+  2932:   ipcMain.handle("window:maximize", (event) => {
+  2933:     const win = BrowserWindow.fromWebContents(event.sender); if (!win) return;
+  2934:     win.isMaximized() ? win.unmaximize() : win.maximize();
+  2935:   });
+  2936:   ipcMain.handle("window:close", (event) => BrowserWindow.fromWebContents(event.sender)?.close());
+  2937:   ipcMain.handle("window:alwaysOnTop", (event, value) => BrowserWindow.fromWebContents(event.sender)?.setAlwaysOnTop(Boolean(value)));
+  2938:   ipcMain.handle("window:compact", (event) => {
+  2939:     const win = BrowserWindow.fromWebContents(event.sender); if (!win) return;
+  2940:     const compact = win.getSize()[0] < 700;
+  2941:     compact ? win.setSize(1500, 960, true) : win.setSize(460, 760, true);
+  2942:   });
+  2943:   ipcMain.handle("external:openChrome", async (_event, rawUrl) => {
+  2944:     try {
+  2945:       const url = new URL(rawUrl);
+--- hit line 2931 ---
+  2923:       return {ok:Boolean(text),text:String(text||""),raw:body};
+  2924:     }catch(error){return {ok:false,code:"NETWORK_ERROR",message:String(error?.message||error)};}
+  2925:   });
+  2926: 
+  2927:   ipcMain.handle("neis:clearCache", async () => {
+  2928:     try { await fs.unlink(neisCachePath()); } catch {}
+  2929:     return { ok: true };
+  2930:   });
+  2931:   ipcMain.handle("window:minimize", (event) => BrowserWindow.fromWebContents(event.sender)?.minimize());
+  2932:   ipcMain.handle("window:maximize", (event) => {
+  2933:     const win = BrowserWindow.fromWebContents(event.sender); if (!win) return;
+  2934:     win.isMaximized() ? win.unmaximize() : win.maximize();
+  2935:   });
+  2936:   ipcMain.handle("window:close", (event) => BrowserWindow.fromWebContents(event.sender)?.close());
+  2937:   ipcMain.handle("window:alwaysOnTop", (event, value) => BrowserWindow.fromWebContents(event.sender)?.setAlwaysOnTop(Boolean(value)));
+  2938:   ipcMain.handle("window:compact", (event) => {
+  2939:     const win = BrowserWindow.fromWebContents(event.sender); if (!win) return;
+  2940:     const compact = win.getSize()[0] < 700;
+  2941:     compact ? win.setSize(1500, 960, true) : win.setSize(460, 760, true);
+  2942:   });
+  2943:   ipcMain.handle("external:openChrome", async (_event, rawUrl) => {
+  2944:     try {
+  2945:       const url = new URL(rawUrl);
+  2946:       if (url.protocol !== "https:") return { ok: false, reason: "HTTPS 주소만 열 수 있습니다." };
+  2947:       const candidates = [
+  2948:         path.join(process.env.PROGRAMFILES || "", "Google", "Chrome", "Application", "chrome.exe"),
+  2949:         path.join(process.env["PROGRAMFILES(X86)"] || "", "Google", "Chrome", "Application", "chrome.exe"),
+--- hit line 2932 ---
+  2924:     }catch(error){return {ok:false,code:"NETWORK_ERROR",message:String(error?.message||error)};}
+  2925:   });
+  2926: 
+  2927:   ipcMain.handle("neis:clearCache", async () => {
+  2928:     try { await fs.unlink(neisCachePath()); } catch {}
+  2929:     return { ok: true };
+  2930:   });
+  2931:   ipcMain.handle("window:minimize", (event) => BrowserWindow.fromWebContents(event.sender)?.minimize());
+  2932:   ipcMain.handle("window:maximize", (event) => {
+  2933:     const win = BrowserWindow.fromWebContents(event.sender); if (!win) return;
+  2934:     win.isMaximized() ? win.unmaximize() : win.maximize();
+  2935:   });
+  2936:   ipcMain.handle("window:close", (event) => BrowserWindow.fromWebContents(event.sender)?.close());
+  2937:   ipcMain.handle("window:alwaysOnTop", (event, value) => BrowserWindow.fromWebContents(event.sender)?.setAlwaysOnTop(Boolean(value)));
+  2938:   ipcMain.handle("window:compact", (event) => {
+  2939:     const win = BrowserWindow.fromWebContents(event.sender); if (!win) return;
+  2940:     const compact = win.getSize()[0] < 700;
+  2941:     compact ? win.setSize(1500, 960, true) : win.setSize(460, 760, true);
+  2942:   });
+  2943:   ipcMain.handle("external:openChrome", async (_event, rawUrl) => {
+  2944:     try {
+  2945:       const url = new URL(rawUrl);
+  2946:       if (url.protocol !== "https:") return { ok: false, reason: "HTTPS 주소만 열 수 있습니다." };
+  2947:       const candidates = [
+  2948:         path.join(process.env.PROGRAMFILES || "", "Google", "Chrome", "Application", "chrome.exe"),
+  2949:         path.join(process.env["PROGRAMFILES(X86)"] || "", "Google", "Chrome", "Application", "chrome.exe"),
+  2950:         path.join(process.env.LOCALAPPDATA || "", "Google", "Chrome", "Application", "chrome.exe"),
+--- hit line 2936 ---
+  2928:     try { await fs.unlink(neisCachePath()); } catch {}
+  2929:     return { ok: true };
+  2930:   });
+  2931:   ipcMain.handle("window:minimize", (event) => BrowserWindow.fromWebContents(event.sender)?.minimize());
+  2932:   ipcMain.handle("window:maximize", (event) => {
+  2933:     const win = BrowserWindow.fromWebContents(event.sender); if (!win) return;
+  2934:     win.isMaximized() ? win.unmaximize() : win.maximize();
+  2935:   });
+  2936:   ipcMain.handle("window:close", (event) => BrowserWindow.fromWebContents(event.sender)?.close());
+  2937:   ipcMain.handle("window:alwaysOnTop", (event, value) => BrowserWindow.fromWebContents(event.sender)?.setAlwaysOnTop(Boolean(value)));
+  2938:   ipcMain.handle("window:compact", (event) => {
+  2939:     const win = BrowserWindow.fromWebContents(event.sender); if (!win) return;
+  2940:     const compact = win.getSize()[0] < 700;
+  2941:     compact ? win.setSize(1500, 960, true) : win.setSize(460, 760, true);
+  2942:   });
+  2943:   ipcMain.handle("external:openChrome", async (_event, rawUrl) => {
+  2944:     try {
+  2945:       const url = new URL(rawUrl);
+  2946:       if (url.protocol !== "https:") return { ok: false, reason: "HTTPS 주소만 열 수 있습니다." };
+  2947:       const candidates = [
+  2948:         path.join(process.env.PROGRAMFILES || "", "Google", "Chrome", "Application", "chrome.exe"),
+  2949:         path.join(process.env["PROGRAMFILES(X86)"] || "", "Google", "Chrome", "Application", "chrome.exe"),
+  2950:         path.join(process.env.LOCALAPPDATA || "", "Google", "Chrome", "Application", "chrome.exe"),
+  2951:       ];
+  2952:       let chromePath = null;
+  2953:       for (const candidate of candidates) {
+  2954:         if (!candidate || candidate.startsWith("Google")) continue;
+--- hit line 2937 ---
+  2929:     return { ok: true };
+  2930:   });
+  2931:   ipcMain.handle("window:minimize", (event) => BrowserWindow.fromWebContents(event.sender)?.minimize());
+  2932:   ipcMain.handle("window:maximize", (event) => {
+  2933:     const win = BrowserWindow.fromWebContents(event.sender); if (!win) return;
+  2934:     win.isMaximized() ? win.unmaximize() : win.maximize();
+  2935:   });
+  2936:   ipcMain.handle("window:close", (event) => BrowserWindow.fromWebContents(event.sender)?.close());
+  2937:   ipcMain.handle("window:alwaysOnTop", (event, value) => BrowserWindow.fromWebContents(event.sender)?.setAlwaysOnTop(Boolean(value)));
+  2938:   ipcMain.handle("window:compact", (event) => {
+  2939:     const win = BrowserWindow.fromWebContents(event.sender); if (!win) return;
+  2940:     const compact = win.getSize()[0] < 700;
+  2941:     compact ? win.setSize(1500, 960, true) : win.setSize(460, 760, true);
+  2942:   });
+  2943:   ipcMain.handle("external:openChrome", async (_event, rawUrl) => {
+  2944:     try {
+  2945:       const url = new URL(rawUrl);
+  2946:       if (url.protocol !== "https:") return { ok: false, reason: "HTTPS 주소만 열 수 있습니다." };
+  2947:       const candidates = [
+  2948:         path.join(process.env.PROGRAMFILES || "", "Google", "Chrome", "Application", "chrome.exe"),
+  2949:         path.join(process.env["PROGRAMFILES(X86)"] || "", "Google", "Chrome", "Application", "chrome.exe"),
+  2950:         path.join(process.env.LOCALAPPDATA || "", "Google", "Chrome", "Application", "chrome.exe"),
+  2951:       ];
+  2952:       let chromePath = null;
+  2953:       for (const candidate of candidates) {
+  2954:         if (!candidate || candidate.startsWith("Google")) continue;
+  2955:         try { await fs.access(candidate); chromePath = candidate; break; } catch {}
+--- hit line 2938 ---
+  2930:   });
+  2931:   ipcMain.handle("window:minimize", (event) => BrowserWindow.fromWebContents(event.sender)?.minimize());
+  2932:   ipcMain.handle("window:maximize", (event) => {
+  2933:     const win = BrowserWindow.fromWebContents(event.sender); if (!win) return;
+  2934:     win.isMaximized() ? win.unmaximize() : win.maximize();
+  2935:   });
+  2936:   ipcMain.handle("window:close", (event) => BrowserWindow.fromWebContents(event.sender)?.close());
+  2937:   ipcMain.handle("window:alwaysOnTop", (event, value) => BrowserWindow.fromWebContents(event.sender)?.setAlwaysOnTop(Boolean(value)));
+  2938:   ipcMain.handle("window:compact", (event) => {
+  2939:     const win = BrowserWindow.fromWebContents(event.sender); if (!win) return;
+  2940:     const compact = win.getSize()[0] < 700;
+  2941:     compact ? win.setSize(1500, 960, true) : win.setSize(460, 760, true);
+  2942:   });
+  2943:   ipcMain.handle("external:openChrome", async (_event, rawUrl) => {
+  2944:     try {
+  2945:       const url = new URL(rawUrl);
+  2946:       if (url.protocol !== "https:") return { ok: false, reason: "HTTPS 주소만 열 수 있습니다." };
+  2947:       const candidates = [
+  2948:         path.join(process.env.PROGRAMFILES || "", "Google", "Chrome", "Application", "chrome.exe"),
+  2949:         path.join(process.env["PROGRAMFILES(X86)"] || "", "Google", "Chrome", "Application", "chrome.exe"),
+  2950:         path.join(process.env.LOCALAPPDATA || "", "Google", "Chrome", "Application", "chrome.exe"),
+  2951:       ];
+  2952:       let chromePath = null;
+  2953:       for (const candidate of candidates) {
+  2954:         if (!candidate || candidate.startsWith("Google")) continue;
+  2955:         try { await fs.access(candidate); chromePath = candidate; break; } catch {}
+  2956:       }
+--- hit line 2943 ---
+  2935:   });
+  2936:   ipcMain.handle("window:close", (event) => BrowserWindow.fromWebContents(event.sender)?.close());
+  2937:   ipcMain.handle("window:alwaysOnTop", (event, value) => BrowserWindow.fromWebContents(event.sender)?.setAlwaysOnTop(Boolean(value)));
+  2938:   ipcMain.handle("window:compact", (event) => {
+  2939:     const win = BrowserWindow.fromWebContents(event.sender); if (!win) return;
+  2940:     const compact = win.getSize()[0] < 700;
+  2941:     compact ? win.setSize(1500, 960, true) : win.setSize(460, 760, true);
+  2942:   });
+  2943:   ipcMain.handle("external:openChrome", async (_event, rawUrl) => {
+  2944:     try {
+  2945:       const url = new URL(rawUrl);
+  2946:       if (url.protocol !== "https:") return { ok: false, reason: "HTTPS 주소만 열 수 있습니다." };
+  2947:       const candidates = [
+  2948:         path.join(process.env.PROGRAMFILES || "", "Google", "Chrome", "Application", "chrome.exe"),
+  2949:         path.join(process.env["PROGRAMFILES(X86)"] || "", "Google", "Chrome", "Application", "chrome.exe"),
+  2950:         path.join(process.env.LOCALAPPDATA || "", "Google", "Chrome", "Application", "chrome.exe"),
+  2951:       ];
+  2952:       let chromePath = null;
+  2953:       for (const candidate of candidates) {
+  2954:         if (!candidate || candidate.startsWith("Google")) continue;
+  2955:         try { await fs.access(candidate); chromePath = candidate; break; } catch {}
+  2956:       }
+  2957:       if (!chromePath) return { ok: false, reason: "Google Chrome 설치 경로를 찾지 못했습니다." };
+  2958:       const child = spawn(chromePath, ["--new-window", url.toString()], { detached: true, stdio: "ignore" });
+  2959:       child.unref();
+  2960:       return { ok: true, browser: "chrome" };
+  2961:     } catch { return { ok: false, reason: "주소 형식 오류" }; }
+--- hit line 2963 ---
+  2955:         try { await fs.access(candidate); chromePath = candidate; break; } catch {}
+  2956:       }
+  2957:       if (!chromePath) return { ok: false, reason: "Google Chrome 설치 경로를 찾지 못했습니다." };
+  2958:       const child = spawn(chromePath, ["--new-window", url.toString()], { detached: true, stdio: "ignore" });
+  2959:       child.unref();
+  2960:       return { ok: true, browser: "chrome" };
+  2961:     } catch { return { ok: false, reason: "주소 형식 오류" }; }
+  2962:   });
+  2963:   ipcMain.handle("external:selectExecutable", async (event) => {
+  2964:     const result = await dialog.showOpenDialog(BrowserWindow.fromWebContents(event.sender), {
+  2965:       title: "충북소통메신저 실행 파일 선택", properties: ["openFile"],
+  2966:       filters: [{ name: "Windows 실행 파일", extensions: ["exe"] }],
+  2967:     });
+  2968:     if (result.canceled || !result.filePaths[0]) return { ok: false };
+  2969:     return { ok: true, path: result.filePaths[0] };
+  2970:   });
+  2971:   ipcMain.handle("external:launchExecutable", async (_event, filePath) => {
+  2972:     try {
+  2973:       const resolved = path.resolve(String(filePath || ""));
+  2974:       if (path.extname(resolved).toLowerCase() !== ".exe") return { ok: false, reason: "Windows 실행 파일(.exe)만 열 수 있습니다." };
+  2975:       await fs.access(resolved);
+  2976:       const child = spawn(resolved, [], { detached: true, stdio: "ignore" }); child.unref();
+  2977:       return { ok: true };
+  2978:     } catch (error) { return { ok: false, reason: error.message || "실행 파일을 열지 못했습니다." }; }
+  2979:   });
+  2980:   createWindow();
+  2981:   app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0 && !shutdownStarted) createWindow(); });
+--- hit line 2971 ---
+  2963:   ipcMain.handle("external:selectExecutable", async (event) => {
+  2964:     const result = await dialog.showOpenDialog(BrowserWindow.fromWebContents(event.sender), {
+  2965:       title: "충북소통메신저 실행 파일 선택", properties: ["openFile"],
+  2966:       filters: [{ name: "Windows 실행 파일", extensions: ["exe"] }],
+  2967:     });
+  2968:     if (result.canceled || !result.filePaths[0]) return { ok: false };
+  2969:     return { ok: true, path: result.filePaths[0] };
+  2970:   });
+  2971:   ipcMain.handle("external:launchExecutable", async (_event, filePath) => {
+  2972:     try {
+  2973:       const resolved = path.resolve(String(filePath || ""));
+  2974:       if (path.extname(resolved).toLowerCase() !== ".exe") return { ok: false, reason: "Windows 실행 파일(.exe)만 열 수 있습니다." };
+  2975:       await fs.access(resolved);
+  2976:       const child = spawn(resolved, [], { detached: true, stdio: "ignore" }); child.unref();
+  2977:       return { ok: true };
+  2978:     } catch (error) { return { ok: false, reason: error.message || "실행 파일을 열지 못했습니다." }; }
+  2979:   });
+  2980:   createWindow();
+  2981:   app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0 && !shutdownStarted) createWindow(); });
+  2982: });
+  2983: app.on("before-quit", () => {
+  2984:   destroyAuxiliaryWindows("before-quit");
+  2985: });
+  2986: app.on("window-all-closed", () => {
+  2987:   if (process.platform !== "darwin") {
+  2988:     destroyAuxiliaryWindows("window-all-closed");
+  2989:     app.quit();
+--- hit line 3023 ---
+  3015: app.whenReady().then(() => setTimeout(repairUepShortcutIcons08064, 1200));
+  3016: 
+  3017: 
+  3018: 
+  3019: 
+  3020: 
+  3021: // __UEP_NEIS_RECORDBOOK_LOCAL_INSPECT_08102__
+  3022: // Read-only local inspection. No Google/Sheets/state write is called from this handler.
+  3023: ipcMain.handle("recordbook:inspectNeisExcel", async (event) => {
+  3024:   const owner=BrowserWindow.fromWebContents(event.sender);
+  3025:   const picked=await dialog.showOpenDialog(owner,{title:"나이스 교과 세특 엑셀 선택",properties:["openFile"],filters:[{name:"나이스 엑셀·CSV",extensions:["xlsx","xls","csv"]}]});
+  3026:   if(picked.canceled||!picked.filePaths[0])return {ok:false,canceled:true};
+  3027:   const filePath=picked.filePaths[0],ext=path.extname(filePath).toLowerCase();
+  3028:   try{
+  3029:     if(ext===".csv"){
+  3030:       const raw=await fs.readFile(filePath,"utf8");
+  3031:       const rows=[];let row=[],cell="",quoted=false;
+  3032:       for(let i=0;i<raw.length;i++){const ch=raw[i];if(ch==='"'&&quoted&&raw[i+1]==='"'){cell+='"';i++;continue;}if(ch==='"'){quoted=!quoted;continue;}if(ch===","&&!quoted){row.push(cell);cell="";continue;}if((ch==="\n"||ch==="\r")&&!quoted){if(ch==="\r"&&raw[i+1]==="\n")i++;row.push(cell);if(row.some(v=>String(v).trim()))rows.push(row);row=[];cell="";continue;}cell+=ch;}
+  3033:       row.push(cell);if(row.some(v=>String(v).trim()))rows.push(row);
+  3034:       return {ok:true,localOnly:true,fileName:path.basename(filePath),sheets:[{name:"CSV",rows}]};
+  3035:     }
+  3036:     const ps=String.raw`
+  3037: $ErrorActionPreference='Stop'
+  3038: [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);$OutputEncoding=[Console]::OutputEncoding
+  3039: $excel=$null;$books=$null;$book=$null;$result=@()
+  3040: try{
+  3041:   $excel=New-Object -ComObject Excel.Application;$excel.Visible=$false;$excel.DisplayAlerts=$false
+===== app/resources/app/electron/preload.cjs =====
+--- hit line 22 ---
+    14:   schoolReadLogin: (payload) => ipcRenderer.invoke("uep:schoolReadLogin", payload),
+    15:   schoolReadSessionStatus: (payload) => ipcRenderer.invoke("uep:schoolReadSessionStatus", payload||{}),
+    16:   schoolReadLogout: () => ipcRenderer.invoke("uep:schoolReadLogout"),
+    17:   googleCredentialStatus: () => ipcRenderer.invoke("google:credentialStatus"),
+    18:   authorizeGoogleUser: (payload) => ipcRenderer.invoke("google:authorizeUser", payload || {}),
+    19:   disconnectGoogleUser: () => ipcRenderer.invoke("google:disconnectUser"),
+    20:   selectGoogleCredential: () => ipcRenderer.invoke("google:selectCredential"),
+    21:   previewReadonlySync: () => ipcRenderer.invoke("google:previewReadonlySync"),
+    22:   previewOperationalSync: () => ipcRenderer.invoke("google:previewOperationalSync"),
+    23:   readReadonlyCache: () => ipcRenderer.invoke("google:readReadonlyCache"),
+    24:   syncSchoolCalendar: (payload) => ipcRenderer.invoke("calendar:syncSchool", typeof payload==="string"?{date:payload}:payload||{}),
+    25:   savePersonalCalendar: (payload) => ipcRenderer.invoke("calendar:savePersonal", payload),
+    26:   saveNotice: (payload) => ipcRenderer.invoke("notice:save", payload),
+    27:   deleteNotice: (id) => ipcRenderer.invoke("notice:delete", id),
+    28:   saveNoticeReceipt: (payload) => ipcRenderer.invoke("notice:receiptSave", payload),
+    29:   saveSharedSecurityConfig: (payload) => ipcRenderer.invoke("securityConfig:save", payload),
+    30:   readSharedSecurityConfig: () => ipcRenderer.invoke("securityConfig:readShared"),
+    31:   resetSharedSecurityConfig: (payload) => ipcRenderer.invoke("securityConfig:reset", payload),
+    32:   getAutoStart: () => ipcRenderer.invoke("system:autoStartGet"),
+    33:   setAutoStart: (enabled) => ipcRenderer.invoke("system:autoStartSet", Boolean(enabled)),
+    34:   updateUserAccount: (payload) => ipcRenderer.invoke("userAccount:update", payload),
+    35:   saveStudentContact: (payload) => ipcRenderer.invoke("student:contactSave", payload),
+    36:   saveProgramOperation: (payload) => ipcRenderer.invoke("program:operationSave", payload),
+    37:   saveOfficialAttendance: (payload) => ipcRenderer.invoke("attendance:officialSave", payload),
+    38:   deleteOfficialAttendance: (id) => ipcRenderer.invoke("attendance:officialDelete", id),
+    39:   saveLateAttendance: (payload) => ipcRenderer.invoke("attendance:lateSave", payload),
+    40:   deleteLateAttendance: (id) => ipcRenderer.invoke("attendance:lateDelete", id),
