@@ -1,0 +1,51 @@
+   1561:   return {ok:true,repaired:true,count:rows.length,unmatchedStudents};
+   1562: }
+   1563: 
+   1564: const UEP_OPERATIONAL_RANGE_NAMES=Object.freeze(['30_공식출결기록','31_지각기록','40_공지마감','44_공지확인현황','42_급식지도계획','43_야자감독계획']);
+   1565: async function fetchOperationalData({credentials=null}={}){
+   1566:   if(!liveDataCache)return {ok:false,requiresFullSync:true,reason:'전체 캐시가 아직 준비되지 않았습니다.'};
+   1567:   const auth=await getReadonlySheetsAuth(credentials),token=auth.token;
+   1568:   const operationalEntries=UEP_OPERATIONAL_RANGE_NAMES.map(name=>[name,SHEET_RANGES[name]]);
+   1569:   const [result,nightResult]=await Promise.all([
+   1570:     readSheetBatch(token,UEP_SPREADSHEET_ID,operationalEntries.map(([,range])=>range)),
+   1571:     // 0.82.70: 실행 중 추가·사후보정되는 야자출결을 운영 동기화에서 함께 갱신합니다.
+   1572:     // 열린 범위는 실제 사용행만 반환하므로 고정 대용량 행 범위를 만들지 않습니다.
+   1573:     readSheetBatch(token,UEP_PROCESSING_SPREADSHEET_ID,["'30_야자출결_정규화'!A:U"])
+   1574:   ]);
+   1575:   const matrices={};assignValueRangesByRange(matrices,operationalEntries,result);
+   1576:   matrices['30_야자출결_정규화']=nightResult?.[0]?.values||[];
+   1577:   const partial=parseGoogleSheetData(matrices);
+   1578:   const patch={officialAttendance:partial.officialAttendance||[],lateAttendance:partial.lateAttendance||[],notices:partial.notices||[],noticeReceipts:partial.noticeReceipts||[],lunchDuties:partial.lunchDuties||[],nightSupervisors:partial.nightSupervisors||[],nightAttendance:partial.nightAttendance||[]};
+   1579:   const operationalSyncedAt=new Date().toISOString();liveDataCache={...liveDataCache,...patch,operationalSyncedAt};liveDataFetchedAt=Date.now();
+   1580:   return {ok:true,operationalSyncedAt,syncedAt:operationalSyncedAt,patch};
+   1581: }
+   1582: 
+   1583: async function fetchLiveData({ force = false, credentials = null } = {}) {
+   1584:   if (!force && liveDataCache && Date.now() - liveDataFetchedAt < 120000) return liveDataCache;
+   1585:   // 0.81.40: 관리자 로컬 서비스계정과 담임 School Read API 세션을 동일 읽기 파이프라인으로 연결합니다.
+   1586:   const auth = await getReadonlySheetsAuth(credentials);
+   1587:   const token = auth.token;
+   1588:   const entries = [
+   1589:     ...Object.entries(SHEET_RANGES),
+   1590:     ["52_대입기초", "'52_대입기초'!A1:N500"],
+   1591:     ["53_전형이해", "'53_전형이해'!A1:N500"],
+   1592:     ["53A_전형세부유형DB", "'53A_전형세부유형DB'!A1:R500"],
+   1593:     ["53B_전형유형별대학DB", "'53B_전형유형별대학DB'!A1:T3000"],
+   1594:     ["56_대학입시마스터", "'56_대학입시마스터'!A1:R500"],
+   1595:     ["56A_대학상담포인트DB", "'56A_대학상담포인트DB'!A1:P1200"],
+   1596:     ["57_내신산정DB", "'57_내신산정DB'!A1:Y1200"],
+   1597:     ["58_권장과목DB", "'58_권장과목DB'!A1:P2000"],
+   1598:     ["18_학교교육과정DB", "'18_학교교육과정DB'!A1:N1000"],
+   1599:     ["54_수능최저DB", "'54_수능최저DB'!A1:U2000"],
+   1600:     ["55_대학입결DB", "'55_대학입결DB'!A1:K5000"],
+   1601:   ];
+   1602:   const matrices = {};
+   1603:   // 기본정보 연결시트를 가장 먼저, 작은 묶음으로 읽습니다.
+   1604:   // 탭 추가로 URL이 길어지거나 특정 탭이 잠시 실패해도 전체 연결이 끊기지 않도록 합니다.
+   1605:   const chunkSize = 12;
+   1606:   const chunks = [];
+   1607:   for (let offset = 0; offset < entries.length; offset += chunkSize) {
+   1608:     chunks.push({ offset, chunk: entries.slice(offset, offset + chunkSize) });
+   1609:   }
+   1610:   await mapWithConcurrency(chunks, 1, async ({ offset, chunk }) => {
+   1611:     try {
