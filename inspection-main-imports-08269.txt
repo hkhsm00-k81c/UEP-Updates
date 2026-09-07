@@ -1,0 +1,141 @@
+      1: const { app, BrowserWindow, ipcMain, dialog, safeStorage, shell, net } = require("electron");
+      2: app.setName("UNHO Education Platform");
+      3: const { spawn } = require("child_process");
+      4: const crypto = require("crypto");
+      5: const http = require("http");
+      6: const os = require("os");
+      7: const path = require("path");
+      8: const fs = require("fs/promises");
+      9: const {
+     10:   UEP_SPREADSHEET_ID,
+     11:   UEP_SPREADSHEET_NAME,
+     12:   UEP_SPREADSHEET_URL,
+     13:   SHEET_RANGES,
+     14:   RULE_SHEET_RANGES,
+     15:   UEP_PROCESSING_SPREADSHEET_ID,
+     16:   UEP_INPUT_CENTER_SPREADSHEET_ID,
+     17:   UEP_RULES_SPREADSHEET_ID,
+     18:   parseGoogleSheetData,
+     19: } = require("./google-data.cjs");
+     20: const UEP_ADMISSIONS_SPREADSHEET_ID = "1BHSdaUbOhp9p_9RB0XGgrfOo4wS_Z8Up0ocSCAMYIIk";
+     21: const UEP_ADMISSIONS_FALLBACK_SPREADSHEET_ID = "1bphoIQ11E2qsc3ksOqrXuO7xqS4CFyH8Dagbld7A1hg";
+     22: 
+     23: // UEP의 사용자 데이터와 Electron safeStorage 키 저장소를 같은 고정 위치에 둡니다.
+     24: // safeStorage 암호문만 다른 폴더로 복사하면 Chromium OS encryption key(Local State)와 분리되어
+     25: // Windows 재부팅/버전 교체 뒤 decryptString이 실패할 수 있으므로 userData 자체를 앱 시작 전에 고정합니다.
+     26: const originalUserDataRoot = app.getPath("userData");
+     27: const fixedUserDataRoot = path.join(process.env.APPDATA || app.getPath("appData"), "UNHO Education Platform");
+     28: try {
+     29:   if (path.resolve(originalUserDataRoot) !== path.resolve(fixedUserDataRoot)) app.setPath("userData", fixedUserDataRoot);
+     30: } catch {}
+     31: const stableUserDataRoot = () => app.getPath("userData");
+     32: const legacyUserDataRoot = () => originalUserDataRoot;
+     33: const statePath = () => path.join(stableUserDataRoot(), "school-board-state.json");
+     34: // UEP_08197_QUICK_LAUNCH_PERSISTENCE: executable paths live outside the replaceable app folder.
+     35: const quickLaunchPath = () => path.join(stableUserDataRoot(), "quick-launch-settings.json");
+     36: const credentialPath = () => path.join(stableUserDataRoot(), "google-service-account.bin");
+     37: const credentialRecoveryPath = () => path.join(stableUserDataRoot(), "google-service-account.recovery.json");
+     38: const googleUserOAuthPath = () => path.join(stableUserDataRoot(), "google-user-oauth.bin");
+     39: const googleUserOAuthRecoveryPath = () => path.join(stableUserDataRoot(), "google-user-oauth.recovery.json");
+     40: // __UEP_GOOGLE_OAUTH_CANONICAL_08073__
+     41: const googleUserOAuthCanonicalRoot = () => path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'UNHO Education Platform');
+     42: const googleUserOAuthCanonicalPath = () => path.join(googleUserOAuthCanonicalRoot(), 'google-user-oauth.bin');
+     43: const googleUserOAuthCanonicalRecoveryPath = () => path.join(googleUserOAuthCanonicalRoot(), 'google-user-oauth.recovery.json');
+     44: const neisApiKeyPath = () => path.join(stableUserDataRoot(), "neis-api-key.bin");
+     45: const schoolReadDevicePath = () => path.join(stableUserDataRoot(), "uep-device-id.txt");
+     46: const schoolReadSessionPath = () => path.join(stableUserDataRoot(), "uep-school-read-session.bin");
+     47: const neisCachePath = () => path.join(stableUserDataRoot(), "neis-dashboard-cache.json");
+     48: 
+     49: const comciganCachePath = () => path.join(stableUserDataRoot(), "comcigan-timetable-cache.json");
+     50: async function migrateStableUserFile(fileName) {
+     51:   const target=path.join(stableUserDataRoot(),fileName), legacy=path.join(legacyUserDataRoot(),fileName);
+     52:   try { await fs.access(target); return; } catch {}
+     53:   try { await fs.mkdir(stableUserDataRoot(),{recursive:true}); await fs.copyFile(legacy,target); } catch {}
+     54: }
+     55: async function migrateStableUserData() {
+     56:   // Local State에는 Windows safeStorage가 사용하는 Chromium OS encryption key 정보가 들어 있습니다.
+     57:   // 기존 버전의 userData에서 최초 1회 같이 옮겨야 기존 암호문을 복호화할 가능성이 유지됩니다.
+     58:   for (const fileName of ["Local State","school-board-state.json","quick-launch-settings.json","google-service-account.bin","google-service-account.recovery.json","google-user-oauth.bin","google-user-oauth.recovery.json","neis-api-key.bin","neis-dashboard-cache.json","comcigan-timetable-cache.json"]) await migrateStableUserFile(fileName);
+     59: }
+     60: let comciganWindow = null;
+     61: let mainWindow = null;
+     62: let shutdownStarted = false;
+     63: 
+     64: async function appendShutdownLog(message) {
+     65:   try {
+     66:     const file = path.join(stableUserDataRoot(), "shutdown-diagnostics.log");
+     67:     await fs.mkdir(stableUserDataRoot(), { recursive: true });
+     68:     await fs.appendFile(file, `${new Date().toISOString()} ${message}\n`, "utf8");
+     69:   } catch {}
+     70: }
+     71: function destroyAuxiliaryWindows(reason="shutdown") {
+     72:   try { appendShutdownLog(`destroy-aux:${reason}:comcigan=${Boolean(comciganWindow && !comciganWindow.isDestroyed())}`); } catch {}
+     73:   try {
+     74:     if (comciganWindow && !comciganWindow.isDestroyed()) comciganWindow.destroy();
+     75:   } catch {}
+     76:   comciganWindow = null;
+     77: }
+     78: function beginCleanShutdown(reason="user-close") {
+     79:   if (shutdownStarted) return;
+     80:   shutdownStarted = true;
+     81:   try { appendShutdownLog(`shutdown-start:${reason}:pid=${process.pid}:windows=${BrowserWindow.getAllWindows().length}`); } catch {}
+     82:   destroyAuxiliaryWindows(reason);
+     83:   // Give Electron a short grace period to release renderer/GPU resources. If the
+     84:   // normal quit sequence stalls, force only THIS Electron process to exit.
+     85:   setTimeout(() => {
+     86:     try { appendShutdownLog(`shutdown-force-exit:${reason}:windows=${BrowserWindow.getAllWindows().length}`); } catch {}
+     87:     try { app.exit(0); } catch {}
+     88:   }, 1500).unref?.();
+     89: }
+     90: 
+     91: function compactDateKey(date) {
+     92:   return `${date.getFullYear()}${String(date.getMonth()+1).padStart(2,"0")}${String(date.getDate()).padStart(2,"0")}`;
+     93: }
+     94: function parseComciganPeriodStart(label="") {
+     95:   const text=String(label||"");
+     96:   let m=text.match(/(\d{2})-(\d{2})-(\d{2})\s*[~～-]/);
+     97:   if(m) return new Date(2000+Number(m[1]),Number(m[2])-1,Number(m[3]),12,0,0);
+     98:   m=text.match(/(?:\(|^)(\d{1,2})\/(\d{1,2})\s*[~～-]/);
+     99:   if(m){const now=new Date();return new Date(now.getFullYear(),Number(m[1])-1,Number(m[2]),12,0,0);}
+    100:   return null;
+    101: }
+    102: function selectComciganPeriod(periods,targetDate){
+    103:   const target=new Date(`${targetDate}T12:00:00`);
+    104:   const list=Array.isArray(periods)?periods:[];
+    105:   for(const row of list){
+    106:     const id=Array.isArray(row)?Number(row[0]):Number(row?.id||row?.period||0);
+    107:     const label=Array.isArray(row)?row[1]:row?.label||row?.name||"";
+    108:     const start=parseComciganPeriodStart(label);
+    109:     if(!start||!id) continue;
+    110:     const end=new Date(start); end.setDate(end.getDate()+6);
+    111:     if(target>=start&&target<=end) return id;
+    112:   }
+    113:   return Number(Array.isArray(list[0])?list[0][0]:list[0]?.id||1)||1;
+    114: }
+    115: async function ensureComciganWindow(schoolCode){
+    116:   if(comciganWindow && !comciganWindow.isDestroyed()) return comciganWindow;
+    117:   comciganWindow=new BrowserWindow({show:false,width:1280,height:900,webPreferences:{contextIsolation:true,sandbox:true}});
+    118:   comciganWindow.on("closed",()=>{comciganWindow=null;});
+    119:   await comciganWindow.loadURL(`https://timetable.s2h9.dev/?sc=${encodeURIComponent(schoolCode)}`);
+    120:   await new Promise(resolve=>setTimeout(resolve,1800));
+    121:   return comciganWindow;
+    122: }
+    123: async function fetchComciganRaw(schoolCode,period=1){
+    124:   const win=await ensureComciganWindow(schoolCode);
+    125:   const script=`(async()=>{
+    126:   const el=document.getElementById('__next_data__');
+    127:   let token=''; try{token=JSON.parse(el?.textContent||'{}').csrfToken||'';}catch{}
+    128:   if(!token) throw new Error('컴시간 CSRF 토큰을 찾지 못했습니다.');
+    129:   const url='/api/getalltimetable?schoolCode=${String(schoolCode).replace(/[^0-9]/g,'')}&period=${Number(period)||1}&format=json';
+    130:   const r=await fetch(url,{credentials:'include',headers:{'Content-Type':'application/json','x-csrf-token':token}});
+    131:   if(!r.ok) throw new Error('컴시간 HTTP '+r.status);
+    132:   return await r.json();
+    133: })()`;
+    134:   return await win.webContents.executeJavaScript(script,true);
+    135: }
+    136: function normalizeComciganTimetable(raw,targetDate,grade,classNo){
+    137:   const g=String(Number(grade)||1), c=String(Number(classNo)||1);
+    138:   const timetable=raw?.timetable||{};
+    139:   const gradeData=timetable[g]||timetable[Number(g)]||{};
+    140:   const schedule=gradeData[c]||gradeData[Number(c)]||[];
+    141:   const periods=Array.isArray(raw?.periods)?raw.periods:[];
