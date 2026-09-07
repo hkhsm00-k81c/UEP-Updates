@@ -1,0 +1,30 @@
+name: Validate UEP 0.82.64 Night Program Dedupe
+on: {push: {paths: ['validate-08264.trigger']}}
+permissions: {contents: write}
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: |
+          $ErrorActionPreference='Stop'
+          function Run-Native([scriptblock]$c,[string]$l){&$c;if($LASTEXITCODE -ne 0){throw "$l failed: $LASTEXITCODE"}}
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          Run-Native {gh release download v0.82.63 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source} 'download'
+          Expand-Archive source/UEP-update.zip app -Force
+          $root='app/resources/app'
+          Run-Native {node scripts/patch-uep-08264-night-program-dedupe.js $root} '0.82.64 patch'
+          Run-Native {node --check "$root/gyomuon.js"} 'renderer syntax'
+          Run-Native {node --check "$root/electron/google-data.cjs"} 'google-data syntax'
+          Run-Native {node --check "$root/electron/main.cjs"} 'main syntax'
+          Run-Native {node scripts/test-uep-08264-night-program-dedupe.js $root} 'regression test'
+          @(
+            'UEP 0.82.64 NIGHT PROGRAM DEDUPE VALIDATION: PASS',
+            ('validated_at=' + (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')),
+            'base=v0.82.63',
+            'checks=patch,renderer syntax,google-data syntax,main syntax,canonical-dedupe regressions',
+            'cases=afterschool duplicate,night-intensive duplicate,parallel groups,historical fallback,separate dates'
+          ) | Set-Content validate-08264-result.txt -Encoding utf8
+          Run-Native {git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add validate-08264-result.txt;git commit -m 'Validate UEP 0.82.64 night program dedupe';git push} 'validation result push'
