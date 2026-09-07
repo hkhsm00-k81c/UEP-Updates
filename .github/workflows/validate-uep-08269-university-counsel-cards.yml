@@ -1,0 +1,29 @@
+name: Validate UEP 0.82.69 University Counseling Cards
+on:
+  push:
+    paths:
+      - 'validate-08269-university.trigger'
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          $ErrorActionPreference='Stop'
+          function Run-Native([scriptblock]$c,[string]$l){&$c;if($LASTEXITCODE -ne 0){throw "$l failed: $LASTEXITCODE"}}
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          Run-Native {gh release download v0.82.68 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source} 'download 0.82.68'
+          Expand-Archive source/UEP-update.zip app -Force
+          Run-Native {node scripts/patch-uep-08269-university-counsel-cards-v2.js app/resources/app} 'apply patch'
+          Run-Native {node --check app/resources/app/gyomuon.js} 'syntax gyomuon.js'
+          Run-Native {node --check app/resources/app/electron/google-data.cjs} 'syntax google-data.cjs'
+          Run-Native {node --check app/resources/app/electron/main.cjs} 'syntax main.cjs'
+          Run-Native {node scripts/test-uep-08269-university-counsel-cards.js app/resources/app} 'university regression'
+          $pkg=Get-Content app/resources/app/package.json -Raw | ConvertFrom-Json
+          if([string]$pkg.version -ne '0.82.69'){throw "package version mismatch: $($pkg.version)"}
+          Write-Host 'VALIDATION_OK UEP 0.82.69'
