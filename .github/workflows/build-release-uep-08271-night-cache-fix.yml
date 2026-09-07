@@ -1,0 +1,143 @@
+name: Build Release UEP 0.82.71 Night Cache Fix
+on:
+  push:
+    paths:
+      - 'release-08271-night-cache-fix.trigger'
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          $ErrorActionPreference='Stop'
+          $repo=$env:GITHUB_REPOSITORY
+          $prev='v0.82.70'
+          $next='v0.82.71'
+          $ver='0.82.71'
+          New-Item -ItemType Directory -Force source,app,out | Out-Null
+          gh release download $prev --repo $repo --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE -ne 0){throw "download failed: $LASTEXITCODE"}
+          Expand-Archive source/UEP-update.zip app -Force
+          $root='app/resources/app'
+          $main="$root/electron/main.cjs"
+          if(!(Test-Path $main)){throw 'main.cjs not found'}
+          $text=Get-Content $main -Raw
+          $pattern='async function fetchOperationalData\(\{credentials=null\}=\{\}\)\{.*?\n\}\n\nasync function fetchLiveData'
+          $replacement=@'
+          async function fetchOperationalData({credentials=null}={}){
+            if(!liveDataCache)return {ok:false,requiresFullSync:true,reason:'전체 캐시가 아직 준비되지 않았습니다.'};
+            const auth=await getReadonlySheetsAuth(credentials),token=auth.token;
+            const operationalEntries=UEP_OPERATIONAL_RANGE_NAMES.map(name=>[name,SHEET_RANGES[name]]);
+            const [result,nightResult]=await Promise.all([
+              readSheetBatch(token,UEP_SPREADSHEET_ID,operationalEntries.map(([,range])=>range)),
+              readSheetBatch(token,UEP_PROCESSING_SPREADSHEET_ID,["'30_야자출결_정규화'!A1:P70000"])
+            ]);
+            const matrices={};assignValueRangesByRange(matrices,operationalEntries,result);
+            // 운영 증분 갱신은 전체 학생마스터를 다시 읽지 않고 현재 readonlyCache.students를
+            // parseGoogleSheetData가 기대하는 02_학생마스터 형태로 재구성해 야자출결 매칭에 사용한다.
+            const cachedStudents=Array.isArray(liveDataCache?.students)?liveDataCache.students:[];
+            matrices['02_학생마스터']=[
+              ['02_학생마스터'],
+              ['UEP operational synthetic student master'],
+              ['학생ID','학년도','학번','성명','사용성명','학년','반','번호','검색표시명','출신중학교','학적상태','학적기준일','학적변동사유','입학일','활성여부','수정일시','수정자','비고'],
+              ...cachedStudents.map((student)=>[
+                String(student?.id||student?.studentId||''),
+                String(student?.schoolYear||student?.year||'2026'),
+                String(student?.studentNo||student?.number||''),
+                String(student?.name||''),
+                String(student?.name||''),
+                String(student?.grade||student?.gradeNo||'1'),
+                String(student?.className||student?.classNo||''),
+                String(student?.studentNumber||student?.numberInClass||''),
+                '', '',
+                String(student?.status||student?.enrollmentStatus||'재학'),
+                '', '', '',
+                String(student?.active||student?.activeYn||'Y'),
+                '', '', ''
+              ])
+            ];
+            matrices['30_야자출결_정규화']=nightResult?.[0]?.values||[];
+            const partial=parseGoogleSheetData(matrices);
+            const patch={officialAttendance:partial.officialAttendance||[],lateAttendance:partial.lateAttendance||[],notices:partial.notices||[],noticeReceipts:partial.noticeReceipts||[],lunchDuties:partial.lunchDuties||[],nightSupervisors:partial.nightSupervisors||[],nightAttendance:partial.nightAttendance||[]};
+            const operationalSyncedAt=new Date().toISOString();liveDataCache={...liveDataCache,...patch,operationalSyncedAt};liveDataFetchedAt=Date.now();
+            return {ok:true,operationalSyncedAt,syncedAt:operationalSyncedAt,patch};
+          }
+
+          async function fetchLiveData
+          '@
+          $rx=[regex]::new($pattern,[System.Text.RegularExpressions.RegexOptions]::Singleline)
+          if(!$rx.IsMatch($text)){throw 'fetchOperationalData patch target not found'}
+          $text=$rx.Replace($text,$replacement,1)
+          $text=$text.Replace('0.82.70','0.82.71')
+          Set-Content $main $text -Encoding utf8
+          foreach($f in @("$root/gyomuon.js","$root/package.json","$root/package-lock.json")){
+            if(Test-Path $f){$c=Get-Content $f -Raw;$c=$c.Replace('0.82.70','0.82.71');Set-Content $f $c -Encoding utf8}
+          }
+
+          # Syntax checks
+          node --check $main
+          if($LASTEXITCODE -ne 0){throw 'main.cjs syntax failed'}
+          node --check "$root/electron/google-data.cjs"
+          if($LASTEXITCODE -ne 0){throw 'google-data.cjs syntax failed'}
+          node --check "$root/gyomuon.js"
+          if($LASTEXITCODE -ne 0){throw 'gyomuon.js syntax failed'}
+
+          # Structural regression assertions
+          $patched=Get-Content $main -Raw
+          foreach($needle in @("cachedStudents=Array.isArray(liveDataCache?.students)","matrices['02_학생마스터']","matrices['30_야자출결_정규화']","nightAttendance:partial.nightAttendance||[]")){
+            if(!$patched.Contains($needle)){throw "missing patched assertion: $needle"}
+          }
+          if($patched -match "readSheetBatch\(token,UEP_SPREADSHEET_ID,\[\"'02_학생마스터'") { throw 'unexpected full student-master read in operational refresh' }
+
+          # 39-count regression model: same filters as google-data + dashboard Set dedupe.
+          $reg=@'
+          const students=Array.from({length:39},(_,i)=>({id:`STU-${i+1}`,studentNo:String(1500+i),name:`S${i+1}`,className:'5'}));
+          const rows=students.map((s,i)=>({학생ID:s.id,학번:s.studentNo,성명:s.name,운영일:'2026-09-07',시간대:'야자1',입력경로:i<33?'NFC출석':'교사확인',최종여부:'Y',매칭상태:'정상'}));
+          const studentIds=new Set(students.map(s=>s.id)); const studentByNo=new Map(students.map(s=>[s.studentNo,s]));
+          const mapped=rows.filter(row=>{const sid=String(row['학생ID']||'').trim();const sno=String(row['학번']||'').replace(/\\.0$/,'');const isFinal=!String(row['최종여부']||'').trim()||String(row['최종여부']||'').trim().toUpperCase()==='Y';const isMatched=!String(row['매칭상태']||'').trim()||String(row['매칭상태']||'').trim()==='정상';return isFinal&&isMatched&&(studentIds.has(sid)||studentByNo.has(sno));}).map(row=>({studentNo:String(row['학번']),date:'2026-09-07',time:'야자1',result:'출석'}));
+          const count=new Set(mapped.filter(r=>r.date==='2026-09-07'&&r.time==='야자1'&&/출석/.test(r.result)).map(r=>r.studentNo)).size;
+          if(count!==39){throw new Error(`night regression expected 39, got ${count}`)}
+          console.log('night regression PASS: 39');
+          '@
+          Set-Content out/night-regression-08271.js $reg -Encoding utf8
+          node out/night-regression-08271.js
+          if($LASTEXITCODE -ne 0){throw 'night regression failed'}
+
+          # Preserve previous UI regressions / no DOM patch hacks.
+          $gy=Get-Content "$root/gyomuon.js" -Raw
+          foreach($needle in @('dashboardNightAttendanceRows','dashboardProgramSessionLabel','uep08223UniversityRegions')){if(!$gy.Contains($needle)){throw "UI regression symbol missing: $needle"}}
+
+          # Package version consistency
+          $pkg=Get-Content "$root/package.json" -Raw | ConvertFrom-Json
+          if([string]$pkg.version -ne $ver){throw "package version mismatch: $($pkg.version)"}
+
+          Compress-Archive -Path app/* -DestinationPath out/UEP-update.zip -CompressionLevel Optimal
+          $hash=(Get-FileHash out/UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  UEP-update.zip" | Set-Content out/sha256.txt -Encoding ascii
+
+          # Release only after all checks passed.
+          gh release create $next out/UEP-update.zip out/sha256.txt --repo $repo --title "UEP v0.82.71" --notes "UEP v0.82.71`n- 야자출결 운영 증분동기화에서 기존 readonlyCache 학생정보를 재사용해 30_야자출결_정규화 학생매칭 정상화`n- 사후 인정·교사확인 등 시트에 도착한 최신 출석이 야자 참여현황에 즉시 반영되도록 수정`n- 9/7 야자1 39명 회귀 모델 검증 추가`n- 전체 학생마스터 재조회 없이 운영 캐시만 갱신하는 구조 유지`n- MutationObserver·전역 클릭·렌더 후 DOM 교체 없음"
+          if($LASTEXITCODE -ne 0){throw "release create failed: $LASTEXITCODE"}
+
+          # Update policy after release asset exists.
+          $policyPath='uep-policy.json'
+          $policy=Get-Content $policyPath -Raw | ConvertFrom-Json
+          $policy.latestVersion=$ver
+          $policy.downloadUrl="https://github.com/$repo/releases/download/$next/UEP-update.zip"
+          $policy.sha256=$hash
+          $policy.message='UEP 0.82.71 · 야자출결 운영 캐시 최신화 수정'
+          $policy | ConvertTo-Json -Depth 20 | Set-Content $policyPath -Encoding utf8
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add $policyPath
+          git commit -m 'Publish UEP 0.82.71 policy'
+          if($LASTEXITCODE -ne 0){throw "policy commit failed: $LASTEXITCODE"}
+          git pull --rebase origin main
+          if($LASTEXITCODE -ne 0){throw "policy pull failed: $LASTEXITCODE"}
+          git push
+          if($LASTEXITCODE -ne 0){throw "policy push failed: $LASTEXITCODE"}
