@@ -1,0 +1,12 @@
+const fs=require('fs');
+const path=require('path');
+const root=process.argv[2]||'app/resources/app';
+const out=process.argv[3]||'inspection-08268-university-body.txt';
+const p=path.join(root,'gyomuon.js');
+const a=fs.readFileSync(p,'utf8').split(/\r?\n/);
+const hit=a.findIndex(x=>x.includes('function openDashboardUniversityDetail('));
+if(hit<0) throw new Error('function missing');
+let end=hit+1;while(end<a.length&&!a[end].includes('function ')&&end<hit+260)end++;
+const s=Math.max(0,hit),e=Math.min(a.length-1,end-1);
+fs.writeFileSync(out,a.slice(s,e+1).map((x,i)=>`${String(s+i+1).padStart(6,' ')} | ${x}`).join('\n'),'utf8');
+console.log(`wrote ${out} lines ${s+1}-${e+1}`);
