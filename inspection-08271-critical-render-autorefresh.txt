@@ -1,0 +1,149 @@
+function startReadonlyAutoRefresh(){
+  if(readonlyAutoRefreshTimer) clearInterval(readonlyAutoRefreshTimer);
+  if(!googleConnectionStatus?.ok) return;
+  readonlyAutoRefreshTimer=setInterval(()=>{
+    if(document.hidden) return;
+    readonlyAutoRefreshCycle+=1;
+    const fullSyncedAt=readonlyCache?.syncedAt?new Date(readonlyCache.syncedAt).getTime():0;
+    const fullAge=fullSyncedAt?Date.now()-fullSyncedAt:Number.POSITIVE_INFINITY;
+    const needsFull=!fullSyncedAt||fullAge>=READONLY_FULL_REFRESH_MAX_AGE_MS||readonlyAutoRefreshCycle%6===0;
+    if(needsFull){
+      const jitter=Math.floor(Math.random()*45000);
+      setTimeout(()=>{if(!document.hidden)refreshReadonlyCacheSilently({force:true,rerender:true});},jitter);
+      return;
+    }
+    refreshOperationalCacheSilently({rerender:true});
+  },READONLY_AUTO_REFRESH_MS);
+}
+
+function updateTopSyncStatus() {
+  const button = $("#syncButton");
+  if (!button) return;
+  button.classList.remove("good", "warn", "bad");
+  const label = button.querySelector("span");
+  if (googleConnectionError) {
+    button.classList.add("bad");
+    if (label) label.textContent = "구글시트 오류";
+    button.title = googleConnectionError;
+    return;
+  }
+  if (readonlyCache?.students?.length && neisData?.ok && !neisData.offline) {
+    button.classList.add("good");
+    if (label) label.textContent = "동기화 정상";
+    button.title = "UEP 구글시트와 NEIS 자료가 정상 연결되었습니다.";
+    return;
+  }
+  if (readonlyCache?.students?.length) {
+    button.classList.add("warn");
+    if (label) label.textContent = neisData?.offline ? "NEIS 저장자료" : "NEIS 연결 대기";
+    button.title = neisError || "UEP 구글시트는 연결되었고 NEIS 자료를 확인 중입니다.";
+    return;
+  }
+  if (googleConnectionStatus?.ok) {
+    button.classList.add("bad");
+    if (label) label.textContent = "시트 권한 확인";
+    button.title = googleConnectionError || "서비스 계정 이메일의 구글시트 공유 권한을 확인하세요.";
+    return;
+  }
+  button.classList.add("warn");
+  if (label) label.textContent = "인증 필요";
+  button.title = "교사 이름·이메일 로그인과 기기승인 상태를 확인하세요.";
+}
+
+async function loadNeisDashboard(force = false, requestedDate = "") {
+  if (!window.schoolBoard?.loadNeisDashboard) {
+    neisError = "이 실행환경에서는 NEIS 연결 기능을 사용할 수 없습니다.";
+    updateTopSyncStatus();
+    return;
+  }
+  if (neisLoading) return;
+  neisLoading = true;
+  if (state.activePage === "dashboard" || state.activePage === "timetable" || state.activePage === "settings") render(state.activePage);
+  const options = {
+    schoolName: state.settings.neis.schoolName,
+    officeCode: state.settings.neis.officeCode,
+    schoolCode: state.settings.neis.schoolCode,
+    grade: state.settings.neis.grade,
+    classNo: state.settings.neis.classNo,
+    date: requestedDate || dateKey(new Date()),
+    useApiKey: Boolean(state.settings.neis.useApiKey),
+    comciganSchoolCode: state.settings.neis.comciganSchoolCode || "69092",
+    force,
+  };
+  try {
+    const result = await window.schoolBoard.loadNeisDashboard(options);
+    if (!result?.ok) throw new Error(result?.reason || "NEIS 자료를 불러오지 못했습니다.");
+    neisData = result;
+    neisError = result.offline ? result.staleReason || "실시간 연결 실패로 마지막 저장자료를 표시합니다." : "";
+    if (result.school) {
+      state.settings.neis.schoolName = result.school.schoolName || state.settings.neis.schoolName;
+      state.settings.neis.officeCode = result.school.officeCode || state.settings.neis.officeCode;
+      state.settings.neis.schoolCode = result.school.schoolCode || state.settings.neis.schoolCode;
+      await save();
+    }
+  } catch (error) {
+    neisError = error?.message || String(error);
+    if (!neisData?.ok) neisData = null;
+  } finally {
+    neisLoading = false;
+    updateTopSyncStatus();
+    if (["dashboard", "timetable", "settings"].includes(state.activePage)) render(state.activePage);
+  }
+}
+
+function toggleDashboardEditing() {
+  state.settings.layoutLocked = !state.settings.layoutLocked;
+  save();
+  render("dashboard");
+  toast(state.settings.layoutLocked ? "대시보드 배치를 저장하고 잠갔습니다." : "위젯을 끌어서 순서를 바꾸고 크기를 조절하세요.");
+}
+
+function openWidgetManager() {
+  const labels = { timetable: "개인 시간표", programs: "오늘의 프로그램", weather: "시계·날씨", calendar: "학교 캘린더", operations: "오늘의 업무·공지" };
+  $("#drawerKicker").textContent = "DASHBOARD WIDGETS";
+  $("#drawerTitle").textContent = "대시보드 위젯 관리";
+  $("#drawerBody").innerHTML = `<div class="widget-manager-list">${(state.settings.dashboardOrder || []).map((key) => { const setting = state.settings.widgetSettings[key] || {}; return `<div><span><b>${labels[key] || key}</b><small>${setting.visible === false ? "숨김" : `표시 · ${setting.width || "auto"}`}</small></span><button data-widget-toggle="${key}">${setting.visible === false ? "추가" : "숨김"}</button><button data-widget-settings="${key}">설정</button></div>`; }).join("")}</div><p class="drawer-note">위젯 표시 여부·너비·글자 크기와 배치 순서는 이 PC에 저장됩니다.</p>`;
+  $("#drawer").classList.remove("hidden");
+  $("#drawerBackdrop").classList.remove("hidden");
+  $("#drawerBody").querySelectorAll("[data-widget-toggle]").forEach((button) => button.onclick = async () => {
+    const key = button.dataset.widgetToggle;
+    state.settings.widgetSettings[key] = { ...state.settings.widgetSettings[key], visible: state.settings.widgetSettings[key]?.visible === false };
+    await save();
+    openWidgetManager();
+    if (state.activePage === "dashboard") render("dashboard");
+  });
+  $("#drawerBody").querySelectorAll("[data-widget-settings]").forEach((button) => button.onclick = () => openWidgetSettings(button.dataset.widgetSettings));
+}
+
+function bindDashboardLayoutEditing() {
+  const grid = $(".dashboard-grid.schoolboard-layout");
+  if (!grid) return;
+  const cards = [...grid.querySelectorAll(".widget-configurable[data-widget]")];
+  if (state.settings.layoutLocked) return;
+  cards.forEach((card) => {
+    card.draggable = true;
+    if (!card.querySelector(".widget-edit-strip")) {
+      const strip = document.createElement("div");
+      strip.className = "widget-edit-strip";
+      strip.innerHTML = `<span>⋮⋮ 이동</span><button data-widget-width-cycle title="크기 변경">↔</button><button data-widget-hide title="숨기기">×</button>`;
+      card.appendChild(strip);
+      strip.querySelector("[data-widget-width-cycle]").onclick = async (event) => {
+        event.stopPropagation();
+        const key = card.dataset.widget;
+        const current = state.settings.widgetSettings[key]?.width || "auto";
+        const next = current === "auto" ? "wide" : current === "wide" ? "fixed" : "auto";
+        state.settings.widgetSettings[key] = { ...state.settings.widgetSettings[key], width: next };
+        await save();
+        render("dashboard");
+      };
+      strip.querySelector("[data-widget-hide]").onclick = async (event) => {
+        event.stopPropagation();
+        const key = card.dataset.widget;
+        state.settings.widgetSettings[key] = { ...state.settings.widgetSettings[key], visible: false };
+        await save();
+        render("dashboard");
+      };
+    }
+    card.ondragstart = (event) => {
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("t

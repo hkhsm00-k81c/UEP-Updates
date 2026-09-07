@@ -1,0 +1,88 @@
+function nightSlotName(rowOrText) {
+  const text = typeof rowOrText === "string" ? rowOrText : `${rowOrText?.time || ""} ${rowOrText?.type || ""} ${rowOrText?.detail || ""}`;
+  // 운호고 방과후 8교시는 오후자습 시간대이다.
+  if (/오후자습|1타임|8교시/.test(text)) return "오후자습";
+  if (/야자\s*1|야간\s*1|2타임/.test(text)) return "야자1";
+  if (/야자\s*2|야간\s*2|3타임/.test(text)) return "야자2";
+  return String(rowOrText?.time || rowOrText?.type || text || "기타").trim();
+}
+function minutesOfClock(value) {
+  const match = String(value || "").match(/(\d{1,2}):(\d{2})/);
+  return match ? Number(match[1]) * 60 + Number(match[2]) : null;
+}
+function slotRange(slot) {
+  return {"오후자습":[17*60,18*60],"야자1":[19*60+20,20*60+10],"야자2":[20*60+20,21*60+30]}[slot] || null;
+}
+function isWednesdayKey(value) {
+  const key=String(value||"").slice(0,10);
+  if(/^\d{4}-\d{2}-\d{2}$/.test(key)){
+    const d=new Date(`${key}T12:00:00`);
+    return !Number.isNaN(d.getTime())&&d.getDay()===3;
+  }
+  return /^수(?:요일)?$/.test(String(value||"").trim());
+}
+function programHasNightStudyImpact(program) {
+  const dates=[program?.date,...(Array.isArray(program?.dates)?program.dates:[])].filter(Boolean);
+  if(dates.length&&dates.every(isWednesdayKey)) return false;
+  const weekdayText=String(program?.weekdays||program?.weekday||program?.day||"").replace(/\s/g,"");
+  if(weekdayText&&/^(수|수요일)$/.test(weekdayText)) return false;
+  // UEP_08177_AFTER_SCHOOL_NIGHT_LINK_ONLY: 문자열 N을 Boolean(N)으로 처리하지 않는다.
+  const raw=program?.affectsAttendance??program?.nightLinked??program?.nightLink??program?.['야자연계여부'];
+  if(raw===true)return true;
+  if(raw===false||raw==null)return false;
+  return /^(Y|YES|TRUE|1|예|연계|적용)$/i.test(String(raw).trim());
+}
+function singlePeriodLabel(session) {
+  const candidates=[session?.period,session?.startTime,session?.time].map(v=>String(v||"").trim()).filter(Boolean);
+  for(const text of candidates){
+    const m=text.match(/(\d+)교시/);
+    if(m) return `${m[1]}교시`;
+  }
+  return String(session?.time||session?.period||"시간 확인");
+}
+function programOverlapsSlot(program, slot) {
+  if(isWednesdayKey(program?.date)||!programHasNightStudyImpact(program)) return false;
+  const descriptor = `${program?.time || ""} ${program?.title || ""} ${program?.actualTitle || ""} ${program?.type || ""}`;
+  // 차시 시작시각이 8교시라면 시트의 기존 야자영향타임 값보다 학교 운영 기준을 우선한다.
+  // 즉 8교시는 야자1이 아니라 오후자습으로만 표시한다.
+  if (/8교시/.test(descriptor)) return slot === "오후자습";
+  const explicitSlots=(program?.nightSlots||[]).flatMap(value=>{
+    const text=String(value||"");
+    return ["오후자습","야자1","야자2"].filter(name=>text.includes(name));
+  });
+  if(explicitSlots.length) return explicitSlots.includes(slot);
+  const range = slotRange(slot);
+  const namedSlot = nightSlotName(descriptor);
+  if (namedSlot && ["오후자습","야자1","야자2"].includes(namedSlot) && !String(namedSlot).includes("기타")) return namedSlot === slot;
+  const clocks = descriptor.match(/\d{1,2}:\d{2}/g) || [];
+  if (!range || clocks.length < 2) return Boolean(program?.affectsAttendance && /오후자습/.test(descriptor) && slot === "오후자습");
+  const start = minutesOfClock(clocks[0]), end = minutesOfClock(clocks[1]);
+  return Number.isFinite(start) && Number.isFinite(end) && start < range[1] && end > range[0];
+}
+function programParticipationFor(student, day, slot) {
+  const id = String(student?.id || student?.studentId || "");
+  const number = String(student?.studentNo || "");
+  const connected = (readonlyCache?.programs || []).filter(program=>program?.kind!=="after");
+  const derived = typeof afterSchoolProgramGroups === "function" ? afterSchoolProgramGroups() : [];
+  const seen = new Set();
+  const programs = [...connected, ...derived].filter(program => {
+    const key = `${program.id || ""}|${program.date || ""}|${program.title || ""}|${program.time || ""}`;
+    if (seen.has(key)) return false; seen.add(key); return true;
+  });
+  for (const program of programs) {
+    if(isWholeSchoolCommonActivity(program))continue;
+    if (program.date !== day || !programOverlapsSlot(program, slot)) continue;
+    const target = (program.students || []).find(item => String(item.studentId || "") === id || (number && String(item.studentNo || item.number || "") === number));
+    if (!target) continue;
+    const participationText = [target.result,target.attendance,target.participation,target.status,target.checkMethod].filter(Boolean).join(" ");
+    const inactive = /결석|불참|취소|중도포기|퇴강|미참여/.test(participationText);
+    // 13_출석부의 활성 수강명단은 출석상태가 '등록'이어도 해당 실제 차시에는 프로그램 참여자로 본다.
+    // 실제 수업일·야자영향타임은 program.date/program.time 단계에서 이미 검증되므로 명단 등록만으로 다른 날짜에 표시되지 않는다.
+    const confirmed = !inactive && ((typeof nightRecordIsAttendance === "function" && nightRecordIsAttendance(target)) || /출석|정상|참여|입실|명단QR|학사|등록|신청/.test(participationText));
+    return {program, target, confirmed, pending: !confirmed && !inactive};
+  }
+  return null;
+}
+function nightProgramStatus(program){
+  const text=`${program?.afterType||""} ${program?.type||""} ${program?.actualTitle||program?.title||""}`;
+  if(/야간심화|심화수업/.test(text

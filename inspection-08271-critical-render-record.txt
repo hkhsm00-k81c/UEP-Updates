@@ -1,0 +1,61 @@
+function nightRecordIsAttendance(row) {
+  const text = `${row?.result || ""} ${row?.detail || ""} ${row?.type || ""}`;
+  if (/결석|미입실|미제출|불참/.test(text)) return false;
+  return /출석|정상|명단QR|QR|입실/.test(text) || Boolean(row?.time || row?.period);
+}
+function openAttendanceHistory(kind, studentKey) {
+  const source = kind === "late" ? (readonlyCache?.lateAttendance || []) : (readonlyCache?.nightAttendance || readonlyCache?.attendance || []);
+  const rows = source.filter((row) => attendanceStudentKey(row) === String(studentKey)).sort((a,b)=>String(b.date).localeCompare(String(a.date)) || String(b.time || b.period || "").localeCompare(String(a.time || a.period || "")));
+  const first = rows[0] || {};
+  const student = (readonlyCache?.students || []).find((item) => item.id === first.studentId || String(item.studentNo) === String(first.studentNo));
+  const titleName = student?.name || first.name || "학생";
+  const studentNo = student?.studentNo || first.studentNo || "-";
+  const className = student?.className || first.className || "-";
+  $("#drawerKicker").textContent = kind === "late" ? "LATE HISTORY" : "NIGHT STUDY HISTORY";
+  $("#drawerTitle").textContent = `${studentNo} ${titleName}`;
+  if (kind === "late") {
+    const totalMinutes = rows.reduce((sum,row)=>sum+Number(row.minutes||0),0);
+    $("#drawerBody").innerHTML = `<div class="history-summary"><span><small>학급</small><b>${escapeHtml(className)}반</b></span><span><small>누적 지각</small><b>${rows.length}회</b></span><span><small>누적 시간</small><b>${totalMinutes}분</b></span><span><small>최근 지각</small><b>${escapeHtml(rows[0]?.date || "-")}</b></span></div><div class="data-card history-table"><div class="data-head late-history-grid"><span>일자</span><span>시각</span><span>지각시간</span><span>사유</span><span>지도상태</span></div>${rows.map(row=>`<div class="data-row late-history-grid"><time>${escapeHtml(row.date||"-")}</time><span>${escapeHtml(row.time||"-")}</span><b>${Number(row.minutes||0)}분</b><span>${escapeHtml(row.reason||"-")}</span><span class="state ${String(row.guidance).includes("필요")?"warn":""}">${escapeHtml(row.guidance||"일반")}</span></div>`).join("")}</div>`;
+  } else {
+    const attended = rows.filter(nightRecordIsAttendance);
+    const days = new Set(attended.map(row=>row.date).filter(Boolean));
+    const times = new Set(attended.map(row=>row.time || row.period).filter(Boolean));
+    $("#drawerBody").innerHTML = `<div class="history-summary positive"><span><small>학급</small><b>${escapeHtml(className)}반</b></span><span><small>참여 일수</small><b>${days.size}일</b></span><span><small>출석 기록</small><b>${attended.length}회</b></span><span><small>참여 타임</small><b>${escapeHtml([...times].join(" · ") || "-")}</b></span></div><div class="data-card history-table"><div class="data-head night-history-grid"><span>일자</span><span>타임</span><span>소속·요일</span><span>참여 결과</span></div>${rows.map(row=>`<div class="data-row night-history-grid"><time>${escapeHtml(row.date||"-")}</time><span>${escapeHtml(row.time||row.period||"-")}</span><span>${escapeHtml(row.detail||"-")}</span><span class="state ${nightRecordIsAttendance(row)?"positive":"warn"}">${escapeHtml(row.result||"확인")}</span></div>`).join("")}</div><p class="drawer-note">출석·명단 QR·입실 기록을 참여로 집계합니다. 결석·미입실·미제출은 참여 횟수에서 제외합니다.</p>`;
+  }
+  $("#drawer").classList.add("reference-expanded");
+  $("#drawer").classList.remove("hidden");
+  $("#drawerBackdrop").classList.remove("hidden");
+}
+
+
+function weekdayLabelFromKey(key, long = false) {
+  const date = new Date(`${key}T12:00:00`);
+  if (Number.isNaN(date.getTime())) return "";
+  const name = ["일","월","화","수","목","금","토"][date.getDay()];
+  return long ? `${name}요일` : name;
+}
+function programStudentGrade(student) {
+  const direct = String(student?.grade || student?.schoolGrade || "").match(/[123]/)?.[0];
+  if (direct) return direct;
+  const studentNo = String(student?.studentNo || student?.number || "").replace(/\.0$/, "").trim();
+  if (/^[123]\d{3,}$/.test(studentNo)) return studentNo[0];
+  const classText = String(student?.className || student?.class || "");
+  const classGrade = classText.match(/^\s*([123])[-\s]/)?.[1];
+  return classGrade || "";
+}
+function timetableClassStyle(label) {
+  const text = String(label || "").trim();
+  if (!text || text === "-" || !/(?:^|\D)[123]-?\d(?:\D|$)|\d반/.test(text)) return { cls:"", style:"" };
+  const palette = [
+    ["#e9f6ff","#63a9d8","#174f72"], ["#eef7e8","#78ad61","#315d28"],
+    ["#fff2e8","#dd9362","#7a4523"], ["#f3ecff","#9b79d0","#50367a"],
+    ["#e8f8f4","#57ab98","#245e52"], ["#fff0f4","#d9829b","#77384b"],
+    ["#f7f3df","#b8a75b","#665a21"], ["#eaf0ff","#718ed2","#354c86"],
+    ["#f0f4f7","#879caf","#425568"]
+  ];
+  let hash = 0; for (const ch of text) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+  const [fill,border,color] = palette[hash % palette.length];
+  return { cls:"class-colored", style:` style="--class-fill:${fill};--class-border:${border};--class-text:${color}"` };
+}
+function timetableSubjectStyle(subject) {
+  const text=String(subject||
