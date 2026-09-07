@@ -1,0 +1,36 @@
+name: Inspect UEP 0.82.69 Night Sync Source
+on:
+  push:
+    paths:
+      - 'inspect-night-sync-source-08269.trigger'
+permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.82.69 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE -ne 0){throw "download failed"}
+          Expand-Archive source/UEP-update.zip app -Force
+          $file='app/resources/app/electron/google-data.cjs';$lines=Get-Content $file;$out='inspection-night-sync-source-08269.txt'
+          "NIGHT SYNC SOURCE" | Set-Content $out -Encoding utf8
+          foreach($p in @('const SHEET_RANGES','30_야자출결_정규화','UEP_PROCESSING_SPREADSHEET_ID','processingEntries','processing','readSheetBatch(token, UEP_PROCESSING_SPREADSHEET_ID')){
+            Add-Content $out "`n--- $p ---";$hits=Select-String -Path $file -Pattern $p -SimpleMatch
+            foreach($h in $hits){$s=[Math]::Max(0,$h.LineNumber-1-25);$e=[Math]::Min($lines.Count-1,$h.LineNumber-1+70);Add-Content $out "[line $($h.LineNumber)]";for($i=$s;$i -le $e;$i++){Add-Content $out (("{0,7}: {1}" -f ($i+1),$lines[$i]))}}
+          }
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add $out
+          git commit -m 'Inspect v0.82.69 night sync source'
+          if($LASTEXITCODE -ne 0){throw "commit failed"}
+          git pull --rebase origin main
+          if($LASTEXITCODE -ne 0){throw "pull failed"}
+          git push
+          if($LASTEXITCODE -ne 0){throw "push failed"}
