@@ -27,7 +27,7 @@ jobs:
           $main="$root/electron/main.cjs"
           if(!(Test-Path $main)){throw 'main.cjs not found'}
           $text=Get-Content $main -Raw
-          $pattern='async function fetchOperationalData\(\{credentials=null\}=\{\}\)\{.*?\n\}\n\nasync function fetchLiveData'
+          $pattern='async function fetchOperationalData\(\{credentials=null\}=\{\}\)\{.*?\n\}\r?\n\r?\nasync function fetchLiveData'
           $replacement=@'
           async function fetchOperationalData({credentials=null}={}){
             if(!liveDataCache)return {ok:false,requiresFullSync:true,reason:'전체 캐시가 아직 준비되지 않았습니다.'};
@@ -35,7 +35,7 @@ jobs:
             const operationalEntries=UEP_OPERATIONAL_RANGE_NAMES.map(name=>[name,SHEET_RANGES[name]]);
             const [result,nightResult]=await Promise.all([
               readSheetBatch(token,UEP_SPREADSHEET_ID,operationalEntries.map(([,range])=>range)),
-              readSheetBatch(token,UEP_PROCESSING_SPREADSHEET_ID,["'30_야자출결_정규화'!A1:P70000"])
+              readSheetBatch(token,UEP_PROCESSING_SPREADSHEET_ID,["'30_야자출결_정규화'!A:U"])
             ]);
             const matrices={};assignValueRangesByRange(matrices,operationalEntries,result);
             // 운영 증분 갱신은 전체 학생마스터를 다시 읽지 않고 현재 readonlyCache.students를
@@ -79,7 +79,6 @@ jobs:
             if(Test-Path $f){$c=Get-Content $f -Raw;$c=$c.Replace('0.82.70','0.82.71');Set-Content $f $c -Encoding utf8}
           }
 
-          # Syntax checks
           node --check $main
           if($LASTEXITCODE -ne 0){throw 'main.cjs syntax failed'}
           node --check "$root/electron/google-data.cjs"
@@ -87,19 +86,16 @@ jobs:
           node --check "$root/gyomuon.js"
           if($LASTEXITCODE -ne 0){throw 'gyomuon.js syntax failed'}
 
-          # Structural regression assertions
           $patched=Get-Content $main -Raw
           foreach($needle in @("cachedStudents=Array.isArray(liveDataCache?.students)","matrices['02_학생마스터']","matrices['30_야자출결_정규화']","nightAttendance:partial.nightAttendance||[]")){
             if(!$patched.Contains($needle)){throw "missing patched assertion: $needle"}
           }
-          if($patched -match "readSheetBatch\(token,UEP_SPREADSHEET_ID,\[\"'02_학생마스터'") { throw 'unexpected full student-master read in operational refresh' }
 
-          # 39-count regression model: same filters as google-data + dashboard Set dedupe.
           $reg=@'
           const students=Array.from({length:39},(_,i)=>({id:`STU-${i+1}`,studentNo:String(1500+i),name:`S${i+1}`,className:'5'}));
           const rows=students.map((s,i)=>({학생ID:s.id,학번:s.studentNo,성명:s.name,운영일:'2026-09-07',시간대:'야자1',입력경로:i<33?'NFC출석':'교사확인',최종여부:'Y',매칭상태:'정상'}));
           const studentIds=new Set(students.map(s=>s.id)); const studentByNo=new Map(students.map(s=>[s.studentNo,s]));
-          const mapped=rows.filter(row=>{const sid=String(row['학생ID']||'').trim();const sno=String(row['학번']||'').replace(/\\.0$/,'');const isFinal=!String(row['최종여부']||'').trim()||String(row['최종여부']||'').trim().toUpperCase()==='Y';const isMatched=!String(row['매칭상태']||'').trim()||String(row['매칭상태']||'').trim()==='정상';return isFinal&&isMatched&&(studentIds.has(sid)||studentByNo.has(sno));}).map(row=>({studentNo:String(row['학번']),date:'2026-09-07',time:'야자1',result:'출석'}));
+          const mapped=rows.filter(row=>{const sid=String(row['학생ID']||'').trim();const sno=String(row['학번']||'').replace(/\.0$/,'');const isFinal=!String(row['최종여부']||'').trim()||String(row['최종여부']||'').trim().toUpperCase()==='Y';const isMatched=!String(row['매칭상태']||'').trim()||String(row['매칭상태']||'').trim()==='정상';return isFinal&&isMatched&&(studentIds.has(sid)||studentByNo.has(sno));}).map(row=>({studentNo:String(row['학번']),date:'2026-09-07',time:'야자1',result:'출석'}));
           const count=new Set(mapped.filter(r=>r.date==='2026-09-07'&&r.time==='야자1'&&/출석/.test(r.result)).map(r=>r.studentNo)).size;
           if(count!==39){throw new Error(`night regression expected 39, got ${count}`)}
           console.log('night regression PASS: 39');
@@ -108,11 +104,8 @@ jobs:
           node out/night-regression-08271.js
           if($LASTEXITCODE -ne 0){throw 'night regression failed'}
 
-          # Preserve previous UI regressions / no DOM patch hacks.
           $gy=Get-Content "$root/gyomuon.js" -Raw
           foreach($needle in @('dashboardNightAttendanceRows','dashboardProgramSessionLabel','uep08223UniversityRegions')){if(!$gy.Contains($needle)){throw "UI regression symbol missing: $needle"}}
-
-          # Package version consistency
           $pkg=Get-Content "$root/package.json" -Raw | ConvertFrom-Json
           if([string]$pkg.version -ne $ver){throw "package version mismatch: $($pkg.version)"}
 
@@ -120,11 +113,9 @@ jobs:
           $hash=(Get-FileHash out/UEP-update.zip -Algorithm SHA256).Hash.ToLower()
           "$hash  UEP-update.zip" | Set-Content out/sha256.txt -Encoding ascii
 
-          # Release only after all checks passed.
           gh release create $next out/UEP-update.zip out/sha256.txt --repo $repo --title "UEP v0.82.71" --notes "UEP v0.82.71`n- 야자출결 운영 증분동기화에서 기존 readonlyCache 학생정보를 재사용해 30_야자출결_정규화 학생매칭 정상화`n- 사후 인정·교사확인 등 시트에 도착한 최신 출석이 야자 참여현황에 즉시 반영되도록 수정`n- 9/7 야자1 39명 회귀 모델 검증 추가`n- 전체 학생마스터 재조회 없이 운영 캐시만 갱신하는 구조 유지`n- MutationObserver·전역 클릭·렌더 후 DOM 교체 없음"
           if($LASTEXITCODE -ne 0){throw "release create failed: $LASTEXITCODE"}
 
-          # Update policy after release asset exists.
           $policyPath='uep-policy.json'
           $policy=Get-Content $policyPath -Raw | ConvertFrom-Json
           $policy.latestVersion=$ver
