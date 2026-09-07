@@ -1,0 +1,46 @@
+name: Inspect UEP 0.82.69 Refresh Simple
+on:
+  push:
+    paths:
+      - 'inspect-refresh-simple-08269.trigger'
+permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.82.69 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE -ne 0){throw "download failed"}
+          Expand-Archive source/UEP-update.zip app -Force
+          $root='app/resources/app'
+          $out='inspection-refresh-simple-08269.txt'
+          $patterns=@('readonlyCache =','readonlyCache=','loadGoogle','refreshGoogle','google:read','school:read','window.uep','setInterval','setTimeout')
+          "REFRESH PATH INSPECTION" | Out-File $out -Encoding utf8
+          foreach($file in @("$root/gyomuon.js","$root/electron/main.cjs")){
+            "`n===== $file =====" | Out-File $out -Append -Encoding utf8
+            $lines=Get-Content $file
+            foreach($p in $patterns){
+              "`n--- $p ---" | Out-File $out -Append -Encoding utf8
+              $hits=Select-String -Path $file -SimpleMatch -Pattern $p
+              foreach($h in $hits){
+                $s=[Math]::Max(0,$h.LineNumber-5);$e=[Math]::Min($lines.Count-1,$h.LineNumber+12)
+                for($i=$s;$i -le $e;$i++){("{0,7}: {1}" -f ($i+1),$lines[$i]) | Out-File $out -Append -Encoding utf8}
+              }
+            }
+          }
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add $out
+          git commit -m 'Inspect v0.82.69 refresh path simple'
+          if($LASTEXITCODE -ne 0){throw "commit failed"}
+          git pull --rebase origin main
+          if($LASTEXITCODE -ne 0){throw "pull failed"}
+          git push
+          if($LASTEXITCODE -ne 0){throw "push failed"}
