@@ -1,0 +1,30 @@
+name: Inspect UEP 0.82.73 Admission Load
+on:
+  push:
+    paths: ['inspect-08273-admission.trigger']
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          gh release download v0.82.73 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE -ne 0){throw 'download failed'}
+          Expand-Archive source/UEP-update.zip app -Force
+          $g='app/resources/app/gyomuon.js'
+          $m='app/resources/app/electron/main.cjs'
+          $p='app/resources/app/electron/preload.cjs'
+          Write-Host '=== message context ==='
+          Select-String -Path $g -Pattern '56_대학입시마스터|자료를 읽지 못했습니다|admissionUniversities|dashboardAdmissionRows' -Context 8,20 | Select-Object -First 80 | ForEach-Object { $_.ToString() }
+          Write-Host '=== admission/load api references in renderer ==='
+          Select-String -Path $g -Pattern 'fetch.*Admission|load.*Admission|admission.*load|window\.uep|window\.api|invoke\(' -Context 1,2 | Select-Object -First 120 | ForEach-Object { $_.ToString() }
+          Write-Host '=== main ipc admission references ==='
+          Select-String -Path $m -Pattern 'admission|입시|fetchLiveData|fetch.*Data' -Context 1,3 | Select-Object -First 160 | ForEach-Object { $_.ToString() }
+          if(Test-Path $p){Write-Host '=== preload admission references ===';Select-String -Path $p -Pattern 'admission|입시|fetch|load' -Context 1,2 | Select-Object -First 120 | ForEach-Object { $_.ToString() }}
