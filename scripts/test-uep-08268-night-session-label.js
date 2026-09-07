@@ -1,0 +1,20 @@
+const fs=require('fs');
+const path=require('path');
+const root=process.argv[2]||'app';
+const g=fs.readFileSync(path.join(root,'gyomuon.js'),'utf8');
+const d=fs.readFileSync(path.join(root,'electron','google-data.cjs'),'utf8');
+const p=JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8'));
+const assert=(ok,msg)=>{if(!ok)throw new Error(msg)};
+assert(/const\s+APP_VERSION\s*=\s*["']0\.82\.68["'];/.test(g),'renderer version mismatch');
+assert(p.version==='0.82.68','package version mismatch');
+assert(g.includes('function dashboardProgramSessionLabel(program)'),'session label helper missing');
+assert(g.includes('sessionLabel=dashboardProgramSessionLabel(p)'),'weekly session label render missing');
+assert(g.includes('<div><b>차시</b><span>${escapeHtml(dashboardProgramSessionLabel(program)||"-")}</span></div>'),'drawer session row missing');
+assert(g.includes("const VERSION='0.82.67',KEY='uep:release-notes:'+VERSION;if(String(APP_VERSION)!==VERSION)return;"),'0.82.67 popup not version-gated');
+assert(g.includes("const VERSION='0.82.68',KEY='uep:release-notes:'+VERSION;if(String(APP_VERSION)!==VERSION)return;"),'0.82.68 popup not version-gated');
+assert(g.includes('function dashboardAfterProgramsForDay(dayKey)'),'canonical weekly source missing');
+assert(d.includes('sessionNo:computedSessionNo.get(sessionId)'),'sessionNo source missing');
+assert(d.includes('야간심화(?:모의고사)?'),'night mock support missing');
+// 차시를 합쳐버리지 않고 각 sessionId가 개별 이벤트로 남아 있어야 한다.
+assert(g.includes('const key=session?`session|${session}`'),'session-level identity guard missing');
+console.log('UEP 0.82.68 night session label regression tests passed');
