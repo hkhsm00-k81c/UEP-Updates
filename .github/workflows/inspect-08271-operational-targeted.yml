@@ -1,0 +1,36 @@
+name: Inspect UEP 0.82.71 Operational Targeted
+on:
+  push:
+    paths: ['inspect-08271-operational-targeted.trigger']
+permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          gh release download v0.82.71 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE -ne 0){throw 'download failed'}
+          Expand-Archive source/UEP-update.zip app -Force
+          $root='app/resources/app'
+          $targets=@(
+            @{f="$root/gyomuon.js"; start=640; end=700},
+            @{f="$root/electron/main.cjs"; pattern='preview-operational|operational-sync|fetchOperationalData|ipcMain.handle'},
+            @{f="$root/electron/preload.cjs"; pattern='previewOperationalSync|operational'}
+          )
+          $out=@()
+          foreach($t in $targets){
+            if(!(Test-Path $t.f)){continue};$lines=Get-Content $t.f;$out+="===== $($t.f) ====="
+            if($t.ContainsKey('start')){for($i=$t.start-1;$i-lt [Math]::Min($lines.Count,$t.end);$i++){$out+=("{0,6}: {1}" -f ($i+1),$lines[$i])}}
+            else{for($i=0;$i-lt $lines.Count;$i++){if($lines[$i]-match $t.pattern){$s=[Math]::Max(0,$i-8);$e=[Math]::Min($lines.Count-1,$i+18);$out+="--- hit line $($i+1) ---";for($j=$s;$j-le $e;$j++){$out+=("{0,6}: {1}" -f ($j+1),$lines[$j])}}}}
+          }
+          $out -join "`r`n" | Set-Content inspection-08271-operational-targeted.txt -Encoding utf8
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add inspection-08271-operational-targeted.txt;git commit -m 'Inspect UEP 0.82.71 targeted operational flow';if($LASTEXITCODE -ne 0){throw 'commit failed'}
+          git pull --rebase origin main;if($LASTEXITCODE -ne 0){throw 'pull failed'};git push;if($LASTEXITCODE -ne 0){throw 'push failed'}
