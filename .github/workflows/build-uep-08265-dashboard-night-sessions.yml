@@ -1,0 +1,40 @@
+name: Build and Release UEP 0.82.65 Dashboard Night Sessions
+
+on:
+  push:
+    paths: ['release-08265.trigger']
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          function Run-Native([scriptblock]$c,[string]$l){&$c;if($LASTEXITCODE -ne 0){throw "$l failed: $LASTEXITCODE"}}
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          Run-Native {gh release download v0.82.64 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source} 'download'
+          Expand-Archive source/UEP-update.zip app -Force
+          $root='app/resources/app'
+          Run-Native {node scripts/patch-uep-08265-dashboard-night-sessions.js $root} '0.82.65 patch'
+          Run-Native {node --check "$root/gyomuon.js"} 'renderer syntax'
+          Run-Native {node --check "$root/electron/google-data.cjs"} 'google-data syntax'
+          Run-Native {node --check "$root/electron/main.cjs"} 'main syntax'
+          Run-Native {node scripts/test-uep-08265-dashboard-night-sessions.js $root} 'dashboard regression test'
+          Compress-Archive -Path app/* -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "$sha  UEP-update.zip"|Set-Content sha256.txt
+          Run-Native {gh release create v0.82.65 UEP-update.zip sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.65' --notes "UEP v0.82.65`n- 대시보드 야간시간표도 실제 차시 일정만 사용하도록 원본 통일`n- 월/화 시작일의 강좌 마스터 + 실제 차시 중복 표시 제거`n- 월·목 3강좌, 화·금 2강좌 세트가 각 날짜 실제 차시 수대로 표시`n- 야간심화도 강좌 마스터와 실제 차시가 겹칠 때 1회만 표시`n- 자습 총원과 야자출결 집계 로직은 변경하지 않음"} 'release'
+          $policy=Get-Content uep-policy.json -Raw|ConvertFrom-Json
+          $policy.latestVersion='0.82.65'
+          $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.65/UEP-update.zip'
+          $policy.sha256=$sha
+          $policy.message='UEP 0.82.65 · 주간 야간시간표 실제 차시 기준 중복 수정'
+          $policy|ConvertTo-Json -Depth 10|Set-Content uep-policy.json -Encoding utf8
+          Run-Native {git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git pull --rebase origin main;git add uep-policy.json;git commit -m 'Publish UEP 0.82.65 policy';git push} 'policy push'
