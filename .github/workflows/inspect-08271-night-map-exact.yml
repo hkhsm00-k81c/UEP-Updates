@@ -1,0 +1,29 @@
+name: Inspect UEP 0.82.71 Night Map Exact
+on:
+  push:
+    paths: ['inspect-08271-night-map-exact.trigger']
+permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          $ErrorActionPreference='Stop';New-Item -ItemType Directory -Force source,app|Out-Null
+          gh release download v0.82.71 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source;if($LASTEXITCODE-ne 0){throw 'download'}
+          Expand-Archive source/UEP-update.zip app -Force;$root='app/resources/app'
+          $d=Get-Content "$root/electron/google-data.cjs" -Raw;$g=Get-Content "$root/gyomuon.js" -Raw;$m=Get-Content "$root/electron/main.cjs" -Raw
+          function Grab($txt,$start,$next,$file){$i=$txt.IndexOf($start);if($i-lt 0){throw "missing $start"};$j=$txt.IndexOf($next,$i+$start.Length);if($j-lt 0){$j=[Math]::Min($txt.Length,$i+20000)};$txt.Substring($i,$j-$i)|Set-Content $file -Encoding utf8}
+          Grab $d 'const mappedNightRows' 'const ' 'inspection-08271-google-night-map.txt'
+          Grab $g 'function nightRecordIsAttendance' 'function openAttendanceHistory' 'inspection-08271-render-night-attendance.txt'
+          Grab $g 'function nightSlotName' 'function dashboardNightWeekDates' 'inspection-08271-render-night-slot.txt'
+          Grab $g 'function dashboardNightAttendanceRows' 'function ' 'inspection-08271-render-night-dashboard.txt'
+          # Extract all renderer operational IPC references
+          ([regex]::Matches($g,'.{0,900}(?:fetchOperationalData|operationalSyncedAt|operational-sync|operational).{0,1600}','Singleline')|ForEach-Object{$_.Value}) -join "`r`n=====HIT=====`r`n" | Set-Content inspection-08271-render-operational.txt -Encoding utf8
+          ([regex]::Matches($m,'.{0,900}(?:fetchOperationalData|operationalSyncedAt).{0,1600}','Singleline')|ForEach-Object{$_.Value}) -join "`r`n=====HIT=====`r`n" | Set-Content inspection-08271-main-operational.txt -Encoding utf8
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add inspection-08271-*.txt;git commit -m 'Inspect exact UEP 0.82.71 night mapping';if($LASTEXITCODE-ne 0){throw 'commit'};git pull --rebase origin main;if($LASTEXITCODE-ne 0){throw 'pull'};git push;if($LASTEXITCODE-ne 0){throw 'push'}
