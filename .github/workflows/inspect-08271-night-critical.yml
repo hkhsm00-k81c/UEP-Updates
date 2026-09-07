@@ -1,0 +1,27 @@
+name: Inspect UEP 0.82.71 Night Critical
+on:
+  push:
+    paths: ['inspect-08271-night-critical.trigger']
+permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          $ErrorActionPreference='Stop';New-Item -ItemType Directory -Force source,app|Out-Null
+          gh release download v0.82.71 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source;if($LASTEXITCODE-ne 0){throw 'download'}
+          Expand-Archive source/UEP-update.zip app -Force;$root='app/resources/app'
+          $d=Get-Content "$root/electron/google-data.cjs" -Raw;$g=Get-Content "$root/gyomuon.js" -Raw;$m=Get-Content "$root/electron/main.cjs" -Raw
+          function Slice($txt,$needle,$len,$file){$i=$txt.IndexOf($needle);if($i-lt 0){throw "missing $needle"};$n=[Math]::Min($len,$txt.Length-$i);$txt.Substring($i,$n)|Set-Content $file -Encoding utf8}
+          Slice $d 'const mappedNightRows = nightRows.map' 18000 'inspection-08271-critical-google-map.txt'
+          Slice $g 'function nightRecordIsAttendance' 5000 'inspection-08271-critical-render-record.txt'
+          Slice $g 'function nightSlotName' 5000 'inspection-08271-critical-render-slot.txt'
+          Slice $g 'function startReadonlyAutoRefresh' 7000 'inspection-08271-critical-render-autorefresh.txt'
+          Slice $m 'async function fetchOperationalData' 9000 'inspection-08271-critical-main-operational.txt'
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add inspection-08271-critical-*.txt;git commit -m 'Inspect critical UEP 0.82.71 night path';if($LASTEXITCODE-ne 0){throw 'commit'};git pull --rebase origin main;if($LASTEXITCODE-ne 0){throw 'pull'};git push;if($LASTEXITCODE-ne 0){throw 'push'}
