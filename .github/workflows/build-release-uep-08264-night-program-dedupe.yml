@@ -1,0 +1,33 @@
+name: Build and Release UEP 0.82.64 Night Program Dedupe
+on: {push: {paths: ['release-08264.trigger']}}
+permissions: {contents: write}
+jobs:
+  build-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: |
+          $ErrorActionPreference='Stop'
+          function Run-Native([scriptblock]$c,[string]$l){&$c;if($LASTEXITCODE -ne 0){throw "$l failed: $LASTEXITCODE"}}
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          Run-Native {gh release download v0.82.63 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source} 'download'
+          Expand-Archive source/UEP-update.zip app -Force
+          $root='app/resources/app'
+          Run-Native {node scripts/patch-uep-08264-night-program-dedupe.js $root} '0.82.64 patch'
+          Run-Native {node --check "$root/gyomuon.js"} 'renderer syntax'
+          Run-Native {node --check "$root/electron/google-data.cjs"} 'google-data syntax'
+          Run-Native {node --check "$root/electron/main.cjs"} 'main syntax'
+          Run-Native {node scripts/test-uep-08264-night-program-dedupe.js $root} 'night-program regression test'
+          Compress-Archive -Path app/* -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "$sha  UEP-update.zip"|Set-Content sha256.txt
+          Run-Native {gh release create v0.82.64 UEP-update.zip sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.64' --notes "UEP v0.82.64`n- 방과후학교·야간심화수업의 동일 실제 차시 중복 표시 수정`n- 프로그램/차시 일정이 있으면 이를 일정의 단일 원본으로 사용`n- 30_야자출결_정규화 파생 일정은 실제 차시가 없는 과거 기록에서만 fallback 사용`n- 강좌 마스터와 실제 차시가 함께 있을 때 실제 차시 우선`n- 야자출결 및 학생별 참여 판정에서 after 일정 이중 합류 제거`n- 서로 다른 병렬 강좌·서로 다른 날짜 차시는 그대로 유지"} 'release'
+          $policy=Get-Content uep-policy.json -Raw|ConvertFrom-Json
+          $policy.latestVersion='0.82.64'
+          $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.64/UEP-update.zip'
+          $policy.sha256=$sha
+          $policy.message='UEP 0.82.64 · 방과후·야간심화 일정 중복 원인 수정'
+          $policy|ConvertTo-Json -Depth 10|Set-Content uep-policy.json -Encoding utf8
+          Run-Native {git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add uep-policy.json;git commit -m 'Publish UEP 0.82.64 policy';git push} 'policy push'
