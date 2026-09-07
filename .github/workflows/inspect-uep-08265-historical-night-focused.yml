@@ -1,0 +1,55 @@
+name: inspect-uep-08265-historical-night-focused
+on:
+  push:
+    paths:
+      - inspect-08265-night-focused.trigger
+permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          gh release download v0.82.65 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip
+          Expand-Archive UEP-update.zip work -Force
+      - name: Extract focused blocks
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $out=New-Object System.Collections.Generic.List[string]
+          $g=Get-Content 'work/resources/app/gyomuon.js' -Raw -Encoding UTF8
+          $a=$g.IndexOf('function afterSchoolProgramGroups() {')
+          $b=$g.IndexOf('function groupedAfterSchoolCourses(items) {',$a)
+          $out.Add('=== afterSchoolProgramGroups ===')
+          if($a -ge 0 -and $b -gt $a){$out.Add($g.Substring($a,$b-$a))}
+          $d=$g.IndexOf('function dashboardAfterProgramsForDay(dayKey)')
+          $e=$g.IndexOf('function dashboardProgramNightSlot(program)',$d)
+          $out.Add('');$out.Add('=== dashboardAfterProgramsForDay ===')
+          if($d -ge 0 -and $e -gt $d){$out.Add($g.Substring($d,$e-$d))}
+          $loader=Get-Content 'work/resources/app/electron/google-data.cjs' -Raw -Encoding UTF8
+          $lines=$loader -split "`r?`n"
+          $out.Add('');$out.Add('=== loader lines: 야간심화 / after / course/session/master ===')
+          for($i=0;$i -lt $lines.Count;$i++){
+            if($lines[$i] -match '야간심화|isCourseMaster|sessionId|courseId|afterType|programType|actualTitle|sessionDate|operationDate'){
+              $from=[Math]::Max(0,$i-3);$to=[Math]::Min($lines.Count-1,$i+3)
+              for($j=$from;$j -le $to;$j++){$out.Add(('{0:D5}: {1}' -f ($j+1),$lines[$j]))}
+              $out.Add('---')
+            }
+          }
+          $out | Set-Content historical-night-focused-08265.txt -Encoding UTF8
+      - name: Commit
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git pull --rebase origin main
+          git add historical-night-focused-08265.txt
+          git commit -m 'Inspect focused UEP 0.82.65 historical night advanced mapping'
+          git push
