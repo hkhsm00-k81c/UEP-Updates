@@ -1,0 +1,37 @@
+name: Inspect UEP 0.82.67 night session label
+on:
+  push:
+    paths:
+      - 'inspect-08267-session-label.trigger'
+jobs:
+  inspect:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          gh release download v0.82.67 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip
+          if($LASTEXITCODE -ne 0){throw 'download failed'}
+          Expand-Archive UEP-update.zip app -Force
+          $g='app/resources/app/gyomuon.js'
+          $out='inspect-08267-session-label.txt'
+          '=== dashboardAfterProgramsForDay ===' | Set-Content $out -Encoding UTF8
+          Select-String -Path $g -Pattern 'dashboardAfterProgramsForDay' -Context 5,45 | Out-String | Add-Content $out
+          '=== afterSchoolProgramGroups ===' | Add-Content $out
+          Select-String -Path $g -Pattern 'function afterSchoolProgramGroups' -Context 0,90 | Out-String | Add-Content $out
+          '=== session fields / card render ===' | Add-Content $out
+          Select-String -Path $g -Pattern 'sessionNo|sessionNumber|차시|actualTitle|night-.*program|weekly.*program|program-chip|program-card' -Context 2,5 | Select-Object -First 260 | Out-String | Add-Content $out
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add $out
+          git commit -m 'inspect: 0.82.67 night session label path'
+          if($LASTEXITCODE -ne 0){throw 'commit failed'}
+          git pull --rebase origin main
+          if($LASTEXITCODE -ne 0){throw 'pull failed'}
+          git push
+          if($LASTEXITCODE -ne 0){throw 'push failed'}
