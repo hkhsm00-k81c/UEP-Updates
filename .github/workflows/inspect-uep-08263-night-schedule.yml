@@ -1,0 +1,60 @@
+name: Inspect UEP 0.82.63 Night Schedule
+
+'on':
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/inspect-uep-08263-night-schedule.yml
+
+permissions:
+  contents: write
+
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download current 0.82.63 release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          gh release download v0.82.63 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip
+          Expand-Archive UEP-update.zip work -Force
+          if(-not (Test-Path 'work/resources/app/gyomuon.js')) { throw 'gyomuon.js missing' }
+      - name: Extract night schedule runtime contexts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $p='work/resources/app/gyomuon.js'
+          $s=Get-Content $p -Raw -Encoding UTF8
+          $terms=@('afterSchoolPrograms','programWithOverride','야간심화','야간 심화','방과후','야자연계','nightStudy','nightSchedule','afterSchool','sessions','schedule')
+          $out=New-Object System.Collections.Generic.List[string]
+          $out.Add('UEP 0.82.63 night schedule runtime inspection')
+          $out.Add(('source length=' + $s.Length))
+          foreach($term in $terms){
+            $out.Add('')
+            $out.Add(('===== TERM: ' + $term + ' ====='))
+            $start=0;$count=0
+            while($count -lt 12){
+              $i=$s.IndexOf($term,$start,[System.StringComparison]::OrdinalIgnoreCase)
+              if($i -lt 0){break}
+              $a=[Math]::Max(0,$i-3500);$b=[Math]::Min($s.Length,$i+$term.Length+3500)
+              $out.Add(('--- match ' + ($count+1) + ' at ' + $i + ' ---'))
+              $out.Add($s.Substring($a,$b-$a))
+              $start=$i+$term.Length;$count++
+            }
+            if($count -eq 0){$out.Add('(no match)')}
+          }
+          $out | Set-Content 'night-schedule-08263-inspection.txt' -Encoding UTF8
+          Write-Host ('inspection bytes=' + (Get-Item 'night-schedule-08263-inspection.txt').Length)
+      - name: Commit inspection output
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add night-schedule-08263-inspection.txt
+          git commit -m 'Inspect UEP 0.82.63 night schedule runtime'
+          git push
