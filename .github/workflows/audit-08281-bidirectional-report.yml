@@ -1,0 +1,37 @@
+name: Audit UEP 0.82.81 Bidirectional Report
+on:
+  push:
+    paths: ['audit-08281-bidirectional-report.trigger']
+permissions:
+  contents: write
+jobs:
+  audit:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          $ErrorActionPreference='Stop'
+          function Run-Native([scriptblock]$c,[string]$l){&$c;if($LASTEXITCODE -ne 0){throw "$l failed: $LASTEXITCODE"}}
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          Run-Native {gh release download v0.82.81 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source} 'download'
+          Expand-Archive source/UEP-update.zip app -Force
+          $root='app/resources/app'
+          @'
+          const fs=require('fs'),path=require('path');
+          const root=process.argv[2], out=process.argv[3];
+          const terms=['연락처','보호자','휴대폰','야자감독','감독계획','급식지도','급식','담임','학년부장','관리자','permission','권한','saveContact','contact','night','meal','supervisor'];
+          const files=['gyomuon.js','electron/main.cjs','electron/preload.cjs','main.cjs','preload.cjs'].map(x=>path.join(root,x)).filter(fs.existsSync);
+          let report=[];
+          for(const f of files){const lines=fs.readFileSync(f,'utf8').split(/\r?\n/);const hits=[];for(let i=0;i<lines.length;i++){if(terms.some(t=>lines[i].toLowerCase().includes(t.toLowerCase())))hits.push(i)};report.push('\n===== FILE '+path.relative(root,f)+' =====');let last=-100;for(const i of hits){if(i-last<8)continue;const a=Math.max(0,i-5),b=Math.min(lines.length-1,i+12);report.push(`\n--- ${i+1} ---`);for(let j=a;j<=b;j++)report.push(String(j+1).padStart(6,' ')+': '+lines[j]);last=i;}}
+          fs.writeFileSync(out,report.join('\n'),'utf8');
+          '@ | Set-Content audit-report.js -Encoding UTF8
+          Run-Native {node audit-report.js $root audit-08281-bidirectional-report.txt} 'audit'
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add audit-08281-bidirectional-report.txt
+          git commit -m 'Add 0.82.81 bidirectional audit report'
+          git pull --rebase origin main
+          git push
