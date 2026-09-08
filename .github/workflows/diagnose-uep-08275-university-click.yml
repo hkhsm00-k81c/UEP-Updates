@@ -6,15 +6,12 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
-concurrency:
-  group: diagnose-uep-08275-university-click
-  cancel-in-progress: true
 jobs:
   diagnose:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Inspect packaged dashboard click lifecycle
+      - name: Inspect university detail renderer and overrides
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -22,24 +19,14 @@ jobs:
           $ErrorActionPreference='Stop'
           New-Item -ItemType Directory -Force source,app | Out-Null
           gh release download v0.82.75 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
-          if ($LASTEXITCODE -ne 0) { throw "release download failed: $LASTEXITCODE" }
+          if($LASTEXITCODE -ne 0){throw "download failed $LASTEXITCODE"}
           Expand-Archive source/UEP-update.zip app -Force
-          $p='app/resources/app/gyomuon.js'
-          $s=Get-Content $p -Raw
-          $binding="$$('[data-dashboard-admission]').forEach"
-          $i=$s.IndexOf($binding,[System.StringComparison]::Ordinal)
-          if($i -lt 0){throw 'admission binding missing'}
-          Write-Host "===== BINDING LARGE CONTEXT at $i ====="
-          $a=[Math]::Max(0,$i-12000);$len=[Math]::Min(18000,$s.Length-$a);Write-Host $s.Substring($a,$len)
-          Write-Host '===== INNERHTML ASSIGNMENTS NEAR BINDING ====='
-          $matches=[regex]::Matches($s,'([A-Za-z_$][\w$\.\[\]\?]*)\.innerHTML\s*=')
-          foreach($m in $matches){if([Math]::Abs($m.Index-$i)-lt 80000){Write-Host ($m.Index.ToString()+': '+$m.Value)}}
-          Write-Host '===== FUNCTION HEADS NEAR BINDING ====='
-          $fm=[regex]::Matches($s,'(?:async\s+)?function\s+[A-Za-z_$][\w$]*\s*\([^)]*\)\s*\{')
-          foreach($m in $fm){if($m.Index -lt $i -and $m.Index -gt ($i-60000)){Write-Host ($m.Index.ToString()+': '+$m.Value)}}
-          Write-Host '===== RENDER CALLS/ASSIGNMENTS AFTER BINDING ====='
-          $tail=$s.Substring($i,[Math]::Min(50000,$s.Length-$i))
-          foreach($pat in @('innerHTML','replaceChildren','outerHTML','insertAdjacentHTML','render\(')){
-            Write-Host "PATTERN $pat"
-            foreach($m in [regex]::Matches($tail,$pat)){if($m.Index -lt 30000){$x=[Math]::Max(0,$m.Index-180);$l=[Math]::Min(500,$tail.Length-$x);Write-Host ('@'+($i+$m.Index)+': '+$tail.Substring($x,$l))}}
+          $s=Get-Content 'app/resources/app/gyomuon.js' -Raw
+          foreach($needle in @('function openDashboardUniversityDetail','openDashboardUniversityDetail=','dashboardAdmissionTodayUniversity','function openDashboardAdmissionDialog','function openDashboardAdmissionDialogBase','function universityRegion','function uep08223UniversityRegion')){
+            Write-Host "===== $needle ====="
+            $start=0;$n=0
+            while(($i=$s.IndexOf($needle,$start,[System.StringComparison]::Ordinal)) -ge 0 -and $n -lt 12){
+              $a=[Math]::Max(0,$i-1400);$l=[Math]::Min(10000,$s.Length-$a);Write-Host "--- at $i ---";Write-Host $s.Substring($a,$l);$start=$i+$needle.Length;$n++
+            }
+            Write-Host "COUNT=$n"
           }
