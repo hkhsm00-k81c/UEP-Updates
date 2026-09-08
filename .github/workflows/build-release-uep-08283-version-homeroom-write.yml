@@ -1,0 +1,46 @@
+name: Build Release UEP 0.82.83 Version + Homeroom Write
+on:
+  push:
+    paths: ['release-08283.trigger']
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          $ErrorActionPreference='Stop'
+          function Run-Native([scriptblock]$c,[string]$l){&$c;if($LASTEXITCODE -ne 0){throw "$l failed: $LASTEXITCODE"}}
+          New-Item -ItemType Directory -Force source,app,verify|Out-Null
+          Run-Native {gh release download v0.82.82 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source} 'download 0.82.82'
+          Expand-Archive source/UEP-update.zip app -Force
+          $root='app/resources/app'
+          Run-Native {node scripts/patch-uep-08283-version-and-homeroom-write.js $root} 'patch 0.82.83'
+          Run-Native {node --check "$root/gyomuon.js"} 'gyomuon syntax'
+          Run-Native {node --check "$root/electron/main.cjs"} 'main syntax'
+          Run-Native {node scripts/test-uep-08283-version-and-homeroom-write.js $root} 'prepackage regression'
+          Compress-Archive -Path app/* -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "$sha  UEP-update.zip"|Set-Content sha256.txt
+          # Critical false-success guard: verify the actual archive that will be uploaded.
+          Expand-Archive UEP-update.zip verify -Force
+          $verifyRoot='verify/resources/app'
+          Run-Native {node --check "$verifyRoot/gyomuon.js"} 'packaged gyomuon syntax'
+          Run-Native {node --check "$verifyRoot/electron/main.cjs"} 'packaged main syntax'
+          Run-Native {node scripts/test-uep-08283-version-and-homeroom-write.js $verifyRoot} 'packaged regression'
+          $packed=Get-Content "$verifyRoot/package.json" -Raw|ConvertFrom-Json
+          if($packed.version -ne '0.82.83'){throw "packaged package.json version mismatch: $($packed.version)"}
+          $gy=Get-Content "$verifyRoot/gyomuon.js" -Raw
+          if($gy -notmatch 'const APP_VERSION="0\.82\.83"'){throw 'packaged APP_VERSION mismatch'}
+          Run-Native {gh release create v0.82.83 UEP-update.zip sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.83' --notes "UEP v0.82.83`n- 0.82.82 false-version 문제 수정: 실제 런타임 APP_VERSION과 package.json을 0.82.83으로 통일`n- 담임/학년부장 겸임 역할까지 포함한 실효 쓰기권한 정규화`n- 학생 연락처: 관리자·학년부장·자기 반 담임 수정`n- 급식지도/야자감독: 관리자·학년부장·담임 수정`n- 04_학생연락식별정보 / 42_급식지도계획 / 43_야자감독계획 직접 저장 흐름 유지`n- 업로드 직전 UEP-update.zip 재압축해제 후 버전·문법·권한 마커를 다시 검증하여 false success 차단`n- 신규 MutationObserver/전역 click 우회/setTimeout DOM 보정 없음"} 'release'
+          $policy=Get-Content uep-policy.json -Raw|ConvertFrom-Json
+          $policy.latestVersion='0.82.83'
+          $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.83/UEP-update.zip'
+          $policy.sha256=$sha
+          $policy.message='UEP 0.82.83 · 실제 버전표시·담임 양방향 권한·패키지 검증 수정'
+          $policy|ConvertTo-Json -Depth 10|Set-Content uep-policy.json -Encoding utf8
+          Run-Native {git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add uep-policy.json;git commit -m 'Publish UEP 0.82.83 policy';git pull --rebase origin main;git push} 'policy push'
