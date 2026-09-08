@@ -1,0 +1,191 @@
+name: Build Release UEP 0.82.77 After School Roster Sync
+on:
+  push:
+    paths:
+      - 'release-08277-after-school-roster-sync.trigger'
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          $ErrorActionPreference='Stop'
+          $repo=$env:GITHUB_REPOSITORY
+          $prev='v0.82.76'
+          $next='v0.82.77'
+          $ver='0.82.77'
+          New-Item -ItemType Directory -Force source,app,out | Out-Null
+          gh release download $prev --repo $repo --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE -ne 0){throw "download failed: $LASTEXITCODE"}
+          Expand-Archive source/UEP-update.zip app -Force
+          $root='app/resources/app'
+          $main="$root/electron/main.cjs"
+          $data="$root/electron/google-data.cjs"
+          $gy="$root/gyomuon.js"
+          if(!(Test-Path $main) -or !(Test-Path $data) -or !(Test-Path $gy)){throw 'runtime source missing'}
+
+          # 1) 운영동기화가 야자 30뿐 아니라 방과후 원본 11/12/13도 함께 갱신하도록 수정.
+          $text=Get-Content $main -Raw
+          $start=$text.IndexOf('async function fetchOperationalData({credentials=null}={}){')
+          $end=$text.IndexOf("`nasync function fetchLiveData",$start)
+          if($start-lt 0 -or $end-lt 0){throw 'fetchOperationalData boundaries not found'}
+          $replacement=@'
+async function fetchOperationalData({credentials=null}={}){
+  if(!liveDataCache)return {ok:false,requiresFullSync:true,reason:'전체 캐시가 아직 준비되지 않았습니다.'};
+  const auth=await getReadonlySheetsAuth(credentials),token=auth.token;
+  const operationalEntries=UEP_OPERATIONAL_RANGE_NAMES.map(name=>[name,SHEET_RANGES[name]]);
+  const afterEntries=['11_방과후학교','12_차시일정','13_출석부'].map(name=>[name,SHEET_RANGES[name]]);
+  const [result,nightResult,afterResult]=await Promise.all([
+    readSheetBatch(token,UEP_SPREADSHEET_ID,operationalEntries.map(([,range])=>range)),
+    readSheetBatch(token,UEP_PROCESSING_SPREADSHEET_ID,["'30_야자출결_정규화'!A1:U70000"]),
+    // 방과후 강좌·차시·수강명단은 함께 읽어야 차시ID가 비어 있는 강좌 신청명단도 프로그램ID fallback으로 연결된다.
+    readSheetBatch(token,UEP_SPREADSHEET_ID,afterEntries.map(([,range])=>range))
+  ]);
+  const matrices={};
+  assignValueRangesByRange(matrices,operationalEntries,result);
+  assignValueRangesByRange(matrices,afterEntries,afterResult);
+  const cachedStudents=Array.isArray(liveDataCache?.students)?liveDataCache.students:[];
+  matrices['02_학생마스터']=[
+    ['02_학생마스터'],
+    ['UEP operational synthetic student master'],
+    ['학생ID','학년도','학번','성명','사용성명','학년','반','번호','검색표시명','출신중학교','학적상태','학적기준일','학적변동사유','입학일','활성여부','수정일시','수정자','비고'],
+    ...cachedStudents.map((student)=>[
+      String(student?.id||student?.studentId||''), String(student?.schoolYear||student?.year||'2026'),
+      String(student?.studentNo||student?.number||''), String(student?.name||''), String(student?.name||''),
+      String(student?.grade||student?.gradeNo||'1'), String(student?.className||student?.classNo||''),
+      String(student?.studentNumber||student?.numberInClass||''), '', '',
+      String(student?.status||student?.enrollmentStatus||'재학'), '', '', '', String(student?.active||student?.activeYn||'Y'), '', '', ''
+    ])
+  ];
+  matrices['30_야자출결_정규화']=nightResult?.[0]?.values||[];
+  const partial=parseGoogleSheetData(matrices);
+
+  // 공통/선택 프로그램은 건드리지 않고 방과후만 최신 11→12→13 결과로 교체한다.
+  const existingPrograms=Array.isArray(liveDataCache?.programs)?liveDataCache.programs:[];
+  const preservedPrograms=existingPrograms.filter(program=>program?.kind!=='after');
+  const freshAfterPrograms=(Array.isArray(partial?.programs)?partial.programs:[]).filter(program=>program?.kind==='after');
+  const programs=[...preservedPrograms,...freshAfterPrograms];
+
+  // 30 최신 출결 + 이번에 다시 만든 프로그램 인정행을 canonical parser 결과 그대로 사용한다.
+  // 방과후 파싱에 실패해 프로그램이 한 건도 없을 때만 기존 프로그램 인정행을 보존하여 일시적 조회실패로 통계를 잃지 않는다.
+  const freshNight=Array.isArray(partial?.nightAttendance)?partial.nightAttendance:[];
+  let nightAttendance=freshNight;
+  if(!freshAfterPrograms.length){
+    const oldProgramRows=Array.isArray(liveDataCache?.nightAttendance)?liveDataCache.nightAttendance.filter(row=>row?.recognizedByProgram===true||row?.linkedFromAfterSchool===true):[];
+    const key=row=>[String(row?.date||'').slice(0,10),String(row?.time||row?.period||''),String(row?.studentNo||row?.studentId||'')].join('|');
+    const map=new Map(freshNight.map(row=>[key(row),row]));oldProgramRows.forEach(row=>map.set(key(row),row));nightAttendance=[...map.values()];
+  }
+
+  const patch={
+    officialAttendance:partial.officialAttendance||[], lateAttendance:partial.lateAttendance||[],
+    notices:partial.notices||[], noticeReceipts:partial.noticeReceipts||[], lunchDuties:partial.lunchDuties||[], nightSupervisors:partial.nightSupervisors||[],
+    programs, afterSchoolAttendance:partial.afterSchoolAttendance||[], nightAttendance
+  };
+  const operationalSyncedAt=new Date().toISOString();
+  liveDataCache={...liveDataCache,...patch,operationalSyncedAt};liveDataFetchedAt=Date.now();
+  return {ok:true,operationalSyncedAt,syncedAt:operationalSyncedAt,patch};
+}
+'@
+          $text=$text.Substring(0,$start)+$replacement+$text.Substring($end)
+          $text=$text.Replace('0.82.76','0.82.77')
+          Set-Content $main $text -Encoding utf8
+
+          # 2) 8교시는 시트의 과거 야자영향타임 문자열보다 실제 학교 시간대(오후자습)를 우선한다.
+          $gd=Get-Content $data -Raw
+          $old=@'
+    const matchedSlots=explicitSlots.length
+      ? nightSlotTemplates.filter(slot=>explicitSlots.includes(slot.label))
+      : (Number.isFinite(start)&&Number.isFinite(end)?nightSlotTemplates.filter(slot=>start<slot.end&&end>slot.start):[]);
+'@
+          $new=@'
+    const eighthPeriod=/8교시/.test(String(program.time||""));
+    const matchedSlots=eighthPeriod
+      ? nightSlotTemplates.filter(slot=>slot.label==="오후자습")
+      : (explicitSlots.length
+        ? nightSlotTemplates.filter(slot=>explicitSlots.includes(slot.label))
+        : (Number.isFinite(start)&&Number.isFinite(end)?nightSlotTemplates.filter(slot=>start<slot.end&&end>slot.start):[]));
+'@
+          if(!$gd.Contains($old)){throw 'night matchedSlots anchor not found'}
+          $gd=$gd.Replace($old,$new).Replace('0.82.76','0.82.77')
+          Set-Content $data $gd -Encoding utf8
+
+          foreach($f in @($gy,"$root/package.json","$root/package-lock.json")){
+            if(Test-Path $f){$c=Get-Content $f -Raw;$c=$c.Replace('0.82.76','0.82.77');Set-Content $f $c -Encoding utf8}
+          }
+
+          # 3) 문법검사.
+          node --check $main; if($LASTEXITCODE -ne 0){throw 'main syntax failed'}
+          node --check $data; if($LASTEXITCODE -ne 0){throw 'google-data syntax failed'}
+          node --check $gy; if($LASTEXITCODE -ne 0){throw 'gyomuon syntax failed'}
+
+          # 4) 실제 parser 회귀: 차시ID 없는 프로그램단위 13_출석부 12명이 9/7 1차시에 fallback 연결되어야 한다.
+          $reg=@'
+const {parseGoogleSheetData}=require(process.argv[2]);
+const title=(name,desc,header,rows)=>[[name],[desc],header,...rows];
+const students=Array.from({length:12},(_,i)=>{const no=String(1101+i);return [`STU-${i+1}`,'2026',no,`학생${i+1}`,`학생${i+1}`,'1','1',String(i+1),`1-1 ${i+1}번 학생${i+1}`,'','재학','','','','Y','','',''];});
+const m={
+ '02_학생마스터':title('02_학생마스터','학생',['학생ID','학년도','학번','성명','사용성명','학년','반','번호','검색표시명','출신중학교','학적상태','학적기준일','학적변동사유','입학일','활성여부','수정일시','수정자','비고'],students),
+ '11_방과후학교':title('11_방과후학교','방과후',['방과후ID','학년도','운영기간구분','프로그램명','교과','담당부서','방과후유형','담당교사','운영시작일','운영종료일','요일','시작시간','종료시간','장소','대상학년','야자연계여부','출석관리방식','운영상태','수정일시','수정자','비고','원본ID','학생안내'],[['AF2026-2-02','2026','2학기','고등 기초 영문법','영어','방과후교육부','일반 방과후','이태연','2026-09-07','2026-11-23','월,목','8교시','','105','1','Y','출석부','운영예정','2026-09-03','UEP연결','','2학기-2','']]),
+ '12_차시일정':title('12_차시일정','차시',['차시ID','강좌ID','차시번호','운영일자','요일','시작시각','종료시각','장소','담당교사','운영상태','원차시ID','보강차시ID','야자영향타임','출석부생성여부','수정일시','수정자','비고','예정일','실제수업일','변경유형','원예정일','변경사유','출석확정','프로그램유형'],[['SES-AF2026-2-02-01','AF2026-2-02','1','2026-09-07','월','8교시','','1-5','이태연','예정','','','야자1','Y','2026-09-03','UEP연결','','2026-09-07','','정상','','','N','방과후학교']]),
+ '13_출석부':title('13_출석부','출석부',['출석부ID','프로그램ID','학생ID','학번','성명','학년','반','번호','검색표시명','신청일','참여상태','시작일','종료일','변경사유','수정일시','수정자','비고','차시ID','출석상태','출석시각','확인방식','보고서제출상태','보고서제출일','프로그램유형'],students.map((s,i)=>[`REG-AF2026-2-02-${s[2]}`,'AF2026-2-02',s[0],s[2],s[3],'1','1',String(i+1),s[8],'','참여','2026-09-07','2026-11-23','','2026-09-03','UEP연결','신청현황','','','','신청현황','','','방과후학교'])),
+ '30_야자출결_정규화':title('30_야자출결_정규화','야자',['기록ID','학생ID','학번','성명','운영일','요일','시간대','입력경로','제출일시','출결상태','최종여부','매칭상태'],[])
+};
+const d=parseGoogleSheetData(m);
+const p=(d.programs||[]).find(x=>x.sessionId==='SES-AF2026-2-02-01');
+if(!p)throw new Error('session program missing');
+if((p.students||[]).length!==12)throw new Error(`roster fallback expected 12 got ${(p.students||[]).length}`);
+if(Number(p.attendedCount)!==12)throw new Error(`attended expected 12 got ${p.attendedCount}`);
+const recognized=(d.nightAttendance||[]).filter(r=>r.date==='2026-09-07'&&r.time==='오후자습'&&(r.recognizedByProgram||r.linkedFromAfterSchool));
+if(recognized.length!==12)throw new Error(`8교시 afternoon recognition expected 12 got ${recognized.length}`);
+const wrong=(d.nightAttendance||[]).filter(r=>r.date==='2026-09-07'&&r.time==='야자1'&&(r.recognizedByProgram||r.linkedFromAfterSchool));
+if(wrong.length)throw new Error(`8교시 must not be recognized as 야자1: ${wrong.length}`);
+console.log('PASS roster fallback 12 / attended 12 / 8교시→오후자습 12');
+'@
+          Set-Content out/regression-08277.js $reg -Encoding utf8
+          node out/regression-08277.js $data
+          if($LASTEXITCODE -ne 0){throw 'parser roster regression failed'}
+
+          # 5) 운영동기화/기존 기능 회귀 구조검사.
+          $patchedMain=Get-Content $main -Raw
+          foreach($needle in @("afterEntries=['11_방과후학교','12_차시일정','13_출석부']","assignValueRangesByRange(matrices,afterEntries,afterResult)","freshAfterPrograms","programs, afterSchoolAttendance:partial.afterSchoolAttendance||[]")){
+            if(!$patchedMain.Contains($needle)){throw "operational roster sync missing: $needle"}
+          }
+          $patchedData=Get-Content $data -Raw
+          foreach($needle in @('const participantRows =','sessionSpecific.length ? sessionSpecific : (rosterByProgram.get(normalizedProgramId) || [])','const eighthPeriod=/8교시/','slot.label==="오후자습"')){
+            if(!$patchedData.Contains($needle)){throw "parser regression symbol missing: $needle"}
+          }
+          $g=Get-Content $gy -Raw
+          foreach($needle in @('function afterSchoolProgramGroups()','function dashboardNightAttendanceRows','uep08223UniversityRegions','uep08273TodayUniversityRegionMatches','uep08275UniversitySupportEligible','uep08276RenderAdmissionUniversity')){
+            if(!$g.Contains($needle)){throw "existing feature regression symbol missing: $needle"}
+          }
+          $pkg=Get-Content "$root/package.json" -Raw | ConvertFrom-Json
+          if([string]$pkg.version -ne $ver){throw "package version mismatch: $($pkg.version)"}
+
+          Compress-Archive -Path app/* -DestinationPath out/UEP-update.zip -CompressionLevel Optimal
+          $hash=(Get-FileHash out/UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  UEP-update.zip" | Set-Content out/sha256.txt -Encoding ascii
+
+          gh release create $next out/UEP-update.zip out/sha256.txt --repo $repo --title "UEP v0.82.77" --notes "UEP v0.82.77`n- 방과후 운영동기화에 11_방과후학교·12_차시일정·13_출석부를 함께 연결`n- 차시ID가 비어 있는 2학기 신청명단도 프로그램ID 기준으로 해당 차시에 정상 fallback`n- 8교시는 과거 야자영향타임 문자열보다 실제 시간대를 우선하여 오후자습으로 인정`n- 고등 기초 영문법 9/7 회귀: 출석부 12명·참여 12명·오후자습 프로그램인정 12명 검증`n- 야자1/야자2 최신 30_야자출결_정규화 동기화와 오늘의 대학 v0.82.76 기능 유지`n- DOM 사후수정·MutationObserver·전역 click 우회 추가 없음"
+          if($LASTEXITCODE -ne 0){throw "release create failed: $LASTEXITCODE"}
+
+          $policyPath='uep-policy.json'
+          $policy=Get-Content $policyPath -Raw | ConvertFrom-Json
+          $policy.latestVersion=$ver
+          $policy.downloadUrl="https://github.com/$repo/releases/download/$next/UEP-update.zip"
+          $policy.sha256=$hash
+          $policy.message='UEP 0.82.77 · 방과후 출석부·차시 연결 정상화'
+          $policy | ConvertTo-Json -Depth 20 | Set-Content $policyPath -Encoding utf8
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add $policyPath
+          git commit -m 'Publish UEP 0.82.77 policy'
+          if($LASTEXITCODE -ne 0){throw "policy commit failed: $LASTEXITCODE"}
+          git pull --rebase origin main
+          if($LASTEXITCODE -ne 0){throw "policy pull failed: $LASTEXITCODE"}
+          git push
+          if($LASTEXITCODE -ne 0){throw "policy push failed: $LASTEXITCODE"}
