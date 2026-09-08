@@ -1,0 +1,35 @@
+name: Build Release UEP 0.82.81 University Summary Actual
+on:
+  push:
+    paths: ['release-08281.trigger']
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          $ErrorActionPreference='Stop'
+          function Run-Native([scriptblock]$c,[string]$l){&$c;if($LASTEXITCODE -ne 0){throw "$l failed: $LASTEXITCODE"}}
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          Run-Native {gh release download v0.82.80 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source} 'download'
+          Expand-Archive source/UEP-update.zip app -Force
+          $root='app/resources/app'
+          Run-Native {node scripts/patch-uep-08281-university-summary-actual.js $root} 'patch'
+          Run-Native {node --check "$root/gyomuon.js"} 'syntax'
+          Run-Native {node scripts/test-uep-08281-university-summary-actual.js $root} 'regression'
+          Compress-Archive -Path app/* -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "$sha  UEP-update.zip"|Set-Content sha256.txt
+          Run-Native {gh release create v0.82.81 UEP-update.zip sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.81' --notes "UEP v0.82.81`n- 오늘의 대학 실제 rich renderer 기준 수정`n- 수능최저: 일반 모집단위만 기본 노출, 의·약·수·간호·사범 등은 기타 모집단위로 접힘`n- 관련·권장과목: 전체 기본 접힘`n- 교과전형 서류 반영 배지: 학생부교과 전형의 실제 서류/정성평가 근거만 판정`n- v0.82.77~0.82.80 야자·방과후·오늘의 대학 진입·동기화 회귀 유지`n- MutationObserver/전역 클릭 우회 추가 없음"} 'release'
+          $policy=Get-Content uep-policy.json -Raw|ConvertFrom-Json
+          $policy.latestVersion='0.82.81'
+          $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.81/UEP-update.zip'
+          $policy.sha256=$sha
+          $policy.message='UEP 0.82.81 · 오늘의 대학 수능최저·권장과목·배지 실제 반영'
+          $policy|ConvertTo-Json -Depth 10|Set-Content uep-policy.json -Encoding utf8
+          Run-Native {git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add uep-policy.json;git commit -m 'Publish UEP 0.82.81 policy';git pull --rebase origin main;git push} 'policy push'
