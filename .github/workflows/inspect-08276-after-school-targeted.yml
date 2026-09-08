@@ -1,0 +1,49 @@
+name: Inspect UEP 0.82.76 After School Targeted
+on:
+  push:
+    paths: ['inspect-08276-after-school-targeted.trigger']
+permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.82.76 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE -ne 0){throw 'download failed'}
+          Expand-Archive source/UEP-update.zip app -Force
+          $root='app/resources/app'
+          $specs=@(
+            @("$root/electron/google-data.cjs",'const participantRows ='),
+            @("$root/electron/google-data.cjs",'const rosterByProgram ='),
+            @("$root/electron/google-data.cjs",'const afterSessions ='),
+            @("$root/gyomuon.js",'function afterSchoolProgramGroups'),
+            @("$root/gyomuon.js",'function openDashboardProgram'),
+            @("$root/gyomuon.js",'참여</div>'),
+            @("$root/gyomuon.js",'program.students')
+          )
+          $out=@()
+          foreach($spec in $specs){
+            $f=$spec[0];$needle=$spec[1]
+            if(!(Test-Path $f)){continue}
+            $txt=Get-Content $f -Raw
+            $i=$txt.IndexOf($needle)
+            $out+="===== $f :: $needle :: $i ====="
+            if($i-ge 0){$s=[Math]::Max(0,$i-2500);$len=[Math]::Min(12000,$txt.Length-$s);$out+=$txt.Substring($s,$len)}
+          }
+          [System.IO.File]::WriteAllText((Join-Path $PWD 'inspection-08276-after-school-targeted.txt'),($out -join "`r`n"),(New-Object System.Text.UTF8Encoding($false)))
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add inspection-08276-after-school-targeted.txt
+          git commit -m 'Inspect UEP 0.82.76 after-school targeted'
+          if($LASTEXITCODE -ne 0){throw 'commit failed'}
+          git pull --rebase origin main
+          if($LASTEXITCODE -ne 0){throw 'pull failed'}
+          git push
+          if($LASTEXITCODE -ne 0){throw 'push failed'}
