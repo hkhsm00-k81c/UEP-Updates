@@ -1,0 +1,30 @@
+name: Inspect UEP 0.82.74 Dashboard Runtime
+on:
+  push:
+    paths: ['inspect-08274-dashboard.trigger']
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          gh release download v0.82.74 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE -ne 0){throw 'download failed'}
+          Expand-Archive source/UEP-update.zip app -Force
+          $g='app/resources/app/gyomuon.js'
+          $gl=Get-Content $g
+          Write-Host '=== selector helper definitions ==='
+          Select-String -Path $g -Pattern 'querySelectorAll|const \$\$|function \$\$|=>document\.querySelectorAll|querySelector\(' -Context 1,1 | Select-Object -First 80 | ForEach-Object {$_.ToString()}
+          Write-Host '=== dashboard bind area ==='
+          Select-String -Path $g -Pattern 'data-dashboard-admission|function bindPage|page===\"dashboard\"|page === \"dashboard\"' -Context 8,16 | Select-Object -First 120 | ForEach-Object {$_.ToString()}
+          Write-Host '=== suspicious forEach calls ==='
+          Select-String -Path $g -Pattern '\$\([^\r\n]*\)\.forEach|\$\$\([^\r\n]*\)\.forEach' -Context 0,0 | Select-Object -First 200 | ForEach-Object {$_.ToString()}
+          Write-Host '=== version ==='
+          Select-String -Path $g -Pattern '0\.82\.74' | Select-Object -First 20 | ForEach-Object {$_.ToString()}
