@@ -1,0 +1,34 @@
+name: Inspect UEP 0.82.77 Missing University References
+on:
+  push:
+    paths: ['inspect-08277-missing-university-refs.trigger']
+permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.82.77 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE-ne 0){throw 'download failed'}
+          Expand-Archive source/UEP-update.zip app -Force
+          $txt=Get-Content 'app/resources/app/gyomuon.js' -Raw
+          $names=@('openDashboardTodayUniversity','openDashboardUniversity','uep08233OpenAdmissionTypes')
+          $out=@()
+          foreach($name in $names){$idx=0;$n=0;while(($idx=$txt.IndexOf($name,$idx)) -ge 0 -and $n -lt 10){$s=[Math]::Max(0,$idx-1800);$len=[Math]::Min(4200,$txt.Length-$s);$out+="===== $name @ $idx =====";$out+=$txt.Substring($s,$len);$idx+=$name.Length;$n++}}
+          $out -join "`r`n" | Set-Content inspection-08277-missing-university-refs.txt -Encoding utf8
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add inspection-08277-missing-university-refs.txt
+          git commit -m 'Inspect missing university references v0.82.77'
+          if($LASTEXITCODE-ne 0){throw 'commit failed'}
+          git pull --rebase origin main
+          if($LASTEXITCODE-ne 0){throw 'pull failed'}
+          git push
+          if($LASTEXITCODE-ne 0){throw 'push failed'}
