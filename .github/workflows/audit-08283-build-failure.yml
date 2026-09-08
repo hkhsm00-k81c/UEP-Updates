@@ -1,0 +1,35 @@
+name: Audit UEP 0.82.83 Build Failure
+on:
+  push:
+    paths: ['audit-08283.trigger']
+permissions:
+  contents: write
+jobs:
+  audit:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          $ErrorActionPreference='Continue'
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          gh release download v0.82.82 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+          $root='app/resources/app'
+          $out=@()
+          $out += 'FILES:'
+          $out += (Get-ChildItem $root | Select-Object Name,Length | Out-String)
+          $out += 'VERSION OCCURRENCES BEFORE:'
+          $out += (Select-String -Path "$root/gyomuon.js" -Pattern 'APP_VERSION|0\.82\.8[0-9]' | Select-Object -First 30 | Out-String)
+          if(Test-Path "$root/package.json"){$out += 'PACKAGE:';$out += (Get-Content "$root/package.json" -Raw)} else {$out += 'PACKAGE MISSING'}
+          $p = (& node scripts/patch-uep-08283-version-and-homeroom-write.js $root 2>&1 | Out-String); $out += "PATCH EXIT=$LASTEXITCODE"; $out += $p
+          $t = (& node scripts/test-uep-08283-version-and-homeroom-write.js $root 2>&1 | Out-String); $out += "TEST EXIT=$LASTEXITCODE"; $out += $t
+          $out | Set-Content audit-08283-build-failure.txt -Encoding utf8
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add audit-08283-build-failure.txt
+          git commit -m 'Record UEP 0.82.83 build failure audit'
+          git pull --rebase origin main
+          git push
