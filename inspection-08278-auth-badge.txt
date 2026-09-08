@@ -1,0 +1,1153 @@
+===== renderer :: 인증 필요 @ 48624 =====
+tus?.ok) return;
+  readonlyAutoRefreshTimer=setInterval(()=>{
+    if(document.hidden) return;
+    readonlyAutoRefreshCycle+=1;
+    const fullSyncedAt=readonlyCache?.syncedAt?new Date(readonlyCache.syncedAt).getTime():0;
+    const fullAge=fullSyncedAt?Date.now()-fullSyncedAt:Number.POSITIVE_INFINITY;
+    const needsFull=!fullSyncedAt||fullAge>=READONLY_FULL_REFRESH_MAX_AGE_MS||readonlyAutoRefreshCycle%6===0;
+    if(needsFull){
+      const jitter=Math.floor(Math.random()*45000);
+      setTimeout(()=>{if(!document.hidden)refreshReadonlyCacheSilently({force:true,rerender:true});},jitter);
+      return;
+    }
+    refreshOperationalCacheSilently({rerender:true});
+  },READONLY_AUTO_REFRESH_MS);
+}
+
+function updateTopSyncStatus() {
+  const button = $("#syncButton");
+  if (!button) return;
+  button.classList.remove("good", "warn", "bad");
+  const label = button.querySelector("span");
+  if (googleConnectionError) {
+    button.classList.add("bad");
+    if (label) label.textContent = "구글시트 오류";
+    button.title = googleConnectionError;
+    return;
+  }
+  if (readonlyCache?.students?.length && neisData?.ok && !neisData.offline) {
+    button.classList.add("good");
+    if (label) label.textContent = "동기화 정상";
+    button.title = "UEP 구글시트와 NEIS 자료가 정상 연결되었습니다.";
+    return;
+  }
+  if (readonlyCache?.students?.length) {
+    button.classList.add("warn");
+    if (label) label.textContent = neisData?.offline ? "NEIS 저장자료" : "NEIS 연결 대기";
+    button.title = neisError || "UEP 구글시트는 연결되었고 NEIS 자료를 확인 중입니다.";
+    return;
+  }
+  if (googleConnectionStatus?.ok) {
+    button.classList.add("bad");
+    if (label) label.textContent = "시트 권한 확인";
+    button.title = googleConnectionError || "서비스 계정 이메일의 구글시트 공유 권한을 확인하세요.";
+    return;
+  }
+  button.classList.add("warn");
+  if (label) label.textContent = "인증 필요";
+  button.title = "교사 이름·이메일 로그인과 기기승인 상태를 확인하세요.";
+}
+
+async function loadNeisDashboard(force = false, requestedDate = "") {
+  if (!window.schoolBoard?.loadNeisDashboard) {
+    neisError = "이 실행환경에서는 NEIS 연결 기능을 사용할 수 없습니다.";
+    updateTopSyncStatus();
+    return;
+  }
+  if (neisLoading) return;
+  neisLoading = true;
+  if (state.activePage === "dashboard" || state.activePage === "timetable" || state.activePage === "settings") render(state.activePage);
+  const options = {
+    schoolName: state.settings.neis.schoolName,
+    officeCode: state.settings.neis.officeCode,
+    schoolCode: state.settings.neis.schoolCode,
+    grade: state.settings.neis.grade,
+    classNo: state.settings.neis.classNo,
+    date: requestedDate || dateKey(new Date()),
+    useApiKey: Boolean(state.settings.neis.useApiKey),
+    comciganSchoolCode: state.settings.neis.comciganSchoolCode || "69092",
+    force,
+  };
+  try {
+    const result = await window.schoolBoard.loadNeisDashboard(options);
+    if (!result?.ok) throw new Error(result?.reason || "NEIS 자료를 불러오지 못했습니다.");
+    neisData = result;
+    neisError = result.offline ? result.staleReason || "실시간 연결 실패로 마지막 저장자료를 표시합니다." : "";
+    if (result.school) {
+      state.settings.neis.schoolName = result.school.schoolName || state.settings.neis.schoolName;
+      state.settings.neis.officeCode = result.school.officeCode || state.settings.neis.officeCode;
+      state.settings.neis.schoolCode = result.school.schoolCode || state.settings.neis.schoolCode;
+      await save();
+    }
+  } catch (error) {
+    neisError = error?.message || String(error);
+    if (!neisData?.ok) neisData = null;
+  } finally {
+    neisLoading = false;
+    updateTopSyncStatus();
+    if (["dashboard", "timetable", "settings"].includes(state.activePage)) render(state.activePage);
+  }
+}
+
+function toggleDashboardEditing() {
+  state.settings.layoutLocked = !state.settings.layoutLocked;
+  save();
+  render("dashboard");
+  toast(state.settings.layoutLocked ? "대시보드 배치를 저장하고 잠갔습니다." : "위젯을 끌어서 순서를 바꾸고 크기를 조절하세요.");
+}
+
+function openWidgetManager() {
+  const labels = { timetable: "개인 시간표", programs: "오늘의 프로그램", weather: "시계·날씨", calendar: "학교 캘린더", operations: "오늘의 업무·공지" };
+  $("#drawerKicker").textContent = "DASHBOARD WIDGETS";
+  $("#drawerTitle").textContent = "대시보드 위젯 관리";
+  $("#drawerBody").innerHTML = `<div class="widget-manager-list">${(state.settings.dashboardOrder || []).map((key) => { const setting = state.settings.widgetSettings[key] || {}; return `<div><span><b>${labels[key] || key}</b><small>${setting.visible === false ? "숨김" : `표시 · ${setting.width || "auto"}`}</small></span><button data-widget-toggle="${key}">${setting.visible === false ? "추가" : "숨김"}</button><button data-widget-settings="${key}">설정</button></div>`; }).join("")}</div><p class="drawer-note">위젯 표시 여부·너비·글자 크기와 배치 순서는 이 PC에 저장됩니다.</p>`;
+  $("#drawer").classList.remove("hidden");
+  $("#drawerBackdrop").classList.remove("hidden");
+  $("#drawerBody").querySelectorAll("[data-widget-toggle]").forEach((button) => button.onclick = async () => {
+    const key = button.dataset.widgetToggle;
+    state.settings.widgetSettings[key] = { ...state.settings.widgetSettings[key], visible: state.settings.widgetSettings[key]?.visible === false };
+    await save();
+    openWidgetManager();
+    if (state.activePage === "dashboard") render("dashboard");
+  });
+  $("#drawerBody").querySelectorAll("[data-wid
+===== renderer :: 인증 필요 @ 407328 =====
+ONFIDENTIAL_PIN_KEY,await subjectConfidentialDigest(result.first));
+  lockSubjectConfidential();
+  toast('선택과목 신청현황 비밀번호를 저장했습니다.');
+  if(state.activePage==='settings')render('settings');
+  return true;
+}
+function lockSubjectConfidential(){sessionStorage.removeItem(UEP_SUBJECT_CONFIDENTIAL_SESSION_KEY);}
+async function unlockSubjectConfidential(){
+  if(!subjectConfidentialPasswordConfigured()&&typeof uepLoadSharedSecurity08168==='function')await uepLoadSharedSecurity08168(true);
+  // __UEP_08159_HOMEROOM_SUBJECT_GATE__
+  const scope=typeof currentTeacherAccessScope==='function'?currentTeacherAccessScope():null;
+  const role=String(currentRoleId?.()||'');
+  const homeroomAllowed=role==='homeroom'||Boolean(scope?.teacher&&scope?.classNo);
+  if(!subjectConfidentialAllowed()&&!homeroomAllowed){toast('담임·학년부장·관리자는 비밀번호 인증 후 과목별 신청현황을 열람할 수 있습니다.');return false;}
+  if(sessionStorage.getItem(UEP_SUBJECT_CONFIDENTIAL_SESSION_KEY)==='1')return true;
+  if(!subjectConfidentialPasswordConfigured()){toast(subjectConfidentialAllowed()?'설정 → 사용자·보안에서 선택과목 대외비 비밀번호를 먼저 설정해 주세요.':'관리자가 아직 선택과목 열람 비밀번호를 공용 설정하지 않았습니다.');return false;}
+  const result=await sensitivePasswordModal({mode:'unlock',configured:true,kind:'subject'});
+  if(!result)return false;
+  if(await subjectConfidentialDigest(result.first)!==subjectConfidentialPasswordHash()){toast('선택과목 대외비 비밀번호가 일치하지 않습니다.');return false;}
+  sessionStorage.setItem(UEP_SUBJECT_CONFIDENTIAL_SESSION_KEY,'1');
+  return true;
+}
+function settingsView() {
+  const connected = Boolean(readonlyCache?.students?.length && !googleConnectionError);
+  const credentialReady = Boolean(googleConnectionStatus?.ok);
+  const googleStatus = connected ? ["구글시트 연결됨", ""] : googleConnectionError ? ["권한·연결 오류", "error"] : credentialReady ? ["권한 확인 필요", "warn"] : ["인증 필요", "warn"];
+  const connectionRows = [
+    ["학생정보", readonlyCache?.students?.length], ["학사생", readonlyCache?.dormStudents?.length], ["학사외출", readonlyCache?.dormOutings?.length],
+    ["성적", readonlyCache?.scoreRecords?.length], ["수능최저", readonlyCache?.admissionMinimums?.length], ["대학입결", readonlyCache?.admissionCuts?.length],
+  ];
+  const neisStatus = neisData?.ok ? (neisData.offline ? ["저장자료 표시", "warn"] : ["실시간 연결됨", ""]) : neisLoading ? ["불러오는 중", "warn"] : ["연결 확인", "error"];
+  const profile=currentUserProfile(), access=currentTeacherAccessScope();
+
+  const header=(title,desc,badge)=>`${settingsTabsMarkup()}<section class="settings-section-head"><div><small>UEP SETTINGS</small><h2>${title}</h2><p>${desc}</p></div><span>${badge}</span></section>`;
+
+  if(settingsPanel==="security") return `<div class="module-page settings-v064 settings-final">
+    ${header("사용자·보안","계정 승인과 역할, 민감정보 보호를 관리합니다.","관리자·학년부장")}
+    <article class="setting-card sensitive-security-settings"><div><small>PRIVACY · SECURITY</small><h3>🔒 민감정보 보안</h3><p>교육비지원 · 요보호학생 · 위기학생 상세정보의 열람 비밀번호를 관리합니다.</p><p class="settings-help">상세정보는 1차 블라인드 후 비밀번호 인증을 거쳐 확인하며 인증은 10분 동안 유지됩니다.</p></div><div class="sensitive-security-status"><b>${sensitivePasswordConfigured()?'비밀번호 설정됨':'비밀번호 설정 필요'}</b><button type="button" class="btn primary" data-sensitive-password-set>${sensitivePasswordConfigured()?'비밀번호 변경':'비밀번호 설정'}</button><button type="button" class="btn secondary" data-sensitive-lock>즉시 잠금</button></div></article>
+    <article class="setting-card subject-confidential-security-settings"><div><small>CONFIDENTIAL · CURRICULUM</small><h3>🔐 선택과목 대외비 보안</h3><p>과목별 신청현황 전용 비밀번호를 민감정보 비밀번호와 별도로 관리합니다.</p><p class="settings-help">관리자·학년부장만 설정 및 열람할 수 있으며 담임은 비활성화됩니다.</p></div><div class="sensitive-security-status"><b>${subjectConfidentialPasswordConfigured()?'비밀번호 설정됨':'비밀번호 설정 필요'}</b><button type="button" class="btn primary" data-subject-confidential-password-set ${subjectConfidentialAllowed()?'':'disabled'}>${subjectConfidentialPasswordConfigured()?'비밀번호 변경':'비밀번호 설정'}</button><button type="button" class="btn secondary" data-subject-confidential-lock ${subjectConfidentialAllowed()?'':'disabled'}>즉시 잠금</button></div></article>
+    <article class="setting-card role-settings-card"><div class="connection-title"><div><h3>사용자·권한 프로필</h3><p>현재 로그인 사용자의 역할과 담당 범위를 확인합니다.</p></div><span class="state">${escapeHtml(currentRoleDisplay())}</span></div><div class="user-profile-summary"><div><small>사용자</small><b>${escapeHtml(profile.name||"미설정")}</b></div><div><small>부서</small><b>${escapeHtml(profile.department||"미설정")}</b></div><div><small>조회 범위</small><b>${escapeHtml(access.label)}</b></div></div><p class="safe-note">담임은 학년 자료를 조회할 수 있고 타반 연락정보는 기본 마스킹합니다. 성적·응답·정규화 원천자료는 UEP에서 직접 수정하지 않습니다.</p></article>
+    <article class="setting-card access-control-card"><div class="connection-title"><div><h3>사용자·권한 승인</h3><p>01_사용자계정의 사용여부·역할·담당학년·담임반을 기준으로 로그인과 조회범위를 제어합니다.</p></div><span class="state connected">계정표 승인</span></div><div class="connection-actions"><button class="btn primary" type="button" data-access-control>권한 승인 제어판</button></div><p class="safe-note">신규 사용자 등록은 표준 구글시트에서 관리하고 UEP에서는 승인상태와 역할을 조정합니다.</p></article>
+  </div>`;
+
+  if(settingsPanel==="operations") return `<div class="module-page settings-v064 settings-final">
+    ${header("알림·운영","실제 운영 중 필요한 알림과 오류 신고만 관리합니다.","운영 설정")}
+===== renderer :: 인증 필요 @ 1167123 =====
+m) => item !== className)
+      : [...notice.confirmedClasses, className];
+    await save();
+    openGradeNotice(id);
+    render("dashboard");
+  };
+}
+
+function openReportDeadline(id) {
+  const item = state.reportDeadlines.find((deadline) => deadline.id === id);
+  if (!item) return;
+  $("#drawerKicker").textContent = "CLASS REPORT";
+  $("#drawerTitle").textContent = item.title;
+  $("#drawerBody").innerHTML =
+    `<div class="program-summary"><div><b>대상학급</b><span>${item.className}</span></div><div><b>마감일</b><span>${item.due}</span></div><div><b>미제출</b><span>${item.missing}명</span></div><div><b>상태</b><span>확인 필요</span></div></div><div class="connection-guide compact"><span>▤</span><h3>미제출 학생 명단</h3><p>생활기록부 프로그램·보고서 자료와 연결하면 해당 학급의 미제출 학생을 표시합니다.</p></div>`;
+  $("#drawer").classList.remove("hidden");
+  $("#drawerBackdrop").classList.remove("hidden");
+}
+
+function openSchoolDeadline(id) {
+  const item = state.schoolDeadlines.find((deadline) => deadline.id === id);
+  if (!item) return;
+  $("#drawerKicker").textContent = "SCHOOL DEADLINE";
+  $("#drawerTitle").textContent = item.title;
+  $("#drawerBody").innerHTML =
+    `<div class="program-summary"><div><b>담당부서</b><span>${escapeHtml(item.department)}</span></div><div><b>마감일</b><span>${item.due}</span></div></div><div class="program-notice"><b>학교 캘린더 업무</b><p>학교 업무일정 계획 시트에서 가져올 마감 항목입니다. 현재 화면은 예시자료입니다.</p></div>`;
+  $("#drawer").classList.remove("hidden");
+  $("#drawerBackdrop").classList.remove("hidden");
+}
+
+function openDrawer(type) {
+  const googleConnected = Boolean(readonlyCache?.students?.length && !googleConnectionError);
+  const googleLabel = googleConnected
+    ? `정상 · 학생 ${readonlyCache.students.length}명`
+    : googleConnectionError
+      ? "연결 오류"
+      : googleConnectionStatus?.ok
+        ? "권한 확인 필요"
+        : "인증 필요";
+  const neisLabel = neisData?.ok
+    ? `${neisData.offline ? "저장자료" : "실시간"} · ${neisData.school?.schoolName || state.settings.neis.schoolName}`
+    : neisLoading
+      ? "불러오는 중"
+      : "연결 확인 필요";
+  const mealCount = neisData?.meals?.length || 0;
+  const timetableDays = neisData?.timetable?.days?.filter((day) => day.lessons?.length).length || 0;
+  const data = {
+    sync: [
+      "SYNC STATUS",
+      "자료 연결 상태",
+      `<div class="drawer-section"><h4>실시간 연결</h4>
+        <div class="drawer-line"><span>UEP 구글시트</span><b class="${googleConnected ? "" : "warn"}">${escapeHtml(googleLabel)}</b></div>
+        <div class="drawer-line"><span>NEIS 급식·시간표</span><b class="${neisData?.ok && !neisData.offline ? "" : "warn"}">${escapeHtml(neisLabel)}</b></div>
+        <div class="drawer-line"><span>마지막 구글 조회</span><b>${escapeHtml(formatSyncTime(readonlyCache?.syncedAt))}</b></div>
+        <div class="drawer-line"><span>마지막 NEIS 조회</span><b>${escapeHtml(formatSyncTime(neisData?.fetchedAt))}</b></div>
+      </div>
+      ${googleConnectionError ? `<div class="connection-error-detail"><b>구글시트 오류</b><span>${escapeHtml(googleConnectionError)}</span></div>` : ""}
+      ${neisError ? `<div class="connection-error-detail"><b>NEIS 안내</b><span>${escapeHtml(neisError)}</span></div>` : ""}
+      <div class="drawer-section"><h4>현재 읽은 자료</h4>
+        <div class="drawer-line"><span>학생·학사·출결</span><b>${readonlyCache?.students?.length || 0}명 · ${readonlyCache?.dormStudents?.length || 0}명 · ${(readonlyCache?.officialAttendance?.length || 0) + (readonlyCache?.lateAttendance?.length || 0) + (readonlyCache?.nightAttendance?.length || 0)}건</b></div>
+        <div class="drawer-line"><span>성적·입시</span><b>${readonlyCache?.scoreRecords?.length || 0}건 · ${(readonlyCache?.admissionMinimums?.length || 0) + (readonlyCache?.admissionCuts?.length || 0)}건</b></div>
+        <div class="drawer-line"><span>급식·주간 시간표</span><b>${mealCount}식 · ${timetableDays}일</b></div>
+      </div>
+      <div class="drawer-section drawer-button-row"><button class="btn secondary" data-sync-settings>연결 설정</button><button class="btn primary" data-sync-google-retry>구글 새로고침</button><button class="btn primary" data-sync-neis-retry>NEIS 새로고침</button><button class="btn secondary" data-sync-diagnostics>진단 JSON 저장</button></div>`,
+    ],
+    notice: [
+      "NOTIFICATION",
+      "알림 센터",
+      `<div class="drawer-section"><h4>오늘 확인할 항목</h4><div class="alert-list"><div class="alert"><i></i><span><b>선택과목 미신청 6명</b><small>확인하기</small></span></div><div class="alert"><i></i><span><b>야자 출결 오류 3건</b><small>오류검토로 이동</small></span></div><div class="alert"><i></i><span><b>보고서 미제출 12명</b><small>학생목록 보기</small></span></div></div></div>`,
+    ],
+    approval: [
+      "APPROVAL",
+      "승인 대기",
+      `<div class="drawer-section"><h4>외부 실행 전 확인</h4><div class="drawer-line"><span>담임 안내 초안</span><b>1건</b></div><div class="drawer-line"><span>출결 대량 반영</span><b>1건</b></div><p style="font-size:9px;color:#71859a">시험판에서는 실제 발송이나 반영이 실행되지 않습니다.</p></div>`,
+    ],
+    info: [
+      "APP INFO",
+      "UEP 기능 상태",
+      `<div class="app-version-card"><span>UEP · SCHOOL OPERATIONS</span><b>v${APP_VERSION}</b><small>배포 준비 · 학생발굴 이동경로 정밀화 · 관리자 ZIP/교사용 단일 EXE 동일 빌드</small></div>
+       <div class="drawer-section"><h4>현재 실제 작동</h4>${[
+        `UEP 구글시트|${googleLabel}`,
+        `NEIS 급식·시간표|${neisLabel}`,
+        `프로그램·보고서|공통·선택·방과후 및 보고
+===== renderer :: 인증 필요 @ 1321248 =====
+ent)return "";
+  const bundle=studentRecordBundle(student),reports=bundle.reports||[],activities=bundle.activities||[],programs=bundle.programs||[];
+  const questions=[];
+  if(!reports.length)questions.push("참여 활동에서 새롭게 알게 된 사실과 생각이 달라진 지점을 구체적으로 적어 주세요.");
+  if(!activities.length)questions.push("교실·동아리·봉사활동에서 발견한 사회·공동체·환경 문제는 무엇인가요?");
+  if(!programs.length)questions.push("관심 진로와 연결하여 다음에 더 탐구하고 싶은 문제와 실천 계획을 적어 주세요.");
+  if(!questions.length)questions.push("기존 근거 중 가장 의미 있는 활동을 골라 문제 발견 → 탐구 → 변화 → 후속 실천의 순서로 보완해 주세요.");
+  const text=`[SDGs 근거 보완 안내] ${student.studentNo||""} ${student.name||""}\n`+questions.map((x,i)=>`${i+1}. ${x}`).join("\n");
+  return `<section class="sdgs-supplement-panel"><header><div><small>EVIDENCE SUPPLEMENT</small><h3>SDGs 근거 보완</h3><p>현재 연결된 활동 ${activities.length}건 · 프로그램 ${programs.length}건 · 보고서 ${reports.length}건을 기준으로 보완 질문을 제안합니다.</p></div><button class="btn primary" data-copy-sdgs-supplement>보완 질문 복사</button></header><ul>${questions.map(x=>`<li>${escapeHtml(x)}</li>`).join("")}</ul><textarea id="sdgsSupplementText" readonly>${escapeHtml(text)}</textarea></section>`;
+}
+
+
+// __UEP_08116_SELECTION_SMS_HELPER__
+function uepSelectionSms(student,errors){
+  const lines=errors.map((x,i)=>`${i+1}. ${x.type}: ${x.detail}`).join("\n");
+  return `[운호고 선택과목 보완 안내]\n${student.name} 학생의 2학년 선택과목 신청에서 확인이 필요한 내용이 있습니다.\n${lines}\n신청 내용을 확인한 뒤 담당 선생님의 안내에 따라 수정해 주세요.`;
+}
+
+
+
+// __UEP_SCHOOL_READ_BADGE_08122__
+function syncSchoolReadAuthBadgeFromState(){
+  try{
+    const authenticated=Boolean(googleConnectionStatus?.ok);
+    const nodes=[...document.querySelectorAll('[data-uep-school-read-auth-badge], .uep-school-read-auth-badge')];
+    for(const node of nodes){
+      node.dataset.uepSchoolReadAuthBadge='1';
+      node.textContent=authenticated?'연결됨':'인증 필요';
+      node.title=authenticated?'UEP School Read API 인증 정상':'UEP 로그인이 필요합니다.';
+    }
+  }catch(error){console.warn('[UEP] School Read auth badge state render failed',error);}
+}
+
+
+
+/* UEP_08132_INTERACTION_REPAIR_START */
+(function(){
+  if(typeof document==='undefined') return;
+  if(window.__UEP08132InteractionRepair) return;
+  window.__UEP08132InteractionRepair=true;
+
+  function renderRecordsSafe(){
+    if(typeof render==='function') render('records');
+  }
+
+  function visibleStudentIds(){
+    const rows=[...document.querySelectorAll('[data-record-student]')]
+      .filter(el=>el.offsetParent!==null)
+      .map(el=>String(el.dataset.recordStudent||'').trim())
+      .filter(Boolean);
+    return [...new Set(rows)];
+  }
+
+  document.addEventListener('click',function(ev){
+    const subject=ev.target&&ev.target.closest?ev.target.closest('[data-curriculum-subject]'):null;
+    if(subject){
+      ev.preventDefault();
+      ev.stopImmediatePropagation();
+      const key=String(subject.dataset.curriculumSubject||'').trim();
+      if(key){
+        try{ curriculumSubjectKey=key; }catch(_e){}
+        if(typeof uepOpenSubjectModal08128==='function'){
+          uepOpenSubjectModal08128(key);
+          return;
+        }
+      }
+    }
+
+    const row=ev.target&&ev.target.closest?ev.target.closest('[data-record-student]'):null;
+    if(row){
+      const id=String(row.dataset.recordStudent||'').trim();
+      if(id){
+        ev.preventDefault();
+        ev.stopImmediatePropagation();
+        try{ recordStudentId=id; }catch(_e){}
+        let curriculum=false;try{curriculum=recordMode==='curriculum';}catch(_e){}
+        if(curriculum&&typeof openCurriculumStudentSidePanel==='function')openCurriculumStudentSidePanel(id);else renderRecordsSafe();
+        return;
+      }
+    }
+
+    const prev=ev.target&&ev.target.closest?ev.target.closest('[data-uep-student-prev]'):null;
+    const next=ev.target&&ev.target.closest?ev.target.closest('[data-uep-student-next]'):null;
+    if(prev||next){
+      ev.preventDefault();
+      ev.stopImmediatePropagation();
+      const ids=visibleStudentIds();
+      if(!ids.length) return;
+      let cur='';
+      try{ cur=String(recordStudentId||'').trim(); }catch(_e){}
+      let i=ids.indexOf(cur);
+      if(i<0) i=0;
+      i=prev?Math.max(0,i-1):Math.min(ids.length-1,i+1);
+      try{ recordStudentId=ids[i]; }catch(_e){}
+      renderRecordsSafe();
+    }
+  },true);
+
+  // Dashboard safeguard: do not leave a holiday-time mode visibly selected on an ordinary weekday.
+  // This only normalizes the selector when both labels exist; it does not remove holiday support.
+  function normalizeHolidayMode(){
+    const nodes=[...document.querySelectorAll('button,[role="button"],.chip,.pill,.seg-btn')];
+    const holiday=nodes.find(el=>/공휴s*시간|공휴일/.test((el.textContent||'').trim()));
+    const regular=nodes.find(el=>/정규s*시간/.test((el.textContent||'').trim()));
+    if(!holiday||!regular) return;
+    const now=new Date();
+    const day=now.getDay();
+    if(day===0||day===6) return;
+    const hs=getComputedStyle(holiday);
+    const rs=getComputedStyle(regular);
+    const holidayLooksActive=holiday.getAttribute('aria-pressed')==='true'||holiday.classList.contains('active')||holiday.classList.contains('selected')||hs.backgroundColor!==rs.backgroundColor;
+    if(holidayLooksActive && typeof regular.click==='function') regular.click();
+  }
+  setTimeout(normaliz
+===== renderer :: 동기화 정상 @ 48027 =====
+t||result.syncedAt||new Date().toISOString()};
+      googleConnectionError='';updateTopSyncStatus();updateDormOutingCount();
+      if(rerender&&state.activePage&&operationalPageNeedsRender08172(state.activePage))render(state.activePage);
+      return true;
+    }catch(error){googleConnectionError=error?.message||String(error);updateTopSyncStatus();return false;}
+  })();
+  try{return await operationalRefreshInFlight;}finally{operationalRefreshInFlight=null;}
+}
+function startReadonlyAutoRefresh(){
+  if(readonlyAutoRefreshTimer) clearInterval(readonlyAutoRefreshTimer);
+  if(!googleConnectionStatus?.ok) return;
+  readonlyAutoRefreshTimer=setInterval(()=>{
+    if(document.hidden) return;
+    readonlyAutoRefreshCycle+=1;
+    const fullSyncedAt=readonlyCache?.syncedAt?new Date(readonlyCache.syncedAt).getTime():0;
+    const fullAge=fullSyncedAt?Date.now()-fullSyncedAt:Number.POSITIVE_INFINITY;
+    const needsFull=!fullSyncedAt||fullAge>=READONLY_FULL_REFRESH_MAX_AGE_MS||readonlyAutoRefreshCycle%6===0;
+    if(needsFull){
+      const jitter=Math.floor(Math.random()*45000);
+      setTimeout(()=>{if(!document.hidden)refreshReadonlyCacheSilently({force:true,rerender:true});},jitter);
+      return;
+    }
+    refreshOperationalCacheSilently({rerender:true});
+  },READONLY_AUTO_REFRESH_MS);
+}
+
+function updateTopSyncStatus() {
+  const button = $("#syncButton");
+  if (!button) return;
+  button.classList.remove("good", "warn", "bad");
+  const label = button.querySelector("span");
+  if (googleConnectionError) {
+    button.classList.add("bad");
+    if (label) label.textContent = "구글시트 오류";
+    button.title = googleConnectionError;
+    return;
+  }
+  if (readonlyCache?.students?.length && neisData?.ok && !neisData.offline) {
+    button.classList.add("good");
+    if (label) label.textContent = "동기화 정상";
+    button.title = "UEP 구글시트와 NEIS 자료가 정상 연결되었습니다.";
+    return;
+  }
+  if (readonlyCache?.students?.length) {
+    button.classList.add("warn");
+    if (label) label.textContent = neisData?.offline ? "NEIS 저장자료" : "NEIS 연결 대기";
+    button.title = neisError || "UEP 구글시트는 연결되었고 NEIS 자료를 확인 중입니다.";
+    return;
+  }
+  if (googleConnectionStatus?.ok) {
+    button.classList.add("bad");
+    if (label) label.textContent = "시트 권한 확인";
+    button.title = googleConnectionError || "서비스 계정 이메일의 구글시트 공유 권한을 확인하세요.";
+    return;
+  }
+  button.classList.add("warn");
+  if (label) label.textContent = "인증 필요";
+  button.title = "교사 이름·이메일 로그인과 기기승인 상태를 확인하세요.";
+}
+
+async function loadNeisDashboard(force = false, requestedDate = "") {
+  if (!window.schoolBoard?.loadNeisDashboard) {
+    neisError = "이 실행환경에서는 NEIS 연결 기능을 사용할 수 없습니다.";
+    updateTopSyncStatus();
+    return;
+  }
+  if (neisLoading) return;
+  neisLoading = true;
+  if (state.activePage === "dashboard" || state.activePage === "timetable" || state.activePage === "settings") render(state.activePage);
+  const options = {
+    schoolName: state.settings.neis.schoolName,
+    officeCode: state.settings.neis.officeCode,
+    schoolCode: state.settings.neis.schoolCode,
+    grade: state.settings.neis.grade,
+    classNo: state.settings.neis.classNo,
+    date: requestedDate || dateKey(new Date()),
+    useApiKey: Boolean(state.settings.neis.useApiKey),
+    comciganSchoolCode: state.settings.neis.comciganSchoolCode || "69092",
+    force,
+  };
+  try {
+    const result = await window.schoolBoard.loadNeisDashboard(options);
+    if (!result?.ok) throw new Error(result?.reason || "NEIS 자료를 불러오지 못했습니다.");
+    neisData = result;
+    neisError = result.offline ? result.staleReason || "실시간 연결 실패로 마지막 저장자료를 표시합니다." : "";
+    if (result.school) {
+      state.settings.neis.schoolName = result.school.schoolName || state.settings.neis.schoolName;
+      state.settings.neis.officeCode = result.school.officeCode || state.settings.neis.officeCode;
+      state.settings.neis.schoolCode = result.school.schoolCode || state.settings.neis.schoolCode;
+      await save();
+    }
+  } catch (error) {
+    neisError = error?.message || String(error);
+    if (!neisData?.ok) neisData = null;
+  } finally {
+    neisLoading = false;
+    updateTopSyncStatus();
+    if (["dashboard", "timetable", "settings"].includes(state.activePage)) render(state.activePage);
+  }
+}
+
+function toggleDashboardEditing() {
+  state.settings.layoutLocked = !state.settings.layoutLocked;
+  save();
+  render("dashboard");
+  toast(state.settings.layoutLocked ? "대시보드 배치를 저장하고 잠갔습니다." : "위젯을 끌어서 순서를 바꾸고 크기를 조절하세요.");
+}
+
+function openWidgetManager() {
+  const labels = { timetable: "개인 시간표", programs: "오늘의 프로그램", weather: "시계·날씨", calendar: "학교 캘린더", operations: "오늘의 업무·공지" };
+  $("#drawerKicker").textContent = "DASHBOARD WIDGETS";
+  $("#drawerTitle").textContent = "대시보드 위젯 관리";
+  $("#drawerBody").innerHTML = `<div class="widget-manager-list">${(state.settings.dashboardOrder || []).map((key) => { const setting = state.settings.widgetSettings[key] || {}; return `<div><span><b>${labels[key] || key}</b><small>${setting.visible === false ? "숨김" : `표시 · ${setting.width || "auto"}`}</small></span><button data-widget-toggle="${key}">${setting.visible === false ? "추가" : "숨김"}</button><button data-widget-settings="${key}">설정</button></div>`; }).join("")}</div><p class="drawer-note">위젯 표
+===== renderer :: Google 연결 @ 115907 =====
+ame, student.middleSchool].join(" ").toLowerCase())}" data-status="${escapeHtml(student.status || "재학")}"><header><b>${escapeHtml(student.studentNo || "-")} ${escapeHtml(student.name)}</b><em>상세 ›</em></header><div><span><small>학적</small>${escapeHtml(student.status || "재학")}</span><span><small>학사</small>${escapeHtml(student.dorm || "-")}</span><span><small>NFC</small>${escapeHtml(student.nfc || "-")}</span></div><footer>${escapeHtml(student.middleSchool || "-")}</footer></button>`).join("");
+    return `<div class="module-page student-master-page student-master-compact">${studentPageTabs}<div class="student-class-dashboard">${classCards}</div><div class="toolbar student-master-toolbar"><input class="search" type="search" id="studentMasterSearch" placeholder="학번·이름·반·출신중학교 검색"><select class="filter" id="studentStatusFilter"><option value="">전체 학적</option><option>재학</option><option>전입</option><option>전출</option><option>자퇴</option></select><div class="student-heat-period" title="학생카드 색은 선택 기간 안의 클릭 횟수로 계산됩니다."><small>카드색 기준</small><button type="button" data-student-heat-period="7" class="${studentCardHeatPeriodDays()===7?'active':''}">최근 7일</button><button type="button" data-student-heat-period="30" class="${studentCardHeatPeriodDays()===30?'active':''}">최근 30일</button><button type="button" data-student-heat-reset>색 초기화</button></div><span class="state" id="studentSelectionState">반을 선택하세요</span></div><div class="student-master-table hidden" id="studentMasterTable"><div id="studentMasterRows" class="student-card-grid">${rows}</div><div class="empty-state hidden" id="studentSearchEmpty"><b>일치하는 학생이 없습니다.</b><span>학번·성명·반 또는 학적 조건을 다시 확인하세요.</span></div></div></div>`;
+  }
+  return `<div class="module-page"><div class="empty-state data-card"><b>학생정보를 불러오지 못했습니다.</b><span>설정에서 Google 연결 인증을 등록한 뒤 새로고침하세요.</span></div></div>`;
+}
+
+
+const NIGHT_STUDY_RULES_STORE='uep-night-study-rules-v1';
+function defaultNightStudyRules(){
+  return [
+    {id:'weekly-wed',name:'수요일 미운영',type:'weekday',weekday:3,active:true},
+    {id:'summer-2026',name:'2026 여름방학 미운영',type:'range',start:'2026-08-08',end:'2026-08-17',active:true}
+  ];
+}
+function readNightStudyRules(){
+  try{const saved=JSON.parse(localStorage.getItem(NIGHT_STUDY_RULES_STORE)||'null');return Array.isArray(saved)?saved:defaultNightStudyRules();}
+  catch{return defaultNightStudyRules();}
+}
+function nightStudyOperationStatus(key){
+  const date=new Date(`${key}T12:00:00`);
+  const rules=readNightStudyRules().filter(r=>r&&r.active!==false);
+  for(const r of rules){
+    if(r.type==='range'&&r.start&&r.end&&key>=r.start&&key<=r.end)return {operates:false,reason:r.name||'미운영 기간'};
+    if(r.type==='weekday'&&Number(r.weekday)===date.getDay())return {operates:false,reason:r.name||'요일 미운영'};
+  }
+  return {operates:true,reason:'운영일'};
+}
+
+function dormDefaultRules(){
+  return [
+    {id:'period-s1',category:'period',name:'2026-1학기',start:'2026-03-01T00:00',end:'2026-07-21T23:59',days:'전체',effect:'운영기간',priority:10,active:true,note:'학교 운영기간. 학사 운영 여부와는 별도로 보존합니다.',operationState:'운영'},
+    {id:'period-summer',category:'period',name:'2026 여름방학',start:'2026-07-22T00:00',end:'2026-08-17T23:59',days:'전체',effect:'운영기간',priority:10,active:true,note:'방학이지만 대부분 학사를 운영합니다. 실제 미운영일은 별도 규칙으로 등록합니다.',operationState:'운영'},
+    {id:'period-s2',category:'period',name:'2026-2학기',start:'2026-08-18T00:00',end:'2026-12-30T23:59',days:'전체',effect:'운영기간',priority:10,active:true,note:'2학기 학교 운영기간.',operationState:'운영'},
+    {id:'period-winter',category:'period',name:'2026 겨울방학',start:'2026-12-31T00:00',end:'2027-02-28T23:59',days:'전체',effect:'운영기간',priority:10,active:true,note:'겨울방학에도 학사를 운영합니다. 실제 미운영기간은 학년 협의 후 별도 등록합니다.',operationState:'운영'},
+    {id:'closure-summer-2026',category:'closure',name:'여름방학 학사 미운영',start:'2026-08-08T00:00',end:'2026-08-17T18:59',days:'전체',effect:'학사 미운영',priority:40,active:true,note:'이 기간 외출은 원본은 보존하되 빠른열기·운영통계에서는 제외합니다.',operationState:'미운영'},
+    {id:'entry-20260817',category:'exception',name:'2학기 개학 전 재입소',start:'2026-08-17T19:00',end:'2026-08-17T22:30',days:'월',effect:'입소 변경',entryTime:'19:00',lateEntry:'22:30',reason:'학원',priority:50,active:true,note:'정상 입소 19:00. 학원 사유 학생은 22:30까지 늦은 입소 허용.',operationState:'입퇴소변경',actualReentry:'2026-08-17T19:00',formRequired:true},
+    {id:'base-weekly-2026',category:'base',name:'기본 주간 입·퇴소 규칙',start:'2026-03-01T00:00',end:'2027-02-28T23:59',days:'금,토,일',effect:'기본 입퇴소',entryTime:'일 19:00',exitTime:'토 08:30',lateEntry:'입소일 22:30',earlyExit:'금 일과후',reason:'학원',priority:20,active:true,note:'평상시에는 금요일에 한해 학원 외출 후 학사 복귀를 허용하며, 기존 금요일 야간 학원 후 바로 귀가도 허용합니다. 모두 개인신청 필요. 토요일 08:30 기본 퇴소. 입소일 19:00 기본 입소, 입소일 학원 사유 학생은 개인신청 시 22:30까지 늦은 입소 허용.',operationState:'운영',priorNightAcademyHome:true,formRequired:true,individualOutingAllowed:true},
+    {id:'expected-20260924-chuseok',category:'exception',name:'추석연휴 입·퇴소 변경',start:'2026-09-24T15:30',end:'2026-09-27T19:00',days:'목,금,토,일',effect:'연휴 전체퇴소·재입소 변경',priority:5,active:true,note:'추석연휴는 전날 일과 종료 후 15:30 전체 퇴소하고 연휴 마지막 날 19:00 재입소합니다.',operationState:'입퇴소변경',actualExit:'2026-09-24T15:30',actualReentry:'2026-09-27T19:00'},
+    {id:'expected-20260908-exam1',category:'exam',name:'1차 정기고사 외출허용',star
+===== renderer :: Google 연결 @ 1185454 =====
+on class="btn secondary" data-outing-email="${escapeHtml(item.id)}">학생 메일 작성</button>`:""}</div></article>`).join(""):'<div class="outing-empty">오늘 발송할 학사외출 안내가 없습니다.</div>';
+  const breakNotice=(viewKey>='2026-08-08'&&viewKey<='2026-08-17')?'<div class="outing-operation-notice"><b>학사 방학 · 운영 제외기간</b><span>2026.8.8 ~ 8.17 19:00 전 외출은 운영현황·통계에서 제외합니다. 원본 기록은 보존됩니다.</span></div>':'';
+  $("#drawerBody").innerHTML = `${breakNotice}<div class="outing-date"><button data-outing-day="-1" title="이전 날짜">‹</button><strong>${displayDate}</strong><span data-outing-today>오늘</span><button data-outing-day="1" title="다음 날짜">›</button></div><div class="outing-summary"><span><b>${items.length}</b>오늘</span><span><b>${weekItems.length}</b>이번 주</span><span><b>${readonlyCache?.summary?.dormRosterCount ?? "-"}</b>학사생</span></div><div class="outing-action-bar"><button class="btn primary" data-outing-teacher-add>+ 외출 추가</button><button class="btn primary" data-outing-print>오늘 명단 출력</button><button class="btn secondary" data-outing-supervisor-copy>전문사감 보고문 확인</button><button class="btn secondary" data-outing-supervisor-email>전문사감 메일 작성</button><button class="btn secondary" data-outing-copy-all>전체 문자내용 확인</button><button class="btn secondary" data-outing-email-all>전체 학생 메일 작성</button></div><h4 class="sync-section-title">오늘 명단</h4><div class="outing-table"><div class="outing-head"><span>날짜</span><span>학생·구분</span><span>외출·입소</span><span>복귀·귀가</span><span>확인정보</span><span>상태</span></div>${rows(items)}</div><h4 class="sync-section-title">학생 문자발송 메시지</h4><div class="outing-message-list">${smsCards}</div><h4 class="sync-section-title">이번 주 월–일</h4><div class="outing-week-grid">${weekDays}</div><p class="drawer-note">${readonlyCache ? `${formatSyncTime(readonlyCache.syncedAt)} 기준 구글시트 조회자료입니다.` : "설정에서 Google 연결 인증을 먼저 등록하세요."} 원본 구글시트는 변경하지 않습니다.</p>`;
+  $("#drawer").classList.add("outing-expanded");
+  $("#drawer").classList.remove("hidden");
+  $("#drawerBackdrop").classList.remove("hidden");
+  $$("[data-outing-day]").forEach((button) => {
+    button.onclick = () => {
+      outingViewDate.setDate(outingViewDate.getDate() + Number(button.dataset.outingDay));
+      openDormOutingDrawer();
+    };
+  });
+  $("[data-outing-today]").onclick = () => {
+    outingViewDate = new Date(today);
+    openDormOutingDrawer();
+  };
+  $("[data-outing-teacher-add]")?.addEventListener("click",openDormOutingTeacherEditor);
+  $("[data-outing-print]")?.addEventListener("click",()=>{
+    if(!items.length)return toast("출력할 오늘 학사외출 명단이 없습니다.");
+    const popup=window.open("","_blank","width=1100,height=800");
+    if(!popup)return toast("팝업 차단을 해제해 주세요.");
+    popup.document.write(`<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>오늘의 학사외출</title><style>body{font-family:'Malgun Gothic',sans-serif;margin:32px;color:#172033}h1{font-size:25px;margin:0 0 6px}p{margin:0 0 22px;color:#5c667a}table{width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed}th,td{border:1px solid #cfd6df;padding:9px;text-align:center;vertical-align:middle}th{background:#eef6f5}th:nth-child(1){width:12%}th:nth-child(2){width:14%}th:nth-child(3){width:13%}th:nth-child(4),th:nth-child(5){width:11%}td:nth-child(2),td:nth-child(6){text-align:left;white-space:nowrap}td:nth-child(6){white-space:normal}@media print{button{display:none}}</style></head><body><h1>오늘의 학사외출 명단</h1><p>${escapeHtml(displayDate)} · 총 ${items.length}명 · 출처: 데이터처리 · 02_학사외출_일자별</p><table><thead><tr><th>학번</th><th>이름</th><th>구분</th><th>외출</th><th>복귀·귀가</th><th>사유·목적지</th></tr></thead><tbody>${items.map(item=>`<tr><td>${escapeHtml(outingStudentNo(item))}</td><td>${escapeHtml(item.name||"")}</td><td>${escapeHtml(item.category||"외출")}</td><td>${escapeHtml(item.outTime||"-")}</td><td>${escapeHtml(item.returnTime||"-")}</td><td>${escapeHtml([item.reason,item.destination].filter(Boolean).join(" · ")||"-")}</td></tr>`).join("")}</tbody></table><script>window.onload=()=>window.print()<\/script></body></html>`);
+    popup.document.close();
+  });
+  $$("[data-outing-copy]").forEach(button=>button.onclick=async()=>{
+    const item=items.find(row=>String(row.id)===String(button.dataset.outingCopy));
+    if(!item)return;
+    try{await navigator.clipboard.writeText(smsText(item));toast(`${item.name} 학생 문자내용을 복사했습니다.`);}catch{toast("문자내용을 복사하지 못했습니다.");}
+  });
+  $$('[data-outing-email]').forEach(button=>button.onclick=()=>{
+    const item=items.find(row=>String(row.id)===String(button.dataset.outingEmail));
+    const email=outingEmail(item);
+    if(!item||!email)return toast('학생 이메일 정보가 없습니다.');
+    const subject=encodeURIComponent(`[운호고등학교] ${displayDate} 학사외출 안내`);
+    const body=encodeURIComponent(smsText(item));
+    window.open(`mailto:${encodeURIComponent(email)}?subject=${subject}&body=${body}`,'_self');
+    toast(`${item.name} 학생 메일 작성창을 열었습니다.`);
+  });
+
+  $("[data-outing-email-all]")?.addEventListener("click",()=>{
+    const emails=[...new Set(items.map(outingEmail).filter(Boolean))];
+    if(!emails.length)return toast("학생 이메일 정보가 없습니다.");
+    const subject=encodeURIComponent(`[운호고등학교] ${displayDate} 학사외출 안내`);
+    const body=encodeURIComponent(items.map(item=>`${outingStudentNo(item)} ${item.name}\n${sms
+===== renderer :: Google 연결 @ 1238821 =====
+(const [studentKey,list] of byStudent){
+    const semesters=[...new Set(list.map(uepSelectionSemester).filter(Boolean))];
+    for(const semester of semesters){
+      const semRows=list.filter(r=>uepSelectionSemester(r)===semester);
+      const pre=new Set(semRows.filter(r=>/사전|상담|구글폼|google/i.test(uepSelectionRound(r)+' '+String(r['원본시트']??''))).map(uepSelectionNormalizeCourse).filter(Boolean));
+      const main=new Set(semRows.filter(r=>/본신청|리로|수강신청/i.test(uepSelectionRound(r)+' '+String(r['원본시트']??''))).map(uepSelectionNormalizeCourse).filter(Boolean));
+      if(!pre.size && !main.size) continue;
+      const kept=[...pre].filter(x=>main.has(x));
+      const removed=[...pre].filter(x=>!main.has(x));
+      const added=[...main].filter(x=>!pre.has(x));
+      const status=!removed.length&&!added.length?'일치':(removed.length&&added.length?'변경':(added.length?'추가':'삭제'));
+      out.push({studentKey,semester,status,kept,removed,added});
+    }
+  }
+  return out;
+}
+// __UEP_STARTUP_GATE_08080__
+// Defensive policy for source variants where the old startup gate was already removed.
+// Google sync state must not be treated as application-login/setup eligibility.
+// __UEP_GOOGLE_NONBLOCKING_08080__
+// Google sync is an independent data-connection layer, not an application login gate.
+(function(){
+  function annotateGoogleConnection(){
+    const drawer=document.querySelector('#drawerBody');
+    if(!drawer) return;
+    const text=String(drawer.textContent||'');
+    if(!/Google|구글시트/.test(text)) return;
+    if(drawer.querySelector('[data-uep-google-nonblocking-note]')) return;
+    const note=document.createElement('div');
+    note.dataset.uepGoogleNonblockingNote='1';
+    note.className='setup-warning';
+    note.style.marginTop='10px';
+    note.innerHTML='<b>UEP는 계속 사용할 수 있습니다.</b><br>Google 연결은 최신 학교자료를 동기화하기 위한 연결입니다. 연결이 끊겨도 마지막 정상 동기화 자료로 화면을 사용할 수 있으며, 연결이 복구되면 최신 자료로 자동 갱신됩니다.';
+    drawer.appendChild(note);
+  }
+  const obs=new MutationObserver(()=>requestAnimationFrame(annotateGoogleConnection));
+  {const target=document.querySelector('#drawerBody');if(target)obs.observe(target,{childList:true,subtree:true});}
+  setTimeout(annotateGoogleConnection,350);
+})();
+// __UEP_EVIDENCE_GROWTH_08082__
+function sdgsDashboard(student,bundle){
+  const career=studentCareerSupport(student,bundle);
+  const programs=(bundle.programs||[]).filter(p=>p.kind!=="after");
+  const activities=bundle.activities||[];
+  const volunteers=[...(bundle.volunteer||[]),...(bundle.volunteers||[]),...(bundle.service||[]),...(bundle.services||[])];
+  const reportRows=[...recordEvidenceRows(student,bundle,"autonomy"),...recordEvidenceRows(student,bundle,"career")].filter(r=>r.report);
+  const uniqueReports=[];const seen=new Set();reportRows.forEach(r=>{const k=String(r.report?.id||[r.report?.submittedAt,r.title,(r.report?.responses||[]).join('|')].join('::'));if(!seen.has(k)){seen.add(k);uniqueReports.push(r);}});
+  const map=new Map(SDG_CATALOG.map(([no,name])=>[Number(no),{no:Number(no),name,evidence:[]} ]));
+  const add=(no,type,title,detail,strength='confirmed')=>{const row=map.get(Number(no));if(!row)return;const key=[type,title,detail].join('|');if(row.evidence.some(e=>e.key===key))return;row.evidence.push({key,type,title:String(title||'활동'),detail:String(detail||''),strength});};
+  programs.forEach(p=>String(p.sdgs||'').split(/[,;/\s]+/).map(Number).filter(n=>n>=1&&n<=17).forEach(n=>add(n,'프로그램',p.recordTitle||p.title,p.description||p.note,'confirmed')));
+  [...activities,...volunteers].forEach(a=>{
+    String(a.sdgs||a.SDGs||'').split(/[,;/\s]+/).map(Number).filter(n=>n>=1&&n<=17).forEach(n=>add(n,/봉사/.test(String(a.area||a.type||''))?'봉사':'학교교육과정',a.title||a.activity||a.name,a.detail||a.description||a.note,'confirmed'));
+    try{suggestSdgsForRows([{title:a.title||a.activity||a.name,report:{responses:[a.detail||a.description||a.note||'']}}]).slice(0,2).forEach(x=>add(x.no,/봉사/.test(String(a.area||a.type||''))?'봉사':'학교교육과정',a.title||a.activity||a.name,a.detail||a.description||a.note,'possible'));}catch{}
+  });
+  uniqueReports.forEach(r=>{try{suggestSdgsForRows([r]).slice(0,3).forEach(x=>add(x.no,'보고서',r.title||r.program?.recordTitle||r.program?.title,(r.report?.responses||[]).join(' · '),'possible'));}catch{}});
+  const ranked=[...map.values()].filter(x=>x.evidence.length).sort((a,b)=>{const ac=a.evidence.filter(e=>e.strength==='confirmed').length,bc=b.evidence.filter(e=>e.strength==='confirmed').length;return bc-ac||b.evidence.length-a.evidence.length||a.no-b.no;});
+  const confirmed=ranked.filter(x=>x.evidence.some(e=>e.strength==='confirmed'));
+  const possible=ranked.filter(x=>!x.evidence.some(e=>e.strength==='confirmed'));
+  const hope=[career.hopeTrack,career.hopeMajor].filter(v=>v&&v!=='-');
+  const careerCounts=new Map();uniqueReports.forEach(r=>{try{analyzeReportTags(r.report).careers.forEach(t=>careerCounts.set(t.label,(careerCounts.get(t.label)||0)+t.score));}catch{}});const topics=[...careerCounts.entries()].sort((a,b)=>b[1]-a[1]).slice(0,4).map(x=>x[0]);
+  const story=[hope.length?`${hope.join(' · ')}에 관심을 두고`:null,topics.length?`${topics.slice(0,3).join('·')} 주제를 반복적으로 탐구하며`:null,confirmed.length?`${confirmed.slice(0,3).map(x=>
+===== renderer :: 구글 새로고침 @ 1169264 =====
+gth).length || 0;
+  const data = {
+    sync: [
+      "SYNC STATUS",
+      "자료 연결 상태",
+      `<div class="drawer-section"><h4>실시간 연결</h4>
+        <div class="drawer-line"><span>UEP 구글시트</span><b class="${googleConnected ? "" : "warn"}">${escapeHtml(googleLabel)}</b></div>
+        <div class="drawer-line"><span>NEIS 급식·시간표</span><b class="${neisData?.ok && !neisData.offline ? "" : "warn"}">${escapeHtml(neisLabel)}</b></div>
+        <div class="drawer-line"><span>마지막 구글 조회</span><b>${escapeHtml(formatSyncTime(readonlyCache?.syncedAt))}</b></div>
+        <div class="drawer-line"><span>마지막 NEIS 조회</span><b>${escapeHtml(formatSyncTime(neisData?.fetchedAt))}</b></div>
+      </div>
+      ${googleConnectionError ? `<div class="connection-error-detail"><b>구글시트 오류</b><span>${escapeHtml(googleConnectionError)}</span></div>` : ""}
+      ${neisError ? `<div class="connection-error-detail"><b>NEIS 안내</b><span>${escapeHtml(neisError)}</span></div>` : ""}
+      <div class="drawer-section"><h4>현재 읽은 자료</h4>
+        <div class="drawer-line"><span>학생·학사·출결</span><b>${readonlyCache?.students?.length || 0}명 · ${readonlyCache?.dormStudents?.length || 0}명 · ${(readonlyCache?.officialAttendance?.length || 0) + (readonlyCache?.lateAttendance?.length || 0) + (readonlyCache?.nightAttendance?.length || 0)}건</b></div>
+        <div class="drawer-line"><span>성적·입시</span><b>${readonlyCache?.scoreRecords?.length || 0}건 · ${(readonlyCache?.admissionMinimums?.length || 0) + (readonlyCache?.admissionCuts?.length || 0)}건</b></div>
+        <div class="drawer-line"><span>급식·주간 시간표</span><b>${mealCount}식 · ${timetableDays}일</b></div>
+      </div>
+      <div class="drawer-section drawer-button-row"><button class="btn secondary" data-sync-settings>연결 설정</button><button class="btn primary" data-sync-google-retry>구글 새로고침</button><button class="btn primary" data-sync-neis-retry>NEIS 새로고침</button><button class="btn secondary" data-sync-diagnostics>진단 JSON 저장</button></div>`,
+    ],
+    notice: [
+      "NOTIFICATION",
+      "알림 센터",
+      `<div class="drawer-section"><h4>오늘 확인할 항목</h4><div class="alert-list"><div class="alert"><i></i><span><b>선택과목 미신청 6명</b><small>확인하기</small></span></div><div class="alert"><i></i><span><b>야자 출결 오류 3건</b><small>오류검토로 이동</small></span></div><div class="alert"><i></i><span><b>보고서 미제출 12명</b><small>학생목록 보기</small></span></div></div></div>`,
+    ],
+    approval: [
+      "APPROVAL",
+      "승인 대기",
+      `<div class="drawer-section"><h4>외부 실행 전 확인</h4><div class="drawer-line"><span>담임 안내 초안</span><b>1건</b></div><div class="drawer-line"><span>출결 대량 반영</span><b>1건</b></div><p style="font-size:9px;color:#71859a">시험판에서는 실제 발송이나 반영이 실행되지 않습니다.</p></div>`,
+    ],
+    info: [
+      "APP INFO",
+      "UEP 기능 상태",
+      `<div class="app-version-card"><span>UEP · SCHOOL OPERATIONS</span><b>v${APP_VERSION}</b><small>배포 준비 · 학생발굴 이동경로 정밀화 · 관리자 ZIP/교사용 단일 EXE 동일 빌드</small></div>
+       <div class="drawer-section"><h4>현재 실제 작동</h4>${[
+        `UEP 구글시트|${googleLabel}`,
+        `NEIS 급식·시간표|${neisLabel}`,
+        `프로그램·보고서|공통·선택·방과후 및 보고서 정규화`,
+        `출결|공결·지각·야자QR 운영일 조회`,
+        `생활기록부|근거선택·규칙검토·초안·최종요약`,
+        `출력센터|보고서·학생자료·선택과목·출석부·성적`,
+      ].map((x)=>{const [a,b]=x.split("|");return `<div class="drawer-line"><span>${a}</span><b>${escapeHtml(b)}</b></div>`;}).join("")}</div>
+       <div class="drawer-section"><h4>다음 개발 단계</h4><div class="drawer-line"><span>권한관리</span><b>7개 역할 설계 반영 · 인증 연결 예정</b></div><div class="drawer-line"><span>자동 업데이트</span><b>버전 확인 작동 · 설치/롤백 준비</b></div><div class="drawer-line"><span>사용 설명서</span><b>메뉴별 도움말 작성 시작</b></div></div>
+       <div class="readonly-rule"><b>데이터 원칙</b><span>기본연결시트·데이터처리시트 우선 검증 · NEIS 공개 API · 담임 수동확정값 보호</span></div>`,
+    ],
+  };
+  const [k, t, b] = data[type] || data.info;
+  $("#drawerKicker").textContent = k;
+  $("#drawerTitle").textContent = t;
+  $("#drawerBody").innerHTML = b;
+  $("#drawer").classList.remove("hidden");
+  $("#drawerBackdrop").classList.remove("hidden");
+  const settingsButton = $("[data-sync-settings]");
+  if (settingsButton) settingsButton.onclick = () => { closeDrawer(); navigate("settings"); };
+  const googleRetry = $("[data-sync-google-retry]");
+  if (googleRetry) googleRetry.onclick = async () => { closeDrawer(); await previewReadonlySync(); };
+  const neisRetry = $("[data-sync-neis-retry]");
+  if (neisRetry) neisRetry.onclick = async () => { closeDrawer(); await loadNeisDashboard(true); };
+  const diagnosticsButton = $("[data-sync-diagnostics]");
+  if (diagnosticsButton) diagnosticsButton.onclick = async () => { await downloadSchoolReadDiagnostics(); };
+}
+function closeDrawer() {
+  $("#drawerTitle")?.classList.remove("privacy-sensitive-text");
+  $("#drawer")?.classList.remove("calendar-editor-drawer");
+  clearInterval(studentPopupClockTimer);
+  studentPopupClockTimer = null;
+  $("#drawer").classList.add("hidden");
+  $("#drawer").classList.remove("weather-expanded");
+  $("#drawer").classList.remove("outing-expanded");
+  $("#drawer").classList.remove("timetable-expanded");
+  $("#drawer").classList.remove("student-expanded");
+  $("#drawer").classList.remove("reference-expanded");
+  $("#drawer").classList.remove("reference-maximized");
+  $("#drawer").cla
+===== main :: Google 연결 @ 28893 =====
+t target of [googleUserOAuthCanonicalPath(),googleUserOAuthPath()]){
+      try{await fs.mkdir(path.dirname(target),{recursive:true});await fs.writeFile(target,encrypted);primarySaved=true;}catch{}
+    }
+  }
+  await writeGoogleUserOAuthRecovery(value);
+  return {primarySaved,recoverySaved:true,canonical:true};
+}
+async function readGoogleUserOAuth(){
+  for(const target of [googleUserOAuthCanonicalPath(),googleUserOAuthPath()]){
+    try{
+      const encrypted=await fs.readFile(target);
+      if(safeStorage.isEncryptionAvailable()){
+        try{const value=JSON.parse(safeStorage.decryptString(encrypted));if(value&&typeof value==='object'){await saveGoogleUserOAuth(value);return value;}}catch{}
+      }
+      try{const legacy=JSON.parse(encrypted.toString('utf8'));if(legacy&&typeof legacy==='object'){await saveGoogleUserOAuth(legacy);return legacy;}}catch{}
+    }catch{}
+  }
+  try{
+    const recovered=await readGoogleUserOAuthRecovery();
+    if(recovered&&typeof recovered==='object'){await saveGoogleUserOAuth(recovered);return recovered;}
+  }catch{}
+  return null;
+}
+async function googleUserInfo(accessToken){
+  const response=await net.fetch('https://openidconnect.googleapis.com/v1/userinfo',{headers:{authorization:`Bearer ${accessToken}`}});
+  if(!response.ok) throw googleOAuthError(`Google 사용자 확인 실패 (${response.status})`,'UEP_GOOGLE_OAUTH_USERINFO_FAILED');
+  return await response.json();
+}
+async function refreshGoogleUserOAuth(saved){
+  if(!saved?.refresh_token) throw googleOAuthError("Google 계정 연결을 다시 승인해 주세요.","UEP_GOOGLE_USER_AUTH_REQUIRED");
+  const clientId=await loadGoogleOAuthClientId();
+  if(String(saved.client_id||'').trim() && String(saved.client_id).trim()!==clientId){
+    await disconnectGoogleUser();
+    throw googleOAuthError('Google 연결 설정이 갱신되었습니다. Google 계정 연결을 한 번만 다시 승인해 주세요.','UEP_GOOGLE_USER_AUTH_REQUIRED');
+  }
+  const body=new URLSearchParams({client_id:clientId,refresh_token:String(saved.refresh_token),grant_type:'refresh_token'});
+  const response=await net.fetch('https://oauth2.googleapis.com/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:body.toString()});
+  if(!response.ok){
+    let payload={},detail='',errCode='';
+    try{payload=await response.json();detail=String(payload?.error_description||'');errCode=String(payload?.error||'');}catch{}
+    if(errCode==='invalid_client'||errCode==='invalid_grant'){
+      googleOAuthPolicyCache={clientId:'',expiresAt:0};
+      await disconnectGoogleUser();
+      throw googleOAuthError('저장된 Google 인증정보가 현재 UEP 연결설정과 맞지 않습니다. Google 계정 연결을 다시 승인해 주세요.','UEP_GOOGLE_USER_AUTH_REQUIRED');
+    }
+    throw googleOAuthError(`Google 계정 토큰 갱신 실패 (${response.status})${detail?`: ${detail}`:''}`,"UEP_GOOGLE_USER_AUTH_REQUIRED");
+  }
+  const next=await response.json();
+  const merged={...saved,...next,client_id:clientId,expires_at:Date.now()+Math.max(60,Number(next.expires_in||3600))*1000,updated_at:new Date().toISOString()};
+  await saveGoogleUserOAuth(merged);
+  return merged;
+}
+async function getGoogleUserSheetsToken(){
+  let saved=await readGoogleUserOAuth();
+  if(!saved) throw googleOAuthError("Google 계정 연결이 필요합니다.","UEP_GOOGLE_USER_AUTH_REQUIRED");
+  if(saved.access_token && Number(saved.expires_at||0)>Date.now()+90000) return String(saved.access_token);
+  saved=await refreshGoogleUserOAuth(saved);
+  if(!saved.access_token) throw googleOAuthError("Google 계정 액세스 토큰을 받지 못했습니다.","UEP_GOOGLE_USER_AUTH_REQUIRED");
+  return String(saved.access_token);
+}
+async function getReadonlySheetsAuth(credentials=null){
+  if(credentials){if(!validateServiceAccount(credentials))throw new Error("Google 서비스 계정 인증정보가 올바르지 않습니다.");return {token:await getSheetsToken(credentials),mode:'service_account',account:credentials.client_email||''};}
+  const session=await readSchoolReadSession();
+  if(session?.token&&session?.deviceId)return {token:'UEP_SCHOOL_READ:'+session.token,mode:'school_read_api',account:String(session?.user?.email||'')};
+  throw schoolReadError('교사 이름과 이메일로 UEP 로그인 후 학교 데이터를 불러올 수 있습니다.','UEP_SCHOOL_READ_LOGIN_REQUIRED');
+}
+async function authorizeGoogleUser({loginHint=''}={}){
+  const clientId=await loadGoogleOAuthClientId();
+  const verifier=crypto.randomBytes(48).toString('base64url');
+  const challenge=crypto.createHash('sha256').update(verifier).digest('base64url');
+  const state=crypto.randomBytes(24).toString('base64url');
+  let timer=null;
+  let settled=false;
+  let callbackResolve,callbackReject;
+  const callbackPromise=new Promise((resolve,reject)=>{callbackResolve=resolve;callbackReject=reject;});
+  const server=http.createServer((req,res)=>{
+    try{
+      const u=new URL(req.url||'/', 'http://127.0.0.1');
+      if(u.pathname!=='/' && u.pathname!=='/oauth2callback'){res.writeHead(404);res.end('Not found');return;}
+      const returnedState=String(u.searchParams.get('state')||'');
+      const code=String(u.searchParams.get('code')||'');
+      const error=String(u.searchParams.get('error')||'');
+      res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store'});
+      if(error||returnedState!==state||
+===== main :: Google 연결 @ 32367 =====
+을 받지 못했습니다.","UEP_GOOGLE_USER_AUTH_REQUIRED");
+  return String(saved.access_token);
+}
+async function getReadonlySheetsAuth(credentials=null){
+  if(credentials){if(!validateServiceAccount(credentials))throw new Error("Google 서비스 계정 인증정보가 올바르지 않습니다.");return {token:await getSheetsToken(credentials),mode:'service_account',account:credentials.client_email||''};}
+  const session=await readSchoolReadSession();
+  if(session?.token&&session?.deviceId)return {token:'UEP_SCHOOL_READ:'+session.token,mode:'school_read_api',account:String(session?.user?.email||'')};
+  throw schoolReadError('교사 이름과 이메일로 UEP 로그인 후 학교 데이터를 불러올 수 있습니다.','UEP_SCHOOL_READ_LOGIN_REQUIRED');
+}
+async function authorizeGoogleUser({loginHint=''}={}){
+  const clientId=await loadGoogleOAuthClientId();
+  const verifier=crypto.randomBytes(48).toString('base64url');
+  const challenge=crypto.createHash('sha256').update(verifier).digest('base64url');
+  const state=crypto.randomBytes(24).toString('base64url');
+  let timer=null;
+  let settled=false;
+  let callbackResolve,callbackReject;
+  const callbackPromise=new Promise((resolve,reject)=>{callbackResolve=resolve;callbackReject=reject;});
+  const server=http.createServer((req,res)=>{
+    try{
+      const u=new URL(req.url||'/', 'http://127.0.0.1');
+      if(u.pathname!=='/' && u.pathname!=='/oauth2callback'){res.writeHead(404);res.end('Not found');return;}
+      const returnedState=String(u.searchParams.get('state')||'');
+      const code=String(u.searchParams.get('code')||'');
+      const error=String(u.searchParams.get('error')||'');
+      res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store'});
+      if(error||returnedState!==state||!code){
+        res.end('<!doctype html><meta charset="utf-8"><title>UEP Google 연결</title><h2>UEP Google 계정 연결이 취소되었거나 실패했습니다.</h2><p>이 창을 닫고 UEP에서 다시 시도해 주세요.</p>');
+        if(!settled){settled=true;callbackReject(googleOAuthError(error?`Google 승인 취소: ${error}`:'Google 승인 응답 검증에 실패했습니다.','UEP_GOOGLE_OAUTH_CALLBACK_FAILED'));}
+        return;
+      }
+      res.end('<!doctype html><meta charset="utf-8"><title>UEP Google 연결</title><h2>Google 승인 정보가 UEP로 전달되었습니다.</h2><p>이 창을 닫고 UEP로 돌아가 연결 완료 여부를 확인해 주세요.</p>');
+      if(!settled){settled=true;callbackResolve(code);}
+    }catch(error){if(!settled){settled=true;callbackReject(error);}}
+  });
+  try{
+    await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
+    const address=server.address();
+    const port=typeof address==='object'&&address?address.port:0;
+    if(!port) throw googleOAuthError('Google 승인용 로컬 포트를 열지 못했습니다.','UEP_GOOGLE_OAUTH_CALLBACK_FAILED');
+    const redirectUri=`http://127.0.0.1:${port}`;
+    const authUrl=new URL('https://accounts.google.com/o/oauth2/v2/auth');
+    authUrl.searchParams.set('client_id',clientId);
+    authUrl.searchParams.set('redirect_uri',redirectUri);
+    authUrl.searchParams.set('response_type','code');
+    authUrl.searchParams.set('scope','openid email https://www.googleapis.com/auth/spreadsheets.readonly');
+    authUrl.searchParams.set('code_challenge',challenge);
+    authUrl.searchParams.set('code_challenge_method','S256');
+    authUrl.searchParams.set('state',state);
+    authUrl.searchParams.set('access_type','offline');
+    authUrl.searchParams.set('prompt','consent');
+    if(String(loginHint||'').includes('@')) authUrl.searchParams.set('login_hint',String(loginHint).trim());
+    await shell.openExternal(authUrl.toString());
+    timer=setTimeout(()=>{if(!settled){settled=true;callbackReject(googleOAuthError('Google 계정 승인이 시간 초과되었습니다.','UEP_GOOGLE_OAUTH_TIMEOUT'));}},180000);
+    const code=await callbackPromise;
+    const body=new URLSearchParams();
+    body.set('client_id',clientId);
+
+    body.set('code',code);
+    body.set('code_verifier',verifier);
+    body.set('redirect_uri',redirectUri);
+    body.set('grant_type','authorization_code');
+    const response=await net.fetch('https://oauth2.googleapis.com/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded;charset=UTF-8','accept':'application/json'},body:body.toString()});
+    if(!response.ok){
+      let errCode='',detail='',raw='';
+      try{const payload=await response.json();errCode=String(payload?.error||'');detail=String(payload?.error_description||'');raw=JSON.stringify(payload);}catch{try{raw=await response.text();}catch{}}
+      const suffix=[errCode,detail].filter(Boolean).join(' · ');
+      if(errCode==='invalid_client'){
+        googleOAuthPolicyCache={clientId:'',expiresAt:0};
+        await disconnectGoogleUser();
+        throw googleOAuthError('Google OAuth 토큰 교환이 거부되었습니다. UEP의 Desktop OAuth Client ID와 Google 승인 설정을 확인한 뒤 다시 연결해 주세요.','UEP_GOOGLE_USER_AUTH_REQUIRED');
+      }
+      throw googleOAuthError(`Google 토큰 교환 실패 (${response.status})${suffix?`: ${suffix}`:''}${!suffix&&raw?`: ${raw}`:''}`,'UEP_GOOGLE_OAUTH_TOKEN_FAILED');
+    }
+    const tokenPayload=await response.json();
+    if(!tokenPayload.access_token) throw googleOAuthError('Google 액세스 토큰을 받지 못했습니다.','UEP_GOOGLE_OAUTH_TOKEN_FAILED');
+    let info={};
+    try{info=aw
+===== main :: Google 연결 @ 32715 =====
+ent_email||''};}
+  const session=await readSchoolReadSession();
+  if(session?.token&&session?.deviceId)return {token:'UEP_SCHOOL_READ:'+session.token,mode:'school_read_api',account:String(session?.user?.email||'')};
+  throw schoolReadError('교사 이름과 이메일로 UEP 로그인 후 학교 데이터를 불러올 수 있습니다.','UEP_SCHOOL_READ_LOGIN_REQUIRED');
+}
+async function authorizeGoogleUser({loginHint=''}={}){
+  const clientId=await loadGoogleOAuthClientId();
+  const verifier=crypto.randomBytes(48).toString('base64url');
+  const challenge=crypto.createHash('sha256').update(verifier).digest('base64url');
+  const state=crypto.randomBytes(24).toString('base64url');
+  let timer=null;
+  let settled=false;
+  let callbackResolve,callbackReject;
+  const callbackPromise=new Promise((resolve,reject)=>{callbackResolve=resolve;callbackReject=reject;});
+  const server=http.createServer((req,res)=>{
+    try{
+      const u=new URL(req.url||'/', 'http://127.0.0.1');
+      if(u.pathname!=='/' && u.pathname!=='/oauth2callback'){res.writeHead(404);res.end('Not found');return;}
+      const returnedState=String(u.searchParams.get('state')||'');
+      const code=String(u.searchParams.get('code')||'');
+      const error=String(u.searchParams.get('error')||'');
+      res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store'});
+      if(error||returnedState!==state||!code){
+        res.end('<!doctype html><meta charset="utf-8"><title>UEP Google 연결</title><h2>UEP Google 계정 연결이 취소되었거나 실패했습니다.</h2><p>이 창을 닫고 UEP에서 다시 시도해 주세요.</p>');
+        if(!settled){settled=true;callbackReject(googleOAuthError(error?`Google 승인 취소: ${error}`:'Google 승인 응답 검증에 실패했습니다.','UEP_GOOGLE_OAUTH_CALLBACK_FAILED'));}
+        return;
+      }
+      res.end('<!doctype html><meta charset="utf-8"><title>UEP Google 연결</title><h2>Google 승인 정보가 UEP로 전달되었습니다.</h2><p>이 창을 닫고 UEP로 돌아가 연결 완료 여부를 확인해 주세요.</p>');
+      if(!settled){settled=true;callbackResolve(code);}
+    }catch(error){if(!settled){settled=true;callbackReject(error);}}
+  });
+  try{
+    await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
+    const address=server.address();
+    const port=typeof address==='object'&&address?address.port:0;
+    if(!port) throw googleOAuthError('Google 승인용 로컬 포트를 열지 못했습니다.','UEP_GOOGLE_OAUTH_CALLBACK_FAILED');
+    const redirectUri=`http://127.0.0.1:${port}`;
+    const authUrl=new URL('https://accounts.google.com/o/oauth2/v2/auth');
+    authUrl.searchParams.set('client_id',clientId);
+    authUrl.searchParams.set('redirect_uri',redirectUri);
+    authUrl.searchParams.set('response_type','code');
+    authUrl.searchParams.set('scope','openid email https://www.googleapis.com/auth/spreadsheets.readonly');
+    authUrl.searchParams.set('code_challenge',challenge);
+    authUrl.searchParams.set('code_challenge_method','S256');
+    authUrl.searchParams.set('state',state);
+    authUrl.searchParams.set('access_type','offline');
+    authUrl.searchParams.set('prompt','consent');
+    if(String(loginHint||'').includes('@')) authUrl.searchParams.set('login_hint',String(loginHint).trim());
+    await shell.openExternal(authUrl.toString());
+    timer=setTimeout(()=>{if(!settled){settled=true;callbackReject(googleOAuthError('Google 계정 승인이 시간 초과되었습니다.','UEP_GOOGLE_OAUTH_TIMEOUT'));}},180000);
+    const code=await callbackPromise;
+    const body=new URLSearchParams();
+    body.set('client_id',clientId);
+
+    body.set('code',code);
+    body.set('code_verifier',verifier);
+    body.set('redirect_uri',redirectUri);
+    body.set('grant_type','authorization_code');
+    const response=await net.fetch('https://oauth2.googleapis.com/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded;charset=UTF-8','accept':'application/json'},body:body.toString()});
+    if(!response.ok){
+      let errCode='',detail='',raw='';
+      try{const payload=await response.json();errCode=String(payload?.error||'');detail=String(payload?.error_description||'');raw=JSON.stringify(payload);}catch{try{raw=await response.text();}catch{}}
+      const suffix=[errCode,detail].filter(Boolean).join(' · ');
+      if(errCode==='invalid_client'){
+        googleOAuthPolicyCache={clientId:'',expiresAt:0};
+        await disconnectGoogleUser();
+        throw googleOAuthError('Google OAuth 토큰 교환이 거부되었습니다. UEP의 Desktop OAuth Client ID와 Google 승인 설정을 확인한 뒤 다시 연결해 주세요.','UEP_GOOGLE_USER_AUTH_REQUIRED');
+      }
+      throw googleOAuthError(`Google 토큰 교환 실패 (${response.status})${suffix?`: ${suffix}`:''}${!suffix&&raw?`: ${raw}`:''}`,'UEP_GOOGLE_OAUTH_TOKEN_FAILED');
+    }
+    const tokenPayload=await response.json();
+    if(!tokenPayload.access_token) throw googleOAuthError('Google 액세스 토큰을 받지 못했습니다.','UEP_GOOGLE_OAUTH_TOKEN_FAILED');
+    let info={};
+    try{info=await googleUserInfo(tokenPayload.access_token);}catch{}
+    let idTokenInfo={};
+    try{
+      const parts=String(tokenPayload.id_token||'').split('.');
+      if(parts.length>=2) idTokenInfo=JSON.parse(Buffer.from(parts[1].replace(/-/g,'+').replace(/_/g,'/'),'base64').toString('utf8'))||{};
+    }catch{}
+    const fallbackEmail=String(loginHi
+===== main :: Google 연결 @ 166004 =====
+x=matrix.findIndex((row,i)=>i>header.index&&String(row?.[idx("사용자ID")]||"").trim()===id);
+    if(rowIndex<0) throw new Error("수정할 사용자를 찾지 못했습니다.");
+    const updates={
+      "역할":String(payload.role??matrix[rowIndex]?.[idx("역할")]??"").trim(),
+      "관리자여부":payload.admin!=null?(payload.admin?"Y":"N"):String(matrix[rowIndex]?.[idx("관리자여부")]||"N"),
+      "담당학년":String(payload.grade??matrix[rowIndex]?.[idx("담당학년")]??"1").trim(),
+      "담당반":String(payload.classNo??matrix[rowIndex]?.[idx("담당반")]??"").trim(),
+      "조회범위":String(payload.viewScope??matrix[rowIndex]?.[idx("조회범위")]??"").trim(),
+      "수정범위":String(payload.editScope??matrix[rowIndex]?.[idx("수정범위")]??"").trim(),
+      "사용여부":payload.active!=null?(payload.active?"Y":"N"):String(matrix[rowIndex]?.[idx("사용여부")]||"Y")
+    };
+    const row=Array.from({length:headers.length},(_,i)=>matrix[rowIndex]?.[i]??"");
+    for (const [name,value] of Object.entries(updates)) { const col=idx(name); if(col>=0) row[col]=value; }
+    await updateSheetValues(token,UEP_SPREADSHEET_ID,`'01_사용자계정'!A${rowIndex+1}:${columnLetter(headers.length-1)}${rowIndex+1}`,[row]);
+    liveDataCache=null; liveDataFetchedAt=0;
+    return {ok:true,id};
+  } catch(error) { return {ok:false,reason:error?.message||"사용자 권한 저장 실패"}; }
+});
+
+// __UEP_08166_SHARED_SECURITY_AND_AUTOSTART__
+ipcMain.handle("securityConfig:save", async (_event, payload={}) => {
+  try {
+    const key=String(payload.key||'').trim(), value=String(payload.value||'').trim();
+    if(!key||!value) throw new Error('설정키와 설정값이 필요합니다.');
+    if(!['SENSITIVE_PIN_HASH','SUBJECT_CONFIDENTIAL_PIN_HASH'].includes(key)) throw new Error('허용되지 않은 보안 설정키입니다.');
+    const account=await readEncrypted(credentialPath());
+    if(!validateServiceAccount(account)) throw new Error('관리자 Google 연결이 필요합니다.');
+    const token=await getSheetsToken(account);
+    const matrix=await readNoticeSheetMatrix(token,'00_UEP설정','A1:F500');
+    const header=findHeaderRowByRequired(matrix,['설정키','설정값']);
+    if(!header) throw new Error('00_UEP설정 헤더를 찾지 못했습니다.');
+    const headers=header.headers.slice(), idx=name=>headers.indexOf(name), keyCol=idx('설정키');
+    const now=new Date().toISOString(), editor=String(payload.editor||'관리자').trim();
+    const values={'설정키':key,'설정값':value,'설명':String(payload.description||'UEP 공용 보안설정'),'수정일시':now,'수정자':editor};
+    const rowIndex=matrix.findIndex((r,i)=>i>header.index&&String(r?.[keyCol]||'').trim()===key);
+    if(rowIndex>=0){
+      const row=Array.from({length:headers.length},(_,i)=>matrix[rowIndex]?.[i]??'');
+      for(const [name,v] of Object.entries(values)){const c=idx(name);if(c>=0)row[c]=v;}
+      await updateSheetValues(token,UEP_SPREADSHEET_ID,`'00_UEP설정'!A${rowIndex+1}:${columnLetter(headers.length-1)}${rowIndex+1}`,[row]);
+    }else{
+      const row=Array.from({length:headers.length},()=> '');
+      for(const [name,v] of Object.entries(values)){const c=idx(name);if(c>=0)row[c]=v;}
+      await appendSheetValues(token,UEP_SPREADSHEET_ID,`'00_UEP설정'!A:${columnLetter(headers.length-1)}`,[row]);
+    }
+    liveDataCache=null;liveDataFetchedAt=0;
+    return {ok:true,key,value};
+  } catch(error){return {ok:false,reason:error?.message||'공용 보안설정 저장 실패'};}
+});
+// __UEP_08168_SHARED_SECURITY_READ__
+ipcMain.handle("securityConfig:readShared", async () => {
+  try{
+    let values=[];
+    const session=await readSchoolReadSession().catch(()=>null);
+    if(session?.token&&session?.deviceId){
+      const ranges=await schoolReadBatchRead(UEP_SPREADSHEET_ID,["'00_UEP설정'!A3:E100"]);
+      values=ranges?.[0]?.values||[];
+    }else{
+      const account=await readEncrypted(credentialPath());
+      if(!validateServiceAccount(account))throw new Error('UEP 로그인이 필요합니다.');
+      const token=await getSheetsToken(account);
+      const matrix=await readNoticeSheetMatrix(token,'00_UEP설정','A3:E100');
+      values=matrix||[];
+    }
+    if(!values.length)return {ok:true,settings:[]};
+    const headers=(values[0]||[]).map(v=>String(v||'').trim());
+    const idx=name=>headers.indexOf(name);
+    const keyCol=idx('설정키'),valueCol=idx('설정값'),descCol=idx('설명');
+    if(keyCol<0||valueCol<0)throw new Error('00_UEP설정 헤더를 찾지 못했습니다.');
+    const allowed=new Set(['SENSITIVE_PIN_HASH','SUBJECT_CONFIDENTIAL_PIN_HASH']);
+    const settings=values.slice(1).map(r=>({key:String(r?.[keyCol]||'').trim(),value:String(r?.[valueCol]||'').trim(),description:descCol>=0?String(r?.[descCol]||''):''})).filter(r=>allowed.has(r.key)&&r.value);
+    return {ok:true,settings};
+  }catch(error){return {ok:false,reason:error?.message||'공용 보안설정 읽기 실패'};}
+});
+
+// __UEP_08168_PASSWORD_RESET__
+ipcMain.handle("securityConfig:reset", async (_event,payload={}) => {
+  try{
+    const key=String(payload.key||'').trim();
+    if(!['SENSITIVE_PIN_HASH','SUBJECT_CONFIDENTIAL_PIN_HASH'].includes(key))throw new Error('허용되지 않은 보안 설정키입니다.');
+    const account=await readEncrypted(credentialPath());
+    if(!validateServiceAccount(account))throw new Error('관리자 Google 연결이 필요합니다.');
+    const token=await getSheetsToken(account);
+    const matrix=await readNoticeSheetMatrix(token,'00_UEP설정','A1:F500');
+    const header=findHe
+===== main :: Google 연결 @ 169236 =====
+장 실패'};}
+});
+// __UEP_08168_SHARED_SECURITY_READ__
+ipcMain.handle("securityConfig:readShared", async () => {
+  try{
+    let values=[];
+    const session=await readSchoolReadSession().catch(()=>null);
+    if(session?.token&&session?.deviceId){
+      const ranges=await schoolReadBatchRead(UEP_SPREADSHEET_ID,["'00_UEP설정'!A3:E100"]);
+      values=ranges?.[0]?.values||[];
+    }else{
+      const account=await readEncrypted(credentialPath());
+      if(!validateServiceAccount(account))throw new Error('UEP 로그인이 필요합니다.');
+      const token=await getSheetsToken(account);
+      const matrix=await readNoticeSheetMatrix(token,'00_UEP설정','A3:E100');
+      values=matrix||[];
+    }
+    if(!values.length)return {ok:true,settings:[]};
+    const headers=(values[0]||[]).map(v=>String(v||'').trim());
+    const idx=name=>headers.indexOf(name);
+    const keyCol=idx('설정키'),valueCol=idx('설정값'),descCol=idx('설명');
+    if(keyCol<0||valueCol<0)throw new Error('00_UEP설정 헤더를 찾지 못했습니다.');
+    const allowed=new Set(['SENSITIVE_PIN_HASH','SUBJECT_CONFIDENTIAL_PIN_HASH']);
+    const settings=values.slice(1).map(r=>({key:String(r?.[keyCol]||'').trim(),value:String(r?.[valueCol]||'').trim(),description:descCol>=0?String(r?.[descCol]||''):''})).filter(r=>allowed.has(r.key)&&r.value);
+    return {ok:true,settings};
+  }catch(error){return {ok:false,reason:error?.message||'공용 보안설정 읽기 실패'};}
+});
+
+// __UEP_08168_PASSWORD_RESET__
+ipcMain.handle("securityConfig:reset", async (_event,payload={}) => {
+  try{
+    const key=String(payload.key||'').trim();
+    if(!['SENSITIVE_PIN_HASH','SUBJECT_CONFIDENTIAL_PIN_HASH'].includes(key))throw new Error('허용되지 않은 보안 설정키입니다.');
+    const account=await readEncrypted(credentialPath());
+    if(!validateServiceAccount(account))throw new Error('관리자 Google 연결이 필요합니다.');
+    const token=await getSheetsToken(account);
+    const matrix=await readNoticeSheetMatrix(token,'00_UEP설정','A1:F500');
+    const header=findHeaderRowByRequired(matrix,['설정키','설정값']);
+    if(!header)throw new Error('00_UEP설정 헤더를 찾지 못했습니다.');
+    const headers=header.headers.slice(),idx=name=>headers.indexOf(name),keyCol=idx('설정키');
+    const rowIndex=matrix.findIndex((r,i)=>i>header.index&&String(r?.[keyCol]||'').trim()===key);
+    if(rowIndex>=0){
+      const row=Array.from({length:headers.length},(_,i)=>matrix[rowIndex]?.[i]??'');
+      const vals={'설정키':key,'설정값':'','설명':'비밀번호 초기화','수정일시':new Date().toISOString(),'수정자':String(payload.editor||'관리자')};
+      for(const [name,v] of Object.entries(vals)){const c=idx(name);if(c>=0)row[c]=v;}
+      await updateSheetValues(token,UEP_SPREADSHEET_ID,`'00_UEP설정'!A${rowIndex+1}:${columnLetter(headers.length-1)}${rowIndex+1}`,[row]);
+    }
+    liveDataCache=null;liveDataFetchedAt=0;return {ok:true,key};
+  }catch(error){return {ok:false,reason:error?.message||'공용 비밀번호 초기화 실패'};}
+});
+
+ipcMain.handle("system:autoStartGet",()=>{
+  try{return {ok:true,enabled:Boolean(app.getLoginItemSettings().openAtLogin)};}catch(error){return {ok:false,reason:error?.message||'자동실행 상태 확인 실패'};}
+});
+ipcMain.handle("system:autoStartSet",(_event,enabled)=>{
+  try{app.setLoginItemSettings({openAtLogin:Boolean(enabled),path:process.execPath});return {ok:true,enabled:Boolean(app.getLoginItemSettings().openAtLogin)};}catch(error){return {ok:false,reason:error?.message||'자동실행 설정 실패'};}
+});
+
+ipcMain.handle("notice:save", async (_event, payload = {}) => {
+  try {
+    const account = await readEncrypted(credentialPath());
+    if (!validateServiceAccount(account)) throw new Error("Google 서비스 계정 인증정보가 필요합니다.");
+    const token = await getSheetsToken(account);
+    const nowIso = new Date().toISOString();
+    const id = String(payload.id || `NTC-${nowIso.replace(/[-:.TZ]/g, "").slice(0,14)}`);
+    const matrix = await readNoticeSheetMatrix(token, "40_공지마감", "A1:AZ2000");
+    const header = findHeaderRowByRequired(matrix,["공지ID","제목","상태"]);
+    if(!header) throw new Error("40_공지마감 헤더를 찾지 못했습니다.");
+    const headers=header.headers.slice(), idCol=headers.indexOf("공지ID");
+    if(!payload.id){
+      const idx=name=>headers.indexOf(name), same=matrix.find((r,i)=>i>header.index&&String(r?.[idx("제목")]||"").trim()===String(payload.title||"").trim()&&String(r?.[idx("내용")]||"").trim()===String(payload.content||"").trim()&&String(r?.[idx("대상반")]||"전체").trim()===String(payload.targetClass||"전체").trim()&&String(r?.[idx("게시일")]||"").slice(0,10)===String(payload.postDate||"").slice(0,10)&&!["삭제","종료"].includes(String(r?.[idx("상태")]||"게시")));
+      if(same)return {ok:true,id:String(same[idCol]||id),duplicate:true};
+    }
+    // 기존 시트에 마감유형 컬럼이 아직 없으면 데이터 손상 없이 마지막 열에 자동 추가한다.
+    if(headers.indexOf("마감유형")<0){
+      const col=headers.length;
+      await updateSheetValues(token,UEP_SPREADSHEET_ID,`'40_공지마감'!${columnLetter(col)}${header.index+1}:${columnLetter(col)}${header.index+1}`,[["마감유형"]]);
+      headers.push("마감유형");
+    }
+    const row=noticePayloadRow(payload,id,nowIso,headers);
+    const endCol=columnLetter(headers.length-1);
+    if (payload.id) {
+      const rowIndex = matrix.findIndex((r,i)=>i>header.index && String(r?.[idCol]||"")===id);
+      if (rowIndex < 0) throw n
+===== main :: Google 연결 @ 205522 =====
+dded in the app and no personal Google OAuth token is required.
+function schoolConnectionLegacyRoots(){
+  const appData=process.env.APPDATA||app.getPath("appData");
+  return [...new Set([
+    stableUserDataRoot(),legacyUserDataRoot(),
+    path.join(appData,"UNHO Education Platform"),
+    path.join(appData,"unho-education-platform"),
+    path.join(appData,"UEP"),
+    path.join(appData,"UEP School Board"),
+    path.join(appData,"School Board")
+  ].filter(Boolean).map(value=>path.resolve(value)))];
+}
+async function readCredentialRecoveryFrom(filePath){
+  const payload=JSON.parse(await fs.readFile(filePath,"utf8"));
+  if(!payload||payload.version!==1||payload.algorithm!=="aes-256-gcm")throw new Error("invalid recovery credential");
+  const salt=Buffer.from(payload.salt,"base64"),iv=Buffer.from(payload.iv,"base64"),tag=Buffer.from(payload.tag,"base64"),data=Buffer.from(payload.data,"base64");
+  const decipher=crypto.createDecipheriv("aes-256-gcm",recoveryKey(salt),iv);decipher.setAuthTag(tag);
+  return JSON.parse(Buffer.concat([decipher.update(data),decipher.final()]).toString("utf8"));
+}
+async function resolveSchoolServiceAccount(){
+  try{const current=await readEncrypted(credentialPath());if(validateServiceAccount(current))return current;}catch{}
+  for(const root of schoolConnectionLegacyRoots()){
+    for(const fileName of ["google-service-account.recovery.json","google-service-account.json"]){
+      const candidate=path.join(root,fileName);
+      try{
+        const recovered=fileName.endsWith("recovery.json")?await readCredentialRecoveryFrom(candidate):JSON.parse(await fs.readFile(candidate,"utf8"));
+        if(!validateServiceAccount(recovered))continue;
+        await saveEncrypted(credentialPath(),recovered);
+        console.log(`[UEP] 학교 공용 Google 연결을 기존 UEP 저장소에서 복구했습니다: ${path.basename(root)}`);
+        return recovered;
+      }catch{}
+    }
+  }
+  const error=new Error("이 PC에서 기존 학교 공용 Google 연결을 찾지 못했습니다. 관리자 배포본의 공용 연결 복구 상태를 확인해 주세요.");
+  error.code="UEP_SCHOOL_CONNECTION_NOT_PROVISIONED";throw error;
+}
+
+
+
+
+
+
