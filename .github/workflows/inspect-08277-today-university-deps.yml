@@ -1,0 +1,38 @@
+name: Inspect UEP 0.82.77 Today University Dependencies
+on:
+  push:
+    paths: ['inspect-08277-today-university-deps.trigger']
+permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.82.77 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE -ne 0){throw 'download failed'}
+          Expand-Archive source/UEP-update.zip app -Force
+          @'
+const fs=require('fs');
+const txt=fs.readFileSync('app/resources/app/gyomuon.js','utf8');
+function extract(name){const marker=`function ${name}(`;const s=txt.indexOf(marker);if(s<0)throw new Error('missing '+name);const b=txt.indexOf('{',s);let d=0,q='',esc=false;for(let i=b;i<txt.length;i++){const c=txt[i];if(q){if(esc){esc=false;continue;}if(c==='\\'){esc=true;continue;}if(c===q)q='';continue;}if(c==='"'||c==="'"||c==='`'){q=c;continue;}if(c==='{')d++;else if(c==='}'&&--d===0)return txt.slice(s,i+1);}throw new Error('unterminated '+name);}
+const body=extract('openDashboardUniversityDetail');
+const calls=[...new Set([...body.matchAll(/\b((?:uep\d+|dashboardAdmission|openDashboard|bindDashboard|renderDashboard)[A-Za-z0-9_]*)\s*\(/g)].map(m=>m[1]))].sort();
+const lines=[];for(const s of calls){const esc=s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');const def=new RegExp(`(?:function\\s+${esc}\\s*\\(|(?:const|let|var)\\s+${esc}\\s*=)`).test(txt);lines.push(`${def?'OK':'MISSING'} ${s}`);}lines.push('\nBODY\n'+body);fs.writeFileSync('inspection-08277-today-university-deps.txt',lines.join('\n'));
+'@ | Set-Content inspect-deps.js -Encoding utf8
+          node inspect-deps.js
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add inspection-08277-today-university-deps.txt
+          git commit -m 'Inspect v0.82.77 today university dependencies'
+          if($LASTEXITCODE -ne 0){throw 'commit failed'}
+          git pull --rebase origin main
+          if($LASTEXITCODE -ne 0){throw 'pull failed'}
+          git push
+          if($LASTEXITCODE -ne 0){throw 'push failed'}
