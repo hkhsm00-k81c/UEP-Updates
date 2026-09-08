@@ -1,0 +1,41 @@
+name: Inspect UEP 0.82.77 University Definitions
+on:
+  push:
+    paths: ['inspect-08277-university-defs.trigger']
+permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.82.77 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE -ne 0){throw 'download failed'}
+          Expand-Archive source/UEP-update.zip app -Force
+          $txt=Get-Content 'app/resources/app/gyomuon.js' -Raw
+          $symbols=@('uep08251UniversityDisplayNameForRegion','dashboardAdmissionStructureRows','uep08258AdmissionActive','uep08223TodayNav','uep08223UniversityBadges','uep08258AdmissionMeta','uep08223UniversityRegions','uep08250PrioritizeAdmission','openDashboardUniversityDetail','openDashboardAdmissionDialog')
+          $out=@()
+          foreach($s in $symbols){
+            $patterns=@("function\s+$s\s*\(","(?:const|let|var)\s+$s\s*=","$s\s*=\s*function")
+            $m=$null
+            foreach($p in $patterns){$mm=[regex]::Match($txt,$p);if($mm.Success){$m=$mm;break}}
+            $out += "===== $s ====="
+            if($null -eq $m){$out += 'NO DEFINITION';continue}
+            $idx=$m.Index;$st=[Math]::Max(0,$idx-300);$len=[Math]::Min(5000,$txt.Length-$st);$out += $txt.Substring($st,$len)
+          }
+          $out -join "`r`n" | Set-Content inspection-08277-university-defs.txt -Encoding utf8
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add inspection-08277-university-defs.txt
+          git commit -m 'Inspect UEP 0.82.77 university definitions'
+          if($LASTEXITCODE -ne 0){throw 'commit failed'}
+          git pull --rebase origin main
+          if($LASTEXITCODE -ne 0){throw 'pull failed'}
+          git push
+          if($LASTEXITCODE -ne 0){throw 'push failed'}
