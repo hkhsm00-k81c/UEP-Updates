@@ -11,7 +11,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Inspect university detail renderer and overrides
+      - name: Inspect suspected click-time ReferenceError
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -22,11 +22,20 @@ jobs:
           if($LASTEXITCODE -ne 0){throw "download failed $LASTEXITCODE"}
           Expand-Archive source/UEP-update.zip app -Force
           $s=Get-Content 'app/resources/app/gyomuon.js' -Raw
-          foreach($needle in @('function openDashboardUniversityDetail','openDashboardUniversityDetail=','dashboardAdmissionTodayUniversity','function openDashboardAdmissionDialog','function openDashboardAdmissionDialogBase','function universityRegion','function uep08223UniversityRegion')){
+          foreach($needle in @('achievementRaw','achievementOn','uep08273Yes','성취도')){
             Write-Host "===== $needle ====="
             $start=0;$n=0
-            while(($i=$s.IndexOf($needle,$start,[System.StringComparison]::Ordinal)) -ge 0 -and $n -lt 12){
-              $a=[Math]::Max(0,$i-1400);$l=[Math]::Min(10000,$s.Length-$a);Write-Host "--- at $i ---";Write-Host $s.Substring($a,$l);$start=$i+$needle.Length;$n++
+            while(($i=$s.IndexOf($needle,$start,[System.StringComparison]::Ordinal)) -ge 0 -and $n -lt 30){
+              $a=[Math]::Max(0,$i-600);$l=[Math]::Min(1600,$s.Length-$a);Write-Host "--- at $i ---";Write-Host $s.Substring($a,$l);$start=$i+$needle.Length;$n++
             }
             Write-Host "COUNT=$n"
           }
+          $fn=$s.IndexOf('function openDashboardUniversityDetail',[System.StringComparison]::Ordinal)
+          if($fn -lt 0){throw 'detail function missing'}
+          $end=$s.IndexOf('function dashboardStudentStatusCompactMarkup',$fn,[System.StringComparison]::Ordinal)
+          if($end -lt 0){$end=[Math]::Min($s.Length,$fn+120000)}
+          $body=$s.Substring($fn,$end-$fn)
+          Write-Host ('BODY achievementRaw declaration=' + [bool]([regex]::IsMatch($body,'\b(?:const|let|var)\s+achievementRaw\b')))
+          Write-Host ('BODY achievementOn declaration=' + [bool]([regex]::IsMatch($body,'\b(?:const|let|var)\s+achievementOn\b')))
+          Write-Host ('BODY achievementRaw refs=' + ([regex]::Matches($body,'\bachievementRaw\b').Count))
+          Write-Host ('BODY achievementOn refs=' + ([regex]::Matches($body,'\bachievementOn\b').Count))
