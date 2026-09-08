@@ -1,7 +1,7 @@
 const path=require('path');
 const root=process.argv[2];
 if(!root)throw new Error('app root required');
-const {parseGoogleSheetData}=require(path.join(root,'electron','google-data.cjs'));
+const {parseGoogleSheetData}=require(path.resolve(root,'electron','google-data.cjs'));
 const table=(name,desc,header,rows)=>[[name],[desc],header,...rows];
 const students=Array.from({length:12},(_,i)=>{const no=String(1101+i);return [`STU-${i+1}`,'2026',no,`학생${i+1}`,`학생${i+1}`,'1','1',String(i+1),`1-1 ${i+1}번 학생${i+1}`,'','재학','','','','Y','','',''];});
 const matrices={
