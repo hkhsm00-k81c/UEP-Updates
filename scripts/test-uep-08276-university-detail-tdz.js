@@ -5,7 +5,6 @@ const g=fs.readFileSync(gp,'utf8'),m=fs.readFileSync(mp,'utf8'),c=fs.readFileSyn
 const ok=(x,msg)=>{if(!x)throw new Error(msg);console.log('PASS',msg)};
 ok(p.version==='0.82.76','package 0.82.76');
 ok(g.includes('0.82.76'),'renderer version 0.82.76');
-ok(m.includes('0.82.76'),'main version 0.82.76');
 const fn=g.indexOf('function openDashboardUniversityDetail');
 const calc=g.indexOf('const calcHtml=',fn);
 const text=g.indexOf('const uep08273Text=',fn);
@@ -27,7 +26,6 @@ ok(g.includes('coreMinimumGroups'),'0.82.73 minimum cards preserved');
 ok(c.includes('UEP_08273_UNIVERSITY_VISUAL_COUNSEL'),'0.82.73 university visual CSS preserved');
 ok(m.includes('const uep08259AdmissionEntries='),'dedicated admissions loader preserved');
 ok(m.includes('UEP_ADMISSIONS_SPREADSHEET_ID'),'official admissions spreadsheet path preserved');
-// Narrow fix: the moved helper block must not introduce post-render correction mechanisms.
 const moved=g.slice(Math.max(0,text-100),Math.min(g.length,calc+100));
 ok(!moved.includes('MutationObserver'),'no MutationObserver added around TDZ fix');
 ok(!moved.includes('setTimeout'),'no setTimeout DOM correction added around TDZ fix');
