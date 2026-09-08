@@ -1,0 +1,20 @@
+const fs=require('fs'),path=require('path');
+const root=process.argv[2]; if(!root)throw new Error('app root required');
+const g=fs.readFileSync(path.join(root,'gyomuon.js'),'utf8');
+const m=fs.readFileSync(path.join(root,'electron','main.cjs'),'utf8');
+const pkg=JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8'));
+function must(src,text,label){if(!src.includes(text))throw new Error('missing '+label)}
+if(pkg.version!=='0.82.83')throw new Error('package version is not 0.82.83: '+pkg.version);
+must(g,'const APP_VERSION="0.82.83"; /* UEP_08283_RUNTIME_VERSION */','runtime version');
+must(g,'UEP_08283_EFFECTIVE_WRITE_ROLE','effective write role');
+must(g,'UEP_08283_CONTACT_EFFECTIVE_ROLE','contact effective role');
+must(g,'UEP_08283_DUTY_WRITE_UI','duty UI write role');
+const payloads=(g.match(/role:currentWriteRoleId\(\),requester:currentLoginTeacherName\(\)/g)||[]).length;
+if(payloads<2)throw new Error('duty payload normalization missing');
+const dutyScopes=(m.match(/UEP_08283_DUTY_WRITE_SCOPE/g)||[]).length;
+if(dutyScopes!==2)throw new Error('backend duty scopes != 2');
+must(m,'UEP_08283_CONTACT_WRITE_SCOPE','backend contact scope');
+must(m,"'42_급식지도계획'",'lunch source');
+must(m,"'43_야자감독계획'",'night source');
+must(m,"'04_학생연락식별정보'",'contact source');
+console.log('UEP 0.82.83 regression passed');
