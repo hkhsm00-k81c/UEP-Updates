@@ -1,0 +1,33 @@
+name: Compare UEP 0.82.74 vs 0.82.77 University Click
+on:
+  push:
+    paths: ['compare-08274-08277-university-click.trigger']
+permissions:
+  contents: write
+jobs:
+  compare:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($v in @('0.82.74','0.82.77')){New-Item -ItemType Directory -Force "src-$v","app-$v" | Out-Null;gh release download "v$v" --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir "src-$v";if($LASTEXITCODE-ne 0){throw "download $v failed"};Expand-Archive "src-$v/UEP-update.zip" "app-$v" -Force}
+          @'
+const fs=require('fs');
+function fn(txt,name){const s=txt.indexOf(`function ${name}(`);if(s<0)return `MISSING ${name}`;const b=txt.indexOf('{',s);let d=0,q=null,esc=false;for(let i=b;i<txt.length;i++){const c=txt[i];if(q){if(esc){esc=false;continue;}if(c==='\\'){esc=true;continue;}if(c===q)q=null;continue;}if(c==='"'||c==="'"||c==='`'){q=c;continue;}if(c==='{')d++;else if(c==='}'&&--d===0)return txt.slice(s,i+1);}return `UNTERMINATED ${name}`;}
+function context(txt,needle,r=2200){const i=txt.indexOf(needle);if(i<0)return `MISSING CONTEXT ${needle}`;return txt.slice(Math.max(0,i-r),Math.min(txt.length,i+r));}
+for(const v of ['0.82.74','0.82.77']){const txt=fs.readFileSync(`app-${v}/resources/app/gyomuon.js`,'utf8');const out=[];out.push(`===== VERSION ${v} =====`);for(const n of ['openDashboardUniversityDetail','dashboardAdmissionTodayUniversity','dashboardStudentStatusCompactMarkup'])out.push(`--- ${n} ---\n${fn(txt,n)}`);out.push('--- admission binding ---\n'+context(txt,"$$('[data-dashboard-admission]')",3000));out.push('--- 08275 marker ---\n'+context(txt,'UEP_08275',2500));out.push('--- 08276 marker ---\n'+context(txt,'UEP_08276',2500));fs.writeFileSync(`compare-university-${v}.txt`,out.join('\n\n'));}
+'@ | Set-Content compare.js -Encoding utf8
+          node compare.js
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add compare-university-0.82.74.txt compare-university-0.82.77.txt
+          git commit -m 'Compare university click v0.82.74 vs v0.82.77'
+          if($LASTEXITCODE-ne 0){throw 'commit failed'}
+          git pull --rebase origin main
+          if($LASTEXITCODE-ne 0){throw 'pull failed'}
+          git push
+          if($LASTEXITCODE-ne 0){throw 'push failed'}
