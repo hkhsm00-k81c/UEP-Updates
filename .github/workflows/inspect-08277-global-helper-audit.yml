@@ -1,0 +1,40 @@
+name: Inspect UEP 0.82.77 Global Helper Audit
+on:
+  push:
+    paths: ['inspect-08277-global-helper-audit.trigger']
+permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.82.77 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE -ne 0){throw 'download failed'}
+          Expand-Archive source/UEP-update.zip app -Force
+          $txt=Get-Content 'app/resources/app/gyomuon.js' -Raw
+          $refs=[regex]::Matches($txt,'\b(?:uep\d+|dashboardAdmission|openDashboard)[A-Za-z0-9_]*\b') | ForEach-Object {$_.Value} | Sort-Object -Unique
+          $out=@()
+          foreach($name in $refs){
+            $e=[regex]::Escape($name)
+            $def=[regex]::IsMatch($txt,"function\s+$e\s*\(|(?:const|let|var)\s+$e\s*=|class\s+$e\b")
+            $count=[regex]::Matches($txt,"\b$e\b").Count
+            if(!$def){$out += "MISSING $name refs=$count"}
+          }
+          if(!$out.Count){$out+='NO MISSING CUSTOM HELPERS'}
+          $out -join "`r`n" | Set-Content inspection-08277-global-helper-audit.txt -Encoding utf8
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add inspection-08277-global-helper-audit.txt
+          git commit -m 'Audit UEP 0.82.77 custom helper definitions'
+          if($LASTEXITCODE -ne 0){throw 'commit failed'}
+          git pull --rebase origin main
+          if($LASTEXITCODE -ne 0){throw 'pull failed'}
+          git push
+          if($LASTEXITCODE -ne 0){throw 'push failed'}
