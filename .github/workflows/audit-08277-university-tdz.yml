@@ -1,0 +1,40 @@
+name: Audit UEP 0.82.77 University TDZ
+on:
+  push:
+    paths:
+      - 'audit-08277-university-tdz.trigger'
+permissions:
+  contents: write
+jobs:
+  audit:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.82.77 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE-ne 0){throw 'download failed'}
+          Expand-Archive source/UEP-update.zip app -Force
+          @'
+const fs=require('fs');
+const txt=fs.readFileSync('app/resources/app/gyomuon.js','utf8');
+const s=txt.indexOf('function openDashboardUniversityDetail('),e=txt.indexOf('\nfunction dashboardStudentStatusCompactMarkup',s);if(s<0||e<0)throw new Error('bounds');
+const body=txt.slice(s,e);const out=[];
+for(const m of body.matchAll(/\bconst\s+([A-Za-z_$][\w$]*)\s*=/g)){const name=m[1],decl=m.index,prefix=body.slice(0,decl),rx=new RegExp('\\b'+name+'\\b','g');const uses=[...prefix.matchAll(rx)];if(uses.length)out.push(`POTENTIAL ${name} first=${uses[0].index} decl=${decl} usesBefore=${uses.length}`);}
+if(!out.length)out.push('NO POTENTIAL CONST USE-BEFORE-DECLARATION');
+fs.writeFileSync('audit-08277-university-tdz.txt',out.join('\n'));
+'@ | Set-Content audit-tdz.js -Encoding utf8
+          node audit-tdz.js
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add audit-08277-university-tdz.txt
+          git commit -m 'Audit v0.82.77 university detail TDZ order'
+          if($LASTEXITCODE-ne 0){throw 'commit failed'}
+          git pull --rebase origin main
+          if($LASTEXITCODE-ne 0){throw 'pull failed'}
+          git push
+          if($LASTEXITCODE-ne 0){throw 'push failed'}
