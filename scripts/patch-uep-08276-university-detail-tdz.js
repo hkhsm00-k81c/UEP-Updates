@@ -7,9 +7,9 @@ const must=(x,msg)=>{if(!x)throw new Error(msg)};
 must(g.includes('0.82.75'),'expected renderer 0.82.75');
 const helper="  const uep08273Text=v=>String(v??'').trim();\n  const uep08273Yes=v=>/^(Y|YES|O|있음|반영|적용)$/i.test(uep08273Text(v))||/반영|적용/.test(uep08273Text(v));\n  const achievementRaw=calc?uep08273Text(calc['성취도배점/환산']||calc['성취도반영']||calc['성취도']):'';\n  const achievementOn=achievementRaw&&!/미반영|반영\\s*안|없음|해당없음|^N$/i.test(achievementRaw);\n";
 const helperCrlf=helper.replace(/\n/g,'\r\n');
-let exact=g.includes(helper)?helper:(g.includes(helperCrlf)?helperCrlf:null);
+const exact=g.includes(helper)?helper:(g.includes(helperCrlf)?helperCrlf:null);
 must(exact,'expected 0.82.73 achievement helper block');
-const calcAnchor="  const detailLine=(label,value)=>value?'<div class=\"uep-uni-detail-line\"><b>'+escapeHtml(label)+'</b><span>'+escapeHtml(value)+'</span></div>:'';";
+const calcAnchor="  const detailLine=(label,value)=>value?'<div class=\"uep-uni-detail-line\"><b>'+escapeHtml(label)+'</b><span>'+escapeHtml(value)+'</span></div>':'';";
 const calcPos=g.indexOf(calcAnchor);
 const helperPos=g.indexOf(exact);
 must(calcPos>=0,'grade calculation anchor missing');
@@ -29,7 +29,7 @@ must(declRaw<calcUse&&declYes<calcUse,'achievement helpers still initialize afte
 must((g.match(/const achievementRaw=/g)||[]).length===1,'achievementRaw duplicated');
 must((g.match(/const uep08273Yes=/g)||[]).length===1,'uep08273Yes duplicated');
 
-for(const [p,label] of [[gp,'renderer'],[mp,'main'],[pp,'package'],[lp,'package-lock']]){
+for(const p of [gp,mp,pp,lp]){
   if(!fs.existsSync(p))continue;
   let x=p===gp?g:(p===mp?m:fs.readFileSync(p,'utf8'));
   x=x.replaceAll('0.82.75','0.82.76');
