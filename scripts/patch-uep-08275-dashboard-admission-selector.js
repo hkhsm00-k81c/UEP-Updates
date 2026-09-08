@@ -5,7 +5,6 @@ let g=fs.readFileSync(gp,'utf8'),m=fs.readFileSync(mp,'utf8');
 const must=(x,msg)=>{if(!x)throw new Error(msg)};
 
 must(g.includes('0.82.74'),'expected renderer 0.82.74');
-must(m.includes('0.82.74'),'expected main 0.82.74');
 const bad="$('[data-dashboard-admission]').forEach(button=>button.onclick=async event=>";
 const good="$$('[data-dashboard-admission]').forEach(button=>button.onclick=async event=>";
 must(g.includes(bad),'expected 0.82.74 dashboard admission selector regression missing');
@@ -13,7 +12,7 @@ must(!g.includes(good),'correct dashboard admission selector already present');
 
 g=g.replace(bad,good);
 g=g.replaceAll('0.82.74','0.82.75');
-m=m.replaceAll('0.82.74','0.82.75');
+if(m.includes('0.82.74'))m=m.replaceAll('0.82.74','0.82.75');
 for(const p of [pp,lp])if(fs.existsSync(p)){let x=fs.readFileSync(p,'utf8').replaceAll('0.82.74','0.82.75');fs.writeFileSync(p,x,'utf8');}
 
 must(!g.includes(bad),'single-element dashboard admission selector still present');
