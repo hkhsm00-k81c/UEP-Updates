@@ -1,0 +1,41 @@
+name: Inspect UEP 0.82.77 University Call Audit
+on:
+  push:
+    paths: ['inspect-08277-university-call-audit.trigger']
+permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.82.77 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE-ne 0){throw 'download failed'}
+          Expand-Archive source/UEP-update.zip app -Force
+          @'
+const fs=require('fs');
+const txt=fs.readFileSync('app/resources/app/gyomuon.js','utf8');
+function extract(name){const s=txt.indexOf(`function ${name}(`);if(s<0)throw new Error('missing '+name);const b=txt.indexOf('{',s);let d=0,q=null,esc=false;for(let i=b;i<txt.length;i++){const c=txt[i];if(q){if(esc){esc=false;continue;}if(c==='\\'){esc=true;continue;}if(c===q)q=null;continue;}if(c==='"'||c==="'"||c==='`'){q=c;continue;}if(c==='{')d++;else if(c==='}'&&--d===0)return txt.slice(s,i+1);}throw new Error('unterminated');}
+const body=extract('openDashboardUniversityDetail');
+const calls=[...new Set([...body.matchAll(/\b([A-Za-z_$][\w$]*)\s*\(/g)].map(m=>m[1]))].sort();
+const builtins=new Set(['if','for','while','switch','catch','function','String','Number','Boolean','Array','Object','Set','Map','Date','RegExp','Math','parseInt','parseFloat','encodeURIComponent','decodeURIComponent']);
+const out=['BODY',body,'','CALL AUDIT'];
+for(const name of calls){if(builtins.has(name))continue;const e=name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');const def=new RegExp(`function\\s+${e}\\s*\\(|(?:const|let|var)\\s+${e}\\s*=|class\\s+${e}\\b`).test(txt);const method=new RegExp(`[.\\?]${e}\\s*\\(`).test(body);out.push(`${def?'DEF':method?'METHOD':'UNRESOLVED'} ${name}`);}
+fs.writeFileSync('inspection-08277-university-call-audit.txt',out.join('\n'));
+'@ | Set-Content audit.js -Encoding utf8
+          node audit.js
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add inspection-08277-university-call-audit.txt
+          git commit -m 'Audit today university detail call dependencies'
+          if($LASTEXITCODE-ne 0){throw 'commit failed'}
+          git pull --rebase origin main
+          if($LASTEXITCODE-ne 0){throw 'pull failed'}
+          git push
+          if($LASTEXITCODE-ne 0){throw 'push failed'}
