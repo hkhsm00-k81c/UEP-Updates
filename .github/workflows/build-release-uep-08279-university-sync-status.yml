@@ -1,0 +1,43 @@
+name: Build and Release UEP 0.82.79 University + Sync Status
+on:
+  push:
+    paths: ['release-08279.trigger']
+permissions:
+  contents: write
+concurrency:
+  group: build-release-uep-08279
+  cancel-in-progress: false
+jobs:
+  build-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch, validate, package, release
+        shell: pwsh
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          $ErrorActionPreference='Stop'
+          function Run-Native([scriptblock]$c,[string]$l){&$c;if($LASTEXITCODE -ne 0){throw "$l failed: $LASTEXITCODE"}}
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          Run-Native {gh release download v0.82.78 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source} 'download 0.82.78'
+          Expand-Archive source/UEP-update.zip app -Force
+          $root='app/resources/app'
+          Run-Native {node scripts/patch-uep-08279-university-sync-status.js $root} '08279 patch'
+          Run-Native {node --check "$root/gyomuon.js"} 'gyomuon syntax'
+          Run-Native {node --check "$root/electron/google-data.cjs"} 'google-data syntax'
+          Run-Native {node --check "$root/electron/main.cjs"} 'main syntax'
+          Run-Native {node scripts/test-uep-08279-university-sync-status.js $root} '08279 regression'
+          $pkg=Get-Content "$root/package.json" -Raw|ConvertFrom-Json
+          if([string]$pkg.version -ne '0.82.79'){throw "package version mismatch: $($pkg.version)"}
+          Compress-Archive -Path app/* -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "$sha  UEP-update.zip"|Set-Content sha256.txt
+          Run-Native {gh release create v0.82.79 UEP-update.zip sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.79' --notes "UEP v0.82.79`n- 오늘의 대학 rich 상세화면에서 제거된 majorRows/restrictedRows를 참조하던 오류를 canonical activeAdmissions 기준으로 수정`n- 로그인·자동 시작 캐시 읽기 성공 시 상단 동기화 상태를 즉시 갱신해 수동 새로고침 전 인증 필요로 보이던 상태표시 오류 수정`n- v0.82.77 방과후 11→12→13 연결, 야자1/야자2 최신화, 8교시→오후자습 기준 유지`n- v0.82.78 오늘의 대학 네이티브 라우터와 오류경계 유지`n- MutationObserver·전역 클릭 우회·렌더 후 HTML 교체 없음"} 'release'
+          $policy=Get-Content uep-policy.json -Raw|ConvertFrom-Json
+          $policy.latestVersion='0.82.79'
+          $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.79/UEP-update.zip'
+          $policy.sha256=$sha
+          $policy.message='UEP 0.82.79 · 오늘의 대학 상세 및 자동 동기화 상태 복구'
+          $policy|ConvertTo-Json -Depth 10|Set-Content uep-policy.json -Encoding utf8
+          Run-Native {git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add uep-policy.json;git commit -m 'Publish UEP 0.82.79 policy';git pull --rebase origin main;git push} 'policy push'
