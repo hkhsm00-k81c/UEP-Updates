@@ -1,0 +1,34 @@
+name: Inspect UEP 0.82.78 Sync Flow
+on:
+  push:
+    paths: ['inspect-08278-sync-flow.trigger']
+permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          gh release download v0.82.78 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE -ne 0){throw 'download failed'}
+          Expand-Archive source/UEP-update.zip app -Force
+          $g=Get-Content 'app/resources/app/gyomuon.js' -Raw
+          $terms=@('async function refreshReadonlyCacheSilently','async function previewReadonlySync','async function refreshOperationalCacheSilently','readonlyCache = result.data','readonlyCache={','googleConnectionStatus =','googleConnectionStatus=','googleConnectionError =','googleConnectionError=')
+          $out=@()
+          foreach($term in $terms){$start=0;$n=0;while(($i=$g.IndexOf($term,$start)) -ge 0 -and $n -lt 8){$s=[Math]::Max(0,$i-2200);$len=[Math]::Min(7600,$g.Length-$s);$out+="===== $term @ $i =====";$out+=$g.Substring($s,$len);$start=$i+$term.Length;$n++}}
+          $out -join "`r`n" | Set-Content inspection-08278-sync-flow.txt -Encoding utf8
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add inspection-08278-sync-flow.txt
+          git commit -m 'Inspect UEP 0.82.78 sync flow'
+          if($LASTEXITCODE -ne 0){throw 'commit failed'}
+          git pull --rebase origin main
+          if($LASTEXITCODE -ne 0){throw 'pull failed'}
+          git push
+          if($LASTEXITCODE -ne 0){throw 'push failed'}
