@@ -1,0 +1,52 @@
+name: Build Release UEP 0.82.78 Today University Router
+on:
+  push:
+    paths:
+      - 'release-08278-today-university-router.trigger'
+permissions:
+  contents: write
+concurrency:
+  group: build-release-uep-08278
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          $ErrorActionPreference='Stop'
+          function Run-Native([scriptblock]$cmd,[string]$label){&$cmd;if($LASTEXITCODE -ne 0){throw "$label failed: $LASTEXITCODE"}}
+          $repo=$env:GITHUB_REPOSITORY;$prev='v0.82.77';$next='v0.82.78';$ver='0.82.78'
+          New-Item -ItemType Directory -Force source,app,out | Out-Null
+          Run-Native {gh release download $prev --repo $repo --pattern UEP-update.zip --dir source} 'download 0.82.77'
+          Expand-Archive source/UEP-update.zip app -Force
+          $root='app/resources/app'
+          Run-Native {node scripts/patch-uep-08278-today-university-router.js $root} '08278 patch'
+          Run-Native {node --check "$root/gyomuon.js"} 'gyomuon syntax'
+          Run-Native {node --check "$root/electron/main.cjs"} 'main syntax'
+          Run-Native {node --check "$root/electron/google-data.cjs"} 'google-data syntax'
+          Run-Native {node scripts/test-uep-08278-today-university-router.js $root} '08278 regression'
+          $pkg=Get-Content "$root/package.json" -Raw | ConvertFrom-Json
+          if([string]$pkg.version -ne $ver){throw "package version mismatch: $($pkg.version)"}
+          Compress-Archive -Path app/* -DestinationPath out/UEP-update.zip -CompressionLevel Optimal
+          $hash=(Get-FileHash out/UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  UEP-update.zip" | Set-Content out/sha256.txt -Encoding ascii
+          Run-Native {gh release create $next out/UEP-update.zip out/sha256.txt --repo $repo --title 'UEP v0.82.78' --notes "UEP v0.82.78`n- 대시보드 오늘의 대학을 이름 있는 네이티브 라우터 하나로 연결`n- 상세 렌더러 오류가 클릭 전체를 무반응으로 만들지 않도록 UI 오류 경계 추가`n- 정상 시 v0.82.76/77의 풍부한 오늘의 대학 상세화면을 그대로 사용하고, 오류 시 확인 가능한 공식 연결자료를 안전 표시`n- v0.82.77 방과후 11·12·13 연결 및 8교시→오후자습, 야자 최신동기화 유지`n- 문서 전역 admission click 감지 제거; MutationObserver·DOM 사후교체·전역 click 우회 없음"} 'release create'
+          $policy=Get-Content uep-policy.json -Raw | ConvertFrom-Json
+          $policy.latestVersion=$ver
+          $policy.downloadUrl="https://github.com/$repo/releases/download/$next/UEP-update.zip"
+          $policy.sha256=$hash
+          $policy.message='UEP 0.82.78 · 오늘의 대학 클릭 라우터 정상화'
+          $policy | ConvertTo-Json -Depth 20 | Set-Content uep-policy.json -Encoding utf8
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add uep-policy.json
+          git commit -m 'Publish UEP 0.82.78 policy'
+          if($LASTEXITCODE -ne 0){throw "policy commit failed: $LASTEXITCODE"}
+          git pull --rebase origin main
+          if($LASTEXITCODE -ne 0){throw "policy pull failed: $LASTEXITCODE"}
+          git push
+          if($LASTEXITCODE -ne 0){throw "policy push failed: $LASTEXITCODE"}
