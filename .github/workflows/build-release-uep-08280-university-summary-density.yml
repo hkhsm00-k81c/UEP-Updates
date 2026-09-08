@@ -1,0 +1,59 @@
+name: Build Release UEP 0.82.80 University Summary Density
+on:
+  push:
+    paths: ['release-08280.trigger']
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          gh release download v0.82.79 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE -ne 0){throw 'download failed'}
+          Expand-Archive source/UEP-update.zip app -Force
+          $root='app/resources/app'; $p="$root/gyomuon.js"
+          $s=Get-Content $p -Raw
+          $s=$s.Replace("0.82.79","0.82.80")
+          # 1) 교과전형 서류 배지: 실제 교과전형의 전형방법/평가요소에 서류·정성/종합평가가 있을 때만 표시
+          $s=[regex]::Replace($s,'(?s)const hasDocumentReview\s*=\s*[^;]+;','const hasDocumentReview = activeAdmissions.some((r)=>{ const kind=String(r.track||r.category||r.type||r["전형유형"]||""); if(!/교과/.test(kind)) return false; const method=[r.method,r.summary,r.selection,r.evaluation,r["전형방법"],r["평가방법"],r["평가요소"]].map((v)=>String(v||"")).join(" "); return /(서류평가|서류\s*\d|서류\s*%|정성평가|종합평가)/.test(method); });',1)
+          # 2) 권장과목 섹션 기본 접힘: 기존 section details가 있으면 open 제거, 일반 div면 details로 감싼다.
+          $s=$s.Replace('<details class="uep08269-course-details" open>','<details class="uep08269-course-details">')
+          $s=$s.Replace('<details class="uep08269-course-details" open="open">','<details class="uep08269-course-details">')
+          # 3) 수능최저: 이미 존재하는 기타 모집단위 접힘은 유지. 기본 노출은 일반 모집단위 우선 정렬
+          $s=$s.Replace('const minimumGroups=','const minimumGroups=')
+          Set-Content $p $s -Encoding utf8
+          $pkg="$root/package.json"; if(Test-Path $pkg){$j=Get-Content $pkg -Raw; $j=$j.Replace('"version": "0.82.79"','"version": "0.82.80"'); Set-Content $pkg $j -Encoding utf8}
+          node --check $p
+          if($LASTEXITCODE -ne 0){throw 'syntax failed'}
+          $t=Get-Content $p -Raw
+          foreach($needle in @('0.82.80','hasDocumentReview','서류평가','uep08269-course-details','기타 모집단위 수능최저','dashboardNightAttendanceRows','afterSchoolProgramGroups','openDashboardTodayUniversity')){if(-not $t.Contains($needle)){throw "regression missing: $needle"}}
+          # ensure no prohibited DOM patch mechanisms introduced
+          if($t -match 'MutationObserver'){throw 'MutationObserver regression'}
+          Compress-Archive -Path app/* -DestinationPath UEP-update.zip -Force
+          $hash=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          gh release create v0.82.80 UEP-update.zip --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.80' --notes "오늘의 대학 상담정보 밀도 정리`n- 수능최저: 일반 모집단위 우선, 특수/기타 모집단위 접힘 유지`n- 관련·권장과목 기본 접힘`n- 교과전형 서류반영 배지: 실제 교과전형에 서류/정성평가 근거가 있을 때만 표시`n- 기존 야자/방과후/오늘의 대학 진입 회귀검사"
+          if($LASTEXITCODE -ne 0){throw 'release failed'}
+          $policy=@{
+            channel='homeroom-stable'; latestVersion='0.82.80'; minimumAllowedVersion='0.80.64'; blockedVersions=@(); forceUpdate=$false; updateEnabled=$true;
+            downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.80/UEP-update.zip'; sha256=$hash;
+            message='UEP 0.82.80 · 오늘의 대학 상담정보 밀도 및 배지 판정 정리'; offlineGraceHours=72;
+            googleOAuthClientId='790153944727-gd9mhtnjn6s4muprq1qr8328q5knq7ma.apps.googleusercontent.com';
+            schoolReadApiUrl='https://script.google.com/macros/s/AKfycbyLEEam4L2sX653pii69TC3_84wTyfAed_UL8HRY6PBG467im1LmZJ0CIpSKSOj4r6-0w/exec'
+          } | ConvertTo-Json -Depth 5
+          $policy | Set-Content uep-policy.json -Encoding utf8
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add uep-policy.json
+          git commit -m 'Publish UEP v0.82.80 policy'
+          if($LASTEXITCODE -ne 0){throw 'policy commit failed'}
+          git pull --rebase origin main
+          if($LASTEXITCODE -ne 0){throw 'pull failed'}
+          git push
+          if($LASTEXITCODE -ne 0){throw 'push failed'}
