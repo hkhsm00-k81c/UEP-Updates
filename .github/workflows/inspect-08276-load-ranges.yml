@@ -1,0 +1,29 @@
+name: Inspect UEP 0.82.76 Load Ranges
+on:
+  push:
+    paths: ['inspect-08276-load-ranges.trigger']
+permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.82.76 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE -ne 0){throw 'download failed'}
+          Expand-Archive source/UEP-update.zip app -Force
+          $f='app/resources/app/electron/main.cjs';$txt=Get-Content $f -Raw;$out=@()
+          foreach($needle in @('const SHEET_RANGES','13_출석부','fetchLiveData','fetchSecondary','fetchAcademic','12_차시일정','11_방과후학교')){
+            $start=0
+            while($true){$i=$txt.IndexOf($needle,$start);if($i-lt 0){break};$s=[Math]::Max(0,$i-2200);$len=[Math]::Min(9000,$txt.Length-$s);$out+="===== $needle @ $i =====";$out+=$txt.Substring($s,$len);$start=$i+$needle.Length}
+          }
+          [IO.File]::WriteAllText((Join-Path $PWD 'inspection-08276-load-ranges.txt'),($out -join "`r`n"),(New-Object Text.UTF8Encoding($false)))
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add inspection-08276-load-ranges.txt;git commit -m 'Inspect UEP 0.82.76 load ranges';if($LASTEXITCODE -ne 0){throw 'commit failed'}
+          git pull --rebase origin main;if($LASTEXITCODE -ne 0){throw 'pull failed'};git push;if($LASTEXITCODE -ne 0){throw 'push failed'}
