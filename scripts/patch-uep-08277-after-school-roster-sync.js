@@ -58,10 +58,13 @@ text=text.slice(0,start)+replacement+text.slice(end);
 text=text.replaceAll('0.82.76','0.82.77');
 fs.writeFileSync(main,text,'utf8');
 let gd=fs.readFileSync(data,'utf8');
-const old=`    const matchedSlots=explicitSlots.length\n      ? nightSlotTemplates.filter(slot=>explicitSlots.includes(slot.label))\n      : (Number.isFinite(start)&&Number.isFinite(end)?nightSlotTemplates.filter(slot=>start<slot.end&&end>slot.start):[]);`;
+const rx=/    const matchedSlots=explicitSlots\.length\r?\n\s*\? nightSlotTemplates\.filter\(slot=>explicitSlots\.includes\(slot\.label\)\)\r?\n\s*: \(Number\.isFinite\(start\)&&Number\.isFinite\(end\)\?nightSlotTemplates\.filter\(slot=>start<slot\.end&&end>slot\.start\):\[\]\);/;
 const neu=`    const eighthPeriod=/8교시/.test(String(program.time||""));\n    const matchedSlots=eighthPeriod\n      ? nightSlotTemplates.filter(slot=>slot.label==="오후자습")\n      : (explicitSlots.length\n        ? nightSlotTemplates.filter(slot=>explicitSlots.includes(slot.label))\n        : (Number.isFinite(start)&&Number.isFinite(end)?nightSlotTemplates.filter(slot=>start<slot.end&&end>slot.start):[]));`;
-if(!gd.includes(old))throw new Error('night matchedSlots anchor not found');
-gd=gd.replace(old,neu).replaceAll('0.82.76','0.82.77');
+if(!rx.test(gd)){
+ const p=gd.indexOf('const matchedSlots=');
+ throw new Error(`night matchedSlots anchor not found; index=${p}; sample=${p>=0?gd.slice(p,p+350):'none'}`);
+}
+gd=gd.replace(rx,neu).replaceAll('0.82.76','0.82.77');
 fs.writeFileSync(data,gd,'utf8');
 for(const f of [gy,path.join(root,'package.json'),path.join(root,'package-lock.json')]){
  if(fs.existsSync(f)){let c=fs.readFileSync(f,'utf8');c=c.replaceAll('0.82.76','0.82.77');fs.writeFileSync(f,c,'utf8');}
