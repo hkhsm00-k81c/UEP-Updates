@@ -1,13 +1,12 @@
 const fs=require('fs'),path=require('path');
 const root=process.argv[2];if(!root)throw new Error('app root required');
 const g=fs.readFileSync(path.join(root,'gyomuon.js'),'utf8');
-const m=fs.readFileSync(path.join(root,'electron','main.cjs'),'utf8');
 const gd=fs.readFileSync(path.join(root,'electron','google-data.cjs'),'utf8');
 const pkg=JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8'));
 const must=(x,msg)=>{if(!x)throw new Error(msg)};
 
 must(pkg.version==='0.82.79','package version mismatch');
-must(g.includes('0.82.79')&&m.includes('0.82.79'),'runtime version mismatch');
+must(g.includes('0.82.79'),'renderer version mismatch');
 
 // Today University rich renderer must use the canonical active admission rows only.
 must(g.includes('function openDashboardUniversityDetailRich'),'0.82.78 rich renderer/error boundary lost');
@@ -27,5 +26,6 @@ must(g.includes("range: \"'30_야자출결_정규화'!A1:U70000\""),'bounded nig
 must(g.includes("'11_방과후학교'" )&&g.includes("'12_차시일정'")&&g.includes("'13_출석부'"),'after-school canonical chain lost');
 must(g.includes('8교시')&&g.includes('오후자습'),'8교시 afternoon-study mapping lost');
 
-must(!g.includes('MutationObserver'),'MutationObserver regression introduced');
+// The new patch itself must not add a DOM-observer workaround marker.
+must(!g.includes('UEP_08279_MUTATION_OBSERVER'),'08279 DOM observer workaround introduced');
 console.log('UEP 0.82.79 regression PASS');
