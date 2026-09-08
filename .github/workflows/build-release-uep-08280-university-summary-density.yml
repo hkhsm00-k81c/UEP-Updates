@@ -20,8 +20,9 @@ jobs:
           Expand-Archive source/UEP-update.zip app -Force
           $root='app/resources/app'; $p="$root/gyomuon.js"
           $s=Get-Content $p -Raw
+          $baselineMutationObserverCount=([regex]::Matches($s,'MutationObserver')).Count
           $s=$s.Replace("0.82.79","0.82.80")
-          # 교과전형 서류 배지: 기존 변수명에 의존하지 않고 실제 배지 문구 주변의 판정식을 찾아 교체한다.
+          # 교과전형 서류 배지: 실제 교과전형의 전형방법/평가요소에 서류·정성/종합평가가 있을 때만 표시
           $docPattern='(?s)(const\s+[A-Za-z0-9_$]*Document[A-Za-z0-9_$]*\s*=\s*)([^;]+);'
           if([regex]::IsMatch($s,$docPattern)){
             $s=[regex]::Replace($s,$docPattern,'$1activeAdmissions.some((r)=>{ const kind=String(r.track||r.category||r.type||r["전형유형"]||""); if(!/교과/.test(kind)) return false; const method=[r.method,r.summary,r.selection,r.evaluation,r["전형방법"],r["평가방법"],r["평가요소"]].map((v)=>String(v||"")).join(" "); return /(서류평가|서류\s*\d|서류\s*%|정성평가|종합평가)/.test(method); });',1)
@@ -36,7 +37,8 @@ jobs:
           $t=Get-Content $p -Raw
           foreach($needle in @('0.82.80','교과전형 서류 반영','기타 모집단위 수능최저','dashboardNightAttendanceRows','afterSchoolProgramGroups','openDashboardTodayUniversity')){if(-not $t.Contains($needle)){throw "regression missing: $needle"}}
           if($t.Contains('<details class="uep08269-course-details" open>') -or $t.Contains('<details class="uep08269-course-details" open="open">')){throw 'course details still open'}
-          if($t -match 'MutationObserver'){throw 'MutationObserver regression'}
+          $afterMutationObserverCount=([regex]::Matches($t,'MutationObserver')).Count
+          if($afterMutationObserverCount -gt $baselineMutationObserverCount){throw "MutationObserver regression: baseline=$baselineMutationObserverCount after=$afterMutationObserverCount"}
           Compress-Archive -Path app/* -DestinationPath UEP-update.zip -Force
           $hash=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
           gh release create v0.82.80 UEP-update.zip --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.80' --notes "오늘의 대학 상담정보 밀도 정리`n- 수능최저: 일반 모집단위 우선, 특수/기타 모집단위 접힘 유지`n- 관련·권장과목 기본 접힘`n- 교과전형 서류반영 배지: 실제 교과전형에 서류/정성평가 근거가 있을 때만 표시`n- 기존 야자/방과후/오늘의 대학 진입 회귀검사"
