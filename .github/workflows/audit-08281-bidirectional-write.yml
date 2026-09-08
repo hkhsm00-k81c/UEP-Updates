@@ -1,0 +1,35 @@
+name: Audit UEP 0.82.81 Bidirectional Write Paths
+on:
+  push:
+    paths: ['audit-08281-bidirectional.trigger']
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          gh release download v0.82.81 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE -ne 0){throw 'download failed'}
+          Expand-Archive source/UEP-update.zip app -Force
+          $root='app/resources/app'
+          @'
+          const fs=require('fs'),path=require('path');
+          const root=process.argv[2];
+          const terms=['연락처','보호자','전화','휴대폰','야자감독','감독계획','급식지도','급식','담임','학년부장','관리자','write','save','update','sheet','권한','permission'];
+          const files=[];
+          function walk(d){for(const e of fs.readdirSync(d,{withFileTypes:true})){const p=path.join(d,e.name); if(e.isDirectory()){if(!['node_modules'].includes(e.name))walk(p);} else if(/\.(js|cjs|mjs|html)$/i.test(e.name))files.push(p)}}
+          walk(root);
+          for(const f of files){let s;try{s=fs.readFileSync(f,'utf8')}catch{continue};const lines=s.split(/\r?\n/);let hits=[];for(let i=0;i<lines.length;i++){if(terms.some(t=>lines[i].toLowerCase().includes(t.toLowerCase())))hits.push(i)};if(!hits.length)continue;
+            const selected=new Set();for(const i of hits){for(let j=Math.max(0,i-3);j<=Math.min(lines.length-1,i+5);j++)selected.add(j)}
+            console.log('\n===== FILE '+path.relative(root,f)+' =====');let prev=-2;for(const i of [...selected].sort((a,b)=>a-b)){if(i>prev+1)console.log('---');console.log(String(i+1).padStart(6,' ')+': '+lines[i]);prev=i;}
+          }
+          '@ | Set-Content audit.js -Encoding UTF8
+          node audit.js $root
+          if($LASTEXITCODE -ne 0){throw 'audit failed'}
