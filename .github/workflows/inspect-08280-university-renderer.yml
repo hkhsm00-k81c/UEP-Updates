@@ -1,0 +1,41 @@
+name: Inspect UEP 0.82.80 University Renderer
+on:
+  push:
+    paths: ['inspect-08280-university.trigger']
+permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          gh release download v0.82.80 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE -ne 0){throw 'download failed'}
+          Expand-Archive source/UEP-update.zip app -Force
+          $p='app/resources/app/gyomuon.js'
+          $s=Get-Content $p -Raw
+          $needles=@('교과전형 서류 반영','대표 수능최저','기타 모집단위 수능최저','관련·권장과목','권장이수','minimumGroups','courseDetails','openDashboardUniversityDetailRich')
+          $out=@()
+          foreach($n in $needles){
+            $idx=0;$count=0
+            while(($idx=$s.IndexOf($n,$idx)) -ge 0 -and $count -lt 8){
+              $start=[Math]::Max(0,$idx-2500);$len=[Math]::Min(7000,$s.Length-$start)
+              $out += "===== $n @ $idx ====="; $out += $s.Substring($start,$len); $idx += $n.Length; $count++
+            }
+          }
+          $out -join "`r`n" | Set-Content inspection-08280-university-renderer.txt -Encoding utf8
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add inspection-08280-university-renderer.txt
+          git commit -m 'Inspect v0.82.80 university renderer'
+          if($LASTEXITCODE -ne 0){throw 'commit failed'}
+          git pull --rebase origin main
+          if($LASTEXITCODE -ne 0){throw 'pull failed'}
+          git push
+          if($LASTEXITCODE -ne 0){throw 'push failed'}
