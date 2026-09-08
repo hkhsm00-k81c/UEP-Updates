@@ -1,0 +1,21 @@
+name: Inspect UEP 0.82.76 Sheet Ranges Only
+on:
+  push:
+    paths: ['inspect-08276-sheet-ranges-only.trigger']
+permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          $ErrorActionPreference='Stop';New-Item -ItemType Directory -Force source,app|Out-Null
+          gh release download v0.82.76 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE-ne 0){throw 'download failed'};Expand-Archive source/UEP-update.zip app -Force
+          $txt=Get-Content 'app/resources/app/electron/main.cjs' -Raw;$i=$txt.IndexOf('const SHEET_RANGES');if($i-lt 0){throw 'SHEET_RANGES not found'}
+          $snippet=$txt.Substring($i,[Math]::Min(18000,$txt.Length-$i));[IO.File]::WriteAllText((Join-Path $PWD 'inspection-08276-sheet-ranges-only.txt'),$snippet,(New-Object Text.UTF8Encoding($false)))
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add inspection-08276-sheet-ranges-only.txt;git commit -m 'Inspect UEP 0.82.76 sheet ranges';if($LASTEXITCODE-ne 0){throw 'commit failed'};git pull --rebase origin main;if($LASTEXITCODE-ne 0){throw 'pull failed'};git push;if($LASTEXITCODE-ne 0){throw 'push failed'}
