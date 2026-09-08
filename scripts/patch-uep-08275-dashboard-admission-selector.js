@@ -10,7 +10,8 @@ const goodLine="  $$('[data-dashboard-admission]').forEach(button=>button.onclic
 const badCount=g.split(badLine).length-1;
 must(badCount>=1,'expected 0.82.74 dashboard admission selector regression missing');
 
-g=g.replaceAll(badLine,goodLine);
+// Function replacement is intentional: String.replace replacement text interprets $$ as one literal $.
+g=g.replaceAll(badLine,()=>goodLine);
 g=g.replaceAll('0.82.74','0.82.75');
 if(m.includes('0.82.74'))m=m.replaceAll('0.82.74','0.82.75');
 for(const p of [pp,lp])if(fs.existsSync(p)){let x=fs.readFileSync(p,'utf8').replaceAll('0.82.74','0.82.75');fs.writeFileSync(p,x,'utf8');}
