@@ -1,0 +1,23 @@
+name: Inspect UEP 0.82.76 Gyomuon Ranges
+on:
+  push:
+    paths: ['inspect-08276-gyomuon-ranges.trigger']
+permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          $ErrorActionPreference='Stop';New-Item -ItemType Directory -Force source,app|Out-Null
+          gh release download v0.82.76 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE -ne 0){throw 'download failed'}
+          Expand-Archive source/UEP-update.zip app -Force
+          $lines=Get-Content 'app/resources/app/gyomuon.js';$out=@()
+          foreach($range in @(@(2380,2460),@(11280,11720),@(7930,7995))){$out+="===== lines $($range[0])-$($range[1]) =====";for($i=$range[0]-1;$i-le [Math]::Min($range[1]-1,$lines.Count-1);$i++){$out+=("{0,6}: {1}" -f ($i+1),$lines[$i])}}
+          [IO.File]::WriteAllText((Join-Path $PWD 'inspection-08276-gyomuon-ranges.txt'),($out -join "`r`n"),(New-Object Text.UTF8Encoding($false)))
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add inspection-08276-gyomuon-ranges.txt;git commit -m 'Inspect UEP 0.82.76 gyomuon ranges';if($LASTEXITCODE -ne 0){throw 'commit failed'};git pull --rebase origin main;if($LASTEXITCODE -ne 0){throw 'pull failed'};git push;if($LASTEXITCODE -ne 0){throw 'push failed'}
