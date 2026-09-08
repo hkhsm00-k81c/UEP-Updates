@@ -1,0 +1,36 @@
+name: Build Release UEP 0.82.82 Bidirectional Role Write
+on:
+  push:
+    paths: ['release-08282.trigger']
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          $ErrorActionPreference='Stop'
+          function Run-Native([scriptblock]$c,[string]$l){&$c;if($LASTEXITCODE -ne 0){throw "$l failed: $LASTEXITCODE"}}
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          Run-Native {gh release download v0.82.81 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source} 'download'
+          Expand-Archive source/UEP-update.zip app -Force
+          $root='app/resources/app'
+          Run-Native {node scripts/patch-uep-08282-bidirectional-role-write.js $root} 'patch'
+          Run-Native {node --check "$root/gyomuon.js"} 'gyomuon syntax'
+          Run-Native {node --check "$root/electron/main.cjs"} 'main syntax'
+          Run-Native {node scripts/test-uep-08282-bidirectional-role-write.js $root} 'regression'
+          Compress-Archive -Path app/* -DestinationPath UEP-update.zip -CompressionLevel Optimal
+          $sha=(Get-FileHash UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "$sha  UEP-update.zip"|Set-Content sha256.txt
+          Run-Native {gh release create v0.82.82 UEP-update.zip sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.82' --notes "UEP v0.82.82`n- 양방향 쓰기 권한 정리: 학생 연락처, 급식지도, 야자감독`n- 학생 연락정보: 관리자·학년부장·자기 반 담임만 수정 가능`n- 급식지도/야자감독: 관리자·학년부장·담임만 수정 가능, 교과담당·학년총무 쓰기 차단`n- 기존 Google Sheets 직접 저장 → 운영데이터 재조회 → 화면 갱신 흐름 유지`n- 04_학생연락식별정보 / 42_급식지도계획 / 43_야자감독계획 원본 직접 반영`n- MutationObserver·setTimeout DOM 보정·전역 click 우회 추가 없음"} 'release'
+          $policy=Get-Content uep-policy.json -Raw|ConvertFrom-Json
+          $policy.latestVersion='0.82.82'
+          $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.82/UEP-update.zip'
+          $policy.sha256=$sha
+          $policy.message='UEP 0.82.82 · 연락처·급식지도·야자감독 양방향 권한 정리'
+          $policy|ConvertTo-Json -Depth 10|Set-Content uep-policy.json -Encoding utf8
+          Run-Native {git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add uep-policy.json;git commit -m 'Publish UEP 0.82.82 policy';git pull --rebase origin main;git push} 'policy push'
