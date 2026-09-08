@@ -1,0 +1,1800 @@
+===== function afterSchoolProgramGroups() @ 603466 =====
+board="${escapeHtml(student?.id||"")}">학생 개인 대시보드</button></div>`;
+  let content="";
+  if(recordMode==="sdgs"){
+    content=personalToolbar+recordPersonalContent(student,bundle);
+  }else if(recordQueryMode==="class"){
+    content=`<div class="record-query-bar"><div class="record-query-switch"><button data-record-query="class" class="active">반별 조회</button><button data-record-query="student">개인별 조회</button></div><div class="record-class-cards">${classCards}</div>${recordMode==='curriculum'?`<button type="button" class="btn ${recordCurriculumErrorOnly?'primary':'secondary'}" data-curriculum-error-only>${recordCurriculumErrorOnly?'오류학생만 보는 중':'오류학생만 보기'}</button><button type="button" class="btn secondary" data-generate-bulk-curriculum-message>오류학생 일괄 문구 생성</button>`:''}</div><div class="record-class-summary"><div><small>${recordMode==="activities"?"ACTIVITY":recordMode==="curriculum"?"CURRICULUM":"FINAL RECORD"}</small><h3>${recordClassNo}반 한 번에 보기</h3><p>${recordMode==='curriculum'?'오류 배지를 누르면 해당 학생의 신청내역과 안내문을 확인할 수 있습니다.':'학생을 누르면 개인 상세로 전환됩니다.'}</p></div><span>${visibleClassStudents.length}명</span></div>${recordClassTable(visibleClassStudents)}${recordMode==='curriculum'?`<section class="curriculum-message-panel curriculum-bulk-panel" id="curriculumBulkPanel" hidden><header><div><small>BULK MESSAGE</small><h3>${recordClassNo}반 오류학생 일괄 안내문</h3></div><span>${visibleClassStudents.filter(s=>selectionErrorsForStudent(s).length).length}명</span></header><textarea id="curriculumBulkMessageText" readonly></textarea><div class="curriculum-message-actions"><button type="button" class="btn primary" data-copy-bulk-curriculum-message>전체 복사</button><a class="btn secondary" href="${escapeHtml(SUBJECT_REAPPLICATION_FORM_URL)}" target="_blank" rel="noreferrer">수강신청 구글폼 열기</a></div><p>현재 반의 오류학생 안내문을 학번·이름 구분선과 함께 한 번에 생성합니다.</p></section>`:''}`;
+  }else{
+    content=`<div class="record-query-bar"><div class="record-query-switch"><button data-record-query="class">반별 조회</button><button data-record-query="student" class="active">개인별 조회</button></div></div>${personalToolbar}${recordPersonalContent(student,bundle)}`;
+  }
+  return `<div class="module-page records-v0601"><div class="record-main-tabs">${tabs.map(([id,label])=>`<button data-record-mode="${id}" class="${recordMode===id?"active":""}"><b>${label}</b><small>${id==="activities"?"학생 활동 사실 확인":id==="sdgs"?"진로·전공·탐구주제·사회적 가치 연계":id==="curriculum"?"학기별 선택과목":"학생 성장 자료"}</small></button>`).join("")}</div>${content}</div>`;
+}
+function afterSchoolProgramGroups() {
+  const connected = (readonlyCache?.programs || []).map(programWithOverride).filter((program) => program.kind === "after").map((program) => ({...program, reportRequired:false}));
+  const rows = (readonlyCache?.afterSchoolAttendance || []).slice();
+  const groups = new Map();
+  rows.forEach((row) => {
+    const type = String(row.type || "방과후 프로그램").trim() || "방과후 프로그램";
+    const time = String(row.time || row.period || "").trim();
+    const key = [row.date || "", type, time].join("|");
+    if (!groups.has(key)) groups.set(key, { key, id: `after-${encodeURIComponent(key)}`, date: row.date || "", title: type, actualTitle: type, recordTitle: type, time: time || "시간 미등록", place: row.detail || "운영정보 확인", teacher: "", records: [], kind: "after", reportRequired: false, affectsAttendance: /오후자습/.test(type), source:"30_야자출결_정규화" });
+    groups.get(key).records.push(row);
+  });
+  const derived = [...groups.values()].map((program) => {
+    const seen = new Set();
+    program.students = program.records.filter((row) => {
+      const key = attendanceStudentKey(row);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    program.attendedCount = program.students.filter(nightRecordIsAttendance).length;
+    return program;
+  });
+
+  const cleanId=value=>String(value||"").replace(/^after-(?:course|master|session)-/,"").trim();
+  const courseKey=program=>cleanId(program?.courseId||program?.programId||program?.id||"");
+  const slotKey=program=>{
+    const named=typeof nightSlotName==="function"?nightSlotName(program):"";
+    if(["오후자습","야자1","야자2"].includes(named)) return named;
+    return String(program?.time||program?.period||"").replace(/\s/g,"").trim()||"시간미등록";
+  };
+  const eventKey=program=>{
+    const sid=cleanId(program?.sessionId||"");
+    if(sid) return `session|${sid}`;
+    const course=courseKey(program);
+    const date=String(program?.date||"").slice(0,10);
+    const slot=slotKey(program);
+    const title=String(program?.actualTitle||program?.title||program?.type||"").replace(/\s/g,"").trim();
+    return ["event",course,date,slot,title].join("|");
+  };
+
+  // 강좌 마스터와 실제 차시가 함께 들어온 경우 차시가 일정의 원본이다.
+  const sessionCourseKeys=new Set(connected.filter(program=>!program.isCourseMaster).map(courseKey).filter(Boolean));
+  const canonicalConnected=[];
+  const seenConnected=new Set();
+  connected.forEach(program=>{
+    if(program.isCourseMaster&&courseKey(program)&&sessionCourseKeys.has(courseKey(program))) return;
+    const key=eventKey(program);
+    if(seenConnected.has(key)) return;
+    seenConnected.add(key);
+    canonicalConnected.push(program);
+  });
+
+  // 실제 차시가 존재하는 날짜·타임에서는 출결 정규화 행으로 두 번째 일정 카드를 만들지 않는다.
+  const connectedCoverage=new Set(canonicalConnected.filter(program=>!program.isCourseMaster&&program.date).map(program=>`${String(program.date).slice(0,10)}|${slotKey(program)}`));
+  const canonicalDerived=derived.filter(program=>!connectedCoverage.has(`${String(program.date||"").slice(0,10)}|${slotKey(program)}`));
+
+  return [...canonicalConnected, ...canonicalDerived].sort((a,b) => String(b.date).localeCompare(String(a.date)) || String(a.title).localeCompare(String(b.title)));
+}
+function groupedAfterSchoolCourses(items) {
+  const groups=new Map();
+  (items||[]).filter(p=>p&&p.kind==="after").forEach(program=>{
+    const courseId=String(program.courseId||program.programId||program.id||"").replace(/^after-session-/,"");
+    const key=courseId||`${program.actualTitle||program.title}|${program.type||""}`;
+    if(!groups.has(key)) groups.set(key,{...program,id:`after-course-${key}`,sessionIds:[],dates:[],students:[],attendedCount:0,sessionCount:0});
+    const group=groups.get(key);
+    if(!program.isCourseMaster) group.sessionIds.push(program.sessionId||program.id);
+    if(program.date) group.dates.push(program.date);
+    if(program.endDate) group.dates.push(program.endDate);
+    if(!program.isCourseMaster) group.sessionCount+=1;
+    group.affectsAttendance=Boolean(group.affectsAttendance||programHasNightStudyImpact(program));
+    if((group.dates||[]).length&&(group.dates||[]).every(isWednesdayKey)) group.affectsAttendance=false;
+    const studentMap=new Map((group.students||[]).map(st=>[String(st.studentId||st.studentNo||st.number),st]));
+    (program.students||[]).forEach(st=>{const sk=String(st.studentId||st.studentNo||st.number);if(sk&&!studentMap.has(sk))studentMap.set(sk,st);});
+    group.students=[...studentMap.values()];
+  });
+  return [...groups.values()].map(group=>{
+    const dates=[...new Set(group.dates)].sort();
+    const first=dates[0]||group.date||"", last=dates.at(-1)||first;
+    group.date=first;
+    group.endDate=last;
+    group.scheduleText=first&&last&&first!==last?`${first} ~ ${last}`:first;
+    group.time=group.type==="여름방학"||/방학/.test(`${group.type||""} ${group.afterType||""}`)?group.time:(group.time||"시간 확인");
+    group.attendedCount=group.students.filter(nightRecordIsAttendance).length;
+    group.sessionNo=`${group.sessionCount}차시`;
+    group.recordTitle="생활기록부 기록 대상 아님";
+    return group;
+  }).sort((a,b)=>String(b.date||"").localeCompare(String(a.date||""))||String(a.title||"").localeCompare(String(b.title||"")));
+}
+
+function programWithOverride(program) {
+  if (!program || typeof program !== "object") return program;
+  const override = state.programOverrides?.[program.id] || {};
+  const merged = {...program, ...override, students: program.students || []};
+  // 보고서 폼 URL은 프로그램별 로컬 override가 아니라 00_UEP설정의 공통값이 원본입니다.
+  // 과거 로컬 빈값/구버전 override가 공통 URL을 가리지 않도록 화면 직전에도 표준 설정값을 우선 적용합니다.
+  const uepSettings = readonlyCache?.uepSettings || {};
+  if (program.kind === "selected") merged.reportFormUrl = String(uepSettings.SELECTED_ACTIVITY_REPORT_FORM_URL || program.reportFormUrl || "").trim();
+  if (program.kind === "common") merged.reportFormUrl = String(uepSettings.COMMON_ACTIVITY_REPORT_FORM_URL || program.reportFormUrl || "").trim();
+  return merged;
+}
+function programAreaKind(program) {
+  if (program?.kind === "after" || /방과후/.test(String(program?.type || ""))) return "after";
+  const text = `${program?.type || ""} ${program?.recordTitle || ""} ${program?.actualTitle || program?.title || ""}`;
+  if (/진로/.test(text)) return "career";
+  return "autonomy";
+}
+function programAreaLabel(program) {
+  const kind = programAreaKind(program);
+  if (kind === "career") return "진로";
+  if (kind === "after") {
+    const text = `${program?.afterType || ""} ${program?.type || ""} ${program?.actualTitle || program?.title || ""}`;
+    if (/야간심화|심화수업/.test(text)) return "야간심화수업";
+    return "방과후";
+  }
+  return "자율";
+}
+
+function programMonthKey(program) {
+  const direct=String(program?.date||"").match(/^(\d{4}-\d{2})/);
+  if(direct) return direct[1];
+  const fallback=String(program?.scheduleText||program?.originalSchedule||"");
+  const year=fallback.match(/(20\d{2})/)?.[1]||String(new Date().getFullYear());
+  const month=fallback.match(/(?:^|\D)(1[0-2]|0?[1-9])\s*월/)?.[1];
+  return month?`${year}-${String(month).padStart(2,"0")}`:"";
+}
+function programTopTabs() {
+  const tab=(mode,label)=>`<button data-program-mode="${mode}" class="${programMode===mode?"active":""}">${label}</button>`;
+  return `<div class="program-sticky-tabs">${tab("common","공통활동")}${tab("selected","선택활동")}${tab("after","방과후학교")}${tab("planning","프로그램 기획센터")}</div>`;
+}
+function programMonthPicker() {
+  const [year,month]=programMonth.split("-").map(Number);
+  return `<div class="program-month-picker"><button data-program-month-shift="-1">‹</button><label><span>월별 조회</span><input id="programMonthInput" type="month" value="${escapeHtml(programMonth)}"></label><strong>${year}년 ${month}월</strong><button data-program-month-shift="1">›</button></div>`;
+}
+function commonProgramClassStudent(){
+  return (readonlyCache?.students||[]).find(s=>recordStudentClass(s)===String(commonProgramClassNo))||null;
+}
+function commonProgramAreaPanel(commonItems){
+  const autonomy=commonItems.filter(p=>recordProgramArea(p)!=="career");
+  const career=commonItems.filter(p=>recordProgramArea(p)==="career");
+  const careerVisible=career.filter(p=>programMonthKey(p)===programMonth);
+  const autonomyVisible=autonomy.filter(p=>programMonthKey(p)===programMonth);
+  const todayKey=dateKey(today);
+  const unifiedRow=program=>{
+    const studentCount=Array.isArray(program.students)?program.students.length:0;
+    const attended=Number(program.attendedCount||0);
+    const actualTitle=program.actualTitle||program.title||"-";
+    const recordTitle=program.recordTitle||program.type||actualTitle;
+    const place=program.place||program.scheduleText||"운영정보 확인";
+    const evidence=state.programEvidence?.[program.id]||[];
+    const reportText=program.reportRequired===false?"보고서 미사용":Number.isFinite(Number(program.reportSubmittedCount))?`학생 ${Number(program.reportSubmittedCount)}명`:"보고서 연계 가능";
+    return `<button class="data-row program-unified-grid program-manage-row" data-program="${escapeHtml(program.id)}" data-search="${escapeHtml([program.date,actualTitle,recordTitle,program.type,program.time,place].join(" ").toLowerCase())}"><time>${escapeHtml(program.date||program.scheduleText||"-")}${program.date===todayKey?'<em class="today-badge">오늘</em>':""}</time><span class="program-kind-badge area-${programAreaKind(program)}">${programAreaLabel(program)}</span><b>${escapeHtml(actualTitle)}</b><span class="record-title">${escapeHtml(recordTitle)}</span><span>${escapeHtml(program.time||"-")}</span><span>${escapeHtml(place)}</span><span>${studentCount||"전체"}${studentCount?"명":""}</span><span class="program-attendance-count"><b>${attended}</b> / ${studentCount||"전체"}${studentCount?"명":""}</span><span class="program-report-stack"><small>${escapeHtml(reportText)}</small><b>${escapeHtml(program.sdgs?`SDGs ${program.sdgs}`:"SDGs 미설정")}</b><em>사진 ${evidence.length}장</em></span><em>열기 ›</em></button>`;
+  };
+  const autonomyRows=autonomyVisible.sort((a,b)=>String(b.date||"").localeCompare(String(a.date||""))).map(unifiedRow).join("");
+  const careerRows=careerVisible.sort((a,b)=>String(b.date||"").localeCompare(String(a.date||""))).map(unifiedRow).join("");
+  const visibleRows=commonProgramArea==="autonomy"?autonomyRows:careerRows;
+  const areaLabel=commonProgramArea==="autonomy"?"자율활동":"진로활동";
+  return `<section class="common-program-control"><div class="common-area-tabs"><button data-common-program-area="autonomy" class="${commonProgramArea==="autonomy"?"active":""}">공통(자율활동) <b>${autonomy.length}</b></button><button data-common-program-area="career" class="${commonProgramArea==="career"?"active":""}">공통(진로활동) <b>${career.length}</b></button></div>
+  <div class="toolbar"><input class="search" type="search" id="programPageSearch" placeholder="활동명·운영일·기록명 검색"><button class="btn secondary" data-program-sheet>시트 연결</button></div><div class="data-card program-table-scroll" id="programPageRows"><div class="data-head program-unified-grid"><span>운영일</span><span>구분</span><span>프로그램명</span><span>영역·기록명</span><span>시간</span><span>장소·운영정보</span><span>대상</span><span>출결</span><span>보고·SDGs</span><span></span></div>${visibleRows||`<div class="empty-state"><b>${escapeHtml(Number(programMonth.slice(5,7)))}월은 공통 ${areaLabel}이 없습니다.</b></div>`}</div></section>`;
+}
+
+function programDurationHours(program){
+  const direct=Number(program?.hours||program?.durationHours||program?.totalHours);
+  if(Number.isFinite(direct)&&direct>0)return direct;
+  const sessionCount=Number(program?.sessionCount||program?.sessions||String(program?.sessionNo||"").match(/\d+/)?.[0]);
+  if(Number.isFinite(sessionCount)&&sessionCount>0)return sessionCount;
+  const time=String(program?.time||"");
+  const match=time.match(/(\d{1,2}):(\d{2})\s*[~〜-]\s*(\d{1,2}):(\d{2})/);
+  if(match){const start=Number(match[1])*60+Number(match[2]);const end=Number(match[3])*60+Number(match[4]);if(end>start)return Math.round((end-start)/6)/10;}
+  return program?.date?1:0;
+}
+function programPlanningCenter(allPrograms){
+  const programs=(allPrograms||[]).filter(Boolean);
+  const selected=programs.filter(p=>p.kind==="selected"||p.kind==="general");
+  const common=programs.filter(p=>p.kind==="common");
+  const after=programs.filter(p=>p.kind==="after");
+  const autonomy=selected.filter(p=>programAreaKind(p)==="autonomy");
+  const career=selected.filter(p=>programAreaKind(p)==="career");
+  const reports=(readonlyCache?.programReports||readonlyCache?.reports||[]).filter(r=>r?.submitted!==false);
+  const programById=new Map(programs.map(p=>[String(p.programId||p.id||''),p]));
+  const reportProgram=r=>programById.get(String(r.programId||''))||selected.find(p=>String(p.actualTitle||p.title||'').replace(/\s/g,'')===String(r.programName||r.reportGroup||'').replace(/\s/g,''));
+  const autonomyReports=reports.filter(r=>programAreaKind(reportProgram(r)||{type:r.kind||r.area||''})==='autonomy');
+  const careerReports=reports.filter(r=>programAreaKind(reportProgram(r)||{type:r.kind||r.area||''})==='career');
+  const participantKeys=new Set([...selected,...after].flatMap(p=>(p.students||[]).map(st=>attendanceStudentKey(st)||`${st.studentNo||st.number||""}|${st.name||""}`).filter(Boolean)));
+  const teacherMap=new Map();
+  [...selected,...after].forEach(p=>{
+    const raw=String(p.teacher||p.teacherName||p.manager||p.instructor||"").trim(); if(!raw)return;
+    raw.split(/[,/·]/).map(x=>x.trim()).filter(Boolean).forEach(name=>{
+      if(!teacherMap.has(name))teacherMap.set(name,{name,selected:0,after:0,night:0,hours:0,students:new Set(),programs:0}
+===== AFTER SCHOOL @ 313831 =====
+<span>${escapeHtml(s.className||"-")}반</span><span>${escapeHtml(`${s.studentNo} ${s.name}`)}</span><span class="state ${es.length?"warn":""}">${es.length?"상담 필요":"정상"}</span><span>${escapeHtml(es.map(e=>e.message||e.type).join(" · ")||"-")}</span></div>`;}).join("")}</div>`;
+}
+function attendanceOutputPanel(){
+  const connected=readonlyCache?.programs||[];
+  const isAfter=outputCenterState.attendanceCategory==='after';
+  let programs;
+  if(isAfter){
+    const sessions=connected.filter(p=>p.kind==='after');
+    programs=groupedAfterSchoolCourses(sessions);
+  }else programs=connected.filter(p=>p.kind!=='after'&&programCategoryKey(p)===outputCenterState.attendanceCategory);
+  if(outputCenterState.session==='all'||!programs.some(p=>String(p.id)===String(outputCenterState.session)))outputCenterState.session=programs[0]?.id||'all';
+  const p=programs.find(x=>String(x.id)===String(outputCenterState.session));
+  const participantCount=p?(p.students||[]).length:0;
+  const preview=p?(isAfter?afterschoolIntegratedAttendancePreview(p):`<div class="output-attendance-summary"><span><small>프로그램</small><b>${escapeHtml(p.actualTitle||p.title||'-')}</b></span><span><small>대상</small><b>${participantCount}명</b></span><span><small>운영일</small><b>${escapeHtml(p.date||'-')}</b></span><span><small>담당</small><b>${escapeHtml(p.teacher||'-')}</b></span></div><table class="output-attendance-table simple"><thead><tr><th>순번</th><th>학번</th><th>이름</th><th>출석</th><th>비고</th></tr></thead><tbody>${(p.students||[]).map((st,i)=>`<tr><td>${i+1}</td><td>${escapeHtml(st.studentNo||st.number||'-')}</td><td><b>${escapeHtml(st.name||'-')}</b></td><td>${escapeHtml(st.attendance||st.status||'')}</td><td></td></tr>`).join('')||'<tr><td colspan="5">명단 자료가 없습니다.</td></tr>'}</tbody></table>`):'';
+  return `${outputStandardSection('ATTENDANCE · PRINT','출석부','선택활동 또는 방과후 강좌를 고르면 실제 출석 결과를 출력형태로 확인합니다.',`<span><b>${programs.length}</b>프로그램</span><span><b>${p?(p.students||[]).length:0}</b>대상</span>`)}${outputCategoryCards('attendance')}<section class="output-standard-stage"><header><div><small>STEP 02 · PROGRAM</small><h3>${isAfter?'방과후 강좌':'프로그램'} 선택</h3><p>${isAfter?'강좌를 선택하면 프로그램 메뉴에서 기록한 전체 차시 출석결과를 한 출석부에 모읍니다.':'프로그램을 선택하면 해당 참여학생의 출석부를 표시합니다.'}</p></div></header><div class="output-standard-program-grid">${programs.map(item=>`<button class="output-standard-program ${String(item.id)===String(outputCenterState.session)?'active':''}" data-output-session-card="${escapeHtml(item.id)}"><div><small>${isAfter?'AFTER SCHOOL COURSE':'SELECTED PROGRAM'}</small><h4>${escapeHtml(item.actualTitle||item.title||item.recordTitle||'프로그램')}</h4><p>${escapeHtml(isAfter?`${item.sessionCount||item.dates?.length||0}차시 · ${(item.students||[]).length}명`:[item.date,item.time,(item.students||[]).length&&`${(item.students||[]).length}명`].filter(Boolean).join(' · '))}</p></div><em>${String(item.id)===String(outputCenterState.session)?'선택됨':'선택'} ›</em></button>`).join('')||'<div class="empty-state">해당 영역의 프로그램이 없습니다.</div>'}</div></section>${p?outputPreviewShell(p.actualTitle||p.title,isAfter?'전체 차시 통합 출석부 · 프로그램 메뉴 출석결과 연동':'프로그램 출석부',preview,`<button class="btn primary" data-output-roster-print="${escapeHtml(p.id)}">출석부 인쇄</button>`):''}`;
+}
+
+function outputStudents(){
+  return (readonlyCache?.students||[]).filter(s=>String(s.status||"재학")==="재학").slice().sort((a,b)=>String(a.studentNo).localeCompare(String(b.studentNo)));
+}
+function outputSelectedStudent(){
+  const students=outputStudents();
+  if(!outputCenterState.studentId||!students.some(s=>s.id===outputCenterState.studentId))outputCenterState.studentId=students[0]?.id||"";
+  return students.find(s=>s.id===outputCenterState.studentId)||null;
+}
+function outputStudentPicker(description){return outputClassStudentPicker(description);}
+function openPrintDocument(title,body,orientation="portrait"){
+  const popup=window.open("","_blank","width=1200,height=900");if(!popup)return toast("인쇄 창을 열 수 없습니다.");
+  popup.document.write(`<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>
+  @page{size:A4 portrait!important;margin:12mm}html,body{writing-mode:horizontal-tb!important;transform:none!important;rotate:none!important}*{box-sizing:border-box}body{font-family:"Malgun Gothic",sans-serif;color:#263f4f;margin:0;font-size:9.3pt;max-width:186mm;overflow:visible}header.print-head{border-bottom:3px solid #4d9f91;padding-bottom:4mm;margin-bottom:5mm}header.print-head h1{font-size:18pt;margin:1mm 0}header.print-head p{margin:1mm 0;color:#607986}.print-section{margin:0 0 6mm;break-inside:avoid}.print-section h2{font-size:13pt;color:#176f63;border-bottom:1px solid #bdd7d2;padding-bottom:2mm}.print-section h3{font-size:11pt;margin:3mm 0 1mm}.meta-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:2mm;background:#eef5f6;padding:3mm}.meta-grid span b{display:block;font-size:8pt;color:#708591}table{width:100%;border-collapse:collapse;font-size:8.5pt}th,td{border:1px solid #c8d8df;padding:2mm;vertical-align:top}th{background:#edf4f6}.report-page{page-break-after:always}.report-page:last-child{page-break-after:auto}.record-box{border:1px solid #cbdce4;border-radius:3mm;padding:3mm;margin:2mm 0;white-space:pre-wrap;line-height:1.55}.draft{background:#fff9e9}.final{background:#edf8f3}.selected-course{background:#ccefe0!important;font-weight:800;color:#0d5f4d}.offered-course{background:#f7fafb;color:#6f8490}.not-offered{background:#f1f3f4}.small{font-size:8pt;color:#718791}.report-qa{break-inside:avoid;margin-bottom:5mm}.report-qa h3{background:#eaf4f6;padding:2.5mm;border-left:4px solid #4d9f91}.curriculum-legend{display:flex;gap:8mm;padding:3mm;background:#eef5f6}.legend-selected{font-weight:800;color:#0d755e}.term-choice-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:2mm;margin-top:3mm}.term-choice-card{border:1px solid #c8dce3;padding:3mm;border-radius:2mm}.term-choice-card b{display:block;color:#176f63;margin-bottom:2mm}.curriculum-matrix th:first-child{width:14%}.curriculum-matrix th:nth-child(2){width:30%}.score-print-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:3mm;margin-bottom:5mm}.score-print-summary>div{background:#496ea4;color:white;padding:4mm;border-radius:3mm}.score-print-summary small,.score-print-summary span{display:block;color:#e7eef8}.score-print-summary b{display:block;font-size:18pt;margin:2mm 0}.score-wide td,.score-wide th{text-align:center}.score-wide td:first-child{text-align:left;font-weight:800}.score-wide td b{display:block;font-size:11pt;color:#126d59}.score-wide td small,.score-wide th small{display:block;margin-top:1mm;color:#6f8290}.score-title{background:#496ea4;color:#fff;padding:5mm}.score-title p{color:#e9f0f8!important}.curriculum-matrix,.score-wide{font-size:7.2pt;table-layout:fixed}.curriculum-matrix th,.curriculum-matrix td,.score-wide th,.score-wide td{padding:1.2mm;word-break:keep-all}.term-choice-grid{grid-template-columns:repeat(2,1fr)}.score-print-summary{grid-template-columns:repeat(2,1fr)}.student-print-badges{display:flex;flex-wrap:wrap;gap:1.5mm;margin-top:2mm}.student-print-badges span{border-radius:99px;padding:1.2mm 2.2mm;font-size:7pt;font-weight:900}.student-print-badges .score{background:#fff5cc;color:#725500}.student-print-badges .manage{background:#eef9f5;color:#236b59}.student-print-badges .dorm{background:#f3edff;color:#62479b}.student-print-badges .univ{background:#eaf4ff;color:#235e93}.student-print-analysis{margin:3mm 0;border:1px solid #bcded6;border-radius:3mm;padding:3mm;background:#f5fbf9}.student-print-analysis h4{margin:0 0 2mm;color:#15947f}.student-print-analysis div{display:grid;grid-template-columns:32mm 1fr;gap:1mm 2mm;padding:1.5mm 0;border-top:1px dotted #cbded8;font-size:8pt}.student-print-analysis div:first-of-type{border-top:0}.student-print-analysis b{grid-row:1/3}.student-print-analysis span,.student-print-analysis em{font-style:normal}.student-print-analysis em{font-weight:700;color:#9a6500}@media print{button{display:none}}</style></head><body><div style="border-bottom:2px solid #4d9f91;padding:0 0 3mm;margin:0 0 4mm;font-weight:900;color:#176f63;letter-spacing:.08em">UNHO EDUCATION PLATFORM <span style="font-weight:500;color:#6f8490;letter-spacing:0">· 운호 에듀케이션 플랫폼</span></div>${body}<script>window.onload=()=>window.print();<\/script></body></html>`);
+  popup.document.close();
+}
+function studentAllReports(student){
+  return studentCanonicalReports(student);
+}
+function studentReportsOutputPanel(){
+  const student=outputSelectedStudent();
+  const reports=student?studentAllReports(student):[];
+  return `${outputStudentPicker("학생이 제출한 전체 보고서를 개별 또는 한 번에 출력합니다.")}
+  ${student?`<article class="setting-card"><h3>${escapeHtml(student.studentNo)} ${escapeHtml(student.name)}</h3><p>제출 보고서 ${reports.length}건</p><div class="output-bulk-actions"><button class="btn primary" data-output-student-reports-all>전체 보고서 인쇄</button></div></article>
+  <div class="output-table"><div class="output-row head"><span></span><span>영역</span><span>프로그램</span><span>제출일</span><span>보기</span><span>출력</span></div>${reports.map(r=>`<div class="output-row"><span></span><span>${escapeHtml(r.kind||"-")}</span><span>${escapeHtml(r.reportGroup||r.programName||"보고서")}</span><span>${escapeHtml(reportSubmissionLabel(r))}</span><span><button class="link-button" data-open-student-report="${escapeHtml(r.id)}">보기</button></span><span><button class="link-button" data-output-single-report="${escapeHtml(r.id)}">인쇄</button></span></div>`).join("")||'<div class="empty-state">제출한 보고서가 없습니다.</div>'}</div>`:'<div class="empty-state">학생을 선택하세요.</div>'}`;
+}
+function printStudentReportPackage(student,reports){
+  if(!student||!reports.length)return toast("출력할 보고서가 없습니다.");
+  const body=reports.map(r=>`<article class="report-page"><header class="print-head"><small>UNHO EDUCATION PLATFORM · 학생 제출 보고서</small><h1>${escapeHtml(r.reportGroup||r.programName||"활동 보고서")}</h1><p>${escapeHtml(`${student.studentNo} ${student.name} · ${r.submittedAt||""}`)}</p>${studentPrintBadgesMarkup(student)}</header><section class="print-section">${(r.responses||[]).map((v,i)=>v?`<div class="report-qa"><h3>Q${i+1}. ${escapeHtml(r.questions?.[i]||`${i+1}번 문항`)}</h3><div class="record-box">${escapeHtml(v)}</div></div>`:"").join("")}</section></article>`).join("");
+  openPrintDocument(`${student.studentNo}_${student.name}_전체보고서`,body);
+}
+function curriculumTermsForStudent(student){
+  const rows=(readonlyCache?.selectedSubjects||[]).filter(x=>studentMatches(x,student));
+  return rows.slice().sort((a,b)=>String(a.term||a.semester||"").localeCompare(String(b.term||b.semester||"")));
+}
+function allCurriculumSubjects(){
+  const rows=readonlyCache?.selectedSubjects||[];
+  const map=new Map();
+  rows.forEach(r=>{const key=`${r.term||r.semester}|${r.group||""}|${r.subject||r.courseName||r.name||""}`;if(!map.has(key))map.set(key,r);});
+  return [...map.values()].sort((a,b)=>String(a.term||a.semester||"").localeCompare(String(b.term||b.semester||""))||String(a.subject||a.name||"").localeCompare(String(b.subject||b.name||""),"ko"));
+}
+function subjectPersonalOutputPanel(){
+  const student=outputSelectedStudent(),chosen=student?curriculumTermsForStudent(student):[];
+  const errors=(readonlyCache?.selectionSubjectErrors||[]).filter(e=>student&&studentMatches(e,student));
+  const byGroup={};chosen.forEach(r=>{const g=r.group||r.category||'선택묶음';(byGroup[g]??=[]).push(`${r.term||r.semester||''} · ${r.subject||r.courseName||r.name||''}`)});
+  const preview=student?`<div class="preview-student-head"><b>${escapeHtml(student.studentNo)} ${escapeHtml(student.name)}</b><span>진로희망 ${escapeHtml(student.career||'-')}</span></div><div class="preview-choice-groups">${Object.entries(byGroup).map(([g,items])=>`<article><b>${escapeHtml(g)}</b>${items.map(x=>`<span>✓ ${escapeHtml(x)}</span>`).join('')}</article>`).join('')||'<p>선택과목 자료가 없습니다.</p>'}${errors.length?`<article class="warn"><b>선택 검토 ${errors.length}건</b><span>${escapeHtml(errors.map(e=>e.message||e.type).join(' · '))}</span></article>`:''}</div>`:'';
+  return `${outputClassStudentPicker('1~9반을 선택한 뒤 학생을 골라 교육과정 선택 상담자료를 확인합니다.')}${student?outputPreviewShell(`${student.studentNo} ${student.name} · 선택과목`,`학교 교육과정 선택묶음 기준`,preview,`<button class="btn primary" data-output-subject-personal>선택과목 상담표 인쇄</button>`):''}`;
+}
+function curriculumTermOrder(term){
+  const order=["2학년 1학기","2학년 2학기","3학년 1학기","3학년 2학기"];const i=order.indexOf(String(term));return i<0?99:i;
+}
+function printSubjectPersonal(student){
+  if(!student)return;
+  const chosen=curriculumTermsForStudent(student),selectedKeys=new Set(chosen.map(r=>`${r.term||r.semester}|${r.subject||r.courseName||r.name}`));
+  const all=allCurriculumSubjects().filter(r=>curriculumTermOrder(r.term||r.semester)<99);
+  const terms=["2학년 1학기","2학년 2학기","3학년 1학기","3학년 2학기"];
+  const errors=(readonlyCache?.selectionSubjectErrors||[]).filter(e=>studentMatches(e,student));
+  const groups=[...new Set(all.map(r=>r.group||r.category||"선택과목"))];
+  const matrixRows=groups.flatMap(group=>{
+    const subjects=[...new Set(all.filter(r=>(r.group||r.category||"선택과목")===group).map(r=>r.subject||r.courseName||r.name||"").filter(Boolean))];
+    return subjects.map((subject,index)=>`<tr><td>${index===0?escapeHtml(group):""}</td><td>${escapeHtml(subject)}</td>${terms.map(term=>{const exists=all.some(r=>(r.term||r.semester)===term&&(r.subject||r.courseName||r.name)===subject);const selected=selectedKeys.has(`${term}|${subject}`);return `<td class="${selected?"selected-course":exists?"offered-course":"not-offered"}">${selected?"● 선택":exists?"○ 개설":""}</td>`}).join("")}</tr>`);
+  }).join("");
+  const chosenByTerm=terms.map(term=>`<div class="term-choice-card"><b>${term}</b><span>${chosen.filter(r=>(r.term||r.semester)===term).map(r=>escapeHtml(r.subject||r.courseName||r.name||"")).join(" · ")||"선택내역 없음"}</span></div>`).join("");
+  const body=`<header class="print-head"><small>운호고등학교 2026학년도 입학생 교육과정 선택 상담자료</small><h1>${escapeHtml(student.studentNo)} ${escapeHtml(student.name)}</h1><p>진로희망: ${escapeHtml(student.career||"-")}</p>${studentPrintBadgesMarkup(student)}</header>
+  <section class="print-section"><div class="curriculum-legend"><span class="legend-selected">● 학생 선택</span><span>○ 학교 개설</span><span>학교 교육과정 편성표 기준</span></div><div class="term-choice-grid">${chosenByTerm}</div></section>
+  <section class="print-section"><h2>선택 검토</h2><div class="record-box ${errors.length?"draft":"final"}">${errors.length?errors.map(e=>escapeHtml(e.message||e.type)).join("<br>"):"확인된 선택 오류가 없습니다."}</div></section>
+  <section class="print-section"><h2>전체 교육과정 선택과목 편성표</h2><table class="curriculum-matrix"><thead><tr><th>선택영역</th><th>개설과목</th>${terms.map(t=>`<th>${t}</th>`).join("")}</tr></thead><tbody>${matrixRows}</tbody></table></section>`;
+  openPrintDocument(`${student.studentNo}_${student.name}_선택과목`,body,"portrait");
+}
+function recordOutputPanel(){
+  const student=outputSelectedStudent();
+  const bundle=student?studentRecordBundle(student):null;
+  let preview='';
+  if(student&&bundle){
+    preview=outputCenterState.recordPackage==='evidence'?`<div class="preview-student-head"><b>${escapeHtml(student.studentNo)} ${escapeHtml(student.name)}</b><span>활동 ${bundle.activities.length}건 · 프로그램 ${bundle.programs.length}건 · 보고서 ${(bundle.reports||[]).length}건</span></div><div class="preview-list">${bundle.activities.slice(0,8).map(a=>`<article><b>${escapeHtml(a.title||a.type||'활동')}</b><span>${escapeHtml([a.area,a.date,a.role].filter(Boolean).join(' · '))}</span></article>`).join('')||'<p>활동 근거자료가 없습니다.</p>'}`:`<div class="preview-student-head"><b>${escapeHtml(student.studentNo)} ${escapeHtml(student.name)}</b><span>교사용 작성본</span></div><div class="preview-list">${[['autonomy','자율활동'],['career','진로활동'],['behavior','종합의견']].map(([area,label])=>`<article><b>${label}</b><span>${escapeHtml((localStorage.getItem(recordDraftKey(student.id,area))||existingFinalRecord(bundle,area)?.text||'저장된 내용 없음').slice(0,160))}</span></article>`).join('')}<
+===== AFTER SCHOOL @ 756275 =====
+button>`;}).join("");
+      cells.push(`<div class="dashboard-night-cell ${students.size||programs.length?'active':'empty'}"><button class="dashboard-night-roster" data-dashboard-night-day="${key}" data-dashboard-night-slot="${escapeHtml(slot.key)}"><b>${students.size?`${students.size}명`:'-'}</b><small>${students.size?'자습인원 보기':'자습 자료 없음'}</small></button>${programCards}</div>`);
+    });
+  });
+  return `<div class="dashboard-night-week"><div class="dashboard-night-corner">시간대</div>${days.map((d,i)=>`<div class="dashboard-night-head"><b>${d}</b><small>${dates[i]?`${dates[i].getMonth()+1}/${dates[i].getDate()}`:""}</small></div>`).join("")}${cells.join("")}</div>`;
+}
+function dashboardTimetableHeaderControlsMarkup(){
+  const mode=dashboardTimetableAutoMode();
+  const dates=dashboardNightWeekDates(),first=dates[0],last=dates[4];
+  const range=first&&last?`${first.getMonth()+1}/${first.getDate()}~${last.getMonth()+1}/${last.getDate()}`:"이번 주";
+  return `<nav class="dashboard-timetable-header-controls"><button class="${mode==='day'?'active':''}" data-dashboard-timetable-mode="day">정규시간</button><button class="${mode==='night'?'active':''}" data-dashboard-timetable-mode="night">야간시간</button><span class="dashboard-tt-week-nav"><button data-dashboard-tt-week-shift="-1" aria-label="이전 주">‹</button><b>${range}</b><button data-dashboard-tt-week-shift="1" aria-label="다음 주">›</button></span></nav>`;
+}
+function dashboardTimetablePanelMarkup(){
+  const mode=dashboardTimetableAutoMode();
+  return mode==='night'?dashboardNightWeekMarkup():dashboardPersonalWeekMarkup();
+}
+function dashboardNightStudentGroups(day,slot){
+  const rows=dashboardNightAttendanceRows(day,slot).map(normalizeDashboardStudentRow);
+  const map=new Map();
+  rows.forEach(row=>{
+    const gc=recordGradeClass(row.studentRef||row),cls=String(Number(gc.classNo||0)||"");
+    if(!cls)return;
+    if(!map.has(cls))map.set(cls,new Map());
+    const key=String(row.studentRef?.id||row.studentId||row.studentNo||`${row.name}|${cls}`);
+    map.get(cls).set(key,row);
+  });
+  return map;
+}
+function openDashboardNightProgram(programId,day){
+  const program=dashboardAfterProgramsForDay(day).find(p=>String(p.id||p.programId||"")===String(programId));
+  if(!program)return toast("프로그램 정보를 찾지 못했습니다.");
+  const isNight=/야간심화/.test(`${program.afterType||""} ${program.type||""} ${program.title||""}`);
+  const students=Array.isArray(program.students)?program.students:[];
+  $("#drawerKicker").textContent=isNight?"NIGHT ADVANCED":"AFTER SCHOOL"; $("#drawerTitle").textContent=program.actualTitle||program.title||"프로그램";
+  $("#drawerBody").innerHTML=`<div class="history-summary positive"><span><small>운영일</small><b>${escapeHtml(day)}</b></span><span><small>시간</small><b>${escapeHtml(program.time||"확인 필요")}</b></span><span><small>참여</small><b>${students.length}명</b></span></div><div class="connection-detail"><div><b>구분</b><span>${isNight?"야간심화":"방과후"}</span></div><div><b>차시</b><span>${escapeHtml(dashboardProgramSessionLabel(program)||"-")}</span></div><div><b>교과</b><span>${escapeHtml(program.subject||"-")}</span></div><div><b>담당교사</b><span>${escapeHtml(program.teacher||"-")}</span></div><div><b>장소</b><span>${escapeHtml(program.place||"-")}</span></div></div><div class="drawer-actions"><button class="btn primary" data-dashboard-night-program-detail="${escapeHtml(program.id||program.programId||"")}">상세보기</button></div>`;
+  $("#drawer").classList.remove("hidden");$("#drawerBackdrop").classList.remove("hidden");
+  $("[data-dashboard-night-program-detail]")?.addEventListener("click",()=>openAfterschoolProgramDrawer(program.id||program.programId));
+}
+function openDashboardNightSlot(day,slot){
+  if(slot==="after"){
+    const programs=dashboardAfterProgramsForDay(day);
+    $("#drawerKicker").textContent="AFTER SCHOOL · WEEK";$("#drawerTitle").textContent=`방과후 · ${day}`;
+    $("#drawerBody").innerHTML=programs.length?`<div class="dashboard-after-list">${programs.map(p=>`<button data-program="${escapeHtml(p.id||p.programId||"")}"><span><b>${escapeHtml(p.actualTitle||p.title||"방과후")}</b><small>${escapeHtml(p.time||"시간 미등록")} · ${escapeHtml(p.place||"교실 미등록")} · ${escapeHtml(p.teacher||"담당교사 미등록")}</small></span><em>${(p.students||[]).length}명 ›</em></button>`).join("")}</div>`:`<div class="query-empty"><b>등록된 방과후 강좌가 없습니다.</b><small>${day} 기준</small></div>`;
+    $("#drawer").classList.remove("hidden");$("#drawerBackdrop").classList.remove("hidden");
+    $("#drawerBody").querySelectorAll('[data-program]').forEach(btn=>btn.onclick=()=>openProgramDrawer(btn.dataset.program));
+    return;
+  }
+  const groups=dashboardNightStudentGroups(day,slot),classes=Array.from({length:9},(_,i)=>String(i+1));
+  const total=[...groups.values()].reduce((sum,m)=>sum+m.size,0);
+  $("#drawerKicker").textContent="NIGHT STUDY · CLASS ROSTER";$("#drawerTitle").textContent=`${slot} · ${day}`;
+  $("#drawerBody").innerHTML=`<div class="history-summary positive"><span><small>기준일</small><b>${escapeHtml(day)}</b></span><span><small>시간대</small><b>${escapeHtml(slot)}</b></span><span><small>학생 수</small><b>${total}명</b></span></div><p class="dashboard-night-guide">반별 자습 인원을 한 화면에서 확인합니다.</p><div class="dashboard-night-class-grid">${classes.map(cls=>{const members=[...(groups.get(cls)?.values()||[])].sort((a,b)=>String(a.studentNo||'').localeCompare(String(b.studentNo||''),'ko'));return `<section><header><b>${cls}반</b><span>${members.length}명</span></header><div>${members.length?members.map(m=>`<button data-dashboard-night-student="${escapeHtml(attendanceStudentKey(m))}" data-dashboard-night-student-day="${escapeHtml(day)}" data-dashboard-night-student-slot="${escapeHtml(slot)}"><b>${escapeHtml(m.studentNo||"")} ${escapeHtml(m.name||"")}</b></button>`).join(""):'<small>참여 없음</small>'}</div></section>`;}).join("")}</div><div class="drawer-actions"><button class="btn primary" data-night-attendance-date="${escapeHtml(day)}">상세보기</button></div>`;
+  $("#drawer").classList.remove("hidden");$("#drawerBackdrop").classList.remove("hidden");
+  $("#drawerBody [data-night-attendance-date]")?.addEventListener("click",()=>{attendanceViewDate=day;nightViewMonth=day.slice(0,7);window.__uepNightRequestedSlot=slot;closeDrawer();navigate("attendance");attendanceMode="night";render("attendance");window.scrollTo(0,0);requestAnimationFrame(()=>toast(`${day} ${slot} 야자출결로 이동했습니다.`));});
+  $("#drawerBody").querySelectorAll('[data-dashboard-night-student]').forEach(btn=>btn.onclick=()=>openNightAttendanceDetail(btn.dataset.dashboardNightStudent,btn.dataset.dashboardNightStudentDay,btn.dataset.dashboardNightStudentSlot));
+}
+
+function dashboardPersonalWeekMarkup(){
+  const {week,days}=personalTimetableData();
+  const status=schoolPeriodStatus(new Date());
+  const todayIndex=Math.max(0,Math.min(4,(today.getDay()+6)%7));
+  const maxPeriods=Math.max(7,Array.isArray(week)?week.length:0);
+  if(!Array.isArray(week)||!week.some(row=>Array.isArray(row)&&row.some(Boolean))){
+    return `<div class="uep-week-timetable-empty"><span>◷</span><b>내 주간시간표 연결 준비</b><small>컴시간 교사시간표가 연결되면 월~금 수업이 이곳에 표시됩니다.</small><button data-page="timetable">시간표 연결 확인</button></div>`;
+  }
+  const heads=(days?.length?days:["월","화","수","목","금"]).slice(0,5);
+  const cells=[];
+  for(let period=1;period<=maxPeriods;period+=1){
+    cells.push(`<div class="uep-week-period"><b>${period}</b><small>${escapeHtml(periodTimeLabel(period)||"")}</small></div>`);
+    for(let d=0;d<5;d+=1){
+      const raw=week[period-1]?.[d]||"";
+      const [subject,room,flag]=String(raw).split("|");
+      const current=d===todayIndex&&status.index===period-1;
+      const classColor=timetableClassColorClass(room);
+      cells.push(`<button class="uep-week-class personal-order ${raw?"has-class":"is-empty"} ${classColor} ${current?"is-current":""} ${flag==="changed"?"is-changed":""}" data-page="timetable"><b>${escapeHtml(room||"-")}</b><small>${escapeHtml(subject||"")}</small>${current?'<i aria-label="현재 교시"></i>':''}${flag==="changed"?'<em>변동</em>':''}</button>`);
+    }
+  }
+  return `<div class="uep-week-timetable"><div class="uep-week-corner">교시</div>${heads.map((day,i)=>`<div class="uep-week-head ${i===todayIndex?"today":""}"><b>${escapeHtml(String(day).replace(/요일/g,""))}</b></div>`).join("")}${cells.join("")}</div>`;
+}
+
+function currentTeacherAccessScope(){
+  const role=currentRoleId();
+  const teacher=currentLoginTeacherName();
+  const profile=currentUserProfile();
+  const defaultGrade=String(profile.grade||state?.settings?.grade||state?.settings?.neis?.grade||1);
+  const homeroomRow=(SOURCE_REFERENCE_DATA?.homeroom||[]).find(row=>String(row?.[2]||'').trim()===teacher);
+  const grade=String(profile.grade||homeroomRow?.[0]||defaultGrade);
+  const classNo=String(profile.classNo||homeroomRow?.[1]||state?.settings?.neis?.classNo||'');
+  if(role==='grade_head'||role==='grade_manager') return {role,teacher,grade,classNo:'',label:`${grade}학년 전체 조회`};
+  if(role==='admin'||role==='vice_principal'||role==='principal') return {role,teacher,grade:'',classNo:'',label:'학교 전체 조회'};
+  if(role==='homeroom') return {role,teacher,grade,classNo,label:classNo?`${grade}학년 전체 조회 · ${classNo}반 업무수정`:`${grade}학년 전체 조회`};
+  return {role,teacher,grade,classNo,label:`${grade}학년 조회`};
+}
+function recordGradeClass(row){
+  const studentNo=String(row?.studentNo||row?.number||row?.studentNumber||'').replace(/\D/g,'');
+  const grade=String(row?.grade||row?.gradeNo||row?.studentGrade||(studentNo.length>=4?studentNo[0]:'')||'');
+  let classNo=String(row?.classNo||row?.className||row?.class||'').replace(/[^0-9]/g,'');
+  if(!classNo&&studentNo.length>=4) classNo=String(Number(studentNo.slice(1,3))||'');
+  return {grade,classNo};
+}
+function filterRowsByCurrentTeacherScope(rows){
+  const scope=currentTeacherAccessScope();
+  if(!Array.isArray(rows))return [];
+  if(!scope.grade&&!scope.classNo)return rows.slice();
+  return rows.filter(row=>{
+    const gc=recordGradeClass(row);
+    if(scope.grade&&gc.grade&&gc.grade!==scope.grade)return false;
+    if(scope.classNo&&gc.classNo&&String(Number(gc.classNo))!==String(Number(scope.classNo)))return false;
+    return true;
+  });
+}
+function dashboardGradeScope(){
+  const profile=currentUserProfile();
+  const scope=currentTeacherAccessScope();
+  const grade=String(profile.grade||scope.grade||state?.settings?.neis?.grade||1);
+  return {grade,label:`${grade}학년 전체`};
+}
+function filterRowsForDashboardStatus(rows){
+  const scope=dashboardGradeScope();
+  if(!Array.isArray(rows))return [];
+  return rows.filter(row=>{
+    const gc=recordGradeClass(row);
+    return !scope.grade||!gc.grade||String(gc.grade)===String(scope.grade);
+  });
+}
+function dashboardOwnClassNo(){
+  const profile=currentUserProfile();
+  if(profile.classNo)return String(Number(profile.classNo));
+  const teacher=currentLoginTeacherName();
+  const row=(SOURCE_REFERENCE_DATA?.homeroom||[]).find(item=>String(item?.[2]||'').trim()===teacher);
+  return row?.[1]?String(Number(row[1])):'';
+}
+function resolveDashboardStudent(row){
+  const students=Array.isArray(readonlyCache?.students)?readonlyCache.students:[];
+  const ids=[row?.studentId,row?.studentID,row?.id,row?.studentNo,row?.studentNumber].map(value=>String(value||'').trim()).filter(Boolean);
+  const name=String(row?.name||row?.studentName||row?.displayName||'').trim();
+  const gc=recordGradeClass(row);
+  return students.find(student=>{
+    const studentIds=[student?.id,student?.studentId,student?.studentID,student?.studentNo,student?.studentNumber].map(value=>String(value||'').trim()).filter(Boolean);
+    if(ids.some(id=>studentIds.includes(id)))return true;
+    if(name&&name===String(student?.name||student?.studentName||student?.displayName||'').trim()){
+      const studentGc=recordGradeClass(student);
+      return (!gc.grade||!studentGc.grade||gc.grade===studentGc.grade)&&(!gc.classNo||!studentGc.classNo||String(Number(gc.classNo))===String(Number(studentGc.classNo)));
+    }
+    return false;
+  })||null;
+}
+function normalizeDashboardStudentRow(row){
+  const student=resolveDashboardStudent(row);
+  const studentNo=student?.studentNo||row?.studentNo||row?.studentNumber||'';
+  const name=student?.name||student?.studentName||row?.name||row?.studentName||'학생 식별정보 확인 필요';
+  const gc=recordGradeClass(student||row);
+  const classLabel=student?.className||row?.className||(gc.grade&&gc.classNo?`${gc.grade}-${Number(gc.classNo)}`:'');
+  return {...row,studentRef:student,studentNo,name,classLabel};
+}
+function dashboardReportGroups(rows){
+  const grouped=new Map();
+  rows.map(normalizeDashboardStudentRow).forEach(row=>{
+    const key=String(row.studentRef?.id||row.studentId||row.studentNo||`${row.classLabel}|${row.name}`);
+    if(!grouped.has(key))grouped.set(key,{key,studentNo:row.studentNo,name:row.name,classLabel:row.classLabel,studentRef:row.studentRef,programs:[],rows:[]});
+    const group=grouped.get(key);group.rows.push(row);
+    const program=String(row.programTitle||row.programName||row.title||row.activityName||'프로그램명 확인 필요').trim();
+    if(program&&!group.programs.includes(program))group.programs.push(program);
+  });
+  return [...grouped.values()].sort((a,b)=>String(a.studentNo).localeCompare(String(b.studentNo),'ko'));
+}
+function dashboardReportGroupState(group){
+  const total=(group?.rows||[]).length;
+  const submitted=(group?.rows||[]).filter(row=>row.submitted===true).length;
+  return {total,submitted,missing:Math.max(0,total-submitted),state:total>0&&submitted===total?"complete":submitted>0?"progress":"missing"};
+}
+function dashboardProgramIsSelectedActivity(program){
+  if(!program)return false;
+  const kind=String(program.kind||program.activityKind||program.programKind||'').trim().toLowerCase();
+  const label=[program.activityType,program.programType,program.category,program.group,program.type].map(value=>String(value||'')).join(' ');
+  if(kind==='common'||kind==='after'||/공통활동|공통\s*프로그램|방과후/.test(label))return false;
+  return kind==='selected'||kind==='general'||/선택활동|선택\s*프로그램/.test(label);
+}
+function dashboardReportStatusRows(){
+  const rows=[];
+  const programs=(readonlyCache?.programs||[]).filter(program=>dashboardProgramIsSelectedActivity(program));
+  const reports=readonlyCache?.programReports||readonlyCache?.reports||[];
+  programs.forEach(program=>{
+    const programTitle=String(program.recordTitle||program.actualTitle||program.title||'프로그램명 확인 필요').trim();
+    (program.students||[]).forEach(student=>{
+      // UEP 0.82.05: explicit report setting/form/data connection, or an actually submitted report,
+      // is the only evidence that this student-program pair belongs to the report target population.
+      if(!programRequiresStudentReport(program,student,reports))return;
+      const matchedReport=resolveStudentProgramReport(program,student,reports);
+      const submitted=Boolean(matchedReport&&matchedReport.submitted!==false);
+      rows.push({
+        studentId:student.studentId||student.id||'',
+        studentNo:student.studentNo||student.number||'',
+        name:student.name||student.studentName||'',
+        classNo:student.classNo||student.className||'',
+        programId:program.programId||program.id||'',
+        programTitle,
+        activityKind:'선택활동',
+        submitted,
+        reportId:matchedReport?.id||'',
+        reportRef:matchedReport||null,
+        status:submitted?'제출 완료':'미제출'
+      });
+    });
+  });
+  if(rows.length)return rows;
+  // Fallback: if program roster metadata is temporarily unavailable, show submitted normalized reports only.
+  return reports.filter(report=>dashboardProgramIsSelectedActivity(report)).map(report=>({
+    ...report,
+    programTitle:report.programTitle||report.programName||report.reportGroup||'프로그램명 확인 필요',
+    activityKind:'선택활동',
+    submitted:report.submitted!==false&&Boolean(report.id||report.reportId||report.submittedAt||report.content)
+  }));
+}
+function officialAttendanceRowsForDate08162(date){
+  // __UEP_08162_OFFICIAL_SINGLE_DATE_SOURCE__
+  const key=String(date||'').slice(0,10);
+  return (readonlyCache?.officialAttendance||[]).filter(
+===== AFTER SCHOOL @ 757560 =====
+-label="이전 주">‹</button><b>${range}</b><button data-dashboard-tt-week-shift="1" aria-label="다음 주">›</button></span></nav>`;
+}
+function dashboardTimetablePanelMarkup(){
+  const mode=dashboardTimetableAutoMode();
+  return mode==='night'?dashboardNightWeekMarkup():dashboardPersonalWeekMarkup();
+}
+function dashboardNightStudentGroups(day,slot){
+  const rows=dashboardNightAttendanceRows(day,slot).map(normalizeDashboardStudentRow);
+  const map=new Map();
+  rows.forEach(row=>{
+    const gc=recordGradeClass(row.studentRef||row),cls=String(Number(gc.classNo||0)||"");
+    if(!cls)return;
+    if(!map.has(cls))map.set(cls,new Map());
+    const key=String(row.studentRef?.id||row.studentId||row.studentNo||`${row.name}|${cls}`);
+    map.get(cls).set(key,row);
+  });
+  return map;
+}
+function openDashboardNightProgram(programId,day){
+  const program=dashboardAfterProgramsForDay(day).find(p=>String(p.id||p.programId||"")===String(programId));
+  if(!program)return toast("프로그램 정보를 찾지 못했습니다.");
+  const isNight=/야간심화/.test(`${program.afterType||""} ${program.type||""} ${program.title||""}`);
+  const students=Array.isArray(program.students)?program.students:[];
+  $("#drawerKicker").textContent=isNight?"NIGHT ADVANCED":"AFTER SCHOOL"; $("#drawerTitle").textContent=program.actualTitle||program.title||"프로그램";
+  $("#drawerBody").innerHTML=`<div class="history-summary positive"><span><small>운영일</small><b>${escapeHtml(day)}</b></span><span><small>시간</small><b>${escapeHtml(program.time||"확인 필요")}</b></span><span><small>참여</small><b>${students.length}명</b></span></div><div class="connection-detail"><div><b>구분</b><span>${isNight?"야간심화":"방과후"}</span></div><div><b>차시</b><span>${escapeHtml(dashboardProgramSessionLabel(program)||"-")}</span></div><div><b>교과</b><span>${escapeHtml(program.subject||"-")}</span></div><div><b>담당교사</b><span>${escapeHtml(program.teacher||"-")}</span></div><div><b>장소</b><span>${escapeHtml(program.place||"-")}</span></div></div><div class="drawer-actions"><button class="btn primary" data-dashboard-night-program-detail="${escapeHtml(program.id||program.programId||"")}">상세보기</button></div>`;
+  $("#drawer").classList.remove("hidden");$("#drawerBackdrop").classList.remove("hidden");
+  $("[data-dashboard-night-program-detail]")?.addEventListener("click",()=>openAfterschoolProgramDrawer(program.id||program.programId));
+}
+function openDashboardNightSlot(day,slot){
+  if(slot==="after"){
+    const programs=dashboardAfterProgramsForDay(day);
+    $("#drawerKicker").textContent="AFTER SCHOOL · WEEK";$("#drawerTitle").textContent=`방과후 · ${day}`;
+    $("#drawerBody").innerHTML=programs.length?`<div class="dashboard-after-list">${programs.map(p=>`<button data-program="${escapeHtml(p.id||p.programId||"")}"><span><b>${escapeHtml(p.actualTitle||p.title||"방과후")}</b><small>${escapeHtml(p.time||"시간 미등록")} · ${escapeHtml(p.place||"교실 미등록")} · ${escapeHtml(p.teacher||"담당교사 미등록")}</small></span><em>${(p.students||[]).length}명 ›</em></button>`).join("")}</div>`:`<div class="query-empty"><b>등록된 방과후 강좌가 없습니다.</b><small>${day} 기준</small></div>`;
+    $("#drawer").classList.remove("hidden");$("#drawerBackdrop").classList.remove("hidden");
+    $("#drawerBody").querySelectorAll('[data-program]').forEach(btn=>btn.onclick=()=>openProgramDrawer(btn.dataset.program));
+    return;
+  }
+  const groups=dashboardNightStudentGroups(day,slot),classes=Array.from({length:9},(_,i)=>String(i+1));
+  const total=[...groups.values()].reduce((sum,m)=>sum+m.size,0);
+  $("#drawerKicker").textContent="NIGHT STUDY · CLASS ROSTER";$("#drawerTitle").textContent=`${slot} · ${day}`;
+  $("#drawerBody").innerHTML=`<div class="history-summary positive"><span><small>기준일</small><b>${escapeHtml(day)}</b></span><span><small>시간대</small><b>${escapeHtml(slot)}</b></span><span><small>학생 수</small><b>${total}명</b></span></div><p class="dashboard-night-guide">반별 자습 인원을 한 화면에서 확인합니다.</p><div class="dashboard-night-class-grid">${classes.map(cls=>{const members=[...(groups.get(cls)?.values()||[])].sort((a,b)=>String(a.studentNo||'').localeCompare(String(b.studentNo||''),'ko'));return `<section><header><b>${cls}반</b><span>${members.length}명</span></header><div>${members.length?members.map(m=>`<button data-dashboard-night-student="${escapeHtml(attendanceStudentKey(m))}" data-dashboard-night-student-day="${escapeHtml(day)}" data-dashboard-night-student-slot="${escapeHtml(slot)}"><b>${escapeHtml(m.studentNo||"")} ${escapeHtml(m.name||"")}</b></button>`).join(""):'<small>참여 없음</small>'}</div></section>`;}).join("")}</div><div class="drawer-actions"><button class="btn primary" data-night-attendance-date="${escapeHtml(day)}">상세보기</button></div>`;
+  $("#drawer").classList.remove("hidden");$("#drawerBackdrop").classList.remove("hidden");
+  $("#drawerBody [data-night-attendance-date]")?.addEventListener("click",()=>{attendanceViewDate=day;nightViewMonth=day.slice(0,7);window.__uepNightRequestedSlot=slot;closeDrawer();navigate("attendance");attendanceMode="night";render("attendance");window.scrollTo(0,0);requestAnimationFrame(()=>toast(`${day} ${slot} 야자출결로 이동했습니다.`));});
+  $("#drawerBody").querySelectorAll('[data-dashboard-night-student]').forEach(btn=>btn.onclick=()=>openNightAttendanceDetail(btn.dataset.dashboardNightStudent,btn.dataset.dashboardNightStudentDay,btn.dataset.dashboardNightStudentSlot));
+}
+
+function dashboardPersonalWeekMarkup(){
+  const {week,days}=personalTimetableData();
+  const status=schoolPeriodStatus(new Date());
+  const todayIndex=Math.max(0,Math.min(4,(today.getDay()+6)%7));
+  const maxPeriods=Math.max(7,Array.isArray(week)?week.length:0);
+  if(!Array.isArray(week)||!week.some(row=>Array.isArray(row)&&row.some(Boolean))){
+    return `<div class="uep-week-timetable-empty"><span>◷</span><b>내 주간시간표 연결 준비</b><small>컴시간 교사시간표가 연결되면 월~금 수업이 이곳에 표시됩니다.</small><button data-page="timetable">시간표 연결 확인</button></div>`;
+  }
+  const heads=(days?.length?days:["월","화","수","목","금"]).slice(0,5);
+  const cells=[];
+  for(let period=1;period<=maxPeriods;period+=1){
+    cells.push(`<div class="uep-week-period"><b>${period}</b><small>${escapeHtml(periodTimeLabel(period)||"")}</small></div>`);
+    for(let d=0;d<5;d+=1){
+      const raw=week[period-1]?.[d]||"";
+      const [subject,room,flag]=String(raw).split("|");
+      const current=d===todayIndex&&status.index===period-1;
+      const classColor=timetableClassColorClass(room);
+      cells.push(`<button class="uep-week-class personal-order ${raw?"has-class":"is-empty"} ${classColor} ${current?"is-current":""} ${flag==="changed"?"is-changed":""}" data-page="timetable"><b>${escapeHtml(room||"-")}</b><small>${escapeHtml(subject||"")}</small>${current?'<i aria-label="현재 교시"></i>':''}${flag==="changed"?'<em>변동</em>':''}</button>`);
+    }
+  }
+  return `<div class="uep-week-timetable"><div class="uep-week-corner">교시</div>${heads.map((day,i)=>`<div class="uep-week-head ${i===todayIndex?"today":""}"><b>${escapeHtml(String(day).replace(/요일/g,""))}</b></div>`).join("")}${cells.join("")}</div>`;
+}
+
+function currentTeacherAccessScope(){
+  const role=currentRoleId();
+  const teacher=currentLoginTeacherName();
+  const profile=currentUserProfile();
+  const defaultGrade=String(profile.grade||state?.settings?.grade||state?.settings?.neis?.grade||1);
+  const homeroomRow=(SOURCE_REFERENCE_DATA?.homeroom||[]).find(row=>String(row?.[2]||'').trim()===teacher);
+  const grade=String(profile.grade||homeroomRow?.[0]||defaultGrade);
+  const classNo=String(profile.classNo||homeroomRow?.[1]||state?.settings?.neis?.classNo||'');
+  if(role==='grade_head'||role==='grade_manager') return {role,teacher,grade,classNo:'',label:`${grade}학년 전체 조회`};
+  if(role==='admin'||role==='vice_principal'||role==='principal') return {role,teacher,grade:'',classNo:'',label:'학교 전체 조회'};
+  if(role==='homeroom') return {role,teacher,grade,classNo,label:classNo?`${grade}학년 전체 조회 · ${classNo}반 업무수정`:`${grade}학년 전체 조회`};
+  return {role,teacher,grade,classNo,label:`${grade}학년 조회`};
+}
+function recordGradeClass(row){
+  const studentNo=String(row?.studentNo||row?.number||row?.studentNumber||'').replace(/\D/g,'');
+  const grade=String(row?.grade||row?.gradeNo||row?.studentGrade||(studentNo.length>=4?studentNo[0]:'')||'');
+  let classNo=String(row?.classNo||row?.className||row?.class||'').replace(/[^0-9]/g,'');
+  if(!classNo&&studentNo.length>=4) classNo=String(Number(studentNo.slice(1,3))||'');
+  return {grade,classNo};
+}
+function filterRowsByCurrentTeacherScope(rows){
+  const scope=currentTeacherAccessScope();
+  if(!Array.isArray(rows))return [];
+  if(!scope.grade&&!scope.classNo)return rows.slice();
+  return rows.filter(row=>{
+    const gc=recordGradeClass(row);
+    if(scope.grade&&gc.grade&&gc.grade!==scope.grade)return false;
+    if(scope.classNo&&gc.classNo&&String(Number(gc.classNo))!==String(Number(scope.classNo)))return false;
+    return true;
+  });
+}
+function dashboardGradeScope(){
+  const profile=currentUserProfile();
+  const scope=currentTeacherAccessScope();
+  const grade=String(profile.grade||scope.grade||state?.settings?.neis?.grade||1);
+  return {grade,label:`${grade}학년 전체`};
+}
+function filterRowsForDashboardStatus(rows){
+  const scope=dashboardGradeScope();
+  if(!Array.isArray(rows))return [];
+  return rows.filter(row=>{
+    const gc=recordGradeClass(row);
+    return !scope.grade||!gc.grade||String(gc.grade)===String(scope.grade);
+  });
+}
+function dashboardOwnClassNo(){
+  const profile=currentUserProfile();
+  if(profile.classNo)return String(Number(profile.classNo));
+  const teacher=currentLoginTeacherName();
+  const row=(SOURCE_REFERENCE_DATA?.homeroom||[]).find(item=>String(item?.[2]||'').trim()===teacher);
+  return row?.[1]?String(Number(row[1])):'';
+}
+function resolveDashboardStudent(row){
+  const students=Array.isArray(readonlyCache?.students)?readonlyCache.students:[];
+  const ids=[row?.studentId,row?.studentID,row?.id,row?.studentNo,row?.studentNumber].map(value=>String(value||'').trim()).filter(Boolean);
+  const name=String(row?.name||row?.studentName||row?.displayName||'').trim();
+  const gc=recordGradeClass(row);
+  return students.find(student=>{
+    const studentIds=[student?.id,student?.studentId,student?.studentID,student?.studentNo,student?.studentNumber].map(value=>String(value||'').trim()).filter(Boolean);
+    if(ids.some(id=>studentIds.includes(id)))return true;
+    if(name&&name===String(student?.name||student?.studentName||student?.displayName||'').trim()){
+      const studentGc=recordGradeClass(student);
+      return (!gc.grade||!studentGc.grade||gc.grade===studentGc.grade)&&(!gc.classNo||!studentGc.classNo||String(Number(gc.classNo))===String(Number(studentGc.classNo)));
+    }
+    return false;
+  })||null;
+}
+function normalizeDashboardStudentRow(row){
+  const student=resolveDashboardStudent(row);
+  const studentNo=student?.studentNo||row?.studentNo||row?.studentNumber||'';
+  const name=student?.name||student?.studentName||row?.name||row?.studentName||'학생 식별정보 확인 필요';
+  const gc=recordGradeClass(student||row);
+  const classLabel=student?.className||row?.className||(gc.grade&&gc.classNo?`${gc.grade}-${Number(gc.classNo)}`:'');
+  return {...row,studentRef:student,studentNo,name,classLabel};
+}
+function dashboardReportGroups(rows){
+  const grouped=new Map();
+  rows.map(normalizeDashboardStudentRow).forEach(row=>{
+    const key=String(row.studentRef?.id||row.studentId||row.studentNo||`${row.classLabel}|${row.name}`);
+    if(!grouped.has(key))grouped.set(key,{key,studentNo:row.studentNo,name:row.name,classLabel:row.classLabel,studentRef:row.studentRef,programs:[],rows:[]});
+    const group=grouped.get(key);group.rows.push(row);
+    const program=String(row.programTitle||row.programName||row.title||row.activityName||'프로그램명 확인 필요').trim();
+    if(program&&!group.programs.includes(program))group.programs.push(program);
+  });
+  return [...grouped.values()].sort((a,b)=>String(a.studentNo).localeCompare(String(b.studentNo),'ko'));
+}
+function dashboardReportGroupState(group){
+  const total=(group?.rows||[]).length;
+  const submitted=(group?.rows||[]).filter(row=>row.submitted===true).length;
+  return {total,submitted,missing:Math.max(0,total-submitted),state:total>0&&submitted===total?"complete":submitted>0?"progress":"missing"};
+}
+function dashboardProgramIsSelectedActivity(program){
+  if(!program)return false;
+  const kind=String(program.kind||program.activityKind||program.programKind||'').trim().toLowerCase();
+  const label=[program.activityType,program.programType,program.category,program.group,program.type].map(value=>String(value||'')).join(' ');
+  if(kind==='common'||kind==='after'||/공통활동|공통\s*프로그램|방과후/.test(label))return false;
+  return kind==='selected'||kind==='general'||/선택활동|선택\s*프로그램/.test(label);
+}
+function dashboardReportStatusRows(){
+  const rows=[];
+  const programs=(readonlyCache?.programs||[]).filter(program=>dashboardProgramIsSelectedActivity(program));
+  const reports=readonlyCache?.programReports||readonlyCache?.reports||[];
+  programs.forEach(program=>{
+    const programTitle=String(program.recordTitle||program.actualTitle||program.title||'프로그램명 확인 필요').trim();
+    (program.students||[]).forEach(student=>{
+      // UEP 0.82.05: explicit report setting/form/data connection, or an actually submitted report,
+      // is the only evidence that this student-program pair belongs to the report target population.
+      if(!programRequiresStudentReport(program,student,reports))return;
+      const matchedReport=resolveStudentProgramReport(program,student,reports);
+      const submitted=Boolean(matchedReport&&matchedReport.submitted!==false);
+      rows.push({
+        studentId:student.studentId||student.id||'',
+        studentNo:student.studentNo||student.number||'',
+        name:student.name||student.studentName||'',
+        classNo:student.classNo||student.className||'',
+        programId:program.programId||program.id||'',
+        programTitle,
+        activityKind:'선택활동',
+        submitted,
+        reportId:matchedReport?.id||'',
+        reportRef:matchedReport||null,
+        status:submitted?'제출 완료':'미제출'
+      });
+    });
+  });
+  if(rows.length)return rows;
+  // Fallback: if program roster metadata is temporarily unavailable, show submitted normalized reports only.
+  return reports.filter(report=>dashboardProgramIsSelectedActivity(report)).map(report=>({
+    ...report,
+    programTitle:report.programTitle||report.programName||report.reportGroup||'프로그램명 확인 필요',
+    activityKind:'선택활동',
+    submitted:report.submitted!==false&&Boolean(report.id||report.reportId||report.submittedAt||report.content)
+  }));
+}
+function officialAttendanceRowsForDate08162(date){
+  // __UEP_08162_OFFICIAL_SINGLE_DATE_SOURCE__
+  const key=String(date||'').slice(0,10);
+  return (readonlyCache?.officialAttendance||[]).filter(row=>String(row?.date||'').slice(0,10)===key);
+}
+function dashboardAdmissionRows(...keys){
+  for(const key of keys){const rows=readonlyCache?.[key];if(Array.isArray(rows))return rows;}
+  return [];
+}
+function dashboardAdmissionEnabled(row){return String(row?.['사용여부']??row?.use??'Y').toUpperCase()!=='N';}
+function dashboardAdmissionOrder(row){return Number(row?.['노출순서']??row?.order??9999)||9999;}
+function dashboardAdmissionNormalizeUniversity(value){return String(value||'').replace(/대학교/g,'대').replace(/\s|\(.*?\)/g,'');}
+function dashboardAdmissionTodayIndex(length){if(!length)return 0;const d=new Date(),s=new Date(d.getFullYear(),0,0);return Math.floor((d-s)/86400000)%length;}
+function dashboardAdmissionUniversities(){return dashboardAdmissionRows('universityAdmissions','56_대학입시마스터').filter(dashboardAdmissionEnabled).sort((a,b)=>dashboardAdmissionOrder(a)-dashboardAdmissionOrder(b));}
+function dashboardAdmissionTodayUniversity(){const rows=dashboardAdmissionUniversities();return rows[dashboardAdmissionTodayIndex(rows.length)]||null;}
+function openDashboardAdmissionDialogBase(title,body){
+  document.querySelector('.dashboard-admission-layer')?.remove();
+  const layer=document.createElement('div');layer.className='dashboard-admission-layer counsel-reason-
+===== AFTER SCHOOL @ 870437 =====
+ind:"calendar-first-grade"}));
+  const selection=[...all.filter(p=>p.kind!=="after"),...calendarPrograms].filter(dashboardTodayProgramVisible).sort((a,b)=>String(a.time||"").localeCompare(String(b.time||"")));
+  const after=all.filter(p=>p.kind==="after"||/방과후|야간심화|심화수업/.test(`${p.type||""} ${p.afterType||""} ${p.title||""}`)).filter(dashboardTodayProgramVisible).sort((a,b)=>String(a.time||"").localeCompare(String(b.time||"")));
+  return {selection,after};
+}
+function dashboardProgramItem(p,group){
+  if(p.kind==="calendar-first-grade")return `<button class="dashboard-program-row calendar-linked-program" data-school-event="${escapeHtml(p.id)}"><time>${escapeHtml(p.time||"종일")}</time><span><b>${escapeHtml(p.title)}</b><small>학교일정 연동 · ${escapeHtml(p.target||"1학년 대상")}${p.place?` · ${escapeHtml(p.place)}`:""}</small></span><em>일정 보기 ›</em></button>`;
+  if(group==="after")return `<button class="dashboard-program-row program-area-after" data-after-program="${escapeHtml(p.id)}"><time>${escapeHtml(p.time||"시간 확인")}</time><span><b>${escapeHtml(p.actualTitle||p.title)}</b><small>${/야간심화/.test(`${p.afterType||""} ${p.title||""}`)?"야간심화":"방과후"} · ${escapeHtml(p.subject||"교과 미입력")} · ${escapeHtml(p.department||"부서 미입력")}</small></span><em>${Array.isArray(p.students)?p.students.length:0}명 ›</em></button>`;
+  return `<button class="dashboard-program-row program-area-${programAreaKind(p)}" data-program="${escapeHtml(p.id)}"><time>${escapeHtml(p.time||"종일")}</time><span><b>${escapeHtml(p.actualTitle||p.title)}</b><small>${programAreaLabel(p)} · ${escapeHtml(p.place||"장소 확인")}</small></span><em>${Array.isArray(p.students)?p.students.length:0}명 ›</em></button>`;
+}
+function todayProgramsMarkup(){
+  const {selection,after}=todayProgramCollections();
+  return `<article class="card program-card dashboard-program-board widget-configurable" ${widgetAttrs("programs")}><div class="card-head"><div><span class="card-icon ci-coral">♧</span><strong>오늘의 프로그램</strong></div><div class="head-actions"><button data-program-sheet>시트 연결</button><button data-program-add>＋ 등록</button><button data-widget-settings="programs">⚙</button></div></div><div class="dashboard-program-columns"><section><header><div><small>SELECTED PROGRAM</small><h3>공통·선택프로그램</h3></div><span>${selection.length}건</span></header><div>${selection.length?selection.map(p=>dashboardProgramItem(p,"selection")).join(""):'<div class="program-empty compact">오늘 진행되는 공통·선택프로그램이 없습니다.</div>'}</div></section><section><header><div><small>AFTER SCHOOL</small><h3>방과후·야간심화</h3></div><span>${after.length}건</span></header><div>${after.length?after.map(p=>dashboardProgramItem(p,"after")).join(""):'<div class="program-empty compact">오늘 진행되는 방과후·야간심화수업이 없습니다.</div>'}</div></section></div><div class="widget-source-footer program-source">출처: 선택활동 DB · 방과후 수업 · 야간심화 · 41_학교캘린더</div></article>`;
+}
+
+function isWholeSchoolCommonActivity(program){
+  if(!program)return false;
+  const type=String(program.type||program.category||program.programType||program.activityType||'');
+  const target=String(program.target||program.targetText||program.audience||program.participantScope||'');
+  const common=type.includes('공통')||type.includes('공통활동');
+  const whole=target.includes('전교생')||target.includes('전체')||target.includes('1학년 전체')||target.includes('공통');
+  return common&&whole;
+}
+function isWholeSchoolDashboardCalendarEvent(event){
+  if(!event)return false;
+  const target=String(event.target||event.targetText||event.audience||'').replace(/\s/g,'');
+  const type=String(event.type||event.category||'');
+  const title=String(event.title||'');
+  const whole=/전교생|전체학생|전학년|학생전체|학교전체/.test(target);
+  const schoolWideCeremony=/개학식|방학식|입학식|졸업식/.test(title)&&(!target||whole);
+  return whole||(/공통행사/.test(type)&&whole)||schoolWideCeremony;
+}
+
+
+function normalizeTimetableGradeClass(row){
+  const directGrade=Number(row?.grade??row?.학년??0);
+  const directClass=Number(row?.classNo??row?.class??row?.반??0);
+  if(directGrade>=1&&directGrade<=3&&directClass>=1&&directClass<=20)return {grade:directGrade,classNo:directClass};
+  const raw=String(row?.classCode??row?.classroom??row?.학급??row?.반코드??row?.['학년반']??'').trim();
+  const digits=raw.replace(/\D/g,'');
+  if(digits.length===3){
+    const grade=Number(digits[0]),classNo=Number(digits.slice(1));
+    if(grade>=1&&grade<=3&&classNo>=1&&classNo<=20)return {grade,classNo};
+  }
+  if(digits.length===4){
+    const grade=Number(digits[0]),classNo=Number(digits.slice(1,3));
+    if(grade>=1&&grade<=3&&classNo>=1&&classNo<=20)return {grade,classNo};
+  }
+  return {grade:directGrade||1,classNo:directClass||Number(digits)||0};
+}
+
+
+function canRevealStudentSensitiveInfo(){
+  const role=String(currentUser?.role||state?.user?.role||'');
+  return /관리자|학년부장|학년총무|담임/.test(role);
+}
+function signalRowsForStudent(student){
+  const id=String(student?.id||student?.studentNo||'');
+  const no=String(student?.studentNo||'');
+  const match=r=>String(r?.studentId||r?.학생ID||'')===id||String(r?.studentNo||r?.학번||'')===no;
+  return {
+    aid:(readonlyCache?.educationSupport||readonlyCache?.educationAid||[]).filter(match),
+    care:(readonlyCache?.protectedStudents||readonlyCache?.healthCare||[]).filter(match),
+    risk:(readonlyCache?.riskStudents||readonlyCache?.crisisStudents||[]).filter(match),
+  };
+}
+function escapeHtml(value = "") {
+  return String(value).replace(/[&<>'"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[ch]);
+}
+
+
+function openMealDutyDrawer(){
+  const status=dashboardDutyStatus("lunch");
+  const rows=dutyMonthRows("lunch").filter(row=>row.date===dateKey(today));
+  const mine=rows.filter(row=>String(row.teacher||"").trim()===currentLoginTeacherName());
+  const meals=Array.isArray(neisData?.meals)?neisData.meals:[];
+  const dutyRows=rows.length?rows.map(row=>`<div class="duty-month-row ${String(row.teacher||'').trim()===currentLoginTeacherName()?'mine':''}"><strong>${escapeHtml(row.teacher||'-')}</strong><span>${escapeHtml(row.dutyType||'급식실')}</span><small>${escapeHtml([row.start,row.end].filter(Boolean).join('~'))}</small></div>`).join(""):`<div class="connection-guide compact"><span>◇</span><h3>오늘 급식지도 일정이 없습니다</h3><p>42_급식지도계획의 오늘 날짜를 확인하세요.</p></div>`;
+  const mealRows=neisData?.ok?(meals.length?`<div class="meal-detail-list">${meals.map(meal=>`<section><header><b>${escapeHtml(meal.mealType)}</b><span>${escapeHtml(meal.calories||"")}</span></header><div>${meal.menu.map(item=>`<p>${escapeHtml(item)}</p>`).join("")}</div></section>`).join("")}</div>`:`<div class="connection-guide compact"><span>🍽</span><h3>오늘 등록된 급식이 없습니다</h3><p>방학·휴업일이거나 NEIS에 식단이 없습니다.</p></div>`):`<div class="connection-guide compact"><span>!</span><h3>급식을 불러오지 못했습니다</h3><p>${escapeHtml(neisError||"NEIS 연결을 확인하세요.")}</p></div>`;
+  $("#drawerKicker").textContent="LUNCH · DUTY";
+  $("#drawerTitle").textContent="급식 및 지도";
+  $("#drawerBody").innerHTML=`<div class="meal-duty-combined"><section class="meal-duty-section duty-first"><header><div><small>TODAY DUTY</small><h3>오늘 급식지도</h3></div><span class="duty-state ${status.state}">${escapeHtml(status.label)}</span></header>${dutyRows}<button class="btn secondary" data-reference="lunch-supervisor">월간 급식지도 보기</button></section><section class="meal-duty-section"><header><div><small>TODAY MEAL</small><h3>오늘 급식메뉴</h3></div></header>${mealRows}</section></div>`;
+  $("#drawer").classList.remove("hidden"); $("#drawerBackdrop").classList.remove("hidden");
+  $("#drawerBody [data-reference='lunch-supervisor']")?.addEventListener("click",()=>openReferenceDrawer("lunch-supervisor"));
+}
+
+function openReferenceDrawer(type) {
+  if(type==="night-supervisor"||type==="lunch-supervisor"){
+    renderDutyCalendarDrawer(type==="lunch-supervisor"?"lunch":"night"); return;
+  }
+  const sites = {
+    portal: ["업무포털", "portal"],
+    edufine: ["K-에듀파인", "edufine"],
+    riro: ["리로스쿨", "riro"],
+    training: ["충북교육연수포털", "training"],
+    "school-site": ["운호고등학교 홈페이지", "school"],
+    "unho-llm": ["운호LLM", "unhoLlm"],
+  };
+  if (sites[type]) {
+    const [name, key] = sites[type];
+    const url = state.settings.links?.[key] || "";
+    if (url) openApprovedSite(name, url);
+    else showSiteAddressEditor(name, key);
+    return;
+  }
+  if (type === "meal-duty") { renderDutyCalendarDrawer("lunch"); return; }
+  if (type === "meal") { openMealDrawer(); return; }
+  if (type === "lunch-duty-editor") { openLunchDutyEditor(); return; }
+  if (type === "lunch-supervisor-today") { openTodayLunchSupervisorDrawer(); return; }
+  if (type === "night-supervisor-today") { openTodayNightSupervisorDrawer(); return; }
+  if (type === "site-settings") {
+    showAllSiteSettings();
+    return;
+  }
+  if (type === "quick-more") {
+    const items = [
+      ["training", "연수포털", "연"],
+      ["school-site", "학교홈", "학"],
+      ["messenger", "소통메신저", "소"],
+      ["unho-llm", "운호LLM", "U"],
+      ["approval", "결재라인", "✓"],
+      ["extension", "내선번호", "☎"],
+      ["homeroom-timetable", "담임반 시간표", "◷"],
+      ["site-settings", "사이트 설정", "⚙"]
+    ];
+    $("#drawerKicker").textContent = "QUICK ACTIONS";
+    $("#drawerTitle").textContent = "빠른 실행 전체";
+    $("#drawerBody").innerHTML = `<div class="uep-quick-more-grid">${items.map(item=>`<button data-reference="${item[0]}"><i>${item[2]}</i><span><b>${item[1]}</b><small>바로 열기</small></span><em>›</em></button>`).join("")}</div><p class="drawer-note">대시보드에는 자주 쓰는 항목만 표시하고, 나머지는 이곳에서 모두 열 수 있습니다.</p>`;
+    $("#drawer").classList.remove("hidden");
+    $("#drawerBackdrop").classList.remove("hidden");
+    $("#drawerBody").querySelectorAll("[data-reference]").forEach(button=>button.onclick=()=>openReferenceDrawer(button.dataset.reference));
+    return;
+  }
+  if (type === "messenger") {
+    openMessenger();
+    return;
+  }
+  if (type === "comtime") {
+    openComtime();
+    return;
+  }
+  if (type === "calendar-add") {
+    openSingleCalendarEditor();
+    return;
+  }
+  if (type === "calendar-note") {
+    openManualCalendarEditor();
+    return;
+  }
+  if (type === "school-hours") {
+    openSchoolHoursEditor();
+    return;
+  }
+  if (type === "homeroom-timetable") {
+    openHomeroomWeekDrawer();
+    return;
+  }
+  if (["approval", "homeroom", "extension"].includes(type)) {
+    openSourceReference(type);
+    return;
+  }
+  const refs = {
+    approval: [
+      "APPROVAL LINE",
+      "주요 업무 결재라인",
+      `<div class="reference-detail"><p>업무 종류를 선택하면 결재 순서를 확인할 수 있습니다.</p>${[
+        "일반 기안|담당 → 부장 → 교감 → 교장",
+        "학생 관련|담임 → 학년부장 → 교감",
+        "예산·구매|담당 → 부장 → 행정실 → 교장",
+        "행사 운영|담당 → 부장 → 교감 → 교장",
+      ]
+        .map((x) => {
+          const [a, b] = x.split("|");
+          return `<div class="reference-row"><b>${a}</b><span>${b}</span></div>`;
+        })
+        .join(
+          "",
+        )}<small>현재 예시자료이며 실제 결재라인 연결 전입니다.</small></div>`,
+    ],
+    homeroom: [
+      "HOMEROOM",
+      "담임교사 명단",
+      `<div class="reference-detail"><div class="reference-search">이름·학급 검색</div>${["1반 김선생", "2반 박선생", "3반 이선생", "4반 최선생", "5반 정선생"].map((x) => `<div class="reference-row"><b>${x.split(" ")[0]}</b><span>${x.split(" ")[1]}</span></div>`).join("")}</div>`,
+    ],
+    extension: [
+      "DIRECTORY",
+      "내선번호·자리배치",
+      `<div class="reference-detail"><div class="reference-search">이름·부서·내선 검색</div>${[
+        "교무실|201 · 본관 2층",
+        "1학년부|231 · 본관 3층",
+        "행정실|101 · 본관 1층",
+        "보건실|119 · 별관 1층",
+      ]
+        .map((x) => {
+          const [a, b] = x.split("|");
+          return `<div class="reference-row"><b>${a}</b><span>${b}</span></div>`;
+        })
+        .join("")}<button class="btn secondary">자리배치도 보기</button></div>`,
+    ],
+    meal: [
+      "MEAL",
+      "오늘의 급식",
+      `<div class="meal-popup"><b>점심</b><p>유부초밥 · 냉우동 · 샐러드 · 배추김치 · 과일</p><small>급식 자료 연결 전 예시 메뉴입니다.</small></div>`,
+    ],
+    academic: [
+      "ACADEMIC YEAR",
+      "연간학사일정",
+      `<div class="reference-detail"><p>연간학사일정은 학교 캘린더의 기본 일정층으로 통합됩니다.</p><div class="reference-row"><b>7월 21일</b><span>방학식</span></div><div class="reference-row"><b>7월 22일</b><span>여름방학 시작</span></div></div>`,
+    ],
+    "calendar-note": [
+      "CALENDAR NOTE",
+      "일정 기록",
+      `<div class="reference-detail"><p>종이 달력에 적던 내용을 학교 캘린더에 직접 기록합니다.</p><textarea rows="5" placeholder="일정 또는 메모를 입력하세요"></textarea><button class="btn primary">로컬에 임시저장</button></div>`,
+    ],
+    "school-hours": [
+      "SCHOOL HOURS",
+      "일과운영시간",
+      `<div class="reference-detail">${[
+        "1교시|08:40~09:30",
+        "2교시|09:40~10:30",
+        "3교시|10:40~11:30",
+        "4교시|11:40~12:30",
+        "점심|12:30~13:40",
+        "5교시|13:40~14:30",
+        "6교시|14:40~15:30",
+        "7교시|15:40~16:30",
+      ]
+        .map((x) => {
+          const [a, b] = x.split("|");
+          return `<div class="reference-row"><b>${a}</b><span>${b}</span></div>`;
+        })
+        .join("")}</div>`,
+    ],
+    "night-supervisor": [
+      "NIGHT STUDY",
+      "월간 야자감독",
+      `<div class="night-supervisor-view"><div class="outing-date"><button>‹</button><strong>${today.getFullYear()}년 ${today.getMonth()+1}월 야자감독표</strong><span>월 기준</span><button>›</button></div><div class="outing-summary"><span><b>0</b>감독교사</span><span><b>0</b>감독구역</span><span><b>3</b>야자 타임</span></div><div class="night-supervisor-empty"><i>◇</i><b>등록된 야자감독이 없습니다</b><span>7월 원본 일정표의 오늘 칸이 비어 있습니다.</span></div><div class="readonly-rule"><b>연결 원본</b><span>2026. 운호고 1학년 야자 감독 / 석식 / 특근매식비 · 7월</span></div><p class="drawer-note">날짜 행과 다음 행의 감독교사를 짝지어 읽습니다. 원본이 비어 있으면 임의로 이름을 표시하지 않습니다.</p></div>`,
+    ],
+    "homeroom-timetable": [
+      "HOMEROOM TIMETABLE",
+      "담임반 시간표 · 1학년 1반",
+      `<div class="connection-guide"><span>NEIS</span><h3>학급 시간표 조회</h3><p>실제 NEIS 자료를 불러오려면 시간표 메뉴의 학급 시간표 조회를 이용하세요.</p></div>`,
+    ],
+  };
+  const data = refs[type];
+  if (!data) return;
+  const [k, t, b] = data;
+  $("#drawerKicker").textContent = k;
+  $("#drawerTitle").textContent = t;
+  $("#drawerBody").innerHTML = b;
+  $("#drawer").classList.remove("hidden");
+  $("#drawerBackdrop").classList.remove("hidden");
+}
+
+
+function approvalListMarkup(rows) {
+  if (!rows.length) return '<div class="outing-empty">검색 결과가 없습니다.</div>';
+  return rows.map((row) => {
+    const index = SOURCE_REFERENCE_DATA.approval.indexOf(row);
+    return `<button type="button" class="approval-nav-row" data-approval-index="${index}"><b>${escapeHtml(row[0])}</b><span>${escapeHtml(row[1] || "")}</span></button>`;
+  }).join("");
+}
+
+function showApprovalDetail(index) {
+  const row = SOURCE_REFERENCE_DATA.approval[Number(index)] || SOURCE_REFERENCE_DATA.approval[0];
+  const target = $("#approvalDetail");
+  if (!target || !row) return;
+  target.innerHTML = `<small>업무 분류</small><h3>${escapeHtml(row[0])}</h3><section><b>결재 순서</b><p>${escapeHtml(row[1] || "-")}</p></section><section><b>확인 사항</b><p>${escapeHtml(row[2] || "별도 비고 없음")}</p></section><footer>2026년 학교 주요 업무 결재 라인 기준 · 읽기 전용</footer>`;
+  $$(".approval-nav-row").forEach((button) => button.classList.toggle("active", Number(button.dataset.approvalIndex) === Number(index)));
+}
+
+function bindExtensionReference() {
+  const imageButton = $("[data-extension-tab='image']");
+  const tableButton = $("[data-extension-tab='table']");
+  const imagePanel = $("#extensionImagePanel");
+  const tablePanel = $("#extensionTablePanel");
+  const switchTab = (name) => {
+    imageButton?.classList.toggle("active", name === "image");
+    tableButton?.classList.toggle("active", name === "table");
+    imagePanel?.classList.toggle("hidden", name !== "image");
+    tablePanel?.classList.toggle("hidden", name !== "table");
+  };
+  if (imageButton) imageButton.onclick = () => switchTab("image");
+  if (tableButton) tableButton.onclick = () => switchTab("table");
+  const image = $("#extensionLayoutImage");
+  if (image) image.onclick = () => { const zoomed = image.classList.toggle("zoomed"); image.closest(".extension-image-scroll")?.classList.toggle("zoom-mode", zoomed); };
+  const search = $("#sourceReferenceSearch");
+  if (search) search.oninput = () => {
+    const query = search.value.trim().toLowerCase(
+===== 참여</ @ 226043 =====
+s.filter(day=>programs.some(program=>programHasNightStudyImpact(program)&&programRunsOn(program,day)));
+  const legacyMonthDates=(readonlyCache?.nightCalendarDates||[]).filter(day=>String(day).startsWith(nightViewMonth));
+  const firstSemesterDormDates=[];
+  if(nightViewMonth>="2026-03"&&nightViewMonth<="2026-07"&&firstSemesterDormIds.size){
+    const [yy,mm]=nightViewMonth.split("-").map(Number),start=new Date(yy,mm-1,1,12),end=new Date(yy,mm,0,12);
+    for(const d=new Date(start);d<=end;d.setDate(d.getDate()+1)){const key=dateKey(d);if(key<="2026-07-16"&&isNightOperatingDay(key))firstSemesterDormDates.push(key);}
+  }
+  const dates=[...new Set([...monthRows.map(row=>row.date),...legacyMonthDates,...programDates,...firstSemesterDormDates,attendanceViewDate].filter(day=>String(day).startsWith(nightViewMonth)&&isNightOperatingDay(day)))].sort();
+  const statusesFor=(student,day)=>slots.map(slot=>resolveStatus(student,day,slot));
+  const classSummaries=Array.from({length:9},(_,i)=>String(i+1)).map(no=>{
+    const roster=allStudents.filter(student=>classNumberOf(student)===no);
+    const statusRows=roster.map(student=>statusesFor(student,attendanceViewDate));
+    const participants=statusRows.filter(items=>items.some(status=>positive.has(status.cls))).length;
+    const rosterIds=new Set(roster.flatMap(student=>[String(student.id||""),String(student.studentNo||"")]).filter(Boolean));
+    const checks=nightRows.filter(row=>{
+      if(row.date!==attendanceViewDate || !(nightRecordIsAttendance(row)||/지각/.test(String(row.result)))) return false;
+      const found=allStudents.find(s=>String(s.id||"")===String(row.studentId||"")||String(s.studentNo||"")===String(row.studentNo||""));
+      const rowClass=classNumberOf(found||{}) || (String(row.className||"").match(/(?:^|\D)(\d+)\s*반?\s*$/)?.[1] || String(row.className||"").match(/\d+/)?.[0] || "");
+      return rowClass===no && ([String(row.studentId||""),String(row.studentNo||"")].some(id=>id&&rosterIds.has(id)) || Boolean(found));
+    }).length;
+    return {classNo:no,roster:roster.length,participants,checks};
+  });
+  const selectedSummary=classSummaries.find(item=>item.classNo===classNo)||{classNo,roster:students.length,participants:0,checks:0};
+  const classCards=`<div class="night-class-overview daily-class-overview">${classSummaries.map(item=>`<button data-night-class="${item.classNo}" class="${classNo===item.classNo?"active":""}"><small>${item.classNo}반 · 재적 ${item.roster}명</small><b>${item.participants}<em>당일 참여</em></b><span>출석체크 ${item.checks}건</span></button>`).join("")}</div>`;
+
+  const dateHead=dates.map(day=>`<th colspan="3" class="${day===attendanceViewDate?"selected-day":""}" data-night-date="${escapeHtml(day)}"><b>${escapeHtml(day.slice(5).replace("-","/"))}</b><small>${escapeHtml(weekdayLabelFromKey(day))}</small></th>`).join("");
+  const slotHead=dates.map(day=>slots.map(slot=>`<th class="${day===attendanceViewDate?"selected-day-slot":""}">${escapeHtml(slot)}</th>`).join("")).join("");
+  const bodyRows=students.map(student=>`<tr><th class="student-name-cell"><button data-night-student="${escapeHtml(attendanceStudentKey(student))}"><b>${escapeHtml(String(student.number||"").padStart(2,"0"))}번</b><span>${escapeHtml(student.name)}</span></button></th>${dates.map(day=>slots.map(slot=>{const status=resolveStatus(student,day,slot);const programAttrs=status.programId?` data-night-program="${escapeHtml(status.programId)}" data-night-program-kind="${escapeHtml(status.programKind||"general")}"`:"";return `<td class="${day===attendanceViewDate?"selected-day-cell":""}"><button class="night-status-cell ${status.cls}" title="${escapeHtml(status.title)}" data-night-student="${escapeHtml(attendanceStudentKey(student))}" data-night-day="${escapeHtml(day)}" data-night-slot="${escapeHtml(slot)}"${programAttrs}><span>${escapeHtml(status.label)}</span></button></td>`;}).join("")).join("")}</tr>`).join("");
+  const matrix=dates.length?`<div class="night-month-scroll-hint">선택일 열은 강조 표시됩니다. 월간 운영일은 항상 유지됩니다. ← 좌우로 스크롤하여 월 전체 확인 →</div><div class="night-month-matrix"><table><thead><tr><th rowspan="2" class="student-name-head">학생</th>${dateHead}</tr><tr>${slotHead}</tr></thead><tbody>${bodyRows}</tbody></table></div>`:`<div class="empty-state compact-empty data-card"><b>${nightStudyOperationStatus(attendanceViewDate).operates?`${nightViewMonth} 야자출결 자료가 없습니다.`:`${attendanceViewDate} · ${escapeHtml(nightStudyOperationStatus(attendanceViewDate).reason)}`}</b><span>${nightStudyOperationStatus(attendanceViewDate).operates?'운영일인데 자료가 없다면 데이터 처리시트의 30_야자출결_정규화를 확인하세요.':'미운영일은 결석·미입력으로 집계하지 않습니다.'}</span></div>`;
+  const gradeSummary=classSummaries.reduce((sum,item)=>({roster:sum.roster+item.roster,participants:sum.participants+item.participants,checks:sum.checks+item.checks}),{roster:0,participants:0,checks:0});
+  return `<div class="module-page">${tabs}${attendanceDateControls("야자 조회일")}<section class="attendance-dashboard-head night"><div><small>NIGHT STUDY · ${attendanceViewDate} ${escapeHtml(weekdayLabelFromKey(attendanceViewDate,true))}</small><h3>1학년 선택일 참여현황</h3><p>1학년 전체 재적을 기준으로, 오후자습·야자1·야자2 중 출결 기록이 확인된 학생을 참여로 집계합니다.</p></div><div class="attendance-head-metrics"><span><b>${gradeSummary.roster}</b>1학년 재적인원</span><span><b>${gradeSummary.participants}</b>학년 참여인원</span><span><b>${gradeSummary.checks}</b>선택일 출석체크</span><span><b>${dates.length}</b>${nightViewMonth} 운영일</span></div></section>${classCards}<div class="section-title-row monthly-night-title"><div><small>MONTHLY · ${nightViewMonth}</small><h3>${classNo}반 월간 참여현황</h3></div><span class="state">${attendanceViewDate} ${escapeHtml(weekdayLabelFromKey(attendanceViewDate,true))} 선택</span></div><div class="night-matrix-legend"><span class="present">출석</span><span class="dorm">학사</span><span class="after">방과후 강좌명</span><span class="program">프로그램명</span><span class="late">지각</span><span class="pending">확인</span><span class="none">기록 없음</span></div>${matrix}</div>`;
+}
+function openNightAttendanceDetail(studentKey, day, slot) {
+  const students = readonlyCache?.students || [];
+  const student = students.find(item => attendanceStudentKey(item) === studentKey) || {};
+  const rows = readonlyCache?.nightAttendance || readonlyCache?.attendance || [];
+  const row = rows.find(item => item.date === day && nightSlotName(item) === slot && (attendanceStudentKey(item) === studentKey || String(item.studentNo||"") === String(student.studentNo||"")));
+  openDrawer(`${student.name || "학생"} · ${day} ${slot}`);
+  $("#drawerTitle")?.classList.add("privacy-sensitive-text");
+  $("#drawerBody").innerHTML = `<div class="history-summary positive"><span><small>학번</small><b class="privacy-sensitive-text">${escapeHtml(student.studentNo||"-")}</b></span><span><small>학급</small><b>${escapeHtml(student.className||"-")}반</b></span><span><small>일자</small><b>${escapeHtml(day)}</b></span><span><small>시간</small><b>${escapeHtml(slot)}</b></span></div><div class="drawer-section"><h4>야자출결 상세</h4><dl class="detail-list"><dt>결과</dt><dd>${escapeHtml(row?.result||"출석 기록 없음")}</dd><dt>소속·유형</dt><dd>${escapeHtml(row?.affiliation||row?.type||"일반 야자")}</dd><dt>상세</dt><dd>${escapeHtml(row?.detail||"-")}</dd><dt>원본 시간</dt><dd>${escapeHtml(row?.time||row?.period||slot)}</dd></dl></div><p class="drawer-note">방과후·야간심화·추가 프로그램 상태는 해당 프로그램 상세 화면으로 바로 연결됩니다.</p>`;
+}
+
+function subjectsView() {
+  return `<div class="module-page">${toolbar("학생·희망과목·오류 검색", "신청 입력")}<div class="data-card"><div class="data-head student-grid"><span>학번</span><span>학생</span><span>1차 신청</span><span>상담</span><span>상태</span></div>${samples.students.map((r, i) => `<div class="data-row student-grid"><b>${r[0]}</b><span>${r[1]}</span><span>${i === 2 ? "미신청" : "완료"}</span><span>${i === 2 ? "필요" : "-"}</span><span class="state ${i === 2 ? "warn" : ""}">${i === 2 ? "확인 필요" : "정상"}</span></div>`).join("")}</div></div>`;
+}
+function schoolScheduleTimetableMarkup(){
+  const anchor=new Date(`${calendarSelectedDate||dateKey(today)}T12:00:00`);
+  const monday=new Date(anchor); monday.setDate(anchor.getDate()-((anchor.getDay()+6)%7));
+  const days=Array.from({length:5},(_,i)=>{const d=new Date(monday);d.setDate(monday.getDate()+i);return d;});
+  const dayEvents=days.map(d=>schoolEventsForDate(dateKey(d)).filter(calendarEventMatchesFilter).sort((a,b)=>String(a.time||"99:99").localeCompare(String(b.time||"99:99"))));
+  const maxRows=Math.max(1,...dayEvents.map(rows=>rows.length));
+  const rows=Array.from({length:maxRows},(_,rowIndex)=>`<div class="school-schedule-row"><div class="school-schedule-slot">${rowIndex+1}</div>${dayEvents.map(events=>{const event=events[rowIndex];if(!event)return '<div class="school-schedule-cell empty"><span>—</span></div>';const kind=calendarEventVisualKind(event);return `<button class="school-schedule-cell kind-${kind} ${calendarEventIsPending(event)?"pending":""}" data-school-event="${escapeHtml(event.id)}"><time>${escapeHtml(event.time||"종일")}</time><b>${escapeHtml(calendarShortTitle(calendarDisplayTitle(event),26))}</b><small>${escapeHtml([event.target,event.place].filter(Boolean).join(" · ")||event.owner||"학교일정")}</small></button>`;}).join("")}</div>`).join("");
+  return `<section class="school-schedule-timetable"><div class="school-schedule-head"><div class="school-schedule-corner">순서</div>${days.map(d=>`<button data-calendar-date="${dateKey(d)}" class="${dateKey(d)===dateKey(today)?"today":""}"><b>${["일","월","화","수","목","금","토"][d.getDay()]}</b><span>${d.getMonth()+1}/${d.getDate()}</span><em>${schoolEventsForDate(dateKey(d)).length}건</em></button>`).join("")}</div>${rows}</section>`;
+}
+function calendarView() {
+  const hubTabs=`<div class="uep-hub-tabs calendar-hub-tabs"><button class="${calendarHubMode==="schedule"?"active":""}" data-calendar-hub="schedule"><b>학교일정</b><small>월간·주간 일정</small></button><button class="${calendarHubMode==="timetable"?"active":""}" data-calendar-hub="timetable"><b>시간표</b><small>개인·학급·학생·교사</small></button></div>`;
+  if(calendarHubMode==="timetable") return `<div class="module-page calendar-timetable-hub">${hubTabs}${timetableView()}</div>`;
+  const anchor=new Date(`${calendarSelectedDate||dateKey(today)}T12:00:00`);
+  return `<div class="module-page calendar-page-v654 school-schedule-page">${hubTabs}<div class="calendar-page-toolbar"><div><small>SCHOOL SCHEDULE · 데이터처리시트 41_학교캘린더</small><h3>학교일정</h3><p>월간계획을 기본으로 확인하고 월간·주간 보기를 자유롭게 전환합니다.</p></div><div><button class="btn secondary" data-calendar-today>${state.calendarMode==="week"?"이번 주":"오늘"}</button><button class="btn primary" data-reference="calendar-add">＋ 개인 일정</button></div></div><div class="school-schedule-summary"><b>${anchor.getFullYear()}년 ${anchor.getMonth()+1}월</b><span>선택일 ${anchor.getMonth()+1}/${anchor.getDate()} · ${schoolEventsForDate(dateKey(anchor)).length}건</span></div><div class="card calendar-page-card school-schedule-card">${calendarMarkup(true)}<div class="widget-source-footer dashboard-source">출처: 데이터처리시트 41_학교캘린더 · 대시보드 월간/주간과 동일 DB</div></div></div>`;
+}
+
+function inputCenterBatchStudents(){
+  const students=(readonlyCache?.students||[]).filter(s=>!String(s.status||s.enrollmentStatus||'').includes('전출'));
+  const scope=inputCenterConfig.batchScope||'학급';
+  if(scope==='학급') return students.filter(s=>String(s.grade||String(s.studentNo||'').slice(0,1))===String(inputCenterConfig.batchGrade||'1') && String(s.className||classNumberOf(s)||'').replace(/반/g,'')===String(inputCenterConfig.batchClass||'1'));
+  if(scope==='학년전체') return students.filter(s=>String(s.grade||String(s.studentNo||'').slice(0,1))===String(inputCenterConfig.batchGrade||'1'));
+  if(scope==='개별') return students.filter(s=>String(s.studentNo||'')===String(inputCenterConfig.batchStudentNo||'').trim());
+  return students;
+}
+function inputCenterBatchExpectedCount(){
+  const scope=inputCenterConfig.batchScope||'학급';
+  if(scope==='사용자지정') return Math.max(0,Number(inputCenterConfig.expectedCount||0));
+  return inputCenterBatchStudents().length;
+}
+function inputCenterStudentMatch(textValue='',fileName=''){
+  const students=inputCenterBatchStudents();
+  const hay=`${fileName||''}\n${textValue||''}`;
+  const numbers=[...hay.matchAll(/(?:^|[^0-9])([123][0-9]{3})(?![0-9])/g)].map(m=>m[1]);
+  for(const no of numbers){const student=students.find(s=>String(s.studentNo||'')===no);if(student)return {student,matchStatus:'자동매칭'};}
+  const shortHay=hay.slice(0,4000);
+  const matched=students.filter(s=>s.name&&shortHay.includes(String(s.name)));
+  if(matched.length===1)return {student:matched[0],matchStatus:'이름매칭'};
+  return {student:null,matchStatus:'확인필요'};
+}
+function inputCenterDraftFromPayload(payload={},textValue=''){
+  const match=inputCenterStudentMatch(textValue,payload.name||payload.fileName||'');
+  const s=match.student||{};
+  return {draftId:`DRAFT-${Date.now()}-${Math.random().toString(36).slice(2,8)}`,filePath:payload.path||'',fileName:payload.name||payload.fileName||'직접입력',extension:payload.extension||'',size:Number(payload.size||0),text:String(textValue||payload.text||''),studentId:s.id||'',studentNo:s.studentNo||'',name:s.name||'',grade:s.grade||String(s.studentNo||'').slice(0,1)||'',className:String(s.className||classNumberOf(s)||'').replace(/반/g,''),matchStatus:match.matchStatus,selected:true};
+}
+function inputCenterClassifyMaterial(file={}, textValue=''){
+  const name=String(file?.name||file?.fileName||'');
+  const text=String(textValue||file?.text||'');
+  const hay=`${name}\n${text.slice(0,12000)}`.toLowerCase();
+  const rules=[
+    {type:'프로그램 신청서',score:[/신청자|참가신청|신청 활동|신청 프로그램|희망 진로|희망순위|신청서/g,/연락처|학년|반|번호|이름/g],reason:'신청·희망·참가 관련 열/문구'},
+    {type:'만족도·설문조사',score:[/만족도|설문|응답|매우 만족|보통|불만족|소감/g,/문항|응답자|제출시간|타임스탬프/g],reason:'설문·응답 관련 문구'},
+    {type:'수행평가지',score:[/수행평가|서술형|평가지|배점|채점|문항|풀이/g,/교과|성취기준|평가요소/g],reason:'수행평가·채점 관련 문구'},
+    {type:'보고서·탐구보고서',score:[/보고서|탐구|활동내용|새롭게 알게|느낀점|소감|주제/g,/책 제목|독서|진로희망|탐구내용/g],reason:'보고서·탐구·독서 관련 문구'},
+    {type:'출결·참여명단',score:[/출석|결석|참여명단|참가자 명단|출결|출석부/g,/학번|이름|반/g],reason:'출결·참여명단 관련 문구'},
+    {type:'성적·평가자료',score:[/성적|점수|등급|석차|평균|원점수|표준점수/g,/학번|이름|과목/g],reason:'성적·점수 관련 열/문구'},
+    {type:'상담·관찰자료',score:[/상담|관찰|면담|상담내용|교사 의견|특이사항/g],reason:'상담·관찰 관련 문구'}
+  ];
+  let best={type:'기타',points:0,reason:'명확한 자동 분류 근거 없음'};
+  for(const r of rules){let pts=0;for(const re of r.score){const m=hay.match(re);if(m)pts+=Math.min(4,m.length);}if(pts>best.points)best={type:r.type,points:pts,reason:r.reason};}
+  const confidence=best.points>=6?'높음':best.points>=3?'보통':'낮음';
+  return {...best,confidence};
+}
+function inputCenterSpreadsheetRows(file, raw){
+  const ext=String(file?.extension||'').toLowerCase();
+  if(!['xls','xlsx','csv','tsv'].includes(ext))return null;
+  const allLines=String(raw||'').replace(/\r/g,'').split('\n');
+  const sections=[];let current={name:'',lines:[]};
+  for(const line of allLines){if(line.startsWith('__UEP_SHEET__\t')){if(current.lines.length)sections.push(current);current={name:line.split('\t').slice(1).join('\t').trim(),lines:[]};}else if(line.trim())current.lines.push(line);}
+  if(current.lines.length)sections.push(current);if(!sections.length)return null;
+  const ordered=sections.slice().sort((a,b)=>{const score=x=>/제출내역_텍스트/.test(x.name)?100:/제출내역|응답|보고서/.test(x.name)?50:0;return score(b)-score(a);});
+  const split=line=>(ext==='csv'?line.split(','):line.split('\t')).map(v=>String(v||'').replace(/\\n/g,'\n'));
+  for(const section of ordered){
+    const rows=section.lines.map(split);let hi=-1,idx={};
+    for(let i=0;i<Math.min(rows.length,25);i++){
+      const cells=rows[i].map(x=>String(x||'').trim());const find=alts=>cells.findIndex(v=>alts.some(a=>v.replace(/\s/g,'').includes(a)));
+      const g=find(['학년']),c=find(['반']),n=find(['번호','번']),nm=find(['이름','성명']),sn=find(['학번']);if(nm>=0&&(sn>=0||(g>=0&&c>=0&&n>=0))){hi=i;idx={g,c,n,nm,sn};break;}
+    }
+    if(hi<0)continue;const headers=rows[hi].map(x=>String(x||'').trim());const out=[];
+    for(let r=hi+1;r<rows.length;r++){
+      const cells=rows[r].map(x=>String(x??'').trim());if(!cells.so
+===== 참여</ @ 620565 =====
+(x.label,(majorCounts.get(x.label)||0)+1));});
+  const usedSdgs=[...sdgCounts.entries()].filter(([,v])=>v.count>0).sort((a,b)=>b[1].count-a[1].count);
+  const leastSdgs=[...sdgCounts.entries()].sort((a,b)=>a[1].count-b[1].count||a[0]-b[0]).slice(0,4);
+  const usedCareers=[...careerCounts.entries()].filter(([,v])=>v.count>0).sort((a,b)=>b[1].count-a[1].count);
+  const leastCareers=[...careerCounts.entries()].sort((a,b)=>a[1].count-b[1].count).slice(0,3);
+  const recommendations=[];
+  if(autonomyReports.length)recommendations.push(`자율활동 보고서에서 가장 적게 나타난 SDGs는 ${leastSdgs.map(([n,v])=>`SDG ${n} ${v.name}(${v.count}건)`).join(', ')}입니다.`);
+  else recommendations.push('자율활동 보고서가 연결되면 SDGs 1~17 중 학생 탐구가 적은 분야를 자동 발굴합니다.');
+  if(careerReports.length)recommendations.push(`진로활동 보고서에서 상대적으로 적은 진로계열은 ${leastCareers.map(([,v])=>`${v.label}(${v.count}건)`).join(', ')}입니다.`);
+  else recommendations.push('진로활동 보고서가 연결되면 문과·이과와 세부 전공군별 부족 분야를 자동 발굴합니다.');
+  if(after.length===0)recommendations.push('방과후·야간심화 운영 자료가 연결되면 교사별 운영시간을 근거로 2학기 편성을 지원합니다.');
+  const tabs=[['overview','운영현황'],['students','학생분석'],['teachers','교사분석'],['programs','프로그램분석'],['recommend','프로그램추천']].map(([id,label])=>`<button data-program-planning-mode="${id}" class="${programPlanningMode===id?'active':''}">${label}</button>`).join('');
+  const summary=`<div class="planning-summary-grid"><span><b>${selected.length}</b>선택활동</span><span><b>${autonomy.length}</b>자율활동</span><span><b>${career.length}</b>진로활동</span><span><b>${after.length}</b>방과후·야간심화</span><span><b>${participantKeys.size}</b>참여 학생</span><span><b>${teacherRows.length}</b>운영 교사</span></div>`;
+  let body='';
+  if(programPlanningMode==='overview')body=`${summary}<div class="planning-two-column"><section><h4>선택활동 구성</h4><div class="planning-bars"><p><span>자율활동</span><b>${autonomy.length}개</b></p><p><span>진로활동</span><b>${career.length}개</b></p><p><span>공통활동</span><b>${common.length}개 · 단순 현황</b></p></div></section><section><h4>보고서 분석 준비</h4><div class="planning-bars"><p><span>자율 보고서</span><b>${autonomyReports.length}건</b></p><p><span>진로 보고서</span><b>${careerReports.length}건</b></p><p><span>방과후·야간심화</span><b>${after.reduce((a,p)=>a+programDurationHours(p),0).toFixed(1)}시간</b></p></div></section></div>`;
+  if(programPlanningMode==='students')body=`${summary}<section class="planning-panel"><h4>학생 결과물 중심 분석</h4><p>학생 개인 참여도는 기존 출석부에서 확인합니다. 이곳에서는 제출 보고서를 통해 자율활동의 SDGs 탐구와 진로활동의 계열·전공군 분포를 다음 프로그램 기획 근거로 사용합니다.</p><div class="planning-bars"><p><span>선택활동 참여</span><b>${new Set(selected.flatMap(p=>(p.students||[]).map(attendanceStudentKey))).size}명</b></p><p><span>자율활동 보고서</span><b>${autonomyReports.length}건</b></p><p><span>진로활동 보고서</span><b>${careerReports.length}건</b></p><p><span>전체 제출 보고서</span><b>${reports.length}건</b></p></div></section>`;
+  if(programPlanningMode==='teachers')body=`<section class="planning-panel"><div class="planning-title-row"><div><h4>교사별 운영시간</h4><p>공통활동은 학교교육계획 통계로만 두고, 선택활동·방과후·야간심화의 교사별 실제 운영시간을 확인합니다.</p></div><span>${teacherRows.length}명</span></div>${teacherRows.length?`<div class="teacher-analysis-table teacher-analysis-table-compact"><div class="teacher-analysis-head"><span>교사</span><span>선택</span><span>방과후</span><span>야간심화</span><span>총시간</span><span>담당학생</span></div>${teacherRows.map(r=>`<div><b>${escapeHtml(r.name)}</b><span>${r.selected.toFixed(1)}</span><span>${r.after.toFixed(1)}</span><span>${r.night.toFixed(1)}</span><strong>${r.hours.toFixed(1)}시간</strong><span>${r.students.size}명</span></div>`).join('')}</div>`:'<div class="empty-state"><b>담당교사 또는 운영시간 자료가 연결되지 않았습니다.</b></div>'}</section>`;
+  if(programPlanningMode==='programs')body=`<div class="planning-two-column"><section><h4>자율활동 · 보고서 기반 SDGs</h4>${usedSdgs.length?usedSdgs.map(([n,v])=>`<p class="planning-list-row"><span>SDG ${n} ${escapeHtml(v.name)}</span><b>${v.count}건</b></p>`).join(''):'<div class="empty-state">자율활동 보고서에서 분석된 SDGs가 없습니다.</div>'}<h4 class="planning-subtitle">가장 적은 SDGs</h4>${leastSdgs.map(([n,v])=>`<p class="planning-list-row planning-low"><span>SDG ${n} ${escapeHtml(v.name)}</span><b>${v.count}건</b></p>`).join('')}</section><section><h4>진로활동 · 계열 및 전공군</h4>${usedCareers.length?usedCareers.map(([,v])=>`<p class="planning-list-row"><span>${escapeHtml(v.label)}</span><b>${v.count}건</b></p>`).join(''):'<div class="empty-state">진로활동 보고서에서 분석된 계열 자료가 없습니다.</div>'}<h4 class="planning-subtitle">세부 전공군</h4>${majorCounts.size?[...majorCounts.entries()].sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<p class="planning-list-row"><span>${escapeHtml(k)}</span><b>${v}건</b></p>`).join(''):'<div class="empty-state">분석된 전공군이 없습니다.</div>'}</section></div>`;
+  if(programPlanningMode==='recommend')body=`<section class="planning-panel"><div class="planning-title-row"><div><h4>다음 프로그램 기획 근거</h4><p>프로그램 자체에 태그를 찍지 않고 학생 보고서의 자동 태그 결과를 근거로 부족 영역을 제시합니다.</p></div></div><div class="planning-recommendations">${recommendations.map((r,i)=>`<article><span>${i+1}</span><b>${escapeHtml(r)}</b></article>`).join('')}</div></section>`;
+  return `<div class="program-planning-center"><div class="module-intro pastel-peach"><span>04</span><div><h3>프로그램 기획센터</h3><p>공통활동은 단순 현황으로만 확인하고, 자율활동은 학생 보고서의 SDGs, 진로활동은 계열·전공군, 방과후·야간심화는 교사별 운영시간을 근거로 다음 프로그램을 설계합니다.</p></div></div><div class="planning-tabs">${tabs}</div>${body}</div>`;
+}
+
+function programsView() {
+  const monthLabel=`${programMonth.slice(0,4)}년 ${Number(programMonth.slice(5,7))}월`;
+  const connectedPrograms = readonlyCache?.programs || [];
+  const localSelected=(state.programs||[]).filter(program=>program.kind!=="after").map(program=>({...program,kind:"selected",actualTitle:program.actualTitle||program.title,recordTitle:program.recordTitle||program.title,reportRequired:program.reportRequired!==false,attendedCount:Array.isArray(program.students)?program.students.length:0,source:"이 PC 로컬"}));
+  const localAfter=(state.programs||[]).filter(program=>program.kind==="after").map(program=>({...program,kind:"after",actualTitle:program.actualTitle||program.title,recordTitle:"생활기록부 기록 대상 아님",reportRequired:false,reportToAuthority:false,attendedCount:Array.isArray(program.students)?program.students.length:0,source:"이 PC 로컬",affectsAttendance:true}));
+  const commonItems=connectedPrograms.filter(program=>program.kind==="common");
+  const selectedConnected=connectedPrograms.filter(program=>program.kind==="selected" || program.kind==="general");
+  const selectedKeys=new Set(selectedConnected.map(program=>`${program.programId||program.id}|${program.date}|${program.title}`));
+  const selectedItems=[...selectedConnected,...localSelected.filter(program=>!selectedKeys.has(`${program.programId||program.id}|${program.date}|${program.title}`))];
+  const connectedAfter=connectedPrograms.filter(program=>program.kind==="after");
+  const afterKeys=new Set(connectedAfter.map(program=>`${program.programId||program.id}|${program.date}|${program.title}`));
+  // 기본연결시트에 11_방과후학교·12_차시일정 기반 강좌/차시가 있으면 이를 단일 진실원천으로 사용한다.
+  // 30_야자출결_정규화에서 파생한 시간대별 행을 프로그램 목록에 다시 합치면
+  // 같은 강좌가 야자1·야자2별 별도 프로그램으로 중복 표시되므로, 연결 강좌가 없을 때만 fallback으로 사용한다.
+  const derivedAfterFallback=connectedAfter.length?[]:afterSchoolProgramGroups();
+  const afterSessions=[...connectedAfter,...derivedAfterFallback.filter(program=>!afterKeys.has(`${program.programId||program.id}|${program.date}|${program.title}`)),...localAfter.filter(program=>!afterKeys.has(`${program.programId||program.id}|${program.date}|${program.title}`))];
+  const afterItems=groupedAfterSchoolCourses(afterSessions);
+  const afterMasterCount=afterItems.length;
+  const afterSessionCount=afterSessions.filter(program=>!program.isCourseMaster).length;
+  const afterRosterStudents=new Set(afterSessions.flatMap(program=>(program.students||[]).map(student=>student.studentId||student.studentNo||student.number).filter(Boolean))).size;
+  const afterBadStatus=connectedAfter.filter(program=>/일정확인필요/.test(String(program.status||""))).length;
+  const afterCoursesWithoutSessions=afterItems.filter(program=>!Number(program.sessionCount||0)).length;
+  const afterDbHealthy=afterMasterCount>0&&afterSessionCount>0&&afterRosterStudents>0&&afterBadStatus===0&&afterCoursesWithoutSessions===0;
+  const afterDbCheck=`<div class="afterschool-db-check ${afterDbHealthy?"ok":"warn"}"><div><small>기본연결시트 실시간 점검</small><h4>${afterDbHealthy?"방과후학교 연결 정상":"방과후학교 연결 확인 필요"}</h4><p>11_방과후학교 → 12_차시일정 → 13_출석부 순서로 읽습니다. 특색프로그램의 ‘일정확인필요’ 행은 방과후 집계에서 제외됩니다.</p></div><div class="afterschool-db-kpis"><span><b>${afterMasterCount}</b>강좌</span><span><b>${afterSessionCount}</b>차시</span><span><b>${afterRosterStudents}</b>수강학생</span><span><b>${afterBadStatus+afterCoursesWithoutSessions}</b>확인필요</span></div></div>`;
+  const todayKey=dateKey(today);
+  const monthFilter=(items)=>items.filter(program=>programMonthKey(program)===programMonth);
+  const afterMonthFilter=(items)=>items.filter(program=>{
+    const sessionDates=Array.isArray(program.dates)?program.dates:[];
+    return sessionDates.some(date=>String(date).startsWith(programMonth)) || programMonthKey(program)===programMonth;
+  });
+  const afterCourseKey=(program)=>String(program.courseId||program.programId||program.id||"").replace(/^after-(?:course|master|session)-/,"");
+  const afterMonthSessions=(course)=>afterSessions.filter(session=>session&&session.kind==="after"&&!session.isCourseMaster&&afterCourseKey(session)===afterCourseKey(course)&&String(session.date||"").startsWith(programMonth)&&!/일정확인필요|취소|휴강|폐강/.test(String(session.status||session.operationStatus||""))).sort((a,b)=>String(a.date||"").localeCompare(String(b.date||""))||String(a.time||"").localeCompare(String(b.time||"")));
+  const afterSessionMarkup=(course)=>{const sessions=afterMonthSessions(course);return `<div class="afterschool-month-sessions"><header><b>${escapeHtml(monthLabel)} 차시별 일정</b><span>해당 월 ${sessions.length}차시</span></header>${sessions.length?`<div class="afterschool-session-grid">${sessions.map((session)=>`<button type="button" data-after-program="${escapeHtml(session.id||course.id)}"><em>${escapeHtml(session.sessionNo||"-")}차시</em><time>${escapeHtml(session.date||"-")} ${escapeHtml(weekdayLabelFromKey(session.date,false))}</time><b>${escapeHtml(singlePeriodLabel(session))}</b><span>${escapeHtml(session.place||course.place||"장소 확인")}</span><small>${escapeHtml(session.status||"운영")}</small></button>`).join("")}</div>`:`<p>이 달에 실제 운영되는 차시가 없습니다.</p>`}</div>`;};
+  const focusStudent=studentFocusStudent();
+  const hasFocusStudent=(program)=>!focusStudent||(program.students||[]).some(row=>studentMatches(row,focusStudent))||program.kind==="common";
+  const commonMonth=monthFilter(commonItems).filter(hasFocusStudent), selectedMonth=monthFilter(selectedItems).filter(hasFocusStudent), afterMonth=afterMonthFilter(afterItems).filter(hasFocusStudent);
+  const summary=(items)=>({count:items.length,today:items.filter(p=>p.date===todayKey).length,students:new Set(items.flatMap(p=>(p.students||[]).map(s=>attendanceStudentKey(s)||`${s.number||""}|${s.name||""}`))).size});
+  const commonSummary=summary(commonMonth), selectedSummary=summary(selectedMonth), afterSummary=summary(afterMonth);
+  const card=(mode,icon,title,subtitle,description,stat,accent)=>`<button class="program-hub-card ${accent} ${programMode===mode?"active":""}" data-program-mode="${mode}"><span class="program-hub-icon">${icon}</span><div><small>${escapeHtml(subtitle)}</small><h3>${escapeHtml(title)}</h3><p>${escapeHtml(description)}</p></div><footer><span><b>${stat.count}</b>개 운영</span><span><b>${stat.today}</b>개 오늘</span><span><b>${stat.students}</b>명 대상</span><em>${programMode===mode?"선택됨":"보기"} ›</em></footer></button>`;
+  const hub=`${programMonthPicker()}<div class="program-hub-grid program-hub-grid-fixed">${card("common","◉","공통활동","학교 창체운영계획","전체학생을 기본 대상으로 하고 출결 현황을 관리합니다.",commonSummary,"common")}${card("selected","★","선택활동","학년 특색프로그램","모집·참여학생, 자율·진로 영역, SDGs와 보고서를 함께 관리합니다.",selectedSummary,"selected")}${card("after","▦","방과후학교","수업·야자출결 연동","1학기·여름방학·2학기·겨울방학 수업과 수강학생을 관리합니다.",afterSummary,"after")}${card("planning","◎","프로그램 기획센터","다음 학기 설계","운영 이력·학생 수요·교사별 운영시간·SDGs 분포를 바탕으로 기획 근거를 확인합니다.",{count:commonMonth.length+selectedMonth.length+afterMonth.length,today:0,students:new Set([...commonMonth,...selectedMonth,...afterMonth].flatMap(p=>(p.students||[]).map(attendanceStudentKey))).size},"planning")}</div>`;
+  if(programMode==="home"){
+    const todayAfterSessions=afterSessions.filter(p=>p&&p.kind==="after"&&!p.isCourseMaster&&p.date===todayKey&&!/일정확인필요|취소|휴강|폐강|결강/.test(String(p.status||p.operationStatus||"")));     const todayPrograms=[...commonMonth,...selectedMonth,...todayAfterSessions].filter(p=>p.date===todayKey&&!isWholeSchoolCommonActivity(p));
+    return `<div class="module-page program-hub-page">${hub}<div class="program-hub-today"><header><div><small>TODAY</small><h3>오늘의 프로그램</h3></div><button class="btn secondary" data-program-sheet>연결시트 확인</button></header>${todayPrograms.map(p=>`<button data-program="${escapeHtml(p.id)}"><span class="program-kind-badge area-${programAreaKind(p)}">${programAreaLabel(p)}</span><b>${escapeHtml(p.actualTitle||p.title)}</b><small>${escapeHtml([p.time,p.place].filter(Boolean).join(" · ")||"운영정보 확인")}</small><em>${(p.students||[]).length}명 ›</em></button>`).join("")||'<div class="empty-state"><b>오늘 등록된 프로그램이 없습니다.</b><span></span></div>'}</div></div>`;
+  }
+  if(programMode==="planning")return `<div class="module-page program-detail-page">${hub}<div class="program-content-panel">${programPlanningCenter([...commonItems,...selectedItems,...afterItems])}</div></div>`;
+  if(programMode==="common")return `<div class="module-page program-detail-page">${hub}<div class="program-content-panel">${commonProgramAreaPanel(focusStudent?commonItems.filter(hasFocusStudent):commonItems)}</div></div>`;
+  const items=programMode==="after"?afterMonth:selectedMonth;
+  const title=programMode==="after"?"방과후학교":"선택활동";
+  const intro=programMode==="after"?"운영기간·수업시간·수강학생을 관리하고 야자출결과 연동합니다.":"학년 특색프로그램의 참여학생, 자율·진로 영역, SDGs와 보고서를 관리합니다.";
+  const uniqueParticipants=new Set();items.forEach(program=>(program.students||[]).forEach(student=>uniqueParticipants.add(attendanceStudentKey(student)||`${student.number||""}|${student.name||""}`)));
+  const rows=items.length?items.sort((a,b)=>String(b.date||"").localeCompare(String(a.date||""))).map(program=>{const isAfter=program.kind==="after",isCommon=program.kind==="common";const studentCount=Array.isArray(program.students)?program.students.length:0;const attended=Number(program.attendedCount||0);const rowAttr=isAfter?`data-after-program="${escapeHtml(program.id)}"`:`data-program="${escapeHtml(program.id)}"`;const place=program.place||program.scheduleText||"운영정보 확인";const actualTitle=program.actualTitle||program.title||"-";const recordTitle=isAfter?"생활기록부 기록 대상 아님":(program.recordTitle||actualTitle);const evidence=state.programEvidence?.[program.id]||[];const reportText=isAfter?"보고서 없음":program.reportRequired===false?"보고서 미사용":Number.isFinite(Number(program.reportSubmittedCount))?`학생 ${Number(program.reportSubmittedCount)}명`:"보고서 필요";const kindLabel=isCommon?"공통":isAfter?"방과후":"선택";const impact=programHasNightStudyImpact(program)?`<small class="program-attendance-impact">야자출결 영향</small>`:"";const displayDate=isAfter?(program.scheduleText||([program.date,program.endDate].filter(Boolean).join(" ~ "))||program.date||"-"):(program.date||program.scheduleText||"-");const mainRow=`<button class="data-row program-unified-grid program-manage-row" ${rowAttr} data-search="${escapeHtml([displayDate,actualTitle,recordTitle,program.type,program.afterType,program.time,place,program.teacher,kindLabel].join(" ").toLowerCase())}"><time>${escapeHtml(displayDate)}${program.date===todayKey?'<em class="today-badge">오늘</em>':""}</time><span class="program-kind-badge area-${programAreaKind(program)}">${programAreaLabel(program)}</span><b>${escapeHtml(actualTitle)}${impact}</b><span class="record-title ${isAfter?"not-record-target":""}">${escapeHtml(isCommon?(program.type||
+===== 참여</ @ 756574 =====
+mall>${students.size?'자습인원 보기':'자습 자료 없음'}</small></button>${programCards}</div>`);
+    });
+  });
+  return `<div class="dashboard-night-week"><div class="dashboard-night-corner">시간대</div>${days.map((d,i)=>`<div class="dashboard-night-head"><b>${d}</b><small>${dates[i]?`${dates[i].getMonth()+1}/${dates[i].getDate()}`:""}</small></div>`).join("")}${cells.join("")}</div>`;
+}
+function dashboardTimetableHeaderControlsMarkup(){
+  const mode=dashboardTimetableAutoMode();
+  const dates=dashboardNightWeekDates(),first=dates[0],last=dates[4];
+  const range=first&&last?`${first.getMonth()+1}/${first.getDate()}~${last.getMonth()+1}/${last.getDate()}`:"이번 주";
+  return `<nav class="dashboard-timetable-header-controls"><button class="${mode==='day'?'active':''}" data-dashboard-timetable-mode="day">정규시간</button><button class="${mode==='night'?'active':''}" data-dashboard-timetable-mode="night">야간시간</button><span class="dashboard-tt-week-nav"><button data-dashboard-tt-week-shift="-1" aria-label="이전 주">‹</button><b>${range}</b><button data-dashboard-tt-week-shift="1" aria-label="다음 주">›</button></span></nav>`;
+}
+function dashboardTimetablePanelMarkup(){
+  const mode=dashboardTimetableAutoMode();
+  return mode==='night'?dashboardNightWeekMarkup():dashboardPersonalWeekMarkup();
+}
+function dashboardNightStudentGroups(day,slot){
+  const rows=dashboardNightAttendanceRows(day,slot).map(normalizeDashboardStudentRow);
+  const map=new Map();
+  rows.forEach(row=>{
+    const gc=recordGradeClass(row.studentRef||row),cls=String(Number(gc.classNo||0)||"");
+    if(!cls)return;
+    if(!map.has(cls))map.set(cls,new Map());
+    const key=String(row.studentRef?.id||row.studentId||row.studentNo||`${row.name}|${cls}`);
+    map.get(cls).set(key,row);
+  });
+  return map;
+}
+function openDashboardNightProgram(programId,day){
+  const program=dashboardAfterProgramsForDay(day).find(p=>String(p.id||p.programId||"")===String(programId));
+  if(!program)return toast("프로그램 정보를 찾지 못했습니다.");
+  const isNight=/야간심화/.test(`${program.afterType||""} ${program.type||""} ${program.title||""}`);
+  const students=Array.isArray(program.students)?program.students:[];
+  $("#drawerKicker").textContent=isNight?"NIGHT ADVANCED":"AFTER SCHOOL"; $("#drawerTitle").textContent=program.actualTitle||program.title||"프로그램";
+  $("#drawerBody").innerHTML=`<div class="history-summary positive"><span><small>운영일</small><b>${escapeHtml(day)}</b></span><span><small>시간</small><b>${escapeHtml(program.time||"확인 필요")}</b></span><span><small>참여</small><b>${students.length}명</b></span></div><div class="connection-detail"><div><b>구분</b><span>${isNight?"야간심화":"방과후"}</span></div><div><b>차시</b><span>${escapeHtml(dashboardProgramSessionLabel(program)||"-")}</span></div><div><b>교과</b><span>${escapeHtml(program.subject||"-")}</span></div><div><b>담당교사</b><span>${escapeHtml(program.teacher||"-")}</span></div><div><b>장소</b><span>${escapeHtml(program.place||"-")}</span></div></div><div class="drawer-actions"><button class="btn primary" data-dashboard-night-program-detail="${escapeHtml(program.id||program.programId||"")}">상세보기</button></div>`;
+  $("#drawer").classList.remove("hidden");$("#drawerBackdrop").classList.remove("hidden");
+  $("[data-dashboard-night-program-detail]")?.addEventListener("click",()=>openAfterschoolProgramDrawer(program.id||program.programId));
+}
+function openDashboardNightSlot(day,slot){
+  if(slot==="after"){
+    const programs=dashboardAfterProgramsForDay(day);
+    $("#drawerKicker").textContent="AFTER SCHOOL · WEEK";$("#drawerTitle").textContent=`방과후 · ${day}`;
+    $("#drawerBody").innerHTML=programs.length?`<div class="dashboard-after-list">${programs.map(p=>`<button data-program="${escapeHtml(p.id||p.programId||"")}"><span><b>${escapeHtml(p.actualTitle||p.title||"방과후")}</b><small>${escapeHtml(p.time||"시간 미등록")} · ${escapeHtml(p.place||"교실 미등록")} · ${escapeHtml(p.teacher||"담당교사 미등록")}</small></span><em>${(p.students||[]).length}명 ›</em></button>`).join("")}</div>`:`<div class="query-empty"><b>등록된 방과후 강좌가 없습니다.</b><small>${day} 기준</small></div>`;
+    $("#drawer").classList.remove("hidden");$("#drawerBackdrop").classList.remove("hidden");
+    $("#drawerBody").querySelectorAll('[data-program]').forEach(btn=>btn.onclick=()=>openProgramDrawer(btn.dataset.program));
+    return;
+  }
+  const groups=dashboardNightStudentGroups(day,slot),classes=Array.from({length:9},(_,i)=>String(i+1));
+  const total=[...groups.values()].reduce((sum,m)=>sum+m.size,0);
+  $("#drawerKicker").textContent="NIGHT STUDY · CLASS ROSTER";$("#drawerTitle").textContent=`${slot} · ${day}`;
+  $("#drawerBody").innerHTML=`<div class="history-summary positive"><span><small>기준일</small><b>${escapeHtml(day)}</b></span><span><small>시간대</small><b>${escapeHtml(slot)}</b></span><span><small>학생 수</small><b>${total}명</b></span></div><p class="dashboard-night-guide">반별 자습 인원을 한 화면에서 확인합니다.</p><div class="dashboard-night-class-grid">${classes.map(cls=>{const members=[...(groups.get(cls)?.values()||[])].sort((a,b)=>String(a.studentNo||'').localeCompare(String(b.studentNo||''),'ko'));return `<section><header><b>${cls}반</b><span>${members.length}명</span></header><div>${members.length?members.map(m=>`<button data-dashboard-night-student="${escapeHtml(attendanceStudentKey(m))}" data-dashboard-night-student-day="${escapeHtml(day)}" data-dashboard-night-student-slot="${escapeHtml(slot)}"><b>${escapeHtml(m.studentNo||"")} ${escapeHtml(m.name||"")}</b></button>`).join(""):'<small>참여 없음</small>'}</div></section>`;}).join("")}</div><div class="drawer-actions"><button class="btn primary" data-night-attendance-date="${escapeHtml(day)}">상세보기</button></div>`;
+  $("#drawer").classList.remove("hidden");$("#drawerBackdrop").classList.remove("hidden");
+  $("#drawerBody [data-night-attendance-date]")?.addEventListener("click",()=>{attendanceViewDate=day;nightViewMonth=day.slice(0,7);window.__uepNightRequestedSlot=slot;closeDrawer();navigate("attendance");attendanceMode="night";render("attendance");window.scrollTo(0,0);requestAnimationFrame(()=>toast(`${day} ${slot} 야자출결로 이동했습니다.`));});
+  $("#drawerBody").querySelectorAll('[data-dashboard-night-student]').forEach(btn=>btn.onclick=()=>openNightAttendanceDetail(btn.dataset.dashboardNightStudent,btn.dataset.dashboardNightStudentDay,btn.dataset.dashboardNightStudentSlot));
+}
+
+function dashboardPersonalWeekMarkup(){
+  const {week,days}=personalTimetableData();
+  const status=schoolPeriodStatus(new Date());
+  const todayIndex=Math.max(0,Math.min(4,(today.getDay()+6)%7));
+  const maxPeriods=Math.max(7,Array.isArray(week)?week.length:0);
+  if(!Array.isArray(week)||!week.some(row=>Array.isArray(row)&&row.some(Boolean))){
+    return `<div class="uep-week-timetable-empty"><span>◷</span><b>내 주간시간표 연결 준비</b><small>컴시간 교사시간표가 연결되면 월~금 수업이 이곳에 표시됩니다.</small><button data-page="timetable">시간표 연결 확인</button></div>`;
+  }
+  const heads=(days?.length?days:["월","화","수","목","금"]).slice(0,5);
+  const cells=[];
+  for(let period=1;period<=maxPeriods;period+=1){
+    cells.push(`<div class="uep-week-period"><b>${period}</b><small>${escapeHtml(periodTimeLabel(period)||"")}</small></div>`);
+    for(let d=0;d<5;d+=1){
+      const raw=week[period-1]?.[d]||"";
+      const [subject,room,flag]=String(raw).split("|");
+      const current=d===todayIndex&&status.index===period-1;
+      const classColor=timetableClassColorClass(room);
+      cells.push(`<button class="uep-week-class personal-order ${raw?"has-class":"is-empty"} ${classColor} ${current?"is-current":""} ${flag==="changed"?"is-changed":""}" data-page="timetable"><b>${escapeHtml(room||"-")}</b><small>${escapeHtml(subject||"")}</small>${current?'<i aria-label="현재 교시"></i>':''}${flag==="changed"?'<em>변동</em>':''}</button>`);
+    }
+  }
+  return `<div class="uep-week-timetable"><div class="uep-week-corner">교시</div>${heads.map((day,i)=>`<div class="uep-week-head ${i===todayIndex?"today":""}"><b>${escapeHtml(String(day).replace(/요일/g,""))}</b></div>`).join("")}${cells.join("")}</div>`;
+}
+
+function currentTeacherAccessScope(){
+  const role=currentRoleId();
+  const teacher=currentLoginTeacherName();
+  const profile=currentUserProfile();
+  const defaultGrade=String(profile.grade||state?.settings?.grade||state?.settings?.neis?.grade||1);
+  const homeroomRow=(SOURCE_REFERENCE_DATA?.homeroom||[]).find(row=>String(row?.[2]||'').trim()===teacher);
+  const grade=String(profile.grade||homeroomRow?.[0]||defaultGrade);
+  const classNo=String(profile.classNo||homeroomRow?.[1]||state?.settings?.neis?.classNo||'');
+  if(role==='grade_head'||role==='grade_manager') return {role,teacher,grade,classNo:'',label:`${grade}학년 전체 조회`};
+  if(role==='admin'||role==='vice_principal'||role==='principal') return {role,teacher,grade:'',classNo:'',label:'학교 전체 조회'};
+  if(role==='homeroom') return {role,teacher,grade,classNo,label:classNo?`${grade}학년 전체 조회 · ${classNo}반 업무수정`:`${grade}학년 전체 조회`};
+  return {role,teacher,grade,classNo,label:`${grade}학년 조회`};
+}
+function recordGradeClass(row){
+  const studentNo=String(row?.studentNo||row?.number||row?.studentNumber||'').replace(/\D/g,'');
+  const grade=String(row?.grade||row?.gradeNo||row?.studentGrade||(studentNo.length>=4?studentNo[0]:'')||'');
+  let classNo=String(row?.classNo||row?.className||row?.class||'').replace(/[^0-9]/g,'');
+  if(!classNo&&studentNo.length>=4) classNo=String(Number(studentNo.slice(1,3))||'');
+  return {grade,classNo};
+}
+function filterRowsByCurrentTeacherScope(rows){
+  const scope=currentTeacherAccessScope();
+  if(!Array.isArray(rows))return [];
+  if(!scope.grade&&!scope.classNo)return rows.slice();
+  return rows.filter(row=>{
+    const gc=recordGradeClass(row);
+    if(scope.grade&&gc.grade&&gc.grade!==scope.grade)return false;
+    if(scope.classNo&&gc.classNo&&String(Number(gc.classNo))!==String(Number(scope.classNo)))return false;
+    return true;
+  });
+}
+function dashboardGradeScope(){
+  const profile=currentUserProfile();
+  const scope=currentTeacherAccessScope();
+  const grade=String(profile.grade||scope.grade||state?.settings?.neis?.grade||1);
+  return {grade,label:`${grade}학년 전체`};
+}
+function filterRowsForDashboardStatus(rows){
+  const scope=dashboardGradeScope();
+  if(!Array.isArray(rows))return [];
+  return rows.filter(row=>{
+    const gc=recordGradeClass(row);
+    return !scope.grade||!gc.grade||String(gc.grade)===String(scope.grade);
+  });
+}
+function dashboardOwnClassNo(){
+  const profile=currentUserProfile();
+  if(profile.classNo)return String(Number(profile.classNo));
+  const teacher=currentLoginTeacherName();
+  const row=(SOURCE_REFERENCE_DATA?.homeroom||[]).find(item=>String(item?.[2]||'').trim()===teacher);
+  return row?.[1]?String(Number(row[1])):'';
+}
+function resolveDashboardStudent(row){
+  const students=Array.isArray(readonlyCache?.students)?readonlyCache.students:[];
+  const ids=[row?.studentId,row?.studentID,row?.id,row?.studentNo,row?.studentNumber].map(value=>String(value||'').trim()).filter(Boolean);
+  const name=String(row?.name||row?.studentName||row?.displayName||'').trim();
+  const gc=recordGradeClass(row);
+  return students.find(student=>{
+    const studentIds=[student?.id,student?.studentId,student?.studentID,student?.studentNo,student?.studentNumber].map(value=>String(value||'').trim()).filter(Boolean);
+    if(ids.some(id=>studentIds.includes(id)))return true;
+    if(name&&name===String(student?.name||student?.studentName||student?.displayName||'').trim()){
+      const studentGc=recordGradeClass(student);
+      return (!gc.grade||!studentGc.grade||gc.grade===studentGc.grade)&&(!gc.classNo||!studentGc.classNo||String(Number(gc.classNo))===String(Number(studentGc.classNo)));
+    }
+    return false;
+  })||null;
+}
+function normalizeDashboardStudentRow(row){
+  const student=resolveDashboardStudent(row);
+  const studentNo=student?.studentNo||row?.studentNo||row?.studentNumber||'';
+  const name=student?.name||student?.studentName||row?.name||row?.studentName||'학생 식별정보 확인 필요';
+  const gc=recordGradeClass(student||row);
+  const classLabel=student?.className||row?.className||(gc.grade&&gc.classNo?`${gc.grade}-${Number(gc.classNo)}`:'');
+  return {...row,studentRef:student,studentNo,name,classLabel};
+}
+function dashboardReportGroups(rows){
+  const grouped=new Map();
+  rows.map(normalizeDashboardStudentRow).forEach(row=>{
+    const key=String(row.studentRef?.id||row.studentId||row.studentNo||`${row.classLabel}|${row.name}`);
+    if(!grouped.has(key))grouped.set(key,{key,studentNo:row.studentNo,name:row.name,classLabel:row.classLabel,studentRef:row.studentRef,programs:[],rows:[]});
+    const group=grouped.get(key);group.rows.push(row);
+    const program=String(row.programTitle||row.programName||row.title||row.activityName||'프로그램명 확인 필요').trim();
+    if(program&&!group.programs.includes(program))group.programs.push(program);
+  });
+  return [...grouped.values()].sort((a,b)=>String(a.studentNo).localeCompare(String(b.studentNo),'ko'));
+}
+function dashboardReportGroupState(group){
+  const total=(group?.rows||[]).length;
+  const submitted=(group?.rows||[]).filter(row=>row.submitted===true).length;
+  return {total,submitted,missing:Math.max(0,total-submitted),state:total>0&&submitted===total?"complete":submitted>0?"progress":"missing"};
+}
+function dashboardProgramIsSelectedActivity(program){
+  if(!program)return false;
+  const kind=String(program.kind||program.activityKind||program.programKind||'').trim().toLowerCase();
+  const label=[program.activityType,program.programType,program.category,program.group,program.type].map(value=>String(value||'')).join(' ');
+  if(kind==='common'||kind==='after'||/공통활동|공통\s*프로그램|방과후/.test(label))return false;
+  return kind==='selected'||kind==='general'||/선택활동|선택\s*프로그램/.test(label);
+}
+function dashboardReportStatusRows(){
+  const rows=[];
+  const programs=(readonlyCache?.programs||[]).filter(program=>dashboardProgramIsSelectedActivity(program));
+  const reports=readonlyCache?.programReports||readonlyCache?.reports||[];
+  programs.forEach(program=>{
+    const programTitle=String(program.recordTitle||program.actualTitle||program.title||'프로그램명 확인 필요').trim();
+    (program.students||[]).forEach(student=>{
+      // UEP 0.82.05: explicit report setting/form/data connection, or an actually submitted report,
+      // is the only evidence that this student-program pair belongs to the report target population.
+      if(!programRequiresStudentReport(program,student,reports))return;
+      const matchedReport=resolveStudentProgramReport(program,student,reports);
+      const submitted=Boolean(matchedReport&&matchedReport.submitted!==false);
+      rows.push({
+        studentId:student.studentId||student.id||'',
+        studentNo:student.studentNo||student.number||'',
+        name:student.name||student.studentName||'',
+        classNo:student.classNo||student.className||'',
+        programId:program.programId||program.id||'',
+        programTitle,
+        activityKind:'선택활동',
+        submitted,
+        reportId:matchedReport?.id||'',
+        reportRef:matchedReport||null,
+        status:submitted?'제출 완료':'미제출'
+      });
+    });
+  });
+  if(rows.length)return rows;
+  // Fallback: if program roster metadata is temporarily unavailable, show submitted normalized reports only.
+  return reports.filter(report=>dashboardProgramIsSelectedActivity(report)).map(report=>({
+    ...report,
+    programTitle:report.programTitle||report.programName||report.reportGroup||'프로그램명 확인 필요',
+    activityKind:'선택활동',
+    submitted:report.submitted!==false&&Boolean(report.id||report.reportId||report.submittedAt||report.content)
+  }));
+}
+function officialAttendanceRowsForDate08162(date){
+  // __UEP_08162_OFFICIAL_SINGLE_DATE_SOURCE__
+  const key=String(date||'').slice(0,10);
+  return (readonlyCache?.officialAttendance||[]).filter(row=>String(row?.date||'').slice(0,10)===key);
+}
+function dashboardAdmissionRows(...keys){
+  for(const key of keys){const rows=readonlyCache?.[key];if(Array.isArray(rows))return rows;}
+  return [];
+}
+function dashboardAdmissionEnabled(row){return String(row?.['사용여부']??row?.use??'Y').toUpperCase
+===== 참여</ @ 995548 =====
+rue)}<div class="subject-term-groups">${subjectTermMarkup(visibleSubjectTerms)||(!hiddenSubjectTerms.length?'<p>선택과목 자료 없음</p>':'')}${hiddenSubjectTerms.length?`<details class="subject-more-details no-print"><summary>3학년 선택과목 더보기 <span>${hiddenSubjectCount}과목</span></summary><div class="subject-more-content">${subjectTermMarkup(hiddenSubjectTerms)}</div></details>`:''}</div></section>${studentCounselHistoryMarkup(live)}</div></div>`;
+  $("#drawer").classList.add("student-expanded","student-dashboard-drawer");$("#drawer").classList.remove("hidden");$("#drawerBackdrop").classList.remove("hidden");
+  $("#drawerBody #printStudentDashboard")?.addEventListener("click",()=>printStudentDashboard(live));
+  $("#drawerBody")?.querySelectorAll(`[data-copy-student-email]`).forEach(button=>button.onclick=async()=>{try{await navigator.clipboard.writeText(button.dataset.copyStudentEmail||"");toast("학생 이메일을 복사했습니다.");}catch{toast("이메일 복사에 실패했습니다.");}});
+  $("#drawerBody")?.querySelectorAll(`[data-edit-contact]`).forEach(button=>button.onclick=()=>{const field=button.dataset.editContact;const labels={phone:"학생 휴대전화번호",email:"학생 이메일",guardian1Phone:`${live.guardian1Relation||"보호자1"} 휴대전화번호`,guardian2Phone:`${live.guardian2Relation||"보호자2"} 휴대전화번호`};editStudentContact(sourceLive,field,labels[field]||"연락정보",index,button);});
+  $("#drawerBody")?.querySelectorAll('[data-reveal-student-card]').forEach(button=>button.onclick=()=>{studentSensitiveRevealKeys.add(sensitiveRevealKey(live,button.dataset.revealStudentCard));openStudentDrawer(index);});
+  $('#drawerBody')?.querySelectorAll('[data-open-student-report]').forEach(button=>button.onclick=()=>openSubmittedProgramReport(button.dataset.openStudentReport, live));
+  $('#drawerBody')?.querySelector('[data-open-participation-dashboard]')?.addEventListener('click',()=>{
+    $('#drawerBody').innerHTML=`<div class="student-dashboard-v424 student-participation-dashboard"><header class="student-dashboard-head"><div><small>${escapeHtml(live.className)} ${escapeHtml(live.number)}번 · ${escapeHtml(live.status||'재학')}</small><h2>${escapeHtml(live.name)} 참여이력·보고서</h2>${studentAdmissionBadgesMarkup(live)}${studentManagementSummaryMarkup(live,bundle)}</div><div class="student-dashboard-head-actions no-print"><div class="student-dashboard-switch"><button type="button" data-back-student-dashboard>학생 대시보드</button><button type="button" class="active">참여이력·보고서</button></div></div></header><section class="student-participation-summary"><div><small>전체 참여</small><b>${participationPrograms.length}</b></div><div><small>선택활동</small><b>${selectedCount}</b></div><div><small>공통활동</small><b>${commonCount}</b></div><div><small>방과후·야간심화</small><b>${afterCount}</b></div><div><small>제출보고서</small><b>${submittedReportCount}</b></div></section><section class="student-program-history participation-full"><div class="student-section-title"><div><h4>참여 프로그램 전체 이력</h4><p>프로그램별 참여 상태와 보고서 제출 여부를 한 화면에서 확인합니다.</p></div><div class="program-count-badges"><span>선택활동 ${selectedCount}</span><span>공통활동 ${commonCount}</span><span>방과후 ${afterCount}</span><span>제출보고서 ${submittedReportCount}</span></div></div><p class="student-program-rule">선택프로그램·방과후학교는 참여한 모든 내역, 공통프로그램은 보고서 제출 활동만 표시합니다. 기존 보고서 제출 여부와 보고서 보기 기능은 그대로 유지됩니다.</p><div class="student-program-list student-program-grid">${programMarkup}${unmatchedReportMarkup}</div></section></div>`;
+    $('#drawerBody')?.querySelector('[data-back-student-dashboard]')?.addEventListener('click',()=>openStudentDrawer(index));
+    $('#drawerBody')?.querySelectorAll('[data-open-student-report]').forEach(button=>button.onclick=()=>openSubmittedProgramReport(button.dataset.openStudentReport, live));
+    $('#drawerBody')?.querySelectorAll('[data-report-tag-detail]').forEach(button=>button.onclick=()=>openReportTagDetail(button.dataset.reportTagDetail));
+  });
+  $('#drawerBody')?.querySelectorAll('[data-report-tag-detail]').forEach(button=>button.onclick=()=>openReportTagDetail(button.dataset.reportTagDetail));
+  const openStudentHubOverlay=(kind,options={})=>{
+    const labels={records:'활동·생활기록부',curriculum:'선택과목',official:'공결',late:'지각',night:'야자출결',program:'프로그램',score:'성적',admission:'입시'};
+    let body='';
+    if(kind==='records'){
+      body=`<div class="student-hub-list"><h4>활동 이력</h4>${bundle.activities.map(x=>`<article><b>${escapeHtml(x.title||x.type||'활동')}</b><span>${escapeHtml([x.area,x.date,x.role,x.organization].filter(Boolean).join(' · '))}</span></article>`).join('')||'<p>연결 자료가 없습니다.</p>'}<h4>최종 기록</h4>${bundle.finalRecords.map(x=>`<article><b>${escapeHtml(x.area||x.type||'기록')}</b><span>${escapeHtml(x.content||x.text||x.record||'')}</span></article>`).join('')||'<p>저장된 최종 기록이 없습니다.</p>'}</div>`;
+    }else if(kind==='curriculum'){
+      body=`<div class="student-hub-list"><h4>진로희망</h4><article><b>${escapeHtml(careerHope)}</b><span>선택과목 응답 기준</span></article><h4>학기별 선택과목</h4>${subjectByTerm.map(group=>`<article><b>${escapeHtml(group.term)}</b><span>${escapeHtml(group.rows.map(x=>x.subject).join(' · '))}</span></article>`).join('')||'<p>선택과목 자료가 없습니다.</p>'}</div>`;
+    }else if(kind==='official'||kind==='late'||kind==='night'){
+      const rows=kind==='official'?attendance.official:kind==='late'?attendance.late:attendance.night;
+      body=`<div class="student-hub-list">${rows.map(x=>`<article><b>${escapeHtml(x.date||'-')} ${escapeHtml(x.timeSlot||x.detailType||x.type||'')}</b><span>${escapeHtml([x.reasonText||x.reason,x.status,x.inputPath,x.programTitle].filter(Boolean).join(' · '))}</span></article>`).join('')||'<p>해당 출결 기록이 없습니다.</p>'}</div>`;
+    }else if(kind==='program'){
+      body=`<div class="student-hub-list">${participationPrograms.map(p=>`<article><b>${escapeHtml(p.recordTitle||p.actualTitle||p.title||'프로그램')}</b><span>${escapeHtml([p.__programGroup,p.date,p.time,p.place,p.__attendanceSummary].filter(Boolean).join(' · '))}</span></article>`).join('')||'<p>참여 프로그램 자료가 없습니다.</p>'}</div>`;
+    }else if(kind==='score'){
+      body=`<div class="student-hub-score"><div><small>최근 내신</small><b>${escapeHtml(scoreSummary.internalExam||'-')}</b><strong>${scoreSummary.internalAverage??'-'}등급</strong><em>9등급 환산 ${actualNine==null?'-':actualNine.toFixed(2)}</em></div>${mockMini}</div>`;
+    }else if(kind==='admission'){
+      let admissionRows=[];try{admissionRows=admissionBase(live.id)?.universities||admissionBase(live.id)?.rows||[];}catch{}
+      body=`<div class="student-hub-list"><article><b>현재 9등급 환산 내신</b><span>${actualNine==null?'-':actualNine.toFixed(2)}</span></article>${admissionRows.slice(0,20).map(x=>`<article><b>${escapeHtml(x.university||x.school||x.name||'대학')}</b><span>${escapeHtml([x.department||x.major,x.result||x.judgement,x.targetGrade||x.grade].filter(Boolean).join(' · '))}</span></article>`).join('')||'<p>연결된 대학 지원 가능성 자료가 없습니다.</p>'}</div>`;
+    }
+    const overlay=document.createElement('section');
+    overlay.className='student-hub-overlay';
+    overlay.innerHTML=`<div class="student-hub-overlay-card"><header><div><small>${escapeHtml(live.studentNo)} ${escapeHtml(live.name)}</small><h3>${labels[kind]||'학생 상세정보'}</h3></div><button type="button" data-close-student-hub aria-label="닫기">×</button></header><div class="student-hub-overlay-body">${body}</div>${options.page?`<footer><button type="button" class="btn secondary" data-open-full-student-page="${options.page}">전체 화면으로 열기</button></footer>`:''}</div>`;
+    $('#drawerBody').appendChild(overlay);
+    overlay.querySelector('[data-close-student-hub]').onclick=()=>overlay.remove();
+    overlay.addEventListener('click',e=>{if(e.target===overlay)overlay.remove();});
+    overlay.querySelector('[data-open-full-student-page]')?.addEventListener('click',()=>{const page=options.page;overlay.remove();closeDrawer();navigate(page);});
+  };
+  $$('[data-student-route]').forEach(button=>button.onclick=()=>{startStudentFocus(live,{drawerIndex:index,originScroll:window.scrollY});const target=button.dataset.recordTarget==='curriculum'?'curriculum':'activities';goFromStudentDashboard('records',target);});
+  $$('[data-student-attendance-target]').forEach(button=>button.onclick=()=>{const target=button.dataset.studentAttendanceTarget;startStudentFocus(live,{drawerIndex:index,originScroll:window.scrollY});goFromStudentDashboard(target==='program'?'programs':'attendance',target);});
+  $('[data-open-student-consult]')?.addEventListener('click',()=>{startStudentFocus(live,{drawerIndex:index,originScroll:window.scrollY});goFromStudentDashboard('scores','combined');});
+  $('[data-open-student-admission]')?.addEventListener('click',()=>{startStudentFocus(live,{drawerIndex:index,originScroll:window.scrollY});goFromStudentDashboard('admissions','combined');});
+  $$('[data-student-counsel-add]').forEach(button=>button.addEventListener('click',()=>{const candidate=findDashboardCounselCandidate(live.id)||{student:live,group:'student',stage:'interest'};openCounselSidePanel(live.id);}));
+  $$('[data-student-counsel-edit]').forEach(button=>button.addEventListener('click',()=>openCounselSidePanel(live.id,button.dataset.studentCounselEdit)));
+}
+
+if(!window.__uepCounselV07717Bound){
+  window.__uepCounselV07717Bound=true;
+  document.addEventListener('change',e=>{const sel=e.target.closest('[data-counsel-class-select]');if(!sel)return;studentCounselClassFilter=sel.value;studentCounselSelectedStudentId='';studentPageMode='counsel';render('students');});
+  document.addEventListener('click',e=>{const b=e.target.closest('[data-counsel-group]');if(!b)return;window.__uepCounselGroupFilter=b.dataset.counselGroup;studentCounselSelectedStudentId='';studentPageMode='counsel';render('students');});
+  document.addEventListener('click',e=>{const b=e.target.closest('[data-counsel-student-clear]');if(!b)return;studentCounselSelectedStudentId='';studentPageMode='counsel';render('students');});
+  document.addEventListener('click',e=>{const b=e.target.closest('[data-counsel-write]');if(!b)return;openCounselSidePanel(b.dataset.counselWrite);});
+  document.addEventListener('click',e=>{const b=e.target.closest('[data-counsel-open-dashboard]');if(!b)return;selectedStudentId=b.dataset.counselOpenDashboard||'';const idx=(readonlyCache?.students||[]).findIndex(x=>String(x.id)===String(selectedStudentId));if(idx>=0)studentDashboardIndex=idx;studentPageMode='dashboard';render('students');});
+  let dragged=null;
+  document.addEventListener('dragstart',e=>{const c=e.target.closest('.uep-quick-card-v0755');if(!c)return;dragged=c;e.dataTransfer.effectAllowed='move';});
+  document.addEventListener('dragover',e=>{const c=e.target.closest('.uep-quick-card-v0755');if(!dragged||!c||c===dragged||c.dataset.quickKind!==dragged.dataset.quickKind)return;e.preventDefault();const r=c.getBoundingClientRect();c.parentNode.insertBefore(dragged,e.clientY<r.top+r.height/2?c:c.nextSibling);});
+  document.addEventListener('dragend',()=>{if(!dragged)return;const kind=dragged.dataset.quickKind,host=dragged.parentNode;const order=[...host.querySelectorAll('.uep-quick-card-v0755')].map(x=>x.dataset.reference);const saved=JSON.parse(localStorage.getItem('uepQuickOrder')||'{}');saved[kind]=order;localStorage.setItem('uepQuickOrder',JSON.stringify(saved));dragged=null;});
+}
+function bindCommonCounselButtons(){
+  $('#scoreCounselButton')?.addEventListener('click',()=>{const id=$('#scoreStudent')?.value||selectedStudentId;if(!id)return toast('상담할 학생을 먼저 선택해 주세요.');openCounselSidePanel(id);});
+  $('#admissionCounselButton')?.addEventListener('click',()=>{const id=$('#admissionStudent')?.value||selectedStudentId;if(!id)return toast('상담할 학생을 먼저 선택해 주세요.');openCounselSidePanel(id);});
+}
+function applyStorageLocationBadges(){
+  const configs=[["#neisSettingsForm","local","로컬 저장"],["#programSheetForm","local","로컬 저장"],["#updateSettingsForm","local","로컬 저장"],["#programEditor","local","로컬 저장"],["#programOverrideEditor","local","로컬 저장"],["#issueReportForm","local","로컬 저장"],["#studentGuidanceForm","sheet","시트 저장"],["#officialEditorForm","sheet","시트 저장"],["#noticeEditorForm","sheet","시트 저장"]];
+  configs.forEach(([selector,kind,label])=>{const root=$(selector);if(!root||root.querySelector('.storage-location-inline'))return;const button=[...root.querySelectorAll('button')].find(b=>/저장|등록|불러오기/.test(b.textContent||''));if(!button)return;const badge=document.createElement('em');badge.className=`storage-badge ${kind} storage-location-inline`;badge.textContent=label;badge.title=kind==='local'?'이 PC에만 저장됩니다':kind==='sheet'?'UEP 표준 Google 시트에 저장됩니다':'중앙 승인 저장소에 저장됩니다';button.insertAdjacentElement('beforebegin',badge);});
+}
+function selectStudentDashboardById(studentId){
+  studentSensitiveRevealKeys.clear();
+  const students=readonlyCache?.students||[];
+  const key=String(studentId||'').trim();
+  const idx=students.findIndex(student=>String(student.id||'')===key || String(student.studentNo||'')===key);
+  if(idx<0)return false;
+  studentDashboardIndex=idx;
+  selectedStudentId=students[idx].id||students[idx].studentNo||"";
+  studentPageMode='dashboard';
+  window.__uepStudentDashboardSwitchToken=(window.__uepStudentDashboardSwitchToken||0)+1;
+  return true;
+}
+function switchStudentDashboard(studentId){
+  const previous=String(selectedStudentId||'');
+  if(!selectStudentDashboardById(studentId))return false;
+  const current=(readonlyCache?.students||[])[studentDashboardIndex];
+  if(current&&String(current.id||current.studentNo||'')!==previous)touchStudentCardHeat(current);
+  render('students');
+  window.scrollTo(0,0);
+  return true;
+}
+function uepBindOnce(el,key,event,handler){if(!el)return false;const attr='uepBound'+key;if(el.dataset[attr])return false;el.dataset[attr]='1';el.addEventListener(event,handler);return true;}
+function bindPage(page) {
+  requestAnimationFrame(()=>{applyStorageLocationBadges();bindCommonCounselButtons();applyPrivacyMode();const pb=document.getElementById('privacyModeButton');if(pb&&!pb.dataset.bound){pb.dataset.bound='1';pb.addEventListener('click',togglePrivacyMode);}});
+  if(page==="inputs")bindInputCenter();
+  if(page==="records"&&(recordMode==="curriculum"||recordMode==="sdgs"))requestAnimationFrame(()=>{
+    $$('[data-curriculum-workspace]').forEach(b=>b.onclick=async()=>{/* __UEP_08163_CURRICULUM_BINDINGS__ */const next=b.dataset.curriculumWorkspace;if((next==='subjects'||next==='cross')&&!(await unlockSubjectConfidential()))return;curriculumWorkspaceMode=next;render('records');});
+    $$('[data-record-class]').forEach(b=>b.onclick=()=>{recordClassNo=b.dataset.recordClass;recordStudentId='';render('records');});
+    $$('[data-record-query]').forEach(b=>b.onclick=()=>{recordQueryMode=b.dataset.recordQuery||'class';render('records');});
+    $$('[data-record-student]').forEach(b=>b.onclick=()=>openCurriculumStudentSidePanel(b.dataset.recordStudent));
+    $('[data-curriculum-error-only]')?.addEventListener('click',()=>{curriculumErrorOnly=!curriculumErrorOnly;curriculumErrorGradeScope=curriculumErrorOnly?'all':'';recordClassNo='all';recordStudentId='';render('records');});$$('[data-error-grade-scope-08190]').forEach(b=>b.onclick=()=>{curriculumErrorOnly=true;curriculumErrorGradeScope=b.getAttribute('data-error-grade-scope-08190')||'all';recordClassNo='all';recordStudentId='';render('records');});
+    /* UEP_08190_REMOVE_ERROR_TYPE_BINDER */
+  $('[data-cross-class]')?.addEventListener('change',e=>{curriculumCrossClass=e.target.value;render('records');});
+  $('[data-cross-type]')?.addEventListener('change',e=>{curriculumCrossType=e.target.value;render('records');});
+  $('[data-cross-sort]')?.addEventListener('change',e=>{curriculumCrossSort=e.target.value;render('records');});
+  $$('[data-cross-student]').forEach(b=>b.onclick=()=>openCurriculumStudentSidePanel(b.dataset.crossStudent));
+    $$('[data-curriculum-term]').forEach(b=>{b.onclick=e=>{e.preventDefault();e.stopPropagation();curriculumTermFilter=b.dataset.curriculumTerm||'2-1';curriculumSubjectKey='';render('records');};});/* UEP_08194_TERM_BINDER */
+    $$('[data-curriculum-subject]').forEach(b=>b.onclick=()=>{curriculumSubjectKey=b
+===== 참여</ @ 1095456 =====
+Key(program,student);
+  return state.afterAttendanceOverrides?.[key]||normalizeAfterAttendanceStatus(student.attendance||student.result||student.participation);
+}
+const AFTER_ATTENDANCE_STATUSES=["신청","수강","불참(미인정)","불참(결석)","불참(조퇴)","불참(인정)"];
+
+function openAfterschoolProgramDrawer(id) {
+  const sourceProgram = [...afterSchoolProgramGroups(),...groupedAfterSchoolCourses(afterSchoolProgramGroups())].find((item) => item.id === id);
+  const program = programWithOverride(sourceProgram);
+  if (!program) return;
+  const students = (program.students || []).slice().sort((a,b)=>Number(programStudentGrade(a))-Number(programStudentGrade(b))||Number(a.className)-Number(b.className)||Number(String(a.studentNo||"").slice(-2))-Number(String(b.studentNo||"").slice(-2)));
+  const statusCounts=Object.fromEntries(AFTER_ATTENDANCE_STATUSES.map(status=>[status,0]));
+  students.forEach(student=>{const status=resolvedAfterAttendanceStatus(program,student);statusCounts[status]=(statusCounts[status]||0)+1;});
+  const statusSummary=AFTER_ATTENDANCE_STATUSES.map(status=>`<span class="after-status-kpi"><b>${escapeHtml(status)}</b><em>${statusCounts[status]||0}</em></span>`).join("");
+  $("#drawerKicker").textContent = "AFTER-SCHOOL PROGRAM";
+  $("#drawerTitle").textContent = program.title;
+  $("#drawerBody").innerHTML = `<div class="program-name-pair"><div><small>실제 프로그램명</small><b>${escapeHtml(program.actualTitle||program.title)}</b></div><div><small>생활기록부 명칭</small><b class="not-record-target">생활기록부 기록 대상 아님</b></div></div><div class="program-summary afterschool-program-summary"><div><b>${program.status==="예정"?"예정 수업일":"실제 수업일"}</b><span>${escapeHtml(program.date || "-")} ${escapeHtml(weekdayLabelFromKey(program.date,true))}</span></div><div><b>회차</b><span>${escapeHtml(program.sessionNo ? `${program.sessionNo}회차` : program.sessionId || "-")}</span></div><div><b>운영시간</b><span>${escapeHtml(program.time || "-")}</span></div><div><b>수업상태</b><span>${escapeHtml(program.status || "예정")}</span></div>${program.changeType?`<div><b>변경유형</b><span>${escapeHtml(program.changeType)}</span></div>`:""}${program.originalDate?`<div><b>원예정일</b><span>${escapeHtml(program.originalDate)}</span></div>`:""}<div><b>교과</b><span>${escapeHtml(program.subject || "-")}</span></div><div><b>담당부서</b><span>${escapeHtml(program.department || "-")}</span></div><div><b>방과후 유형</b><span>${escapeHtml(program.afterType || program.type || "-")}</span></div><div><b>출석부 인원</b><span>${students.length}명</span></div><div><b>출석·참여</b><span>${program.attendedCount}명</span></div><div><b>학생 보고서</b><span>없음</span></div><div><b>야자 중복</b><span>${programHasNightStudyImpact(program)?"자동 제외":"해당 없음"}</span></div></div><div class="program-notice ${programHasNightStudyImpact(program)?"attendance-linked":""}"><b>${programHasNightStudyImpact(program)?"야자출결 중복 처리":"방과후 프로그램"}</b><p>${programHasNightStudyImpact(program)?"결강·휴강·취소가 아닌 실제 차시가 오후자습·야자와 겹치면 출석부 학생의 해당 시간에 실제 강좌명으로 표시합니다.":"수요일 수업은 야자 미운영일이므로 야자출결에 영향을 주지 않습니다. 일반 프로그램과 동일하게 운영일·출석부 인원·출결을 관리합니다."}</p></div><div class="drawer-section"><div class="section-title-row"><h4>학생 출석</h4><small>${program.sessionNo?`${escapeHtml(program.sessionNo)}차시 기준`:`강좌 신청 명단`}</small></div><div class="after-status-summary">${statusSummary}</div>${programRosterTabs(students)}<div class="participant-list participant-afterschool"><div class="participant-head"><em>번호</em><b>학번</b><b>이름</b><b>반</b><b>학생 출석</b></div>${students.map((student,index)=>{const selected=resolvedAfterAttendanceStatus(program,student);return `<div data-program-student-grade="${escapeHtml(programStudentGrade(student))}"><em>${index+1}</em><span>${escapeHtml(student.studentNo||student.number||"-")}</span><b>${escapeHtml(student.name||"-")}</b><span>${escapeHtml(student.className||"-")}반</span><select class="after-attendance-select" data-after-attendance-student="${escapeHtml(student.studentId||student.studentNo||student.number||student.name||"")}">${AFTER_ATTENDANCE_STATUSES.map(status=>`<option value="${escapeHtml(status)}" ${status===selected?"selected":""}>${escapeHtml(status)}</option>`).join("")}</select></div>`;}).join("") || '<div class="empty-state"><b>출석부에 등록된 학생이 없습니다.</b></div>'}</div><p class="safe-note">불참(인정)은 공식 행사·공결 등으로 실제 참여하지 않았지만 인정 처리하는 상태입니다.</p></div><section class="program-student-alert"><div class="section-title-row"><div><small>STUDENT NOTICE</small><h4>학생 안내·발송</h4></div></div><div class="program-alert-groups compact"><div class="program-alert-group"><small>PERSONAL · 개인 발송</small><b>방과후 참여학생 안내</b><p>복사·발송 전에 내용을 먼저 확인하고 수정합니다.</p><div><button class="btn primary" id="programEmailButton">학생 알림 메일</button><button class="btn secondary" id="programIndividualNoticeButton">개인 메시지</button><button class="btn secondary" id="programSmsButton">문자 문구</button></div></div><div class="program-alert-group"><small>NOTICE · 공지</small><b>공지용 문구</b><p>리로스쿨 문구도 확인 후 복사합니다.</p><div><button class="btn secondary" id="programRiroButton">리로 개인문구</button><button class="btn secondary" id="programFamilyLetterButton">리로 가정통신문</button></div></div></div><p class="safe-note">출석 QR은 스캔 결과 저장 기능이 연결되어 있지 않아 제거했습니다.</p></section><div class="program-actions"><button class="btn secondary" id="overrideAfterProgramButton">운영정보 수정</button><button class="btn primary" id="printAfterProgramButton">출석부 PDF·인쇄</button><button class="btn secondary" id="excelAfterProgramButton">출석부 Excel</button></div><p class="drawer-note">방과후 프로그램은 학생 보고서·생활기록부 기록 대상이 아닙니다. 야자와 겹치는 경우 실제 프로그램을 학사보다 우선 표시하고 중복 출결을 제거합니다.</p>`;
+  $("#drawer").classList.add("program-expanded"); $("#drawer").classList.remove("hidden"); $("#drawerBackdrop").classList.remove("hidden");
+  bindProgramRosterGradeFilter();
+  $$(".after-attendance-select").forEach(select=>select.addEventListener("change",async()=>{
+    const student=students.find(row=>String(row.studentId||row.studentNo||row.number||row.name||"")===String(select.dataset.afterAttendanceStudent||""));
+    if(!student)return;
+    state.afterAttendanceOverrides=state.afterAttendanceOverrides||{};
+    state.afterAttendanceOverrides[afterAttendanceOverrideKey(program,student)]=select.value;
+    await save();
+    openAfterschoolProgramDrawer(id);
+    toast(`${student.studentNo||""} ${student.name||"학생"} · ${select.value}`);
+  }));
+  $("#overrideAfterProgramButton")?.addEventListener("click",()=>openConnectedProgramOverrideEditor(id,program,true));
+  $("#programEmailButton")?.addEventListener("click",()=>openProgramMessageComposer({...program,students},'email'));
+  $("#programIndividualNoticeButton")?.addEventListener("click",()=>openProgramMessageComposer({...program,students},'individual'));
+  $("#programSmsButton")?.addEventListener("click",()=>openProgramMessageComposer({...program,students},'sms'));
+  $("#programRiroButton")?.addEventListener("click",()=>openProgramMessageComposer({...program,students},'riro'));
+  $("#programFamilyLetterButton")?.addEventListener("click",()=>openProgramMessageComposer({...program,students},'family'));
+  $("#printAfterProgramButton")?.addEventListener("click",()=>printProgram({...program,students}));
+  $("#excelAfterProgramButton")?.addEventListener("click",()=>exportProgramAttendanceExcel({...program,students}));
+}
+
+async function addProgramPhotos(programId) {
+  if (!window.schoolBoard?.selectProgramPhotos) return toast("사진 선택 기능을 사용할 수 없습니다.");
+  const result = await window.schoolBoard.selectProgramPhotos(programId);
+  if (!result?.ok || !Array.isArray(result.files) || !result.files.length) return;
+  state.programEvidence = state.programEvidence || {};
+  const current = Array.isArray(state.programEvidence[programId]) ? state.programEvidence[programId] : [];
+  const known = new Set(current.map(file=>file.path));
+  state.programEvidence[programId] = [...current, ...result.files.filter(file=>!known.has(file.path))];
+  await save();
+  openProgramDrawer(programId);
+  toast(`${result.files.length}장의 사진을 등록했습니다.`);
+}
+
+
+function programNoticeText(program) {
+  const title=program.actualTitle||program.title||"프로그램";
+  const lines=[`[UEP 프로그램 안내] ${title}`,`운영일: ${program.date||"미정"}`,program.sessionNo?`회차: ${program.sessionNo}회차`:"",program.status?`수업상태: ${program.status}`:"",program.changeType?`일정변경: ${program.changeType}${program.originalDate?` (원예정일 ${program.originalDate})`:""}`:"",`시간: ${program.time||"미정"}`,`장소: ${program.place||"미정"}`,program.subject?`교과: ${program.subject}`:"",program.department?`담당부서: ${program.department}`:"",program.teacher?`담당교사: ${program.teacher}`:"",program.memo?`안내: ${program.memo}`:"",program.reportFormUrl?`보고서 작성: ${program.reportFormUrl}`:""].filter(Boolean);
+  return lines.join("\n");
+}
+function programStudentMasters(program){
+  const masters=readonlyCache?.students||[];
+  return (program.students||[]).map(item=>masters.find(s=>String(s.id)===String(item.studentId)||String(s.studentNo)===String(item.studentNo||item.number))||item);
+}
+function sendProgramEmailNotice(program){
+  const recipients=[...new Set(programStudentMasters(program).map(s=>String(s.email||"").trim()).filter(v=>v&&v!=="-"&&/@/.test(v)))];
+  if(!recipients.length)return toast("학생 이메일이 연결된 출석부 인원가 없습니다.");
+  const subject=encodeURIComponent(`[UEP] ${program.actualTitle||program.title||"프로그램"} 안내`);
+  const body=encodeURIComponent(programNoticeText(program));
+  window.open(`mailto:?bcc=${encodeURIComponent(recipients.join(","))}&subject=${subject}&body=${body}`,"_self");
+  toast(`${recipients.length}명의 메일 발송 화면을 열었습니다.`);
+}
+async function prepareProgramSmsNotice(program){
+  const rows=programStudentMasters(program).map(s=>`${s.studentNo||""}\t${s.name||""}\t${s.phone&&s.phone!=="-"?s.phone:"연락처 없음"}`);
+  const text=`${programNoticeText(program)}\n\n[출석부 인원]\n${rows.join("\n")}`;
+  try{await navigator.clipboard.writeText(text);toast("문자 발송용 안내문과 출석부 인원 연락처를 복사했습니다.");}catch{toast("클립보드 복사에 실패했습니다.");}
+}
+function openProgramAttendanceQr(program){
+  const payload=`UEP|PROGRAM|${program.programId||program.id}|${program.date||""}|${program.actualTitle||program.title||""}`;
+  const url=`https://quickchart.io/qr?size=420&text=${encodeURIComponent(payload)}`;
+  const win=window.open("","_blank","width=560,height=680");
+  if(!win)return toast("QR 창을 열 수 없습니다.");
+  win.document.write(`<!doctype html><html lang="ko"><meta charset="utf-8"><title>출석 QR</title><style>body{font-family:Malgun Gothic,sans-serif;text-align:center;padding:28px;color:#173247}img{width:420px;max-width:90%}button{padding:10px 18px}</style><h1>${escapeHtml(program.actualTitle||program.title||"프로그램")}</h1><p>${escapeHtml(program.date||"")} ${escapeHtml(program.time||"")}</p><img src="${url}" alt="출석 QR"><p>프로그램ID: ${escapeHtml(program.programId||program.id||"")}</p><button onclick="window.print()">인쇄</button></html>`);win.document.close();
+}
+function openProgramReportForm(program){
+  if(!program.reportFormUrl)return toast("운영정보 수정에서 보고서 구글폼 URL을 먼저 입력하세요.");
+  window.open(program.reportFormUrl,"_blank","noopener");
+}
+function allConnectedReports(){
+  const reports=[];
+  (readonlyCache?.students||[]).forEach(student=>(student.reports||[]).forEach(report=>reports.push({...report,__student:student})));
+  (readonlyCache?.programs||[]).forEach(program=>(program.reportReports||[]).forEach(report=>reports.push({...report,__program:program})));
+  const unique=new Map();
+  reports.forEach(report=>{if(report?.id&&!unique.has(String(report.id)))unique.set(String(report.id),report);});
+  return [...unique.values()];
+}
+function findConnectedReport(reportId, student){
+  const id=String(reportId||"");
+  return (student?.reports||[]).find(report=>String(report.id)===id)||allConnectedReports().find(report=>String(report.id)===id)||null;
+}
+function reportQuestionLabel(index){return ["참여내용","인상 깊었던 점","진로 연계","추가 탐구","성장 내용","기타 의견"][index]||`응답 ${index+1}`;}
+function reportPreviewMarkup(report, student){
+  const responses=(report.responses||[]).filter(value=>String(value||"").trim());
+  return `<div class="report-preview-internal"><header class="report-preview-head"><div><small>STUDENT REPORT · INTERNAL PREVIEW</small><h2>${escapeHtml(report.programName||"학생 프로그램 보고서")}</h2></div><span class="state">${report.submitted?"제출":"확인 필요"}</span></header><div class="report-preview-meta"><span><b>학생</b>${escapeHtml(report.studentNo||student?.studentNo||"-")} ${escapeHtml(report.name||student?.name||"")}</span><span><b>구분</b>${escapeHtml(report.kind||"-")}</span><span><b>최종 제출</b>${escapeHtml(reportSubmissionLabel(report))}</span><span><b>매칭상태</b>${escapeHtml(report.matchStatus||"-")}</span></div>${reportTagMarkup(report)}<div class="report-response-list">${responses.length?responses.map((value,index)=>`<article><h4>${escapeHtml((report.questions?.[index]||reportQuestionLabel(index)))}</h4><p>${escapeHtml(value)}</p></article>`).join(""):"<p>정규화된 보고서 응답 내용이 없습니다.</p>"}</div><div class="report-preview-actions no-print"><button class="btn primary" id="printCurrentReport">바로 인쇄·PDF</button><button class="btn secondary" id="excelCurrentReport">Excel 저장</button></div><p class="safe-note">보고서는 UEP에 이미 연결된 정규화 자료를 표시합니다. Google Sheets 원본을 새 창으로 열지 않습니다.</p></div>`;
+}
+function openSubmittedProgramReport(reportId, student){
+  const report=findConnectedReport(reportId,student); if(!report)return toast("UEP에 연결된 보고서 내용을 찾지 못했습니다.");
+  const resolvedStudent=student||report.__student||(readonlyCache?.students||[]).find(item=>String(item.id)===String(report.studentId)||String(item.studentNo)===String(report.studentNo));
+  $("#drawerKicker").textContent="REPORT · INTERNAL PREVIEW"; $("#drawerTitle").textContent=`${report.studentNo||resolvedStudent?.studentNo||""} ${report.name||resolvedStudent?.name||""}`;
+  $("#drawerBody").innerHTML=reportPreviewMarkup(report,resolvedStudent); $("#drawer").classList.remove("student-expanded","student-dashboard-drawer"); $("#drawer").classList.add("report-preview-drawer"); $("#drawer").classList.remove("hidden"); $("#drawerBackdrop").classList.remove("hidden");
+  $("#printCurrentReport").onclick=()=>printReportDocument(report,resolvedStudent);
+  $("#excelCurrentReport").onclick=()=>exportReportExcel(report,resolvedStudent);
+  $$("[data-report-tag-detail]").forEach(button=>button.onclick=()=>openReportTagDetail(button.dataset.reportTagDetail));
+}
+function printReportDocument(report,student){
+  const popup=window.open("","_blank","width=1000,height=850"); if(!popup)return toast("인쇄 창을 열 수 없습니다."); const responses=(report.responses||[]).filter(value=>String(value||"").trim());
+  popup.document.write(`<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${escapeHtml(report.studentNo||student?.studentNo||"")}_${escapeHtml(report.programName||"보고서")}</title><style>@page{size:A4 portrait;margin:14mm}*{box-sizing:border-box}body{font-family:"Malgun Gothic",sans-serif;color:#233b4d;margin:0}header{border-bottom:3px solid #65b7a8;padding-bottom:8mm;margin-bottom:7mm}h1{font-size:20pt;margin:2mm 0}.meta{display:grid;grid-template-columns:1fr 1fr;gap:2mm 8mm;background:#f4f8fa;padding:5mm;border-radius:3mm;margin-bottom:6mm}.meta b{display:inline-block;width:22mm;color:#557082}.answer{border:1px solid #cbdde5;border-radius:3mm;padding:5mm;margin:0 0 4mm;break-inside:avoid}.answer h3{font-size:11pt;color:#15947f;margin:0 0 3mm}.answer p{white-space:pre-wrap;line-height:1.65;margin:0;font-size:10pt}</style></head><body><header><small>UNHO EDUCATION PLATFORM</small><h1>${escapeHtml(report.programName||"학생 프로그램 보고서")}</h1></header><div class="meta"><span><b>학생</b>${escapeHtml(report.studentNo||student?.studentNo||"-")} ${escapeHtml(report.name||student?.name||"")}</span><span><b>최종 제출</b>${escapeHtml(reportSubmissionLabel(report))}</span><span><b>구분</b>${escapeHtml(report.kind||"-")}</span><span><b>매칭상태</b>${escapeHtml(report.matchStatus||"-")}</span></div>${responses.length?responses.map((value,index)=>`<section class="answer"><h3>${escapeHtml((report.questions?.[index]||reportQuestionLabel(index)))}</h3><p>${escapeHtml(value)}</p></section>`).join(""):"<p>표시할 응답이 없습니다.</p>"}<script>window.on
+===== 참여</ @ 1150920 =====
+}th,td{border:1px solid #9fb2bd;padding:2.6mm;text-align:center}th{background:#edf7f5}.signature{width:42mm;height:11mm}.foot{margin-top:4mm;font-size:9pt;color:#5f7380}@media print{button{display:none}}</style></head><body><div class="brand">UNHO EDUCATION PLATFORM</div><h1 class="title">${escapeHtml(program.actualTitle||program.title||'프로그램')} 학생 안내문</h1><p class="subtitle">신청 학생은 아래 운영 내용을 확인한 뒤 본인 서명란에 직접 서명하세요.</p><div class="meta"><div><b>일시</b><span>${escapeHtml([program.date,program.time].filter(Boolean).join(' · ')||'-')}</span></div><div><b>장소</b><span>${escapeHtml(program.place||'-')}</span></div><div><b>담당교사</b><span>${escapeHtml(program.teacher||'-')}</span></div><div><b>생활기록부·보고서</b><span>${recordLabel}</span></div></div><div class="notice"><b>세부 안내</b><div>${escapeHtml(program.memo||'별도 준비사항 및 안내가 없습니다.')}</div></div>${roster||'<p>참여학생 명단이 없습니다.</p>'}<p class="foot">※ 방송 안내 후 본인이 프로그램 일시·장소·내용을 확인하고 직접 서명하기 바랍니다.</p><script>window.onload=()=>window.print()<\/script></body></html>`);
+  printable.document.close();
+}
+
+function printProgram(program) {
+  const printable = window.open("", "_blank", "width=820,height=920");
+  if (!printable) return toast("인쇄 창을 열 수 없습니다.");
+  printable.document.write(
+    `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${escapeHtml(program.title)} 참여학생 명단</title><style>body{font-family:"Malgun Gothic",sans-serif;padding:38px;color:#172b3a}h1{margin:0 0 8px;font-size:25px}.meta{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin:24px 0}.meta div{border:1px solid #cad6df;padding:10px}.meta b{display:block;font-size:11px;color:#667d8f}.meta span{font-size:14px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #aebdca;padding:9px;text-align:left}th{background:#eef6f7}th:first-child,td:first-child{width:50px;text-align:center}.notice{margin-top:18px;padding:12px;background:#fff5e9}@media print{button{display:none}}</style></head><body><h1>${escapeHtml(program.title)} 참여학생 명단</h1><p>${escapeHtml(program.date)}</p><div class="meta"><div><b>시간</b><span>${escapeHtml(program.time)}</span></div><div><b>장소</b><span>${escapeHtml(program.place)}</span></div><div><b>담당교사</b><span>${escapeHtml(program.teacher)}</span></div><div><b>담당부서</b><span>${escapeHtml(program.department||"-")}</span></div><div><b>교과</b><span>${escapeHtml(program.subject||"-")}</span></div><div><b>참여인원</b><span>${program.students.length}명</span></div></div><table><thead><tr><th>번호</th><th>학번</th><th>이름</th><th>출석·참여</th></tr></thead><tbody>${program.students.map((student, index) => `<tr><td>${index + 1}</td><td>${escapeHtml(student.studentNo||student.number||"")}</td><td>${escapeHtml(student.name)}</td><td></td></tr>`).join("")}</tbody></table>${program.memo ? `<div class="notice"><b>안내</b><p>${escapeHtml(program.memo)}</p></div>` : ""}<script>window.onload=()=>window.print()<\/script></body></html>`,
+  );
+  printable.document.close();
+}
+
+function parseStudentLine(line) {
+  const trimmed = String(line || "").trim();
+  if (!trimmed) return { number: "", name: "" };
+  const parts = trimmed.includes("\t")
+    ? trimmed.split(/\t+/)
+    : trimmed.includes(",")
+      ? trimmed.split(/,+/)
+      : trimmed.split(/\s+/);
+  return { number: (parts.shift() || "").trim(), name: parts.join(" ").trim() };
+}
+
+function openProgramSheetSettings() {
+  $("#drawerKicker").textContent = "GOOGLE SHEETS";
+  $("#drawerTitle").textContent = "프로그램 시트 연결 준비";
+  $("#drawerBody").innerHTML =
+    `<form class="site-editor" id="programSheetForm"><label>구글시트 주소<input id="programSheetUrl" type="url" value="${escapeHtml(state.settings.programSheetUrl || "")}" placeholder="https://docs.google.com/spreadsheets/..."></label><label>프로그램 탭 이름<input id="programSheetName" value="${escapeHtml(state.settings.programSheetName || "프로그램")}"></label><div class="sheet-schema"><b>권장 열 구조</b><span>운영일 · 프로그램명 · 시작시간 · 종료시간 · 장소 · 담당교사 · 학번 · 이름 · 안내</span></div><button class="btn primary">연결 정보 저장</button><p class="safe-note">여기서는 주소와 탭 이름만 저장합니다. 실제 읽기·쓰기는 권한 확인과 선생님 승인 후 연결합니다.</p></form>`;
+  $("#drawer").classList.remove("hidden");
+  $("#drawerBackdrop").classList.remove("hidden");
+  $("#programSheetForm").onsubmit = async (event) => {
+    event.preventDefault();
+    state.settings.programSheetUrl = $("#programSheetUrl").value.trim();
+    state.settings.programSheetName = $("#programSheetName").value.trim() || "프로그램";
+    await save();
+    toast("시트 연결 정보를 저장했습니다.");
+    closeDrawer();
+  };
+}
+
+
+function upsertNoticeCache(payload,id){
+  readonlyCache=readonlyCache||{};readonlyCache.notices=Array.isArray(readonlyCache.notices)?readonlyCache.notices:[];
+  const normalized={...payload,id:String(id||payload.id||''),status:payload.status||'게시',detail:payload.content,date:payload.postDate,receipts:readonlyCache.notices.find(x=>String(x.id)===String(id))?.receipts||[]};
+  const index=readonlyCache.notices.findIndex(x=>String(x.id)===String(normalized.id));
+  if(index>=0)readonlyCache.notices[index]={...readonlyCache.notices[index],...normalized};else readonlyCache.notices.unshift(normalized);
+  if(Array.isArray(state.workNotices)&&state.workNotices.length){state.workNotices=[];save().catch(()=>{});}
+  return normalized;
+}
+function setNoticeBusy(form,busy,label='저장 중…'){
+  const button=form?.querySelector('button[type="submit"]');if(!button)return;
+  if(busy){button.dataset.originalText=button.textContent;button.disabled=true;button.textContent=label;form.setAttribute('aria-busy','true');}
+  else{button.disabled=false;button.textContent=button.dataset.originalText||'저장';form.removeAttribute('aria-busy');}
+}
+function openNoticeEditor(id=""){
+  const now=dateKey(today), item=(readonlyCache?.notices||[]).find(row=>String(row.id)===String(id))||{};
+  const isEdit=Boolean(item.id);
+  openDrawer(isEdit?'학교업무 공지 수정':'학교업무 공지 등록','MANUAL NOTICE · UEP ↔ 40_공지마감');
+  const noticeKind=item.noticeKind||item.type||'일반공지';
+  $("#drawerBody").innerHTML=`<form id="noticeEditorForm" class="calendar-single-editor calendar-single-editor-v426"><div class="calendar-editor-grid"><label>공지 유형<select id="noticeKind"><option ${noticeKind==='일반공지'?'selected':''}>일반공지</option><option ${noticeKind==='확인요청'?'selected':''}>확인요청</option><option ${noticeKind==='제출요청'?'selected':''}>제출요청</option><option ${noticeKind==='종례전달'?'selected':''}>종례전달</option><option ${noticeKind==='긴급'?'selected':''}>긴급</option></select><small>유형에 따라 확인·제출·종례 기능이 자동 적용됩니다.</small></label><label>공지 시작일<input id="noticePostDate" type="date" value="${escapeHtml(item.postDate||now)}" required></label><label>공지 종료일<input id="noticeEndDate" type="date" value="${escapeHtml(item.endDate||'')}"></label><label class="wide">제목<input id="noticeTitle" type="text" tabindex="0" autocomplete="off" required value="${escapeHtml(item.title||'')}" placeholder="담임 선생님께 표시할 공지 제목"></label><label class="wide">내용<textarea id="noticeContent" tabindex="0" rows="6" required placeholder="공지 내용을 입력하세요.">${escapeHtml(item.detail||item.content||'')}</textarea></label><label>대상학년<input id="noticeTargetGrade" value="${escapeHtml(item.targetGrade||'1')}"></label><label>대상반<input id="noticeTargetClass" value="${escapeHtml(item.targetClass||'전체')}" placeholder="전체 또는 1,2,3"><small>전체 또는 여러 반(예: 1,3,5)</small></label><div class="notice-target-quick wide"><button type="button" data-notice-target="전체">전체</button>${Array.from({length:9},(_,i)=>`<button type="button" data-notice-target="${i+1}">${i+1}반</button>`).join("")}</div><label>마감 유형<select id="noticeDeadlineType"><option value="" ${!item.deadlineType?'selected':''}>마감 없음</option><option value="학생제출" ${item.deadlineType==='학생제출'?'selected':''}>학생 제출 마감</option><option value="담임확인" ${item.deadlineType==='담임확인'?'selected':''}>담임 확인 마감</option><option value="업무처리" ${item.deadlineType==='업무처리'?'selected':''}>업무 처리 마감</option></select><small>누가 무엇을 언제까지 해야 하는지 구분합니다.</small></label><label>마감일시<input id="noticeDeadline" type="datetime-local" value="${escapeHtml(item.deadline?String(item.deadline).slice(0,16):'')}"><small>공지 노출기간과 별개입니다.</small></label><label>담당부서<input id="noticeDepartment" value="${escapeHtml(item.department||'1학년부')}"></label><label>담당자<input id="noticeAuthor" value="${escapeHtml(item.author||currentLoginTeacherName()||'')}"></label><label class="check-label wide"><input id="noticeTopAlert" type="checkbox" ${item.topAlert||noticeKind==='긴급'?'checked':''}> 대시보드 상단 강조</label></div><div class="program-actions">${isEdit?'<button type="button" class="btn danger" id="noticeDelete">삭제</button>':''}<button type="button" class="btn secondary" id="noticeCancel">취소</button><button type="submit" class="btn primary">${isEdit?'수정 저장':'공지 등록'}</button></div></form><p class="drawer-note">직접 공지는 40_공지마감이 원본입니다. 확인·제출·종례 여부는 공지 유형에 따라 자동 적용됩니다.</p>`;
+  $("#noticeCancel").onclick=closeDrawer;
+  // 공지 제목·내용은 어떤 전역 드래그/단축키 상태와 관계없이 일반 텍스트 입력을 보장한다.
+  ["noticeTitle","noticeContent"].forEach(id=>{const el=document.getElementById(id);if(el){el.readOnly=false;el.disabled=false;el.style.pointerEvents='auto';el.style.userSelect='text';}});
+  requestAnimationFrame(()=>document.getElementById('noticeTitle')?.focus());
+  $$('[data-notice-target]').forEach(btn=>btn.onclick=()=>{const input=$("#noticeTargetClass");if(!input)return;const v=btn.dataset.noticeTarget;if(v==='전체')input.value='전체';else{const current=input.value==='전체'?'':input.value;const parts=[...new Set(current.split(/[,·\s]+/).filter(Boolean).concat(v))];input.value=parts.join(',');}});
+  const applyKind=()=>{const k=$("#noticeKind").value;if(k==='긴급')$("#noticeTopAlert").checked=true;};$("#noticeKind").onchange=applyKind;applyKind();
+  $("#noticeEditorForm").onsubmit=async(e)=>{e.preventDefault();const form=e.currentTarget;if(form.getAttribute('aria-busy')==='true')return;const k=$("#noticeKind").value;if($("#noticeDeadlineType").value&&!$("#noticeDeadline").value)return toast('마감 유형을 선택한 경우 마감일시도 입력해 주세요.');const payload={id:item.id||'',schoolYear:new Date().getFullYear(),noticeKind:k,type:'공지',title:$("#noticeTitle").value.trim(),content:$("#noticeContent").value.trim(),targetGrade:$("#noticeTargetGrade").value.trim(),targetClass:$("#noticeTargetClass").value.trim(),postDate:$("#noticePostDate").value,endDate:$("#noticeEndDate").value,deadlineType:$("#noticeDeadlineType").value,deadline:$("#noticeDeadlineType").value?$("#noticeDeadline").value:'',department:$("#noticeDepartment").value.trim(),author:$("#noticeAuthor").value.trim(),confirmRequired:true,submitRequired:k==='제출요청'/* __UEP_08162_DIRECT_NOTICE_CONFIRM_REQUIRED__ */,homeroomNotice:k==='종례전달',important:k==='긴급',topAlert:$("#noticeTopAlert").checked||k==='긴급'};setNoticeBusy(form,true,isEdit?'수정 저장 중…':'공지 등록 중…');try{const result=await window.schoolBoard?.saveNotice?.(payload);if(!result?.ok){toast(result?.reason||'공지를 저장하지 못했습니다.');return;}upsertNoticeCache(payload,result.id||payload.id);closeDrawer();workBoardMode='notice';render(state.activePage==='work'?'work':'dashboard');toast(result.duplicate?'같은 공지가 이미 등록되어 기존 공지를 표시합니다.':isEdit?'공지를 수정했습니다.':'학교업무 공지를 등록했습니다.');}catch(error){toast(error?.message||'공지를 저장하지 못했습니다.');}finally{setNoticeBusy(form,false);}};
+  $("#noticeDelete")?.addEventListener('click',async()=>{if(!confirm('이 공지를 삭제할까요?'))return;const result=await window.schoolBoard?.deleteNotice?.(item.id);if(!result?.ok)return toast(result?.reason||'공지 삭제 실패');if(Array.isArray(readonlyCache?.notices))readonlyCache.notices=readonlyCache.notices.filter(row=>String(row.id)!==String(item.id));closeDrawer();workBoardMode='notice';render(state.activePage==='work'?'work':'dashboard');toast('공지를 삭제했습니다.');});
+}
+
+async function refreshReadonlyAfterNotice({force=false}={}){
+  // 확인/승인 상태는 먼저 로컬 캐시에 즉시 반영한다. 매 클릭마다 전체 시트를 다시 읽지 않는다.
+  if(force){
+    const sync=await window.schoolBoard?.previewReadonlySync?.();
+    if(sync?.ok&&sync.data){readonlyCache=sync.data;return;}
+  }
+  const refreshed=await window.schoolBoard?.readReadonlyCache?.();
+  if(refreshed?.ok)readonlyCache=refreshed.data;
+}
+async function saveCurrentNoticeReceipt(item,change){
+  const mine=currentTeacherHomeroomClass(), classNo=mine?mine.split('-')[1]:'';
+  const payload={noticeId:item.id,userId:currentNoticeUserId(),teacher:currentLoginTeacherName()||'사용자',grade:'1',classNo,...change};
+  const result=await window.schoolBoard?.saveNoticeReceipt?.({...payload,read:true,detailViewed:true});if(!result?.ok){toast(result?.reason||'확인 상태를 저장하지 못했습니다.');return false;}item.receipts=Array.isArray(item.receipts)?item.receipts:[];const keyIndex=item.receipts.findIndex(row=>(payload.userId&&String(row.userId)===String(payload.userId))||String(row.teacher)===String(payload.teacher));const nextReceipt={...(keyIndex>=0?item.receipts[keyIndex]:{}),...payload,read:true,detailViewed:true,confirmed:Boolean(change.confirmed),submitted:Boolean(change.submitted),modifiedAt:new Date().toISOString()};if(keyIndex>=0)item.receipts[keyIndex]=nextReceipt;else item.receipts.push(nextReceipt);/* __UEP_08162_NOTICE_RECEIPT_REFRESH__ */try{await refreshReadonlyAfterNotice({force:true});}catch{}return true;
+}
+function openConnectedNotice(id){ return openWorkNoticeDetail(id,"connected"); }
+
+function openGradeNotice(id) {
+  const notice = state.gradeNotices.find((item) => item.id === id);
+  if (!notice) return;
+  const className = "1-1";
+  const checked = notice.confirmedClasses.includes(className);
+  $("#drawerKicker").textContent = "GRADE NOTICE";
+  $("#drawerTitle").textContent = notice.title;
+  $("#drawerBody").innerHTML =
+    `<div class="program-notice"><b>${escapeHtml(notice.author)} 공지</b><p>${escapeHtml(notice.detail)}</p></div><div class="drawer-section"><h4>담임 확인 현황</h4><div class="notice-class-grid">${notice.requiredClasses.map((item) => `<span class="${notice.confirmedClasses.includes(item) ? "done" : ""}"><b>${item}</b><small>${notice.confirmedClasses.includes(item) ? "확인" : "미확인"}</small></span>`).join("")}</div></div><button class="btn ${checked ? "secondary" : "primary"}" id="confirmNoticeButton">${checked ? "확인 취소" : "1-1반 담임 확인"}</button><p class="drawer-note">현재는 로컬 시범 동작입니다. 여러 담임의 실시간 확인 상태는 공용 시트 또는 서버 연결 후 공유됩니다.</p>`;
+  $("#drawer").classList.remove("hidden");
+  $("#drawerBackdrop").classList.remove("hidden");
+  $("#confirmNoticeButton").onclick = async () => {
+    notice.confirmedClasses = checked
+      ? notice.confirmedClasses.filter((item) => item !== className)
+      : [...notice.confirmedClasses, className];
+    await save();
+    openGradeNotice(id);
+    render("dashboard");
+  };
+}
+
+function openReportDeadline(id) {
+  const item = state.reportDeadlines.find((deadline) => deadline.id === id);
+  if (!item) return;
+  $("#drawerKicker").textContent = "CLASS REPORT";
+  $("#drawerTitle").textContent = item.title;
+  $("#drawerBody").innerHTML =
+    `<div class="program-summary"><div><b>대상학급</b><span>${item.className}</span></div><div><b>마감일</b><span>${item.due}</span></div><div><b>미제출</b><span>${item.missing}명</span></div><div><b>상태</b><span>확인 필요</span></div></div><div class="connection-guide compact"><span>▤</span><h3>미제출 학생 명단</h3><p>생활기록부 프로그램·보고서 자료와 연결하면 해당 학급의 미제출 학생을 표시합니다.</p></div>`;
+  $("#drawer").classList.remove("hidden");
+  $("#drawerBackdrop").classList.remove("hidden");
+}
+
+function openSchoolDeadline(id) {
+  const item = state.schoolDeadlines.find((deadline) => deadline.id === id);
+  if (!item) return;
+  $("#drawerKicker").textContent = "SCHOOL DEADLINE";
+  $("#drawerTitle").textContent = item.title;
+  $("#drawerBody").innerHTML =
+    `<div class="program-summary"><div><b>담당부서</b><span>${escapeHtml(item.department)}</span></div><div><b>마감일</b><span>${item.due}</span></div></div><div class="program-notice"><b>학교 캘린더 업무</b><p>학교 업무일정 계획 시트에서 가져올 마감 항목입니다. 현재 화면은 예시자료입니다.</p></div>`;
+  $("#drawer").classList.remove("hidden");
+  $("#drawerBackdrop").classList.remove("hidden");
+}
+
+function openDrawer(type) {
+  const googleConnected = Boolean(readonlyCache?.students?.length && !googleConnectionError);
+  const googleLabel = googleConnected
+    ? `정상 · 학생 ${readonlyCache.st
