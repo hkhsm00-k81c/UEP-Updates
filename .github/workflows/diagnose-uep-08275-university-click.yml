@@ -1,0 +1,49 @@
+name: Diagnose UEP 0.82.75 University Click
+on:
+  push:
+    paths:
+      - '.github/workflows/diagnose-uep-08275-university-click.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: diagnose-uep-08275-university-click
+  cancel-in-progress: true
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect packaged dashboard click flow
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.82.75 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if ($LASTEXITCODE -ne 0) { throw "release download failed: $LASTEXITCODE" }
+          Expand-Archive source/UEP-update.zip app -Force
+          $p='app/resources/app/gyomuon.js'
+          if (!(Test-Path $p)) { throw 'gyomuon.js missing' }
+          $s=Get-Content $p -Raw
+          Write-Host ('VERSION-HIT=' + ([regex]::Matches($s,'0\.82\.75').Count))
+          $needles=@(
+            "data-dashboard-admission",
+            "uep08250PrioritizeAdmission",
+            "renderDashboard",
+            "dashboard.innerHTML",
+            "dashboardEl.innerHTML",
+            "content.innerHTML"
+          )
+          foreach($needle in $needles){
+            Write-Host "===== NEEDLE: $needle ====="
+            $start=0;$n=0
+            while(($i=$s.IndexOf($needle,$start,[System.StringComparison]::Ordinal)) -ge 0 -and $n -lt 8){
+              $a=[Math]::Max(0,$i-900);$len=[Math]::Min(2200,$s.Length-$a)
+              Write-Host "--- occurrence $n at $i ---"
+              Write-Host $s.Substring($a,$len)
+              $start=$i+$needle.Length;$n++
+            }
+            Write-Host "COUNT-SHOWN=$n"
+          }
