@@ -1,0 +1,44 @@
+name: Diagnose UEP 0.82.81 Bidirectional Edit Permissions
+on:
+  push:
+    paths:
+      - '.github/workflows/diagnose-uep-08281-bidirectional-permissions.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect renderer, preload, main and data write paths
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.82.81 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE -ne 0){throw "download failed $LASTEXITCODE"}
+          Expand-Archive source/UEP-update.zip app -Force
+          $files=@(
+            'app/resources/app/gyomuon.js',
+            'app/resources/app/electron/main.cjs',
+            'app/resources/app/electron/preload.cjs',
+            'app/resources/app/electron/google-data.cjs'
+          )
+          $patterns=@(
+            '연락처','보호자','학생연락','contact','phone','guardian',
+            '야자감독','야자 감독','급식지도','급식 지도','quick','빠른열기',
+            'save','update','write','mutation','permission','role','담임','homeroom',
+            'ipcMain.handle','ipcRenderer.invoke','contextBridge','Google','sheet'
+          )
+          foreach($f in $files){
+            if(!(Test-Path $f)){continue}
+            Write-Host "===== FILE $f ====="
+            $s=Get-Content $f -Raw
+            foreach($p in $patterns){
+              $m=[regex]::Matches($s,[regex]::Escape($p),[System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+              if($m.Count -gt 0){Write-Host "--- $p count=$($m.Count) ---"; foreach($x in $m | Select-Object -First 12){$a=[Math]::Max(0,$x.Index-900);$l=[Math]::Min(2500,$s.Length-$a);Write-Host $s.Substring($a,$l)}}
+            }
+          }
