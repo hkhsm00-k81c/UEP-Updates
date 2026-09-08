@@ -1,0 +1,1593 @@
+===== app/resources/app/electron/main.cjs TOP =====
+     1: const { app, BrowserWindow, ipcMain, dialog, safeStorage, shell, net } = require("electron");
+     2: app.setName("UNHO Education Platform");
+     3: const { spawn } = require("child_process");
+     4: const crypto = require("crypto");
+     5: const http = require("http");
+     6: const os = require("os");
+     7: const path = require("path");
+     8: const fs = require("fs/promises");
+     9: const {
+    10:   UEP_SPREADSHEET_ID,
+    11:   UEP_SPREADSHEET_NAME,
+    12:   UEP_SPREADSHEET_URL,
+    13:   SHEET_RANGES,
+    14:   RULE_SHEET_RANGES,
+    15:   UEP_PROCESSING_SPREADSHEET_ID,
+    16:   UEP_INPUT_CENTER_SPREADSHEET_ID,
+    17:   UEP_RULES_SPREADSHEET_ID,
+    18:   parseGoogleSheetData,
+    19: } = require("./google-data.cjs");
+    20: const UEP_ADMISSIONS_SPREADSHEET_ID = "1BHSdaUbOhp9p_9RB0XGgrfOo4wS_Z8Up0ocSCAMYIIk";
+    21: const UEP_ADMISSIONS_FALLBACK_SPREADSHEET_ID = "1bphoIQ11E2qsc3ksOqrXuO7xqS4CFyH8Dagbld7A1hg";
+    22: 
+    23: // UEP의 사용자 데이터와 Electron safeStorage 키 저장소를 같은 고정 위치에 둡니다.
+    24: // safeStorage 암호문만 다른 폴더로 복사하면 Chromium OS encryption key(Local State)와 분리되어
+    25: // Windows 재부팅/버전 교체 뒤 decryptString이 실패할 수 있으므로 userData 자체를 앱 시작 전에 고정합니다.
+    26: const originalUserDataRoot = app.getPath("userData");
+    27: const fixedUserDataRoot = path.join(process.env.APPDATA || app.getPath("appData"), "UNHO Education Platform");
+    28: try {
+    29:   if (path.resolve(originalUserDataRoot) !== path.resolve(fixedUserDataRoot)) app.setPath("userData", fixedUserDataRoot);
+    30: } catch {}
+    31: const stableUserDataRoot = () => app.getPath("userData");
+    32: const legacyUserDataRoot = () => originalUserDataRoot;
+    33: const statePath = () => path.join(stableUserDataRoot(), "school-board-state.json");
+    34: // UEP_08197_QUICK_LAUNCH_PERSISTENCE: executable paths live outside the replaceable app folder.
+    35: const quickLaunchPath = () => path.join(stableUserDataRoot(), "quick-launch-settings.json");
+    36: const credentialPath = () => path.join(stableUserDataRoot(), "google-service-account.bin");
+    37: const credentialRecoveryPath = () => path.join(stableUserDataRoot(), "google-service-account.recovery.json");
+    38: const googleUserOAuthPath = () => path.join(stableUserDataRoot(), "google-user-oauth.bin");
+    39: const googleUserOAuthRecoveryPath = () => path.join(stableUserDataRoot(), "google-user-oauth.recovery.json");
+    40: // __UEP_GOOGLE_OAUTH_CANONICAL_08073__
+    41: const googleUserOAuthCanonicalRoot = () => path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'UNHO Education Platform');
+    42: const googleUserOAuthCanonicalPath = () => path.join(googleUserOAuthCanonicalRoot(), 'google-user-oauth.bin');
+    43: const googleUserOAuthCanonicalRecoveryPath = () => path.join(googleUserOAuthCanonicalRoot(), 'google-user-oauth.recovery.json');
+    44: const neisApiKeyPath = () => path.join(stableUserDataRoot(), "neis-api-key.bin");
+    45: const schoolReadDevicePath = () => path.join(stableUserDataRoot(), "uep-device-id.txt");
+    46: const schoolReadSessionPath = () => path.join(stableUserDataRoot(), "uep-school-read-session.bin");
+    47: const neisCachePath = () => path.join(stableUserDataRoot(), "neis-dashboard-cache.json");
+    48: 
+    49: const comciganCachePath = () => path.join(stableUserDataRoot(), "comcigan-timetable-cache.json");
+    50: async function migrateStableUserFile(fileName) {
+    51:   const target=path.join(stableUserDataRoot(),fileName), legacy=path.join(legacyUserDataRoot(),fileName);
+    52:   try { await fs.access(target); return; } catch {}
+    53:   try { await fs.mkdir(stableUserDataRoot(),{recursive:true}); await fs.copyFile(legacy,target); } catch {}
+    54: }
+    55: async function migrateStableUserData() {
+    56:   // Local State에는 Windows safeStorage가 사용하는 Chromium OS encryption key 정보가 들어 있습니다.
+    57:   // 기존 버전의 userData에서 최초 1회 같이 옮겨야 기존 암호문을 복호화할 가능성이 유지됩니다.
+    58:   for (const fileName of ["Local State","school-board-state.json","quick-launch-settings.json","google-service-account.bin","google-service-account.recovery.json","google-user-oauth.bin","google-user-oauth.recovery.json","neis-api-key.bin","neis-dashboard-cache.json","comcigan-timetable-cache.json"]) await migrateStableUserFile(fileName);
+    59: }
+    60: let comciganWindow = null;
+    61: let mainWindow = null;
+    62: let shutdownStarted = false;
+    63: 
+    64: async function appendShutdownLog(message) {
+    65:   try {
+    66:     const file = path.join(stableUserDataRoot(), "shutdown-diagnostics.log");
+    67:     await fs.mkdir(stableUserDataRoot(), { recursive: true });
+    68:     await fs.appendFile(file, `${new Date().toISOString()} ${message}\n`, "utf8");
+    69:   } catch {}
+    70: }
+    71: function destroyAuxiliaryWindows(reason="shutdown") {
+    72:   try { appendShutdownLog(`destroy-aux:${reason}:comcigan=${Boolean(comciganWindow && !comciganWindow.isDestroyed())}`); } catch {}
+    73:   try {
+    74:     if (comciganWindow && !comciganWindow.isDestroyed()) comciganWindow.destroy();
+    75:   } catch {}
+    76:   comciganWindow = null;
+    77: }
+    78: function beginCleanShutdown(reason="user-close") {
+    79:   if (shutdownStarted) return;
+    80:   shutdownStarted = true;
+    81:   try { appendShutdownLog(`shutdown-start:${reason}:pid=${process.pid}:windows=${BrowserWindow.getAllWindows().length}`); } catch {}
+    82:   destroyAuxiliaryWindows(reason);
+    83:   // Give Electron a short grace period to release renderer/GPU resources. If the
+    84:   // normal quit sequence stalls, force only THIS Electron process to exit.
+    85:   setTimeout(() => {
+    86:     try { appendShutdownLog(`shutdown-force-exit:${reason}:windows=${BrowserWindow.getAllWindows().length}`); } catch {}
+    87:     try { app.exit(0); } catch {}
+    88:   }, 1500).unref?.();
+    89: }
+    90: 
+    91: function compactDateKey(date) {
+    92:   return `${date.getFullYear()}${String(date.getMonth()+1).padStart(2,"0")}${String(date.getDate()).padStart(2,"0")}`;
+    93: }
+    94: function parseComciganPeriodStart(label="") {
+    95:   const text=String(label||"");
+    96:   let m=text.match(/(\d{2})-(\d{2})-(\d{2})\s*[~～-]/);
+    97:   if(m) return new Date(2000+Number(m[1]),Number(m[2])-1,Number(m[3]),12,0,0);
+    98:   m=text.match(/(?:\(|^)(\d{1,2})\/(\d{1,2})\s*[~～-]/);
+    99:   if(m){const now=new Date();return new Date(now.getFullYear(),Number(m[1])-1,Number(m[2]),12,0,0);}
+   100:   return null;
+   101: }
+   102: function selectComciganPeriod(periods,targetDate){
+   103:   const target=new Date(`${targetDate}T12:00:00`);
+   104:   const list=Array.isArray(periods)?periods:[];
+   105:   for(const row of list){
+   106:     const id=Array.isArray(row)?Number(row[0]):Number(row?.id||row?.period||0);
+   107:     const label=Array.isArray(row)?row[1]:row?.label||row?.name||"";
+   108:     const start=parseComciganPeriodStart(label);
+   109:     if(!start||!id) continue;
+   110:     const end=new Date(start); end.setDate(end.getDate()+6);
+   111:     if(target>=start&&target<=end) return id;
+   112:   }
+   113:   return Number(Array.isArray(list[0])?list[0][0]:list[0]?.id||1)||1;
+   114: }
+   115: async function ensureComciganWindow(schoolCode){
+   116:   if(comciganWindow && !comciganWindow.isDestroyed()) return comciganWindow;
+   117:   comciganWindow=new BrowserWindow({show:false,width:1280,height:900,webPreferences:{contextIsolation:true,sandbox:true}});
+   118:   comciganWindow.on("closed",()=>{comciganWindow=null;});
+   119:   await comciganWindow.loadURL(`https://timetable.s2h9.dev/?sc=${encodeURIComponent(schoolCode)}`);
+   120:   await new Promise(resolve=>setTimeout(resolve,1800));
+--- assignValueRangesByRange line 663 ---
+   651:       return readSheetBatch(token, spreadsheetId, ranges, attempt + 1);
+   652:     }
+   653:     throw new Error(`UEP 구글시트 읽기 실패 (${response.status})${detail ? `: ${detail}` : ""}`);
+   654:   }
+   655:   return (await response.json()).valueRanges || [];
+   656: }
+   657: 
+   658: function sheetNameFromA1Range(range="") {
+   659:   const prefix=String(range||"").split("!")[0].trim();
+   660:   return prefix.replace(/^'/,"").replace(/'$/,"").replace(/''/g,"'");
+   661: }
+   662: 
+   663: function assignValueRangesByRange(target, entries, valueRanges) {
+   664:   const logicalBySheet=new Map(entries.map(([logicalName,range])=>[sheetNameFromA1Range(range),logicalName]));
+   665:   const assigned=new Set();
+   666:   (Array.isArray(valueRanges)?valueRanges:[]).forEach((item,index)=>{
+   667:     const responseSheet=sheetNameFromA1Range(item?.range);
+   668:     // Sheets batchGet may omit empty ranges or return them in a different order.
+   669:     // A response that names its range must only be assigned to that sheet; index is
+   670:     // retained solely for legacy responses that contain no range metadata at all.
+   671:     const logicalName=responseSheet?logicalBySheet.get(responseSheet):entries[index]?.[0];
+   672:     if(!logicalName)return;
+   673:     target[logicalName]=item?.values||[];
+   674:     assigned.add(logicalName);
+   675:   });
+   676:   entries.forEach(([logicalName])=>{if(!assigned.has(logicalName)&&!target[logicalName])target[logicalName]=[];});
+   677:   return target;
+   678: }
+   679: 
+   680: async function updateSheetValues(token, spreadsheetId, range, values, attempt=0) {
+   681:   const url = new URL(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`);
+   682:   url.searchParams.set("valueInputOption", "USER_ENTERED");
+   683:   const response = await fetch(url, {
+   684:     method: "PUT",
+   685:     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+   686:     body: JSON.stringify({ majorDimension: "ROWS", values }),
+   687:   });
+   688:   if (!response.ok) {
+   689:     let detail=""; try{ detail=(await response.json())?.error?.message||""; }catch{}
+   690:     if ((response.status===429 || response.status>=500) && attempt<4) {
+   691:       const retryAfter=Number(response.headers.get("retry-after")||0);
+   692:       const waitMs=retryAfter>0?retryAfter*1000:1000*Math.pow(2,attempt);
+   693:       await new Promise(resolve=>setTimeout(resolve,waitMs));
+   694:       return updateSheetValues(token,spreadsheetId,range,values,attempt+1);
+   695:     }
+   696:     throw new Error(`구글시트 저장 실패 (${response.status})${detail?`: ${detail}`:""}`);
+   697:   }
+   698:   return response.json();
+--- assignValueRangesByRange line 1574 ---
+  1562: }
+  1563: 
+  1564: const UEP_OPERATIONAL_RANGE_NAMES=Object.freeze(['30_공식출결기록','31_지각기록','40_공지마감','44_공지확인현황','42_급식지도계획','43_야자감독계획']);
+  1565: async function fetchOperationalData({credentials=null}={}){
+  1566:   if(!liveDataCache)return {ok:false,requiresFullSync:true,reason:'전체 캐시가 아직 준비되지 않았습니다.'};
+  1567:   const auth=await getReadonlySheetsAuth(credentials),token=auth.token;
+  1568:   const operationalEntries=UEP_OPERATIONAL_RANGE_NAMES.map(name=>[name,SHEET_RANGES[name]]);
+  1569:   const [result,nightResult]=await Promise.all([
+  1570:     readSheetBatch(token,UEP_SPREADSHEET_ID,operationalEntries.map(([,range])=>range)),
+  1571:     // School Read API는 행번호가 있는 bounded A1만 허용한다. A:U 같은 열린 범위는 INVALID_RANGE가 된다.
+  1572:     readSheetBatch(token,UEP_PROCESSING_SPREADSHEET_ID,["'30_야자출결_정규화'!A1:U70000"])
+  1573:   ]);
+  1574:   const matrices={};assignValueRangesByRange(matrices,operationalEntries,result);
+  1575:   // 전체 학생마스터를 다시 읽지 않고 현재 캐시 학생정보를 파서용 02_학생마스터로 재구성한다.
+  1576:   const cachedStudents=Array.isArray(liveDataCache?.students)?liveDataCache.students:[];
+  1577:   matrices['02_학생마스터']=[
+  1578:     ['02_학생마스터'],
+  1579:     ['UEP operational synthetic student master'],
+  1580:     ['학생ID','학년도','학번','성명','사용성명','학년','반','번호','검색표시명','출신중학교','학적상태','학적기준일','학적변동사유','입학일','활성여부','수정일시','수정자','비고'],
+  1581:     ...cachedStudents.map((student)=>[
+  1582:       String(student?.id||student?.studentId||''),
+  1583:       String(student?.schoolYear||student?.year||'2026'),
+  1584:       String(student?.studentNo||student?.number||''),
+  1585:       String(student?.name||''),
+  1586:       String(student?.name||''),
+  1587:       String(student?.grade||student?.gradeNo||'1'),
+  1588:       String(student?.className||student?.classNo||''),
+  1589:       String(student?.studentNumber||student?.numberInClass||''),
+  1590:       '', '',
+  1591:       String(student?.status||student?.enrollmentStatus||'재학'),
+  1592:       '', '', '',
+  1593:       String(student?.active||student?.activeYn||'Y'),
+  1594:       '', '', ''
+  1595:     ])
+  1596:   ];
+  1597:   matrices['30_야자출결_정규화']=nightResult?.[0]?.values||[];
+  1598:   const partial=parseGoogleSheetData(matrices);
+  1599: 
+  1600:   // 운영 갱신에서는 30의 최신 NFC/교사확인 행만 교체하고,
+  1601:   // 전체 동기화에서 11_방과후학교→12_차시일정→13_출석부로 만든 프로그램 인정 행은 보존한다.
+  1602:   // 같은 학생·날짜·시간대가 겹치면 전체 파서와 동일하게 프로그램 인정 행이 우선한다.
+  1603:   const freshRawNight=Array.isArray(partial.nightAttendance)?partial.nightAttendance.filter(row=>!row?.recognizedByProgram&&!row?.linkedFromAfterSchool):[];
+  1604:   const retainedProgramNight=Array.isArray(liveDataCache?.nightAttendance)?liveDataCache.nightAttendance.filter(row=>row?.recognizedByProgram===true||row?.linkedFromAfterSchool===true):[];
+  1605:   const nightKey=(row)=>[String(row?.date||'').slice(0,10),String(row?.time||row?.period||''),String(row?.studentNo||row?.studentId||'')].join('|');
+  1606:   const mergedNightMap=new Map();
+  1607:   freshRawNight.forEach(row=>mergedNightMap.set(nightKey(row),row));
+  1608:   retainedProgramNight.forEach(row=>mergedNightMap.set(nightKey(row),row));
+  1609:   const mergedNightAttendance=[...mergedNightMap.values()];
+--- assignValueRangesByRange line 1645 ---
+  1633:   ];
+  1634:   const matrices = {};
+  1635:   // 기본정보 연결시트를 가장 먼저, 작은 묶음으로 읽습니다.
+  1636:   // 탭 추가로 URL이 길어지거나 특정 탭이 잠시 실패해도 전체 연결이 끊기지 않도록 합니다.
+  1637:   const chunkSize = 12;
+  1638:   const chunks = [];
+  1639:   for (let offset = 0; offset < entries.length; offset += chunkSize) {
+  1640:     chunks.push({ offset, chunk: entries.slice(offset, offset + chunkSize) });
+  1641:   }
+  1642:   await mapWithConcurrency(chunks, 1, async ({ offset, chunk }) => {
+  1643:     try {
+  1644:       const valueRanges = await readSheetBatch(token, UEP_SPREADSHEET_ID, chunk.map(([, range]) => range));
+  1645:       assignValueRangesByRange(matrices,chunk,valueRanges);
+  1646:     } catch (chunkError) {
+  1647:       console.warn(`[UEP] 기본정보 묶음 조회 실패(${offset + 1}~${offset + chunk.length}), 개별 재시도`, chunkError?.message || chunkError);
+  1648:       await mapWithConcurrency(chunk, 1, async ([logicalName, range]) => {
+  1649:         try {
+  1650:           const one = await readSheetBatch(token, UEP_SPREADSHEET_ID, [range]);
+  1651:           matrices[logicalName] = one?.[0]?.values || [];
+  1652:         } catch (sheetError) {
+  1653:           matrices[logicalName] = [];
+  1654:           console.warn(`[UEP] 기본정보 탭 조회 실패: ${logicalName}`, sheetError?.message || sheetError);
+  1655:         }
+  1656:       });
+  1657:     }
+  1658:   });
+  1659:   entries.forEach(([name]) => { if (!matrices[name]) matrices[name] = []; });
+  1660: 
+  1661:   // 선택보고서 정규화 탭의 구조가 손상된 경우 구글폼 원본으로 복구한 뒤 읽습니다.
+  1662:   // 읽기 전용 담임 세션에서는 정규화 탭 자동복구(쓰기)를 실행하지 않습니다.
+  1663:   if(auth.mode!=='school_read_api') await ensureSelectedReportNormalization(token);
+  1664: 
+  1665:   // 학생응답 가공 결과: 현재 실제 존재하는 데이터 처리 탭만 직접 읽습니다.
+  1666:   // 선택과목은 응답수집 06_선택과목응답을 별도 읽고 기존 fallback 로직으로 구성합니다.
+  1667:   const processingRanges = [
+  1668:     ["02_학사외출_일자별", "'02_학사외출_일자별'!A1:AD10000"],
+  1669:     ["20_공통보고서_정규화", "'20_공통보고서_정규화'!A1:X5000"],
+  1670:     ["21_선택보고서_정규화", "'21_선택보고서_정규화'!A1:X5000"],
+  1671:     ["30_야자출결_정규화", "'30_야자출결_정규화'!A1:P70000"],
+  1672:     // 학교캘린더는 기본정보 연결시트가 아니라 데이터 처리시트의 직접 이관값만 사용합니다.
+  1673:     ["41_학교캘린더", "'41_학교캘린더'!A1:W3000"],
+  1674:     ["51_선택과목오류_정규화", "'51_선택과목오류_정규화'!A1:V5000"],
+  1675:   ];
+  1676:   try {
+  1677:     const result = await readSheetBatch(token, UEP_PROCESSING_SPREADSHEET_ID, processingRanges.map(([,range])=>range));
+  1678:     assignValueRangesByRange(matrices,processingRanges,result);
+  1679:   } catch(error) {
+  1680:     // 한 탭의 일시 오류가 보고서·학사외출·선택과목 등 정상 탭까지 모두 비우지 않도록
+--- assignValueRangesByRange line 1678 ---
+  1666:   // 선택과목은 응답수집 06_선택과목응답을 별도 읽고 기존 fallback 로직으로 구성합니다.
+  1667:   const processingRanges = [
+  1668:     ["02_학사외출_일자별", "'02_학사외출_일자별'!A1:AD10000"],
+  1669:     ["20_공통보고서_정규화", "'20_공통보고서_정규화'!A1:X5000"],
+  1670:     ["21_선택보고서_정규화", "'21_선택보고서_정규화'!A1:X5000"],
+  1671:     ["30_야자출결_정규화", "'30_야자출결_정규화'!A1:P70000"],
+  1672:     // 학교캘린더는 기본정보 연결시트가 아니라 데이터 처리시트의 직접 이관값만 사용합니다.
+  1673:     ["41_학교캘린더", "'41_학교캘린더'!A1:W3000"],
+  1674:     ["51_선택과목오류_정규화", "'51_선택과목오류_정규화'!A1:V5000"],
+  1675:   ];
+  1676:   try {
+  1677:     const result = await readSheetBatch(token, UEP_PROCESSING_SPREADSHEET_ID, processingRanges.map(([,range])=>range));
+  1678:     assignValueRangesByRange(matrices,processingRanges,result);
+  1679:   } catch(error) {
+  1680:     // 한 탭의 일시 오류가 보고서·학사외출·선택과목 등 정상 탭까지 모두 비우지 않도록
+  1681:     // 묶음 조회 실패 시 각 탭을 독립적으로 재시도합니다. 평상시에는 1회 batchGet으로 quota를 보호합니다.
+  1682:     console.warn("[UEP] 처리시트 묶음 조회 실패 - 개별 복구 시도",error?.message||error);
+  1683:     await mapWithConcurrency(processingRanges,1,async([logicalName,range])=>{
+  1684:       try{const one=await readSheetBatch(token,UEP_PROCESSING_SPREADSHEET_ID,[range]);matrices[logicalName]=one?.[0]?.values||[];}
+  1685:       catch(sheetError){matrices[logicalName]=[];console.warn(`[UEP] 처리시트 개별 조회 실패: ${logicalName}`,sheetError?.message||sheetError);}
+  1686:     });
+  1687:   }
+  1688: 
+  1689:   // 학사외출은 데이터 처리시트의 02_학사외출_일자별만 조회합니다.
+  1690:   // 응답 원본이나 기본정보 연결시트, 별도 운영 시트를 직접 참조하지 않습니다.
+  1691: 
+  1692:   // 입력센터 원본은 별도 [UEP] 입력센터 원본 스프레드시트에서 읽습니다.
+  1693:   try {
+  1694:     const inputResult=await readSheetBatch(token,UEP_INPUT_CENTER_SPREADSHEET_ID,["'02_자료원본'!A1:X10000"]);
+  1695:     matrices["__INPUT_CENTER_SOURCE"]=inputResult?.[0]?.values||[];
+  1696:   } catch(error) {
+  1697:     matrices["__INPUT_CENTER_SOURCE"]=[];
+  1698:     console.warn("[UEP] 입력센터 원본 조회 실패",error?.message||error);
+  1699:   }
+  1700: 
+  1701:   // 학생이 직접 입력한 희망계열·희망전공은 정규화 자료의 유무와 관계없이 항상 읽습니다.
+  1702:   // 선택과목 목록은 처리시트/고교학점제 결과를 우선하되, 진로 보조정보는 원응답의 최신값을 기준으로 합니다.
+  1703:   try {
+  1704:     const rawSelection = await readSheetBatch(token, "1K-Me8Pm8T2d5fGHoqSPEAu4RXozETUQ-N5pZVxjs8Hw", ["'06_선택과목응답'!A1:U2000"]);
+  1705:     matrices["__SELECTION_RESPONSES"] = rawSelection?.[0]?.values || [];
+  1706:   } catch (error) {
+  1707:     matrices["__SELECTION_RESPONSES"] = [];
+  1708:     console.warn("[UEP] 선택과목 응답 조회 실패", error?.message || error);
+  1709:   }
+  1710: 
+  1711:   // 규칙 적용 자료: 평상시는 batchGet, 한 탭이라도 실패하면 각 탭을 독립 재조회합니다.
+  1712:   // 특히 40_학사외출규칙은 다른 규칙 탭 오류와 무관하게 반드시 복구를 시도합니다.
+  1713:   const ruleEntries = Object.entries(RULE_SHEET_RANGES);
+--- assignValueRangesByRange line 1716 ---
+  1704:     const rawSelection = await readSheetBatch(token, "1K-Me8Pm8T2d5fGHoqSPEAu4RXozETUQ-N5pZVxjs8Hw", ["'06_선택과목응답'!A1:U2000"]);
+  1705:     matrices["__SELECTION_RESPONSES"] = rawSelection?.[0]?.values || [];
+  1706:   } catch (error) {
+  1707:     matrices["__SELECTION_RESPONSES"] = [];
+  1708:     console.warn("[UEP] 선택과목 응답 조회 실패", error?.message || error);
+  1709:   }
+  1710: 
+  1711:   // 규칙 적용 자료: 평상시는 batchGet, 한 탭이라도 실패하면 각 탭을 독립 재조회합니다.
+  1712:   // 특히 40_학사외출규칙은 다른 규칙 탭 오류와 무관하게 반드시 복구를 시도합니다.
+  1713:   const ruleEntries = Object.entries(RULE_SHEET_RANGES);
+  1714:   try {
+  1715:     const ruleValueRanges = await readSheetBatch(token, UEP_RULES_SPREADSHEET_ID, ruleEntries.map(([, range]) => range));
+  1716:     assignValueRangesByRange(matrices,ruleEntries,ruleValueRanges);
+  1717:     ruleEntries.forEach(([name]) => { if (!matrices[name]) matrices[name] = []; });
+  1718:   } catch (error) {
+  1719:     console.warn("[UEP] 규칙로그 묶음 조회 실패 - 개별 복구 시도", error?.message || error);
+  1720:     await mapWithConcurrency(ruleEntries, 1, async ([logicalName, range]) => {
+  1721:       try {
+  1722:         const one = await readSheetBatch(token, UEP_RULES_SPREADSHEET_ID, [range]);
+  1723:         matrices[logicalName] = one?.[0]?.values || [];
+  1724:       } catch (sheetError) {
+  1725:         matrices[logicalName] = [];
+  1726:         console.warn(`[UEP] 규칙로그 개별 조회 실패: ${logicalName}`, sheetError?.message || sheetError);
+  1727:       }
+  1728:     });
+  1729:   }
+  1730:   // v0.76.93: 학사외출 규칙은 화면 운영의 핵심이므로 규칙 묶음 결과와 무관하게 마지막에 단독 재조회합니다.
+  1731:   // batchGet의 일부 누락/순서 문제 또는 다른 규칙 탭 오류가 있어도 40_학사외출규칙 원본을 우선합니다.
+  1732:   try {
+  1733:     const dormRuleResult = await readSheetBatch(
+  1734:       token,
+  1735:       UEP_RULES_SPREADSHEET_ID,
+  1736:       ["'40_학사외출규칙'!A1:X1000"]
+  1737:     );
+  1738:     const dormRuleMatrix = dormRuleResult?.[0]?.values || [];
+  1739:     if (dormRuleMatrix.length >= 3) {
+  1740:       matrices["40_학사외출규칙"] = dormRuleMatrix;
+  1741:       console.log(`[UEP] 40_학사외출규칙 단독 조회 성공: ${Math.max(0,dormRuleMatrix.length-3)}건`);
+  1742:     } else {
+  1743:       console.warn("[UEP] 40_학사외출규칙 단독 조회 결과가 비어 있습니다.");
+  1744:     }
+  1745:   } catch (dormRuleError) {
+  1746:     console.warn("[UEP] 40_학사외출규칙 단독 조회 실패", dormRuleError?.message || dormRuleError);
+  1747:   }
+  1748: 
+  1749:   const curriculumSpreadsheetId = "1fevlAWQZqWQkiYl-eGRCdzidBj59Z8NqOxfCrGvwlHI";
+  1750: const curriculumReads = [
+  1751:   ["__CURRICULUM_09", "'09_수강신청결과'!A1:AG1200"],
+--- assignValueRangesByRange line 1781 ---
+  1769:     try {
+  1770:       const result=await readSheetBatch(token,officialSourceId,officialTabs.map(tab=>`'${tab.replace(/'/g,"''")}'!A1:AM1200`));
+  1771:       officialTabs.forEach((tab,index)=>{matrices[`__OFFICIAL_${tab}`]=result?.[index]?.values||[];});
+  1772:     } catch(tabError) {
+  1773:       officialTabs.forEach(tab=>{matrices[`__OFFICIAL_${tab}`]=[];});
+  1774:       console.warn("[UEP] 공결 원본 묶음 조회 실패",tabError?.message||tabError);
+  1775:     }
+  1776:   } catch (error) {
+  1777:     console.warn("[UEP] 2026. 운호고 1학년 공결 현황 조회 실패", error?.message || error);
+  1778:   }
+  1779: 
+  1780:   const uep08259AdmissionEntries=[['52_대입기초',"'52_대입기초'!A1:N500"],['53_전형이해',"'53_전형이해'!A1:N500"],['53A_전형세부유형DB',"'53A_전형세부유형DB'!A1:R500"],['53B_전형유형별대학DB',"'53B_전형유형별대학DB'!A1:T3000"],['53C_전형DB점검',"'53C_전형DB점검'!A1:T500"],['54_수능최저DB',"'54_수능최저DB'!A1:Z1000"],['55_대학입결DB',"'55_대학입결DB'!A1:Z1000"],['56_대학입시마스터',"'56_대학입시마스터'!A1:R500"],['56A_대학상담포인트DB',"'56A_대학상담포인트DB'!A1:P1200"],['57_내신산정DB',"'57_내신산정DB'!A1:Z1200"],['58_권장과목DB',"'58_권장과목DB'!A1:P2000"]];
+  1781:   try{for(let offset=0;offset<uep08259AdmissionEntries.length;offset+=6){const chunk=uep08259AdmissionEntries.slice(offset,offset+6);let vr;try{vr=await schoolReadBatchRead(UEP_ADMISSIONS_SPREADSHEET_ID,chunk.map(([,range])=>range));}catch(primaryError){console.warn('[UEP] 새 입시DB School Read 실패, 기존 52~58 안전원본으로 전환',primaryError?.message||primaryError);vr=await schoolReadBatchRead(UEP_ADMISSIONS_FALLBACK_SPREADSHEET_ID,chunk.map(([,range])=>range));}assignValueRangesByRange(matrices,chunk,vr);}}catch(admissionError){console.warn('[UEP] 2028 입시DB 조회 실패',admissionError?.message||admissionError);for(const [logicalName] of uep08259AdmissionEntries)matrices[logicalName]=[];}
+  1782:   const data = parseGoogleSheetData(matrices);
+  1783: 
+  1784:   // 0.82.10 admissions reference datasets from basic-info connector
+  1785:   const uep08210MatrixObjects=(matrix)=>{
+  1786:     const rows=Array.isArray(matrix)?matrix:[];
+  1787:     const headers=(rows[2]||[]).map(v=>String(v??'').replace(/\r?\n/g,' ').trim());
+  1788:     if(!headers.some(Boolean))return [];
+  1789:     return rows.slice(3).filter(row=>Array.isArray(row)&&row.some(v=>String(v??'').trim())).map(row=>{
+  1790:       const obj={};headers.forEach((h,i)=>{if(h)obj[h]=row[i]??'';});return obj;
+  1791:     });
+  1792:   };
+  1793:   data.admissionBasics=uep08210MatrixObjects(matrices['52_대입기초']);
+  1794:   data.admissionTypes=uep08210MatrixObjects(matrices['53_전형이해']);
+  1795:   data.admissionTypeDetails=uep08210MatrixObjects(matrices['53A_전형세부유형DB']);
+  1796:   data.admissionStructures=uep08210MatrixObjects(matrices['53B_전형유형별대학DB']);
+  1797:   data.universityAdmissionStructures=data.admissionStructures;
+  1798:   data.universityAdmissions=uep08210MatrixObjects(matrices['56_대학입시마스터']);
+  1799:   data.admissionCounselPoints=uep08210MatrixObjects(matrices['56A_대학상담포인트DB']);
+  1800:   data.admissionTypeUniversities=uep08210MatrixObjects(matrices['53B_전형유형별대학DB']);
+  1801:   data.admissionSubtypes=uep08210MatrixObjects(matrices['53A_전형세부유형DB']);
+  1802:   data.admissionGradeCalcs=uep08210MatrixObjects(matrices['57_내신산정DB']);
+  1803:   data.admissionRecommendations=uep08210MatrixObjects(matrices['58_권장과목DB']);
+  1804:   data.curriculumDb=uep08210MatrixObjects(matrices['18_학교교육과정DB']);
+  1805:   data['52_대입기초']=data.admissionBasics;
+  1806:   data['53_전형이해']=data.admissionTypes;
+  1807:   data['53A_전형세부유형DB']=data.admissionTypeDetails;
+  1808:   data['53B_전형유형별대학DB']=data.admissionStructures;
+  1809:   data['56_대학입시마스터']=data.universityAdmissions;
+  1810:   data['56A_대학상담포인트DB']=data.admissionCounselPoints;
+  1811:   data['53B_전형유형별대학DB']=data.admissionTypeUniversities;
+  1812:   data['53A_전형세부유형DB']=data.admissionSubtypes;
+  1813:   data['18_학교교육과정DB']=data.curriculumDb;
+  1814:   data['57_내신산정DB']=data.admissionGradeCalcs;
+  1815:   data['58_권장과목DB']=data.admissionRecommendations;
+  1816:   data.admissionMinimumRows=uep08210MatrixObjects(matrices['54_수능최저DB']);
+--- SHEET_RANGES line 13 ---
+     1: const { app, BrowserWindow, ipcMain, dialog, safeStorage, shell, net } = require("electron");
+     2: app.setName("UNHO Education Platform");
+     3: const { spawn } = require("child_process");
+     4: const crypto = require("crypto");
+     5: const http = require("http");
+     6: const os = require("os");
+     7: const path = require("path");
+     8: const fs = require("fs/promises");
+     9: const {
+    10:   UEP_SPREADSHEET_ID,
+    11:   UEP_SPREADSHEET_NAME,
+    12:   UEP_SPREADSHEET_URL,
+    13:   SHEET_RANGES,
+    14:   RULE_SHEET_RANGES,
+    15:   UEP_PROCESSING_SPREADSHEET_ID,
+    16:   UEP_INPUT_CENTER_SPREADSHEET_ID,
+    17:   UEP_RULES_SPREADSHEET_ID,
+    18:   parseGoogleSheetData,
+    19: } = require("./google-data.cjs");
+    20: const UEP_ADMISSIONS_SPREADSHEET_ID = "1BHSdaUbOhp9p_9RB0XGgrfOo4wS_Z8Up0ocSCAMYIIk";
+    21: const UEP_ADMISSIONS_FALLBACK_SPREADSHEET_ID = "1bphoIQ11E2qsc3ksOqrXuO7xqS4CFyH8Dagbld7A1hg";
+    22: 
+    23: // UEP의 사용자 데이터와 Electron safeStorage 키 저장소를 같은 고정 위치에 둡니다.
+    24: // safeStorage 암호문만 다른 폴더로 복사하면 Chromium OS encryption key(Local State)와 분리되어
+    25: // Windows 재부팅/버전 교체 뒤 decryptString이 실패할 수 있으므로 userData 자체를 앱 시작 전에 고정합니다.
+    26: const originalUserDataRoot = app.getPath("userData");
+    27: const fixedUserDataRoot = path.join(process.env.APPDATA || app.getPath("appData"), "UNHO Education Platform");
+    28: try {
+    29:   if (path.resolve(originalUserDataRoot) !== path.resolve(fixedUserDataRoot)) app.setPath("userData", fixedUserDataRoot);
+    30: } catch {}
+    31: const stableUserDataRoot = () => app.getPath("userData");
+    32: const legacyUserDataRoot = () => originalUserDataRoot;
+    33: const statePath = () => path.join(stableUserDataRoot(), "school-board-state.json");
+    34: // UEP_08197_QUICK_LAUNCH_PERSISTENCE: executable paths live outside the replaceable app folder.
+    35: const quickLaunchPath = () => path.join(stableUserDataRoot(), "quick-launch-settings.json");
+    36: const credentialPath = () => path.join(stableUserDataRoot(), "google-service-account.bin");
+    37: const credentialRecoveryPath = () => path.join(stableUserDataRoot(), "google-service-account.recovery.json");
+    38: const googleUserOAuthPath = () => path.join(stableUserDataRoot(), "google-user-oauth.bin");
+    39: const googleUserOAuthRecoveryPath = () => path.join(stableUserDataRoot(), "google-user-oauth.recovery.json");
+    40: // __UEP_GOOGLE_OAUTH_CANONICAL_08073__
+    41: const googleUserOAuthCanonicalRoot = () => path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'UNHO Education Platform');
+    42: const googleUserOAuthCanonicalPath = () => path.join(googleUserOAuthCanonicalRoot(), 'google-user-oauth.bin');
+    43: const googleUserOAuthCanonicalRecoveryPath = () => path.join(googleUserOAuthCanonicalRoot(), 'google-user-oauth.recovery.json');
+    44: const neisApiKeyPath = () => path.join(stableUserDataRoot(), "neis-api-key.bin");
+    45: const schoolReadDevicePath = () => path.join(stableUserDataRoot(), "uep-device-id.txt");
+    46: const schoolReadSessionPath = () => path.join(stableUserDataRoot(), "uep-school-read-session.bin");
+    47: const neisCachePath = () => path.join(stableUserDataRoot(), "neis-dashboard-cache.json");
+    48: 
+--- SHEET_RANGES line 14 ---
+     2: app.setName("UNHO Education Platform");
+     3: const { spawn } = require("child_process");
+     4: const crypto = require("crypto");
+     5: const http = require("http");
+     6: const os = require("os");
+     7: const path = require("path");
+     8: const fs = require("fs/promises");
+     9: const {
+    10:   UEP_SPREADSHEET_ID,
+    11:   UEP_SPREADSHEET_NAME,
+    12:   UEP_SPREADSHEET_URL,
+    13:   SHEET_RANGES,
+    14:   RULE_SHEET_RANGES,
+    15:   UEP_PROCESSING_SPREADSHEET_ID,
+    16:   UEP_INPUT_CENTER_SPREADSHEET_ID,
+    17:   UEP_RULES_SPREADSHEET_ID,
+    18:   parseGoogleSheetData,
+    19: } = require("./google-data.cjs");
+    20: const UEP_ADMISSIONS_SPREADSHEET_ID = "1BHSdaUbOhp9p_9RB0XGgrfOo4wS_Z8Up0ocSCAMYIIk";
+    21: const UEP_ADMISSIONS_FALLBACK_SPREADSHEET_ID = "1bphoIQ11E2qsc3ksOqrXuO7xqS4CFyH8Dagbld7A1hg";
+    22: 
+    23: // UEP의 사용자 데이터와 Electron safeStorage 키 저장소를 같은 고정 위치에 둡니다.
+    24: // safeStorage 암호문만 다른 폴더로 복사하면 Chromium OS encryption key(Local State)와 분리되어
+    25: // Windows 재부팅/버전 교체 뒤 decryptString이 실패할 수 있으므로 userData 자체를 앱 시작 전에 고정합니다.
+    26: const originalUserDataRoot = app.getPath("userData");
+    27: const fixedUserDataRoot = path.join(process.env.APPDATA || app.getPath("appData"), "UNHO Education Platform");
+    28: try {
+    29:   if (path.resolve(originalUserDataRoot) !== path.resolve(fixedUserDataRoot)) app.setPath("userData", fixedUserDataRoot);
+    30: } catch {}
+    31: const stableUserDataRoot = () => app.getPath("userData");
+    32: const legacyUserDataRoot = () => originalUserDataRoot;
+    33: const statePath = () => path.join(stableUserDataRoot(), "school-board-state.json");
+    34: // UEP_08197_QUICK_LAUNCH_PERSISTENCE: executable paths live outside the replaceable app folder.
+    35: const quickLaunchPath = () => path.join(stableUserDataRoot(), "quick-launch-settings.json");
+    36: const credentialPath = () => path.join(stableUserDataRoot(), "google-service-account.bin");
+    37: const credentialRecoveryPath = () => path.join(stableUserDataRoot(), "google-service-account.recovery.json");
+    38: const googleUserOAuthPath = () => path.join(stableUserDataRoot(), "google-user-oauth.bin");
+    39: const googleUserOAuthRecoveryPath = () => path.join(stableUserDataRoot(), "google-user-oauth.recovery.json");
+    40: // __UEP_GOOGLE_OAUTH_CANONICAL_08073__
+    41: const googleUserOAuthCanonicalRoot = () => path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'UNHO Education Platform');
+    42: const googleUserOAuthCanonicalPath = () => path.join(googleUserOAuthCanonicalRoot(), 'google-user-oauth.bin');
+    43: const googleUserOAuthCanonicalRecoveryPath = () => path.join(googleUserOAuthCanonicalRoot(), 'google-user-oauth.recovery.json');
+    44: const neisApiKeyPath = () => path.join(stableUserDataRoot(), "neis-api-key.bin");
+    45: const schoolReadDevicePath = () => path.join(stableUserDataRoot(), "uep-device-id.txt");
+    46: const schoolReadSessionPath = () => path.join(stableUserDataRoot(), "uep-school-read-session.bin");
+    47: const neisCachePath = () => path.join(stableUserDataRoot(), "neis-dashboard-cache.json");
+    48: 
+    49: const comciganCachePath = () => path.join(stableUserDataRoot(), "comcigan-timetable-cache.json");
+--- SHEET_RANGES line 1568 ---
+  1556:   }
+  1557:   if(unmatchedPrograms)throw new Error(`선택보고서 프로그램 매칭 실패 ${unmatchedPrograms}건이 있어 자동 복구를 중단했습니다.`);
+  1558:   await clearSheetValues(token,UEP_PROCESSING_SPREADSHEET_ID,`'${target}'!A3:X5000`);
+  1559:   await updateSheetValues(token,UEP_PROCESSING_SPREADSHEET_ID,`'${target}'!A3:X${rows.length+3}`,[required,...rows]);
+  1560:   console.log(`[UEP] 선택보고서 정규화 자동 복구 완료: ${rows.length}건 · 학생확인 ${unmatchedStudents}건`);
+  1561:   return {ok:true,repaired:true,count:rows.length,unmatchedStudents};
+  1562: }
+  1563: 
+  1564: const UEP_OPERATIONAL_RANGE_NAMES=Object.freeze(['30_공식출결기록','31_지각기록','40_공지마감','44_공지확인현황','42_급식지도계획','43_야자감독계획']);
+  1565: async function fetchOperationalData({credentials=null}={}){
+  1566:   if(!liveDataCache)return {ok:false,requiresFullSync:true,reason:'전체 캐시가 아직 준비되지 않았습니다.'};
+  1567:   const auth=await getReadonlySheetsAuth(credentials),token=auth.token;
+  1568:   const operationalEntries=UEP_OPERATIONAL_RANGE_NAMES.map(name=>[name,SHEET_RANGES[name]]);
+  1569:   const [result,nightResult]=await Promise.all([
+  1570:     readSheetBatch(token,UEP_SPREADSHEET_ID,operationalEntries.map(([,range])=>range)),
+  1571:     // School Read API는 행번호가 있는 bounded A1만 허용한다. A:U 같은 열린 범위는 INVALID_RANGE가 된다.
+  1572:     readSheetBatch(token,UEP_PROCESSING_SPREADSHEET_ID,["'30_야자출결_정규화'!A1:U70000"])
+  1573:   ]);
+  1574:   const matrices={};assignValueRangesByRange(matrices,operationalEntries,result);
+  1575:   // 전체 학생마스터를 다시 읽지 않고 현재 캐시 학생정보를 파서용 02_학생마스터로 재구성한다.
+  1576:   const cachedStudents=Array.isArray(liveDataCache?.students)?liveDataCache.students:[];
+  1577:   matrices['02_학생마스터']=[
+  1578:     ['02_학생마스터'],
+  1579:     ['UEP operational synthetic student master'],
+  1580:     ['학생ID','학년도','학번','성명','사용성명','학년','반','번호','검색표시명','출신중학교','학적상태','학적기준일','학적변동사유','입학일','활성여부','수정일시','수정자','비고'],
+  1581:     ...cachedStudents.map((student)=>[
+  1582:       String(student?.id||student?.studentId||''),
+  1583:       String(student?.schoolYear||student?.year||'2026'),
+  1584:       String(student?.studentNo||student?.number||''),
+  1585:       String(student?.name||''),
+  1586:       String(student?.name||''),
+  1587:       String(student?.grade||student?.gradeNo||'1'),
+  1588:       String(student?.className||student?.classNo||''),
+  1589:       String(student?.studentNumber||student?.numberInClass||''),
+  1590:       '', '',
+  1591:       String(student?.status||student?.enrollmentStatus||'재학'),
+  1592:       '', '', '',
+  1593:       String(student?.active||student?.activeYn||'Y'),
+  1594:       '', '', ''
+  1595:     ])
+  1596:   ];
+  1597:   matrices['30_야자출결_정규화']=nightResult?.[0]?.values||[];
+  1598:   const partial=parseGoogleSheetData(matrices);
+  1599: 
+  1600:   // 운영 갱신에서는 30의 최신 NFC/교사확인 행만 교체하고,
+  1601:   // 전체 동기화에서 11_방과후학교→12_차시일정→13_출석부로 만든 프로그램 인정 행은 보존한다.
+  1602:   // 같은 학생·날짜·시간대가 겹치면 전체 파서와 동일하게 프로그램 인정 행이 우선한다.
+  1603:   const freshRawNight=Array.isArray(partial.nightAttendance)?partial.nightAttendance.filter(row=>!row?.recognizedByProgram&&!row?.linkedFromAfterSchool):[];
+--- SHEET_RANGES line 1631 ---
+  1619:   };
+  1620:   const operationalSyncedAt=new Date().toISOString();
+  1621:   liveDataCache={...liveDataCache,...patch,operationalSyncedAt};liveDataFetchedAt=Date.now();
+  1622:   return {ok:true,operationalSyncedAt,syncedAt:operationalSyncedAt,patch};
+  1623: }
+  1624: 
+  1625: async function fetchLiveData({ force = false, credentials = null } = {}) {
+  1626:   if (!force && liveDataCache && Date.now() - liveDataFetchedAt < 120000) return liveDataCache;
+  1627:   // 0.81.40: 관리자 로컬 서비스계정과 담임 School Read API 세션을 동일 읽기 파이프라인으로 연결합니다.
+  1628:   const auth = await getReadonlySheetsAuth(credentials);
+  1629:   const token = auth.token;
+  1630:   const entries = [
+  1631:     ...Object.entries(SHEET_RANGES),
+  1632:     ["18_학교교육과정DB", "'18_학교교육과정DB'!A1:N1000"],
+  1633:   ];
+  1634:   const matrices = {};
+  1635:   // 기본정보 연결시트를 가장 먼저, 작은 묶음으로 읽습니다.
+  1636:   // 탭 추가로 URL이 길어지거나 특정 탭이 잠시 실패해도 전체 연결이 끊기지 않도록 합니다.
+  1637:   const chunkSize = 12;
+  1638:   const chunks = [];
+  1639:   for (let offset = 0; offset < entries.length; offset += chunkSize) {
+  1640:     chunks.push({ offset, chunk: entries.slice(offset, offset + chunkSize) });
+  1641:   }
+  1642:   await mapWithConcurrency(chunks, 1, async ({ offset, chunk }) => {
+  1643:     try {
+  1644:       const valueRanges = await readSheetBatch(token, UEP_SPREADSHEET_ID, chunk.map(([, range]) => range));
+  1645:       assignValueRangesByRange(matrices,chunk,valueRanges);
+  1646:     } catch (chunkError) {
+  1647:       console.warn(`[UEP] 기본정보 묶음 조회 실패(${offset + 1}~${offset + chunk.length}), 개별 재시도`, chunkError?.message || chunkError);
+  1648:       await mapWithConcurrency(chunk, 1, async ([logicalName, range]) => {
+  1649:         try {
+  1650:           const one = await readSheetBatch(token, UEP_SPREADSHEET_ID, [range]);
+  1651:           matrices[logicalName] = one?.[0]?.values || [];
+  1652:         } catch (sheetError) {
+  1653:           matrices[logicalName] = [];
+  1654:           console.warn(`[UEP] 기본정보 탭 조회 실패: ${logicalName}`, sheetError?.message || sheetError);
+  1655:         }
+  1656:       });
+  1657:     }
+  1658:   });
+  1659:   entries.forEach(([name]) => { if (!matrices[name]) matrices[name] = []; });
+  1660: 
+  1661:   // 선택보고서 정규화 탭의 구조가 손상된 경우 구글폼 원본으로 복구한 뒤 읽습니다.
+  1662:   // 읽기 전용 담임 세션에서는 정규화 탭 자동복구(쓰기)를 실행하지 않습니다.
+  1663:   if(auth.mode!=='school_read_api') await ensureSelectedReportNormalization(token);
+  1664: 
+  1665:   // 학생응답 가공 결과: 현재 실제 존재하는 데이터 처리 탭만 직접 읽습니다.
+  1666:   // 선택과목은 응답수집 06_선택과목응답을 별도 읽고 기존 fallback 로직으로 구성합니다.
+--- SHEET_RANGES line 1713 ---
+  1701:   // 학생이 직접 입력한 희망계열·희망전공은 정규화 자료의 유무와 관계없이 항상 읽습니다.
+  1702:   // 선택과목 목록은 처리시트/고교학점제 결과를 우선하되, 진로 보조정보는 원응답의 최신값을 기준으로 합니다.
+  1703:   try {
+  1704:     const rawSelection = await readSheetBatch(token, "1K-Me8Pm8T2d5fGHoqSPEAu4RXozETUQ-N5pZVxjs8Hw", ["'06_선택과목응답'!A1:U2000"]);
+  1705:     matrices["__SELECTION_RESPONSES"] = rawSelection?.[0]?.values || [];
+  1706:   } catch (error) {
+  1707:     matrices["__SELECTION_RESPONSES"] = [];
+  1708:     console.warn("[UEP] 선택과목 응답 조회 실패", error?.message || error);
+  1709:   }
+  1710: 
+  1711:   // 규칙 적용 자료: 평상시는 batchGet, 한 탭이라도 실패하면 각 탭을 독립 재조회합니다.
+  1712:   // 특히 40_학사외출규칙은 다른 규칙 탭 오류와 무관하게 반드시 복구를 시도합니다.
+  1713:   const ruleEntries = Object.entries(RULE_SHEET_RANGES);
+  1714:   try {
+  1715:     const ruleValueRanges = await readSheetBatch(token, UEP_RULES_SPREADSHEET_ID, ruleEntries.map(([, range]) => range));
+  1716:     assignValueRangesByRange(matrices,ruleEntries,ruleValueRanges);
+  1717:     ruleEntries.forEach(([name]) => { if (!matrices[name]) matrices[name] = []; });
+  1718:   } catch (error) {
+  1719:     console.warn("[UEP] 규칙로그 묶음 조회 실패 - 개별 복구 시도", error?.message || error);
+  1720:     await mapWithConcurrency(ruleEntries, 1, async ([logicalName, range]) => {
+  1721:       try {
+  1722:         const one = await readSheetBatch(token, UEP_RULES_SPREADSHEET_ID, [range]);
+  1723:         matrices[logicalName] = one?.[0]?.values || [];
+  1724:       } catch (sheetError) {
+  1725:         matrices[logicalName] = [];
+  1726:         console.warn(`[UEP] 규칙로그 개별 조회 실패: ${logicalName}`, sheetError?.message || sheetError);
+  1727:       }
+  1728:     });
+  1729:   }
+  1730:   // v0.76.93: 학사외출 규칙은 화면 운영의 핵심이므로 규칙 묶음 결과와 무관하게 마지막에 단독 재조회합니다.
+  1731:   // batchGet의 일부 누락/순서 문제 또는 다른 규칙 탭 오류가 있어도 40_학사외출규칙 원본을 우선합니다.
+  1732:   try {
+  1733:     const dormRuleResult = await readSheetBatch(
+  1734:       token,
+  1735:       UEP_RULES_SPREADSHEET_ID,
+  1736:       ["'40_학사외출규칙'!A1:X1000"]
+  1737:     );
+  1738:     const dormRuleMatrix = dormRuleResult?.[0]?.values || [];
+  1739:     if (dormRuleMatrix.length >= 3) {
+  1740:       matrices["40_학사외출규칙"] = dormRuleMatrix;
+  1741:       console.log(`[UEP] 40_학사외출규칙 단독 조회 성공: ${Math.max(0,dormRuleMatrix.length-3)}건`);
+  1742:     } else {
+  1743:       console.warn("[UEP] 40_학사외출규칙 단독 조회 결과가 비어 있습니다.");
+  1744:     }
+  1745:   } catch (dormRuleError) {
+  1746:     console.warn("[UEP] 40_학사외출규칙 단독 조회 실패", dormRuleError?.message || dormRuleError);
+  1747:   }
+  1748: 
+--- parseGoogleSheetData line 18 ---
+     6: const os = require("os");
+     7: const path = require("path");
+     8: const fs = require("fs/promises");
+     9: const {
+    10:   UEP_SPREADSHEET_ID,
+    11:   UEP_SPREADSHEET_NAME,
+    12:   UEP_SPREADSHEET_URL,
+    13:   SHEET_RANGES,
+    14:   RULE_SHEET_RANGES,
+    15:   UEP_PROCESSING_SPREADSHEET_ID,
+    16:   UEP_INPUT_CENTER_SPREADSHEET_ID,
+    17:   UEP_RULES_SPREADSHEET_ID,
+    18:   parseGoogleSheetData,
+    19: } = require("./google-data.cjs");
+    20: const UEP_ADMISSIONS_SPREADSHEET_ID = "1BHSdaUbOhp9p_9RB0XGgrfOo4wS_Z8Up0ocSCAMYIIk";
+    21: const UEP_ADMISSIONS_FALLBACK_SPREADSHEET_ID = "1bphoIQ11E2qsc3ksOqrXuO7xqS4CFyH8Dagbld7A1hg";
+    22: 
+    23: // UEP의 사용자 데이터와 Electron safeStorage 키 저장소를 같은 고정 위치에 둡니다.
+    24: // safeStorage 암호문만 다른 폴더로 복사하면 Chromium OS encryption key(Local State)와 분리되어
+    25: // Windows 재부팅/버전 교체 뒤 decryptString이 실패할 수 있으므로 userData 자체를 앱 시작 전에 고정합니다.
+    26: const originalUserDataRoot = app.getPath("userData");
+    27: const fixedUserDataRoot = path.join(process.env.APPDATA || app.getPath("appData"), "UNHO Education Platform");
+    28: try {
+    29:   if (path.resolve(originalUserDataRoot) !== path.resolve(fixedUserDataRoot)) app.setPath("userData", fixedUserDataRoot);
+    30: } catch {}
+    31: const stableUserDataRoot = () => app.getPath("userData");
+    32: const legacyUserDataRoot = () => originalUserDataRoot;
+    33: const statePath = () => path.join(stableUserDataRoot(), "school-board-state.json");
+    34: // UEP_08197_QUICK_LAUNCH_PERSISTENCE: executable paths live outside the replaceable app folder.
+    35: const quickLaunchPath = () => path.join(stableUserDataRoot(), "quick-launch-settings.json");
+    36: const credentialPath = () => path.join(stableUserDataRoot(), "google-service-account.bin");
+    37: const credentialRecoveryPath = () => path.join(stableUserDataRoot(), "google-service-account.recovery.json");
+    38: const googleUserOAuthPath = () => path.join(stableUserDataRoot(), "google-user-oauth.bin");
+    39: const googleUserOAuthRecoveryPath = () => path.join(stableUserDataRoot(), "google-user-oauth.recovery.json");
+    40: // __UEP_GOOGLE_OAUTH_CANONICAL_08073__
+    41: const googleUserOAuthCanonicalRoot = () => path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'UNHO Education Platform');
+    42: const googleUserOAuthCanonicalPath = () => path.join(googleUserOAuthCanonicalRoot(), 'google-user-oauth.bin');
+    43: const googleUserOAuthCanonicalRecoveryPath = () => path.join(googleUserOAuthCanonicalRoot(), 'google-user-oauth.recovery.json');
+    44: const neisApiKeyPath = () => path.join(stableUserDataRoot(), "neis-api-key.bin");
+    45: const schoolReadDevicePath = () => path.join(stableUserDataRoot(), "uep-device-id.txt");
+    46: const schoolReadSessionPath = () => path.join(stableUserDataRoot(), "uep-school-read-session.bin");
+    47: const neisCachePath = () => path.join(stableUserDataRoot(), "neis-dashboard-cache.json");
+    48: 
+    49: const comciganCachePath = () => path.join(stableUserDataRoot(), "comcigan-timetable-cache.json");
+    50: async function migrateStableUserFile(fileName) {
+    51:   const target=path.join(stableUserDataRoot(),fileName), legacy=path.join(legacyUserDataRoot(),fileName);
+    52:   try { await fs.access(target); return; } catch {}
+    53:   try { await fs.mkdir(stableUserDataRoot(),{recursive:true}); await fs.copyFile(legacy,target); } catch {}
+--- parseGoogleSheetData line 1598 ---
+  1586:       String(student?.name||''),
+  1587:       String(student?.grade||student?.gradeNo||'1'),
+  1588:       String(student?.className||student?.classNo||''),
+  1589:       String(student?.studentNumber||student?.numberInClass||''),
+  1590:       '', '',
+  1591:       String(student?.status||student?.enrollmentStatus||'재학'),
+  1592:       '', '', '',
+  1593:       String(student?.active||student?.activeYn||'Y'),
+  1594:       '', '', ''
+  1595:     ])
+  1596:   ];
+  1597:   matrices['30_야자출결_정규화']=nightResult?.[0]?.values||[];
+  1598:   const partial=parseGoogleSheetData(matrices);
+  1599: 
+  1600:   // 운영 갱신에서는 30의 최신 NFC/교사확인 행만 교체하고,
+  1601:   // 전체 동기화에서 11_방과후학교→12_차시일정→13_출석부로 만든 프로그램 인정 행은 보존한다.
+  1602:   // 같은 학생·날짜·시간대가 겹치면 전체 파서와 동일하게 프로그램 인정 행이 우선한다.
+  1603:   const freshRawNight=Array.isArray(partial.nightAttendance)?partial.nightAttendance.filter(row=>!row?.recognizedByProgram&&!row?.linkedFromAfterSchool):[];
+  1604:   const retainedProgramNight=Array.isArray(liveDataCache?.nightAttendance)?liveDataCache.nightAttendance.filter(row=>row?.recognizedByProgram===true||row?.linkedFromAfterSchool===true):[];
+  1605:   const nightKey=(row)=>[String(row?.date||'').slice(0,10),String(row?.time||row?.period||''),String(row?.studentNo||row?.studentId||'')].join('|');
+  1606:   const mergedNightMap=new Map();
+  1607:   freshRawNight.forEach(row=>mergedNightMap.set(nightKey(row),row));
+  1608:   retainedProgramNight.forEach(row=>mergedNightMap.set(nightKey(row),row));
+  1609:   const mergedNightAttendance=[...mergedNightMap.values()];
+  1610: 
+  1611:   const patch={
+  1612:     officialAttendance:partial.officialAttendance||[],
+  1613:     lateAttendance:partial.lateAttendance||[],
+  1614:     notices:partial.notices||[],
+  1615:     noticeReceipts:partial.noticeReceipts||[],
+  1616:     lunchDuties:partial.lunchDuties||[],
+  1617:     nightSupervisors:partial.nightSupervisors||[],
+  1618:     nightAttendance:mergedNightAttendance
+  1619:   };
+  1620:   const operationalSyncedAt=new Date().toISOString();
+  1621:   liveDataCache={...liveDataCache,...patch,operationalSyncedAt};liveDataFetchedAt=Date.now();
+  1622:   return {ok:true,operationalSyncedAt,syncedAt:operationalSyncedAt,patch};
+  1623: }
+  1624: 
+  1625: async function fetchLiveData({ force = false, credentials = null } = {}) {
+  1626:   if (!force && liveDataCache && Date.now() - liveDataFetchedAt < 120000) return liveDataCache;
+  1627:   // 0.81.40: 관리자 로컬 서비스계정과 담임 School Read API 세션을 동일 읽기 파이프라인으로 연결합니다.
+  1628:   const auth = await getReadonlySheetsAuth(credentials);
+  1629:   const token = auth.token;
+  1630:   const entries = [
+  1631:     ...Object.entries(SHEET_RANGES),
+  1632:     ["18_학교교육과정DB", "'18_학교교육과정DB'!A1:N1000"],
+  1633:   ];
+--- parseGoogleSheetData line 1782 ---
+  1770:       const result=await readSheetBatch(token,officialSourceId,officialTabs.map(tab=>`'${tab.replace(/'/g,"''")}'!A1:AM1200`));
+  1771:       officialTabs.forEach((tab,index)=>{matrices[`__OFFICIAL_${tab}`]=result?.[index]?.values||[];});
+  1772:     } catch(tabError) {
+  1773:       officialTabs.forEach(tab=>{matrices[`__OFFICIAL_${tab}`]=[];});
+  1774:       console.warn("[UEP] 공결 원본 묶음 조회 실패",tabError?.message||tabError);
+  1775:     }
+  1776:   } catch (error) {
+  1777:     console.warn("[UEP] 2026. 운호고 1학년 공결 현황 조회 실패", error?.message || error);
+  1778:   }
+  1779: 
+  1780:   const uep08259AdmissionEntries=[['52_대입기초',"'52_대입기초'!A1:N500"],['53_전형이해',"'53_전형이해'!A1:N500"],['53A_전형세부유형DB',"'53A_전형세부유형DB'!A1:R500"],['53B_전형유형별대학DB',"'53B_전형유형별대학DB'!A1:T3000"],['53C_전형DB점검',"'53C_전형DB점검'!A1:T500"],['54_수능최저DB',"'54_수능최저DB'!A1:Z1000"],['55_대학입결DB',"'55_대학입결DB'!A1:Z1000"],['56_대학입시마스터',"'56_대학입시마스터'!A1:R500"],['56A_대학상담포인트DB',"'56A_대학상담포인트DB'!A1:P1200"],['57_내신산정DB',"'57_내신산정DB'!A1:Z1200"],['58_권장과목DB',"'58_권장과목DB'!A1:P2000"]];
+  1781:   try{for(let offset=0;offset<uep08259AdmissionEntries.length;offset+=6){const chunk=uep08259AdmissionEntries.slice(offset,offset+6);let vr;try{vr=await schoolReadBatchRead(UEP_ADMISSIONS_SPREADSHEET_ID,chunk.map(([,range])=>range));}catch(primaryError){console.warn('[UEP] 새 입시DB School Read 실패, 기존 52~58 안전원본으로 전환',primaryError?.message||primaryError);vr=await schoolReadBatchRead(UEP_ADMISSIONS_FALLBACK_SPREADSHEET_ID,chunk.map(([,range])=>range));}assignValueRangesByRange(matrices,chunk,vr);}}catch(admissionError){console.warn('[UEP] 2028 입시DB 조회 실패',admissionError?.message||admissionError);for(const [logicalName] of uep08259AdmissionEntries)matrices[logicalName]=[];}
+  1782:   const data = parseGoogleSheetData(matrices);
+  1783: 
+  1784:   // 0.82.10 admissions reference datasets from basic-info connector
+  1785:   const uep08210MatrixObjects=(matrix)=>{
+  1786:     const rows=Array.isArray(matrix)?matrix:[];
+  1787:     const headers=(rows[2]||[]).map(v=>String(v??'').replace(/\r?\n/g,' ').trim());
+  1788:     if(!headers.some(Boolean))return [];
+  1789:     return rows.slice(3).filter(row=>Array.isArray(row)&&row.some(v=>String(v??'').trim())).map(row=>{
+  1790:       const obj={};headers.forEach((h,i)=>{if(h)obj[h]=row[i]??'';});return obj;
+  1791:     });
+  1792:   };
+  1793:   data.admissionBasics=uep08210MatrixObjects(matrices['52_대입기초']);
+  1794:   data.admissionTypes=uep08210MatrixObjects(matrices['53_전형이해']);
+  1795:   data.admissionTypeDetails=uep08210MatrixObjects(matrices['53A_전형세부유형DB']);
+  1796:   data.admissionStructures=uep08210MatrixObjects(matrices['53B_전형유형별대학DB']);
+  1797:   data.universityAdmissionStructures=data.admissionStructures;
+  1798:   data.universityAdmissions=uep08210MatrixObjects(matrices['56_대학입시마스터']);
+  1799:   data.admissionCounselPoints=uep08210MatrixObjects(matrices['56A_대학상담포인트DB']);
+  1800:   data.admissionTypeUniversities=uep08210MatrixObjects(matrices['53B_전형유형별대학DB']);
+  1801:   data.admissionSubtypes=uep08210MatrixObjects(matrices['53A_전형세부유형DB']);
+  1802:   data.admissionGradeCalcs=uep08210MatrixObjects(matrices['57_내신산정DB']);
+  1803:   data.admissionRecommendations=uep08210MatrixObjects(matrices['58_권장과목DB']);
+  1804:   data.curriculumDb=uep08210MatrixObjects(matrices['18_학교교육과정DB']);
+  1805:   data['52_대입기초']=data.admissionBasics;
+  1806:   data['53_전형이해']=data.admissionTypes;
+  1807:   data['53A_전형세부유형DB']=data.admissionTypeDetails;
+  1808:   data['53B_전형유형별대학DB']=data.admissionStructures;
+  1809:   data['56_대학입시마스터']=data.universityAdmissions;
+  1810:   data['56A_대학상담포인트DB']=data.admissionCounselPoints;
+  1811:   data['53B_전형유형별대학DB']=data.admissionTypeUniversities;
+  1812:   data['53A_전형세부유형DB']=data.admissionSubtypes;
+  1813:   data['18_학교교육과정DB']=data.curriculumDb;
+  1814:   data['57_내신산정DB']=data.admissionGradeCalcs;
+  1815:   data['58_권장과목DB']=data.admissionRecommendations;
+  1816:   data.admissionMinimumRows=uep08210MatrixObjects(matrices['54_수능최저DB']);
+  1817:   data.admissionResults=uep08210MatrixObjects(matrices['55_대학입결DB']);
+--- 13_출석부 line 1601 ---
+  1589:       String(student?.studentNumber||student?.numberInClass||''),
+  1590:       '', '',
+  1591:       String(student?.status||student?.enrollmentStatus||'재학'),
+  1592:       '', '', '',
+  1593:       String(student?.active||student?.activeYn||'Y'),
+  1594:       '', '', ''
+  1595:     ])
+  1596:   ];
+  1597:   matrices['30_야자출결_정규화']=nightResult?.[0]?.values||[];
+  1598:   const partial=parseGoogleSheetData(matrices);
+  1599: 
+  1600:   // 운영 갱신에서는 30의 최신 NFC/교사확인 행만 교체하고,
+  1601:   // 전체 동기화에서 11_방과후학교→12_차시일정→13_출석부로 만든 프로그램 인정 행은 보존한다.
+  1602:   // 같은 학생·날짜·시간대가 겹치면 전체 파서와 동일하게 프로그램 인정 행이 우선한다.
+  1603:   const freshRawNight=Array.isArray(partial.nightAttendance)?partial.nightAttendance.filter(row=>!row?.recognizedByProgram&&!row?.linkedFromAfterSchool):[];
+  1604:   const retainedProgramNight=Array.isArray(liveDataCache?.nightAttendance)?liveDataCache.nightAttendance.filter(row=>row?.recognizedByProgram===true||row?.linkedFromAfterSchool===true):[];
+  1605:   const nightKey=(row)=>[String(row?.date||'').slice(0,10),String(row?.time||row?.period||''),String(row?.studentNo||row?.studentId||'')].join('|');
+  1606:   const mergedNightMap=new Map();
+  1607:   freshRawNight.forEach(row=>mergedNightMap.set(nightKey(row),row));
+  1608:   retainedProgramNight.forEach(row=>mergedNightMap.set(nightKey(row),row));
+  1609:   const mergedNightAttendance=[...mergedNightMap.values()];
+  1610: 
+  1611:   const patch={
+  1612:     officialAttendance:partial.officialAttendance||[],
+  1613:     lateAttendance:partial.lateAttendance||[],
+  1614:     notices:partial.notices||[],
+  1615:     noticeReceipts:partial.noticeReceipts||[],
+  1616:     lunchDuties:partial.lunchDuties||[],
+  1617:     nightSupervisors:partial.nightSupervisors||[],
+  1618:     nightAttendance:mergedNightAttendance
+  1619:   };
+  1620:   const operationalSyncedAt=new Date().toISOString();
+  1621:   liveDataCache={...liveDataCache,...patch,operationalSyncedAt};liveDataFetchedAt=Date.now();
+  1622:   return {ok:true,operationalSyncedAt,syncedAt:operationalSyncedAt,patch};
+  1623: }
+  1624: 
+  1625: async function fetchLiveData({ force = false, credentials = null } = {}) {
+  1626:   if (!force && liveDataCache && Date.now() - liveDataFetchedAt < 120000) return liveDataCache;
+  1627:   // 0.81.40: 관리자 로컬 서비스계정과 담임 School Read API 세션을 동일 읽기 파이프라인으로 연결합니다.
+  1628:   const auth = await getReadonlySheetsAuth(credentials);
+  1629:   const token = auth.token;
+  1630:   const entries = [
+  1631:     ...Object.entries(SHEET_RANGES),
+  1632:     ["18_학교교육과정DB", "'18_학교교육과정DB'!A1:N1000"],
+  1633:   ];
+  1634:   const matrices = {};
+  1635:   // 기본정보 연결시트를 가장 먼저, 작은 묶음으로 읽습니다.
+  1636:   // 탭 추가로 URL이 길어지거나 특정 탭이 잠시 실패해도 전체 연결이 끊기지 않도록 합니다.
+===== app/resources/app/electron/google-data.cjs TOP =====
+     1: "use strict";
+     2: 
+     3: const UEP_SPREADSHEET_ID = "1bphoIQ11E2qsc3ksOqrXuO7xqS4CFyH8Dagbld7A1hg";
+     4: const UEP_SPREADSHEET_NAME = "2026_운호고_UEP_DB_v1.0_Dev";
+     5: const UEP_SPREADSHEET_URL = `https://docs.google.com/spreadsheets/d/${UEP_SPREADSHEET_ID}/edit`;
+     6: const UEP_PROCESSING_SPREADSHEET_ID = "1fNV2T9Nf07y7i8VKngLzV6IWo_Bja4142ejJNS4F5c4";
+     7: const UEP_INPUT_CENTER_SPREADSHEET_ID = "1nJDQ1MzLVVD0mtSPxecoxMYDF4vKvaiqL1bcUSqgopc"; // [UEP] 입력센터 원본
+     8: const UEP_RULES_SPREADSHEET_ID = "1hRNvoUmNISEftmrMvjeo6CfAt9BJx3yjeHWAiT1M77s";
+     9: 
+    10: const SHEET_RANGES = Object.freeze({
+    11:   "00_UEP설정": "'00_UEP설정'!A1:Z500",
+    12:   "01_사용자계정": "'01_사용자계정'!A1:Z1000",
+    13:   "00_표준환경": "'00_표준환경'!A1:N500",
+    14:   "02_학생마스터": "'02_학생마스터'!A1:Z1000",
+    15:   "04_학생연락식별정보": "'04_학생연락식별정보'!A1:Z1000",
+    16:   "05_대학적성데이터": "'05_대학적성데이터'!A1:Z1000",
+    17:   "06_선택과목이력": "'06_선택과목이력'!A1:AI1000",
+    18:   "18_학교교육과정DB": "'18_학교교육과정DB'!A1:Z1000",
+    19:   "19_선택과목블록DB": "'19_선택과목블록DB'!A1:T1000",
+    20:   "07_학생활동이력": "'07_학생활동이력'!A1:X3000",
+    21:   "08_생활기록부최종기록": "'08_생활기록부최종기록'!A1:X3000",
+    22:   "09_공통활동마스터": "'09_공통활동마스터'!A1:AH1000",
+    23:   "10_선택활동마스터": "'10_선택활동마스터'!A1:AL1000",
+    24:   "11_방과후학교": "'11_방과후학교'!A1:Z1000",
+    25:   "12_차시일정": "'12_차시일정'!A1:Z1000",
+    26:   "14_봉사활동확정": "'14_봉사활동확정'!A1:X5000",
+    27:   "13_출석부": "'13_출석부'!A1:Z5000",
+    28:   "16_프로그램출석실적": "'16_프로그램출석실적'!A1:Z10000",
+    29:   "17_시간표마스터": "'17_시간표마스터'!A1:N1000",
+    30:   "17A_교사시간표마스터": "'17A_교사시간표마스터'!A1:L1100",
+    31:   "20_학사생마스터": "'20_학사생마스터'!A1:Z1000",
+    32:   "30_공식출결기록": "'30_공결기록'!A1:Z3000",
+    33:   "31_지각기록": "'31_지각기록'!A1:Z1000",
+    34:   "40_공지마감": "'40_공지마감'!A1:Z2000",
+    35:   "44_공지확인현황": "'44_공지확인현황'!A1:R3000",
+    36:   "45_학생상담기록": "'45_학생상담기록'!A1:R5000",
+    37:   "46_학생지도기록": "'46_학생지도기록'!A1:R5000",
+    38:   "47_교육비지원": "'47_교육비지원'!A1:R1000",
+    39:   "48_요보호학생": "'48_요보호학생'!A1:P1000",
+    40:   "49_위기학생관리": "'49_위기학생관리'!A1:T1000",
+    41:   "42_급식지도계획": "'42_급식지도계획'!A1:K1000",
+    42:   "43_야자감독계획": "'43_야자감독계획'!A1:J1000",
+    43:   "50_내신DB": "'50_내신DB'!A1:V7000",
+    44:   "51_모의고사DB": "'51_모의고사DB'!A1:AH2000",
+    45:   "54_수능최저DB": "'54_수능최저DB'!A1:Z1000",
+    46:   "55_대학입결DB": "'55_대학입결DB'!A1:Z1000",
+    47: });
+    48: 
+    49: const RULE_SHEET_RANGES = Object.freeze({
+    50:   "32_생기부작성우선순위": "'32_생기부작성우선순위'!A1:Z1000",
+    51:   "31_생기부작성규칙": "'31_생기부작성규칙'!A1:N1000",
+    52:   "33_생기부작성절대규칙": "'33_생기부작성절대규칙'!A1:Z1000",
+    53:   "35_금지표현DB": "'35_금지표현DB'!A1:Z1000",
+    54:   "34_문장패턴DB": "'34_문장패턴DB'!A1:Z1000",
+    55:   "36_교사관찰표현DB": "'36_교사관찰표현DB'!A1:Y1000",
+    56:   "40_학사외출규칙": "'40_학사외출규칙'!A1:X1000",
+    57:   "41_선택과목규칙": "'41_선택과목규칙'!A1:Z1000",
+    58:   "53_외부자료입력규칙": "'53_외부자료입력규칙'!A1:P1000",
+    59: });
+    60: 
+    61: function normalizeHeaderText(value) {
+    62:   return String(value ?? "")
+    63:     .replace(/\r?\n/g, " ")
+    64:     .replace(/\s+/g, " ")
+    65:     .trim();
+    66: }
+    67: 
+    68: function detectHeaderRowIndex(rows) {
+    69:   const source = Array.isArray(rows) ? rows : [];
+    70:   const scanLimit = Math.min(source.length, 12);
+    71:   let bestIndex = -1;
+    72:   let bestScore = -Infinity;
+    73: 
+    74:   for (let index = 0; index < scanLimit; index += 1) {
+    75:     const cells = (source[index] || []).map(normalizeHeaderText);
+    76:     const nonEmpty = cells.filter(Boolean);
+    77:     if (nonEmpty.length < 2) continue;
+    78: 
+    79:     const uniqueCount = new Set(nonEmpty).size;
+    80:     const duplicatePenalty = nonEmpty.length - uniqueCount;
+    81:     const knownHeaderHits = nonEmpty.filter((value) =>
+    82:       /^(학생ID|학번|성명|사용성명|학년|반|번호|일자|운영일|일정ID|프로그램ID|강좌ID|기록ID|상태|구분|설정키|파일구분|스프레드시트ID|탭명|탭용도)$/.test(value),
+    83:     ).length;
+    84:     const titlePenalty = nonEmpty.length <= 2 && /UEP|표준|시트|DB|관리|기준/.test(nonEmpty.join(" ")) ? 8 : 0;
+    85:     const score = nonEmpty.length * 3 + uniqueCount + knownHeaderHits * 8 - duplicatePenalty * 2 - titlePenalty;
+    86: 
+    87:     if (score > bestScore) {
+    88:       bestScore = score;
+    89:       bestIndex = index;
+    90:     }
+    91:   }
+    92: 
+    93:   return bestIndex;
+    94: }
+    95: 
+    96: function headerLookupKey(value) {
+    97:   return normalizeHeaderText(value).replace(/[\s·_\-()\[\]{}]/g, "").toLowerCase();
+    98: }
+    99: 
+   100: function valueByHeader(row, ...aliases) {
+   101:   if (!row || typeof row !== "object") return "";
+   102:   for (const alias of aliases) {
+   103:     if (Object.prototype.hasOwnProperty.call(row, alias)) return row[alias];
+   104:   }
+   105:   const wanted = new Set(aliases.map(headerLookupKey));
+   106:   for (const [key, value] of Object.entries(row)) {
+   107:     const normalizedKey = headerLookupKey(key);
+   108:     if (wanted.has(normalizedKey)) return value;
+   109:     // 병합형 2단 헤더(예: "학생정보 학번", "외출정보 외출일자")도
+   110:     // 하위 헤더 별칭으로 안전하게 찾습니다.
+   111:     for (const aliasKey of wanted) {
+   112:       if (aliasKey && normalizedKey.endsWith(aliasKey)) return value;
+   113:     }
+   114:   }
+   115:   return "";
+   116: }
+   117: 
+   118: function looksLikeSubHeaderRow(row) {
+   119:   const cells = (Array.isArray(row) ? row : []).map(normalizeHeaderText);
+   120:   const nonEmpty = cells.filter(Boolean);
+--- SHEET_RANGES line 10 ---
+     1: "use strict";
+     2: 
+     3: const UEP_SPREADSHEET_ID = "1bphoIQ11E2qsc3ksOqrXuO7xqS4CFyH8Dagbld7A1hg";
+     4: const UEP_SPREADSHEET_NAME = "2026_운호고_UEP_DB_v1.0_Dev";
+     5: const UEP_SPREADSHEET_URL = `https://docs.google.com/spreadsheets/d/${UEP_SPREADSHEET_ID}/edit`;
+     6: const UEP_PROCESSING_SPREADSHEET_ID = "1fNV2T9Nf07y7i8VKngLzV6IWo_Bja4142ejJNS4F5c4";
+     7: const UEP_INPUT_CENTER_SPREADSHEET_ID = "1nJDQ1MzLVVD0mtSPxecoxMYDF4vKvaiqL1bcUSqgopc"; // [UEP] 입력센터 원본
+     8: const UEP_RULES_SPREADSHEET_ID = "1hRNvoUmNISEftmrMvjeo6CfAt9BJx3yjeHWAiT1M77s";
+     9: 
+    10: const SHEET_RANGES = Object.freeze({
+    11:   "00_UEP설정": "'00_UEP설정'!A1:Z500",
+    12:   "01_사용자계정": "'01_사용자계정'!A1:Z1000",
+    13:   "00_표준환경": "'00_표준환경'!A1:N500",
+    14:   "02_학생마스터": "'02_학생마스터'!A1:Z1000",
+    15:   "04_학생연락식별정보": "'04_학생연락식별정보'!A1:Z1000",
+    16:   "05_대학적성데이터": "'05_대학적성데이터'!A1:Z1000",
+    17:   "06_선택과목이력": "'06_선택과목이력'!A1:AI1000",
+    18:   "18_학교교육과정DB": "'18_학교교육과정DB'!A1:Z1000",
+    19:   "19_선택과목블록DB": "'19_선택과목블록DB'!A1:T1000",
+    20:   "07_학생활동이력": "'07_학생활동이력'!A1:X3000",
+    21:   "08_생활기록부최종기록": "'08_생활기록부최종기록'!A1:X3000",
+    22:   "09_공통활동마스터": "'09_공통활동마스터'!A1:AH1000",
+    23:   "10_선택활동마스터": "'10_선택활동마스터'!A1:AL1000",
+    24:   "11_방과후학교": "'11_방과후학교'!A1:Z1000",
+    25:   "12_차시일정": "'12_차시일정'!A1:Z1000",
+    26:   "14_봉사활동확정": "'14_봉사활동확정'!A1:X5000",
+    27:   "13_출석부": "'13_출석부'!A1:Z5000",
+    28:   "16_프로그램출석실적": "'16_프로그램출석실적'!A1:Z10000",
+    29:   "17_시간표마스터": "'17_시간표마스터'!A1:N1000",
+    30:   "17A_교사시간표마스터": "'17A_교사시간표마스터'!A1:L1100",
+    31:   "20_학사생마스터": "'20_학사생마스터'!A1:Z1000",
+    32:   "30_공식출결기록": "'30_공결기록'!A1:Z3000",
+    33:   "31_지각기록": "'31_지각기록'!A1:Z1000",
+    34:   "40_공지마감": "'40_공지마감'!A1:Z2000",
+    35:   "44_공지확인현황": "'44_공지확인현황'!A1:R3000",
+    36:   "45_학생상담기록": "'45_학생상담기록'!A1:R5000",
+    37:   "46_학생지도기록": "'46_학생지도기록'!A1:R5000",
+    38:   "47_교육비지원": "'47_교육비지원'!A1:R1000",
+    39:   "48_요보호학생": "'48_요보호학생'!A1:P1000",
+    40:   "49_위기학생관리": "'49_위기학생관리'!A1:T1000",
+    41:   "42_급식지도계획": "'42_급식지도계획'!A1:K1000",
+    42:   "43_야자감독계획": "'43_야자감독계획'!A1:J1000",
+    43:   "50_내신DB": "'50_내신DB'!A1:V7000",
+    44:   "51_모의고사DB": "'51_모의고사DB'!A1:AH2000",
+    45:   "54_수능최저DB": "'54_수능최저DB'!A1:Z1000",
+--- SHEET_RANGES line 49 ---
+    37:   "46_학생지도기록": "'46_학생지도기록'!A1:R5000",
+    38:   "47_교육비지원": "'47_교육비지원'!A1:R1000",
+    39:   "48_요보호학생": "'48_요보호학생'!A1:P1000",
+    40:   "49_위기학생관리": "'49_위기학생관리'!A1:T1000",
+    41:   "42_급식지도계획": "'42_급식지도계획'!A1:K1000",
+    42:   "43_야자감독계획": "'43_야자감독계획'!A1:J1000",
+    43:   "50_내신DB": "'50_내신DB'!A1:V7000",
+    44:   "51_모의고사DB": "'51_모의고사DB'!A1:AH2000",
+    45:   "54_수능최저DB": "'54_수능최저DB'!A1:Z1000",
+    46:   "55_대학입결DB": "'55_대학입결DB'!A1:Z1000",
+    47: });
+    48: 
+    49: const RULE_SHEET_RANGES = Object.freeze({
+    50:   "32_생기부작성우선순위": "'32_생기부작성우선순위'!A1:Z1000",
+    51:   "31_생기부작성규칙": "'31_생기부작성규칙'!A1:N1000",
+    52:   "33_생기부작성절대규칙": "'33_생기부작성절대규칙'!A1:Z1000",
+    53:   "35_금지표현DB": "'35_금지표현DB'!A1:Z1000",
+    54:   "34_문장패턴DB": "'34_문장패턴DB'!A1:Z1000",
+    55:   "36_교사관찰표현DB": "'36_교사관찰표현DB'!A1:Y1000",
+    56:   "40_학사외출규칙": "'40_학사외출규칙'!A1:X1000",
+    57:   "41_선택과목규칙": "'41_선택과목규칙'!A1:Z1000",
+    58:   "53_외부자료입력규칙": "'53_외부자료입력규칙'!A1:P1000",
+    59: });
+    60: 
+    61: function normalizeHeaderText(value) {
+    62:   return String(value ?? "")
+    63:     .replace(/\r?\n/g, " ")
+    64:     .replace(/\s+/g, " ")
+    65:     .trim();
+    66: }
+    67: 
+    68: function detectHeaderRowIndex(rows) {
+    69:   const source = Array.isArray(rows) ? rows : [];
+    70:   const scanLimit = Math.min(source.length, 12);
+    71:   let bestIndex = -1;
+    72:   let bestScore = -Infinity;
+    73: 
+    74:   for (let index = 0; index < scanLimit; index += 1) {
+    75:     const cells = (source[index] || []).map(normalizeHeaderText);
+    76:     const nonEmpty = cells.filter(Boolean);
+    77:     if (nonEmpty.length < 2) continue;
+    78: 
+    79:     const uniqueCount = new Set(nonEmpty).size;
+    80:     const duplicatePenalty = nonEmpty.length - uniqueCount;
+    81:     const knownHeaderHits = nonEmpty.filter((value) =>
+    82:       /^(학생ID|학번|성명|사용성명|학년|반|번호|일자|운영일|일정ID|프로그램ID|강좌ID|기록ID|상태|구분|설정키|파일구분|스프레드시트ID|탭명|탭용도)$/.test(value),
+    83:     ).length;
+    84:     const titlePenalty = nonEmpty.length <= 2 && /UEP|표준|시트|DB|관리|기준/.test(nonEmpty.join(" ")) ? 8 : 0;
+--- SHEET_RANGES line 1784 ---
+  1772:       internalScoreCount: internalScoreRows.length,
+  1773:       mockScoreCount: mockScoreRows.length,
+  1774:       admissionMinimumCount: admissionMinimums.length,
+  1775:       admissionCutCount: admissionCuts.length,
+  1776:     },
+  1777:   };
+  1778: }
+  1779: 
+  1780: module.exports = {
+  1781:   UEP_SPREADSHEET_ID,
+  1782:   UEP_SPREADSHEET_NAME,
+  1783:   UEP_SPREADSHEET_URL,
+  1784:   SHEET_RANGES,
+  1785:   RULE_SHEET_RANGES,
+  1786:   UEP_PROCESSING_SPREADSHEET_ID,
+  1787:   UEP_INPUT_CENTER_SPREADSHEET_ID,
+  1788:   UEP_RULES_SPREADSHEET_ID,
+  1789:   matrixToObjectRows,
+  1790:   parseGoogleSheetData,
+  1791: };
+  1792: 
+  1793: // __UEP_SELECTION_TERM_08082__
+  1794: function normalizeSelectionTerm(value){
+  1795:   const s=String(value||'').replace(/\s+/g,'').replace(/학년도/g,'').trim();
+  1796:   let m=s.match(/([23])(?:학년)?[-_.]?([12])(?:학기)?/);
+  1797:   if(!m)m=s.match(/([23])학년([12])학기/);
+  1798:   if(m)return `${m[1]}학년 ${m[2]}학기`;
+  1799:   return String(value||'').trim();
+  1800: }
+  1801: 
+  1802: 
+  1803: 
+--- SHEET_RANGES line 1785 ---
+  1773:       mockScoreCount: mockScoreRows.length,
+  1774:       admissionMinimumCount: admissionMinimums.length,
+  1775:       admissionCutCount: admissionCuts.length,
+  1776:     },
+  1777:   };
+  1778: }
+  1779: 
+  1780: module.exports = {
+  1781:   UEP_SPREADSHEET_ID,
+  1782:   UEP_SPREADSHEET_NAME,
+  1783:   UEP_SPREADSHEET_URL,
+  1784:   SHEET_RANGES,
+  1785:   RULE_SHEET_RANGES,
+  1786:   UEP_PROCESSING_SPREADSHEET_ID,
+  1787:   UEP_INPUT_CENTER_SPREADSHEET_ID,
+  1788:   UEP_RULES_SPREADSHEET_ID,
+  1789:   matrixToObjectRows,
+  1790:   parseGoogleSheetData,
+  1791: };
+  1792: 
+  1793: // __UEP_SELECTION_TERM_08082__
+  1794: function normalizeSelectionTerm(value){
+  1795:   const s=String(value||'').replace(/\s+/g,'').replace(/학년도/g,'').trim();
+  1796:   let m=s.match(/([23])(?:학년)?[-_.]?([12])(?:학기)?/);
+  1797:   if(!m)m=s.match(/([23])학년([12])학기/);
+  1798:   if(m)return `${m[1]}학년 ${m[2]}학기`;
+  1799:   return String(value||'').trim();
+  1800: }
+  1801: 
+  1802: 
+  1803: 
+--- parseGoogleSheetData line 291 ---
+   279:   if (typeof value === "number") {
+   280:     const totalMinutes = Math.round((value % 1) * 24 * 60);
+   281:     return `${String(Math.floor(totalMinutes / 60) % 24).padStart(2, "0")}:${String(totalMinutes % 60).padStart(2, "0")}`;
+   282:   }
+   283:   const text = String(value).trim();
+   284:   if (/^0\.\d+$/.test(text)) return localTime(Number(text));
+   285:   const match = text.match(/(\d{1,2}):(\d{2})/);
+   286:   return match ? `${match[1].padStart(2, "0")}:${match[2]}` : text;
+   287: }
+   288: 
+   289: function classNumberSafe(value) { return String(value || "").replace(/[^0-9]/g, ""); }
+   290: 
+   291: function parseGoogleSheetData(sheetMatrices) {
+   292:   const rowsFrom = (name) => matrixToObjectRows(sheetMatrices[name] || []);
+   293:   const masters = rowsFrom("02_학생마스터").filter(
+   294:     (row) => String(row["활성여부"] || "Y").trim() !== "N",
+   295:   );
+   296:   const contactSourceRows = rowsFrom("04_학생연락식별정보");
+   297:   const contacts = new Map(
+   298:     contactSourceRows
+   299:       .filter((row) => String(row["현재사용여부"] || "Y").trim() !== "N")
+   300:       .map((row) => [String(row["학생ID"] || "").trim(), row]),
+   301:   );
+   302:   const dormRows = rowsFrom("20_학사생마스터");
+   303:   const currentDorm = new Map(
+   304:     dormRows
+   305:       .filter(
+   306:         (row) =>
+   307:           String(row["현재여부"] || "").trim() === "Y" &&
+   308:           String(row["학사상태"] || "").trim() === "재사",
+   309:       )
+   310:       .map((row) => [String(row["학생ID"] || "").trim(), row]),
+   311:   );
+   312:   const careerRows = (rowsFrom("05_대학적성데이터").length ? rowsFrom("05_대학적성데이터") : rowsFrom("05_진로희망이력")).filter(row => String(row["현재여부"] || "Y").trim() !== "N");
+   313:   const careerProfiles = new Map(careerRows.map(row => {
+   314:     const id=String(row["학생ID"] || "").trim();
+   315:     const career=String(row["대학적성데이터"] || row["진로희망분야"] || row["진로희망"] || "").trim();
+   316:     const major=String(row["희망학과"] || row["희망전공"] || "").trim();
+   317:     const track=String(row["희망계열"] || row["계열"] || "").trim();
+   318:     const interest=String(row["흥미"] || row["흥미유형"] || row["관심분야"] || "").trim();
+   319:     const aptitude=String(row["적성"] || row["적성유형"] || row["강점"] || "").trim();
+   320:     return [id,{career,major,track,interest,aptitude}];
+   321:   }));
+   322:   const careers = new Map([...careerProfiles].map(([id,p]) => [id, [p.career,p.major].filter(Boolean).join(" · ")]));
+   323: 
+   324:   // 학생 지원·보호 신호 원본. 목록 화면에는 민감 상세를 직접 노출하지 않고,
+   325:   // 학생이 선택된 경우에만 renderer가 신호등과 의도적 확인 UI를 표시합니다.
+   326:   const educationSupportByStudent = new Map(rowsFrom("47_교육비지원")
+--- parseGoogleSheetData line 1790 ---
+  1778: }
+  1779: 
+  1780: module.exports = {
+  1781:   UEP_SPREADSHEET_ID,
+  1782:   UEP_SPREADSHEET_NAME,
+  1783:   UEP_SPREADSHEET_URL,
+  1784:   SHEET_RANGES,
+  1785:   RULE_SHEET_RANGES,
+  1786:   UEP_PROCESSING_SPREADSHEET_ID,
+  1787:   UEP_INPUT_CENTER_SPREADSHEET_ID,
+  1788:   UEP_RULES_SPREADSHEET_ID,
+  1789:   matrixToObjectRows,
+  1790:   parseGoogleSheetData,
+  1791: };
+  1792: 
+  1793: // __UEP_SELECTION_TERM_08082__
+  1794: function normalizeSelectionTerm(value){
+  1795:   const s=String(value||'').replace(/\s+/g,'').replace(/학년도/g,'').trim();
+  1796:   let m=s.match(/([23])(?:학년)?[-_.]?([12])(?:학기)?/);
+  1797:   if(!m)m=s.match(/([23])학년([12])학기/);
+  1798:   if(m)return `${m[1]}학년 ${m[2]}학기`;
+  1799:   return String(value||'').trim();
+  1800: }
+  1801: 
+  1802: 
+  1803: 
+--- module.exports line 1780 ---
+  1768:       lateCount: lateRows.length,
+  1769:       lateStudents: new Set(lateRows.map((row) => row.studentId)).size,
+  1770:       scoreCount: scoreRows.length,
+  1771:       scoreStudents: new Set(scoreRows.map((row) => row.studentId)).size,
+  1772:       internalScoreCount: internalScoreRows.length,
+  1773:       mockScoreCount: mockScoreRows.length,
+  1774:       admissionMinimumCount: admissionMinimums.length,
+  1775:       admissionCutCount: admissionCuts.length,
+  1776:     },
+  1777:   };
+  1778: }
+  1779: 
+  1780: module.exports = {
+  1781:   UEP_SPREADSHEET_ID,
+  1782:   UEP_SPREADSHEET_NAME,
+  1783:   UEP_SPREADSHEET_URL,
+  1784:   SHEET_RANGES,
+  1785:   RULE_SHEET_RANGES,
+  1786:   UEP_PROCESSING_SPREADSHEET_ID,
+  1787:   UEP_INPUT_CENTER_SPREADSHEET_ID,
+  1788:   UEP_RULES_SPREADSHEET_ID,
+  1789:   matrixToObjectRows,
+  1790:   parseGoogleSheetData,
+  1791: };
+  1792: 
+  1793: // __UEP_SELECTION_TERM_08082__
+  1794: function normalizeSelectionTerm(value){
+  1795:   const s=String(value||'').replace(/\s+/g,'').replace(/학년도/g,'').trim();
+  1796:   let m=s.match(/([23])(?:학년)?[-_.]?([12])(?:학기)?/);
+  1797:   if(!m)m=s.match(/([23])학년([12])학기/);
+  1798:   if(m)return `${m[1]}학년 ${m[2]}학기`;
+  1799:   return String(value||'').trim();
+  1800: }
+  1801: 
+  1802: 
+  1803: 
+--- 13_출석부 line 27 ---
+    15:   "04_학생연락식별정보": "'04_학생연락식별정보'!A1:Z1000",
+    16:   "05_대학적성데이터": "'05_대학적성데이터'!A1:Z1000",
+    17:   "06_선택과목이력": "'06_선택과목이력'!A1:AI1000",
+    18:   "18_학교교육과정DB": "'18_학교교육과정DB'!A1:Z1000",
+    19:   "19_선택과목블록DB": "'19_선택과목블록DB'!A1:T1000",
+    20:   "07_학생활동이력": "'07_학생활동이력'!A1:X3000",
+    21:   "08_생활기록부최종기록": "'08_생활기록부최종기록'!A1:X3000",
+    22:   "09_공통활동마스터": "'09_공통활동마스터'!A1:AH1000",
+    23:   "10_선택활동마스터": "'10_선택활동마스터'!A1:AL1000",
+    24:   "11_방과후학교": "'11_방과후학교'!A1:Z1000",
+    25:   "12_차시일정": "'12_차시일정'!A1:Z1000",
+    26:   "14_봉사활동확정": "'14_봉사활동확정'!A1:X5000",
+    27:   "13_출석부": "'13_출석부'!A1:Z5000",
+    28:   "16_프로그램출석실적": "'16_프로그램출석실적'!A1:Z10000",
+    29:   "17_시간표마스터": "'17_시간표마스터'!A1:N1000",
+    30:   "17A_교사시간표마스터": "'17A_교사시간표마스터'!A1:L1100",
+    31:   "20_학사생마스터": "'20_학사생마스터'!A1:Z1000",
+    32:   "30_공식출결기록": "'30_공결기록'!A1:Z3000",
+    33:   "31_지각기록": "'31_지각기록'!A1:Z1000",
+    34:   "40_공지마감": "'40_공지마감'!A1:Z2000",
+    35:   "44_공지확인현황": "'44_공지확인현황'!A1:R3000",
+    36:   "45_학생상담기록": "'45_학생상담기록'!A1:R5000",
+    37:   "46_학생지도기록": "'46_학생지도기록'!A1:R5000",
+    38:   "47_교육비지원": "'47_교육비지원'!A1:R1000",
+    39:   "48_요보호학생": "'48_요보호학생'!A1:P1000",
+    40:   "49_위기학생관리": "'49_위기학생관리'!A1:T1000",
+    41:   "42_급식지도계획": "'42_급식지도계획'!A1:K1000",
+    42:   "43_야자감독계획": "'43_야자감독계획'!A1:J1000",
+    43:   "50_내신DB": "'50_내신DB'!A1:V7000",
+    44:   "51_모의고사DB": "'51_모의고사DB'!A1:AH2000",
+    45:   "54_수능최저DB": "'54_수능최저DB'!A1:Z1000",
+    46:   "55_대학입결DB": "'55_대학입결DB'!A1:Z1000",
+    47: });
+    48: 
+    49: const RULE_SHEET_RANGES = Object.freeze({
+    50:   "32_생기부작성우선순위": "'32_생기부작성우선순위'!A1:Z1000",
+    51:   "31_생기부작성규칙": "'31_생기부작성규칙'!A1:N1000",
+    52:   "33_생기부작성절대규칙": "'33_생기부작성절대규칙'!A1:Z1000",
+    53:   "35_금지표현DB": "'35_금지표현DB'!A1:Z1000",
+    54:   "34_문장패턴DB": "'34_문장패턴DB'!A1:Z1000",
+    55:   "36_교사관찰표현DB": "'36_교사관찰표현DB'!A1:Y1000",
+    56:   "40_학사외출규칙": "'40_학사외출규칙'!A1:X1000",
+    57:   "41_선택과목규칙": "'41_선택과목규칙'!A1:Z1000",
+    58:   "53_외부자료입력규칙": "'53_외부자료입력규칙'!A1:P1000",
+    59: });
+    60: 
+    61: function normalizeHeaderText(value) {
+    62:   return String(value ?? "")
+--- 13_출석부 line 500 ---
+   488:     const status = String(row["운영상태"] || row["상태"] || "").trim();
+   489:     // "운영완료"는 정상 강좌다. 정확한 비활성 상태만 제외한다.
+   490:     return !/^(종료|폐강|비활성|N)$/i.test(status);
+   491:   });
+   492:   const sessionRows = rowsFrom("12_차시일정")
+   493:     .filter((row) => (row["프로그램ID"] || row["강좌ID"]) && (row["실제수업일"] || row["운영일자"] || row["예정일"]))
+   494:     .map((row) => ({
+   495:       ...row,
+   496:       __programId: String(row["프로그램ID"] || row["강좌ID"] || "").trim().replace(/^CRS-/, ""),
+   497:       __date: localDate(row["실제수업일"] || row["운영일자"] || row["예정일"]),
+   498:       __status: String(row["운영상태"] || "예정").trim(),
+   499:     }));
+   500:   // 13_출석부는 방과후·야간심화의 차시 출석 전용입니다.
+   501:   const rosterRows = rowsFrom("13_출석부").filter((row) => {
+   502:     const programId = row["프로그램ID"] || row["강좌ID"];
+   503:     const state = String(row["참여상태"] || row["등록상태"] || row["신청상태"] || "참여");
+   504:     return programId && !/취소|종료|제외|N/i.test(state);
+   505:   });
+   506:   // 선택활동의 최종 참여학생은 16_프로그램출석실적만 사용합니다.
+   507:   const selectedParticipationRows = rowsFrom("16_프로그램출석실적").filter((row) => {
+   508:     const programId = String(row["프로그램ID"] || "").trim();
+   509:     const state = String(row["참여상태"] || "참여").trim();
+   510:     return programId && !/취소|종료|제외|미참여|N/i.test(state);
+   511:   });
+   512:   const selectedParticipationByProgram = selectedParticipationRows.reduce((map,row)=>{
+   513:     const key=String(row["프로그램ID"]||"").trim();
+   514:     if(!map.has(key))map.set(key,[]);
+   515:     map.get(key).push(row);
+   516:     return map;
+   517:   },new Map());
+   518:   const rosterByProgram = rosterRows.reduce((map, row) => {
+   519:     const key = String(row["프로그램ID"] || row["강좌ID"] || "").trim().replace(/^CRS-/, "");
+   520:     if (!map.has(key)) map.set(key, []);
+   521:     map.get(key).push(row);
+   522:     return map;
+   523:   }, new Map());
+   524:   const rosterBySession = rosterRows.reduce((map, row) => {
+   525:     const key = String(row["차시ID"] || "").trim();
+   526:     if (!key) return map;
+   527:     if (!map.has(key)) map.set(key, []);
+   528:     map.get(key).push(row);
+   529:     return map;
+   530:   }, new Map());
+   531:   const truthyFlag = (value) => /^(Y|YES|TRUE|1|사용|적용)$/i.test(String(value || "").trim());
+   532:   const selectedParticipantRows = (programId) => {
+   533:     const sourceRows=selectedParticipationByProgram.get(String(programId||"").trim())||[];
+   534:     return sourceRows.map((row)=>{
+   535:       const enteredId=String(row["학생ID"]||"").trim();
+--- 13_출석부 line 501 ---
+   489:     // "운영완료"는 정상 강좌다. 정확한 비활성 상태만 제외한다.
+   490:     return !/^(종료|폐강|비활성|N)$/i.test(status);
+   491:   });
+   492:   const sessionRows = rowsFrom("12_차시일정")
+   493:     .filter((row) => (row["프로그램ID"] || row["강좌ID"]) && (row["실제수업일"] || row["운영일자"] || row["예정일"]))
+   494:     .map((row) => ({
+   495:       ...row,
+   496:       __programId: String(row["프로그램ID"] || row["강좌ID"] || "").trim().replace(/^CRS-/, ""),
+   497:       __date: localDate(row["실제수업일"] || row["운영일자"] || row["예정일"]),
+   498:       __status: String(row["운영상태"] || "예정").trim(),
+   499:     }));
+   500:   // 13_출석부는 방과후·야간심화의 차시 출석 전용입니다.
+   501:   const rosterRows = rowsFrom("13_출석부").filter((row) => {
+   502:     const programId = row["프로그램ID"] || row["강좌ID"];
+   503:     const state = String(row["참여상태"] || row["등록상태"] || row["신청상태"] || "참여");
+   504:     return programId && !/취소|종료|제외|N/i.test(state);
+   505:   });
+   506:   // 선택활동의 최종 참여학생은 16_프로그램출석실적만 사용합니다.
+   507:   const selectedParticipationRows = rowsFrom("16_프로그램출석실적").filter((row) => {
+   508:     const programId = String(row["프로그램ID"] || "").trim();
+   509:     const state = String(row["참여상태"] || "참여").trim();
+   510:     return programId && !/취소|종료|제외|미참여|N/i.test(state);
+   511:   });
+   512:   const selectedParticipationByProgram = selectedParticipationRows.reduce((map,row)=>{
+   513:     const key=String(row["프로그램ID"]||"").trim();
+   514:     if(!map.has(key))map.set(key,[]);
+   515:     map.get(key).push(row);
+   516:     return map;
+   517:   },new Map());
+   518:   const rosterByProgram = rosterRows.reduce((map, row) => {
+   519:     const key = String(row["프로그램ID"] || row["강좌ID"] || "").trim().replace(/^CRS-/, "");
+   520:     if (!map.has(key)) map.set(key, []);
+   521:     map.get(key).push(row);
+   522:     return map;
+   523:   }, new Map());
+   524:   const rosterBySession = rosterRows.reduce((map, row) => {
+   525:     const key = String(row["차시ID"] || "").trim();
+   526:     if (!key) return map;
+   527:     if (!map.has(key)) map.set(key, []);
+   528:     map.get(key).push(row);
+   529:     return map;
+   530:   }, new Map());
+   531:   const truthyFlag = (value) => /^(Y|YES|TRUE|1|사용|적용)$/i.test(String(value || "").trim());
+   532:   const selectedParticipantRows = (programId) => {
+   533:     const sourceRows=selectedParticipationByProgram.get(String(programId||"").trim())||[];
+   534:     return sourceRows.map((row)=>{
+   535:       const enteredId=String(row["학생ID"]||"").trim();
+   536:       const enteredNo=String(row["학번"]||"").replace(/\.0$/,"").trim();
+--- 13_출석부 line 709 ---
+   697:   const afterSessions = validAfterSessionRows
+   698:     .map((session, index) => {
+   699:       const row = afterMasterById.get(session.__programId);
+   700:       const programId = session.__programId;
+   701:       const sessionId = String(session["차시ID"] || `AFTER-SESSION-${index+1}`).trim();
+   702:       const actualTitle = String(row["프로그램명"] || row["강좌명"] || "방과후학교").trim();
+   703:       const studentsForProgram = participantRows(programId, sessionId);
+   704:       const startTime=localTime(session["시작시각"]||row["시작시간"]);
+   705:       const endTime=localTime(session["종료시각"]||row["종료시간"]);
+   706:       const attendedCount = studentsForProgram.filter(student => /출석|지각|공결|참여/.test(String(student.result || ""))).length;
+   707:       return {
+   708:         id:`after-session-${sessionId}`,
+   709:         source:"12_차시일정 + 13_출석부",
+   710:         programId,
+   711:         courseId:programId,
+   712:         sessionId,
+   713:         sessionNo:computedSessionNo.get(sessionId) || String(session["차시번호"] || "").trim(),
+   714:         sourceSessionNo:String(session["차시번호"] || "").trim(),
+   715:         date:session.__date,
+   716:         plannedDate:localDate(session["예정일"] || session["운영일자"]),
+   717:         title:actualTitle,
+   718:         actualTitle,
+   719:         recordTitle:"생활기록부 기록 대상 아님",
+   720:         type:String(row["운영기간구분"] || "방과후학교").trim(),
+   721:         kind:"after",
+   722:         time:[startTime,endTime].filter(Boolean).join("~") || String(row["요일"] || "시간 미등록"),
+   723:         place:String(session["장소"] || row["장소"] || "").trim(),
+   724:         teacher:String(session["담당교사"] || row["담당교사"] || "").trim(),
+   725:         students:studentsForProgram,
+   726:         attendedCount,
+   727:         subject:String(row["교과"] || "").trim(),
+   728:         department:String(row["담당부서"] || "").trim(),
+   729:         afterType:String(row["방과후유형"] || row["운영기간구분"] || "방과후수업").trim(),
+   730:         weekdays:String(row["요일"] || "").trim(),
+   731:         reportRequired:false,
+   732:         reportSubmittedCount:0,
+   733:         reportToAuthority:false,
+   734:         reportAgency:"",
+   735:         reportAfterDays:0,
+   736:         photoRequired:false,
+   737:         affectsAttendance:truthyFlag(row["야자연계여부"] || row["야자영향"] || "Y"),
+   738:         status:session.__status || "예정",
+   739:         changeType:String(session["변경유형"] || "").trim(),
+   740:         originalDate:localDate(session["원예정일"]),
+   741:         changeReason:String(session["변경사유"] || "").trim(),
+   742:         attendanceConfirmed:truthyFlag(session["출석확정"]),
+   743:         nightSlots:(()=>{
+   744:           const explicit=String(session["야자영향타임"] || "").split(/[·,\/]/).map(v=>v.trim()).filter(Boolean);
+--- 13_출석부 line 761 ---
+   749:           return [];
+   750:         })(),
+   751:         memo:String(session["비고"] || row["비고"] || "").trim(),
+   752:         endDate:session.__date
+   753:       };
+   754:     });
+   755:   const afterMasterPrograms = [...afterMasterById.entries()].map(([programId,row],index)=>{
+   756:     const studentsForProgram=participantRows(programId);
+   757:     const startDate=localDate(row["운영시작일"]||row["시작일"]||row["운영일자"]);
+   758:     const endDate=localDate(row["운영종료일"]||row["종료일"]||startDate);
+   759:     const actualTitle=String(row["프로그램명"]||row["강좌명"]||"방과후학교").trim();
+   760:     return {
+   761:       id:`after-master-${programId}`,source:"11_방과후학교 + 13_출석부",programId,courseId:programId,sessionId:"",sessionNo:"",
+   762:       date:startDate,endDate,title:actualTitle,actualTitle,recordTitle:"생활기록부 기록 대상 아님",
+   763:       type:String(row["운영기간구분"]||"방과후학교").trim(),kind:"after",
+   764:       time:[localTime(row["시작시간"]),localTime(row["종료시간"])].filter(Boolean).join("~")||String(row["요일"]||"시간 미등록"),
+   765:       place:String(row["장소"]||"").trim(),teacher:String(row["담당교사"]||"").trim(),students:studentsForProgram,
+   766:       attendedCount:studentsForProgram.filter(student=>/출석|지각|공결|참여|등록|신청/.test(String(student.result||""))).length,
+   767:       subject:String(row["교과"]||"").trim(),department:String(row["담당부서"]||"").trim(),
+   768:       afterType:String(row["방과후유형"]||row["운영기간구분"]||"방과후수업").trim(),weekdays:String(row["요일"]||"").trim(),
+   769:       reportRequired:false,reportSubmittedCount:0,reportToAuthority:false,reportAgency:"",reportAfterDays:0,photoRequired:false,
+   770:       affectsAttendance:truthyFlag(row["야자연계여부"]||row["야자영향"]||"Y"),status:String(row["운영상태"]||"예정").trim(),
+   771:       memo:String(row["학생안내"]||row["비고"]||"").trim(),operationPeriod:String(row["운영기간구분"]||"").trim(),targetGrade:String(row["대상학년"]||"").trim(),attendanceMethod:String(row["출석관리방식"]||"").trim(),isCourseMaster:true
+   772:     };
+   773:   });
+   774:   const afterPrograms = [...afterMasterPrograms,...afterSessions];
+   775:   const connectedPrograms=[...commonPrograms,...selectedPrograms,...afterPrograms];
+   776: 
+   777:   const toMinutes = (value) => { const match = String(value || "").match(/(\d{1,2}):(\d{2})/); return match ? Number(match[1]) * 60 + Number(match[2]) : null; };
+   778:   const slotRange = (row) => { const text = `${row.time || ""} ${row.type || ""} ${row.detail || ""}`; if (/오후자습|1타임/.test(text)) return [17*60,18*60,"오후자습"]; if (/야자\s*1|야간\s*1|2타임/.test(text)) return [19*60+20,20*60+10,"야자1"]; if (/야자\s*2|야간\s*2|3타임/.test(text)) return [20*60+20,21*60+30,"야자2"]; return null; };
+   779:   const programOverlaps = (program,row) => {
+   780:     const slot=slotRange(row); if(!slot) return false;
+   781:     // 야자출결의 프로그램 판정은 12_차시일정에 실제 시작·종료시각이 있는 차시만 허용한다.
+   782:     // 강좌명이나 "오후자습" 문구만으로 방과후를 추정하지 않는다.
+   783:     const clocks=String(program.time||"").match(/\d{1,2}:\d{2}/g)||[];
+   784:     if(clocks.length<2) return false;
+   785:     const start=toMinutes(clocks[0]),end=toMinutes(clocks[1]);
+   786:     return Number.isFinite(start)&&Number.isFinite(end)&&start<slot[1]&&end>slot[0];
+   787:   };
+   788:   // 11_방과후학교 → 12_차시일정 → 13_출석부를 야자 월간표에도 직접 반영합니다.
+   789:   // 기존 야자 QR 행이 없어도 실제 수업 차시와 수강생이 확인되면 해당 시간대를 프로그램 참여로 생성합니다.
+   790:   const nightSlotTemplates = [
+   791:     { label:"오후자습", start:17*60, end:18*60 },
+   792:     { label:"야자1", start:19*60+20, end:20*60+10 },
+   793:     { label:"야자2", start:20*60+20, end:21*60+30 },
+   794:   ];
+   795:   const nightRowKey = (date,time,studentId,studentNo) => [date,time,studentId||studentNo].join("|");
+   796:   const existingNightKeys = new Set(allMappedNightRows.map(row=>nightRowKey(row.date,row.time,row.studentId,row.studentNo)));
+--- 13_출석부 line 788 ---
+   776: 
+   777:   const toMinutes = (value) => { const match = String(value || "").match(/(\d{1,2}):(\d{2})/); return match ? Number(match[1]) * 60 + Number(match[2]) : null; };
+   778:   const slotRange = (row) => { const text = `${row.time || ""} ${row.type || ""} ${row.detail || ""}`; if (/오후자습|1타임/.test(text)) return [17*60,18*60,"오후자습"]; if (/야자\s*1|야간\s*1|2타임/.test(text)) return [19*60+20,20*60+10,"야자1"]; if (/야자\s*2|야간\s*2|3타임/.test(text)) return [20*60+20,21*60+30,"야자2"]; return null; };
+   779:   const programOverlaps = (program,row) => {
+   780:     const slot=slotRange(row); if(!slot) return false;
+   781:     // 야자출결의 프로그램 판정은 12_차시일정에 실제 시작·종료시각이 있는 차시만 허용한다.
+   782:     // 강좌명이나 "오후자습" 문구만으로 방과후를 추정하지 않는다.
+   783:     const clocks=String(program.time||"").match(/\d{1,2}:\d{2}/g)||[];
+   784:     if(clocks.length<2) return false;
+   785:     const start=toMinutes(clocks[0]),end=toMinutes(clocks[1]);
+   786:     return Number.isFinite(start)&&Number.isFinite(end)&&start<slot[1]&&end>slot[0];
+   787:   };
+   788:   // 11_방과후학교 → 12_차시일정 → 13_출석부를 야자 월간표에도 직접 반영합니다.
+   789:   // 기존 야자 QR 행이 없어도 실제 수업 차시와 수강생이 확인되면 해당 시간대를 프로그램 참여로 생성합니다.
+   790:   const nightSlotTemplates = [
+   791:     { label:"오후자습", start:17*60, end:18*60 },
+   792:     { label:"야자1", start:19*60+20, end:20*60+10 },
+   793:     { label:"야자2", start:20*60+20, end:21*60+30 },
+   794:   ];
+   795:   const nightRowKey = (date,time,studentId,studentNo) => [date,time,studentId||studentNo].join("|");
+   796:   const existingNightKeys = new Set(allMappedNightRows.map(row=>nightRowKey(row.date,row.time,row.studentId,row.studentNo)));
+   797:   afterSessions.filter(program=>program.affectsAttendance===true).forEach(program=>{
+   798:     const explicitSlots=(program.nightSlots||[]).flatMap(value=>{
+   799:       const text=String(value||"");
+   800:       return ["오후자습","야자1","야자2"].filter(slot=>text.includes(slot));
+   801:     });
+   802:     const clocks=String(program.time||"").match(/\d{1,2}:\d{2}/g)||[];
+   803:     const start=clocks.length>=2?toMinutes(clocks[0]):null, end=clocks.length>=2?toMinutes(clocks[1]):null;
+   804:     const matchedSlots=explicitSlots.length
+   805:       ? nightSlotTemplates.filter(slot=>explicitSlots.includes(slot.label))
+   806:       : (Number.isFinite(start)&&Number.isFinite(end)?nightSlotTemplates.filter(slot=>start<slot.end&&end>slot.start):[]);
+   807:     matchedSlots.forEach(slot=>{
+   808:       (program.students||[]).forEach((student,index)=>{
+   809:         const status=String(student.result||student.attendance||student.participation||"");
+   810:         if(/결석|불참|취소|제외/.test(status)) return;
+   811:         const studentId=String(student.studentId||"");
+   812:         const studentNo=String(student.studentNo||student.number||"");
+   813:         const key=nightRowKey(program.date,slot.label,studentId,studentNo);
+   814:         const programRow={
+   815:           id:`after-linked-${program.sessionId||program.programId}-${studentId||studentNo}-${slot.label}-${index}`,
+   816:           studentId, studentNo, name:String(student.name||""), className:classNumberSafe(student.className||""),
+   817:           date:program.date, time:slot.label, type:"방과후학교", affiliation:String(program.actualTitle||program.title||"방과후학교"),
+   818:           detail:[program.actualTitle||program.title, program.time, program.place].filter(Boolean).join(" · "),
+   819:           result:"프로그램 인정", originalResult:"", recognizedByProgram:true, programPending:false,
+   820:           programTitle:program.actualTitle||program.title, programKind:"after", programId:program.id||"", courseId:program.programId||program.courseId||"", sessionId:program.sessionId||"",
+   821:           programType:program.afterType||program.type||"방과후학교", programTime:program.time||"", programPlace:program.place||"", programTeacher:program.teacher||"", programWeekdays:program.weekdays||"",
+   822:           inputPath:"12_차시일정·13_출석부 자동연동", submittedAt:"", linkedFromAfterSchool:true,
+   823:         };
+--- 13_출석부 line 822 ---
+   810:         if(/결석|불참|취소|제외/.test(status)) return;
+   811:         const studentId=String(student.studentId||"");
+   812:         const studentNo=String(student.studentNo||student.number||"");
+   813:         const key=nightRowKey(program.date,slot.label,studentId,studentNo);
+   814:         const programRow={
+   815:           id:`after-linked-${program.sessionId||program.programId}-${studentId||studentNo}-${slot.label}-${index}`,
+   816:           studentId, studentNo, name:String(student.name||""), className:classNumberSafe(student.className||""),
+   817:           date:program.date, time:slot.label, type:"방과후학교", affiliation:String(program.actualTitle||program.title||"방과후학교"),
+   818:           detail:[program.actualTitle||program.title, program.time, program.place].filter(Boolean).join(" · "),
+   819:           result:"프로그램 인정", originalResult:"", recognizedByProgram:true, programPending:false,
+   820:           programTitle:program.actualTitle||program.title, programKind:"after", programId:program.id||"", courseId:program.programId||program.courseId||"", sessionId:program.sessionId||"",
+   821:           programType:program.afterType||program.type||"방과후학교", programTime:program.time||"", programPlace:program.place||"", programTeacher:program.teacher||"", programWeekdays:program.weekdays||"",
+   822:           inputPath:"12_차시일정·13_출석부 자동연동", submittedAt:"", linkedFromAfterSchool:true,
+   823:         };
+   824:         const existingIndex=allMappedNightRows.findIndex(row=>nightRowKey(row.date,row.time,row.studentId,row.studentNo)===key);
+   825:         if(existingIndex>=0) allMappedNightRows.splice(existingIndex,1,programRow);
+   826:         else allMappedNightRows.push(programRow);
+   827:         existingNightKeys.add(key);
+   828:       });
+   829:     });
+   830:   });
+   831: 
+   832:   allMappedNightRows.forEach((row) => {
+   833:     if (isAfterSchool(row)) return;
+   834:     const program = connectedPrograms.find(item => item.date === row.date && programOverlaps(item,row) && (item.students || []).some(student => String(student.studentId || "") === String(row.studentId || "") || String(student.studentNo || "") === String(row.studentNo || "")));
+   835:     if (!program) return;
+   836:     const participant = (program.students || []).find(student => String(student.studentId || "") === String(row.studentId || "") || String(student.studentNo || "") === String(row.studentNo || "")) || {};
+   837:     const status = String(participant.result || "대상");
+   838:     const confirmed = /출석|지각|공결|정상|참여|입실/.test(status) || (!participant.attendance && /참여|등록/.test(String(participant.participation||"")));
+   839:     row.originalResult = row.result;
+   840:     row.result = confirmed ? "프로그램 인정" : "프로그램 확인";
+   841:     row.recognizedByProgram = confirmed;
+   842:     row.programPending = !confirmed;
+   843:     row.programTitle = program.actualTitle || program.title;
+   844:     row.programId = program.id || "";
+   845:     row.programKind = program.kind;
+   846:     row.type = program.kind === "after" ? "방과후학교" : (program.type || "프로그램");
+   847:     row.affiliation = row.programTitle;
+   848:     row.detail = [row.programTitle, program.time, program.place].filter(Boolean).join(" · ");
+   849:   });
+   850:   // 방과후 기록도 월간 야자표에서는 상태 표시가 필요하므로 제거하지 않습니다.
+   851:   // 결석·미대상 기록은 화면 판정 단계에서 '기록 없음'으로 처리됩니다.
+   852:   const nightAttendance = allMappedNightRows;
+   853:   afterSchoolAttendance = nightAttendance.filter(row => row.recognizedByProgram || isAfterSchool(row));
+   854:   const attendance = nightAttendance.slice(-500).reverse();
+   855:   const attended = nightRows.filter((row) =>
+   856:     String(row["출결"] || row["입실상태"] || "").includes("출석"),
+   857:   ).length;
