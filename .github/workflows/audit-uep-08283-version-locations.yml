@@ -1,0 +1,25 @@
+name: Audit UEP 0.82.83 Version Locations
+on:
+  push:
+    paths:
+      - '.github/workflows/audit-uep-08283-version-locations.yml'
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          gh release download v0.82.83 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE -ne 0){throw 'download failed'}
+          Expand-Archive source/UEP-update.zip app -Force
+          Write-Host '=== VERSION MARKERS ==='
+          Get-ChildItem app -Recurse -File -Include *.js,*.cjs,*.json | Select-String -SimpleMatch '0.82.83' | ForEach-Object { Write-Host ($_.Path+':'+$_.LineNumber+': '+$_.Line.Trim()) }
+          Write-Host '=== ADMISSION CONSTANT DEFINITIONS ==='
+          Get-ChildItem app/resources/app -Recurse -File -Include *.js,*.cjs | Select-String -Pattern 'UEP_ADMISSIONS_SPREADSHEET_ID|UEP_ADMISSIONS_FALLBACK_SPREADSHEET_ID' | ForEach-Object { Write-Host ($_.Path+':'+$_.LineNumber+': '+$_.Line.Trim()) }
