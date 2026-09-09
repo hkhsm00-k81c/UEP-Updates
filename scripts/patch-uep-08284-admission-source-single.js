@@ -30,9 +30,9 @@ const newLoader="const vr=await schoolReadBatchRead(UEP_ADMISSIONS_SPREADSHEET_I
 must(main.includes(oldLoader),'기존 입시 fallback 로더 구조를 찾지 못했습니다.');
 main=main.replace(oldLoader,newLoader);
 
-const fallbackDefinition='const UEP_ADMISSIONS_FALLBACK_SPREADSHEET_ID = "1bphoIQ11E2qsc3ksOqrXuO7xqS4CFyH8Dagbld7A1hg";\n';
-must(main.includes(fallbackDefinition),'기존 입시 fallback ID 정의를 찾지 못했습니다.');
-main=main.replace(fallbackDefinition,'');
+const fallbackRegex=/const UEP_ADMISSIONS_FALLBACK_SPREADSHEET_ID = "1bphoIQ11E2qsc3ksOqrXuO7xqS4CFyH8Dagbld7A1hg";\r?\n/;
+must(fallbackRegex.test(main),'기존 입시 fallback ID 정의를 찾지 못했습니다.');
+main=main.replace(fallbackRegex,'');
 must(!main.includes('UEP_ADMISSIONS_FALLBACK_SPREADSHEET_ID'),'fallback ID 참조가 남아 있습니다.');
 must(!main.includes('기존 52~58 안전원본으로 전환'),'fallback 경고문이 남아 있습니다.');
 write(mainPath,main);
