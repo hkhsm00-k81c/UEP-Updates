@@ -1,0 +1,127 @@
+name: Build Release UEP 0.82.84 Admission Source Single
+on:
+  push:
+    paths:
+      - 'release-08284.trigger'
+permissions:
+  contents: write
+jobs:
+  build-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Download v0.82.83 baseline
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,output|Out-Null
+          gh release download v0.82.83 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE -ne 0){throw 'v0.82.83 baseline download failed'}
+          Expand-Archive source/UEP-update.zip app -Force
+      - name: Apply targeted admissions source patch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node scripts/patch-uep-08284-admission-source-single.js app/resources/app
+          if($LASTEXITCODE -ne 0){throw 'patch failed'}
+      - name: Syntax and regression checks
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check app/resources/app/electron/main.cjs
+          if($LASTEXITCODE -ne 0){throw 'main.cjs syntax failed'}
+          node --check app/resources/app/gyomuon.js
+          if($LASTEXITCODE -ne 0){throw 'gyomuon.js syntax failed'}
+          node scripts/test-uep-08284-admission-source-single.js app/resources/app
+          if($LASTEXITCODE -ne 0){throw 'v0.82.84 regression failed'}
+      - name: Build update ZIP
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          if(Test-Path output/UEP-update.zip){Remove-Item output/UEP-update.zip -Force}
+          Compress-Archive -Path app/* -DestinationPath output/UEP-update.zip -CompressionLevel Optimal
+          if($LASTEXITCODE -ne 0){throw 'compress failed'}
+          if(!(Test-Path output/UEP-update.zip)){throw 'UEP-update.zip not created'}
+      - name: Re-open package and verify false-success guards
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force verify|Out-Null
+          Expand-Archive output/UEP-update.zip verify -Force
+          node --check verify/resources/app/electron/main.cjs
+          if($LASTEXITCODE -ne 0){throw 'packaged main.cjs syntax failed'}
+          node --check verify/resources/app/gyomuon.js
+          if($LASTEXITCODE -ne 0){throw 'packaged gyomuon.js syntax failed'}
+          node scripts/test-uep-08284-admission-source-single.js verify/resources/app
+          if($LASTEXITCODE -ne 0){throw 'packaged regression failed'}
+          $pkg=Get-Content verify/resources/app/package.json -Raw|ConvertFrom-Json
+          if($pkg.version -ne '0.82.84'){throw "packaged package version mismatch: $($pkg.version)"}
+          $renderer=Get-Content verify/resources/app/gyomuon.js -Raw
+          if($renderer -notmatch 'APP_VERSION="0\.82\.84"'){throw 'packaged runtime version mismatch'}
+      - name: Generate SHA256
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $hash=(Get-FileHash output/UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  UEP-update.zip" | Set-Content output/sha256.txt -Encoding ascii
+          "UEP_ZIP_SHA256=$hash" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "ZIP SHA256: $hash"
+      - name: Create GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          gh release view v0.82.84 --repo $env:GITHUB_REPOSITORY *> $null
+          if($LASTEXITCODE -eq 0){throw 'v0.82.84 already exists; refusing to overwrite'}
+          gh release create v0.82.84 output/UEP-update.zip output/sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.84' --notes @'
+          UEP v0.82.84 · 입시DB 원본 단일화
+          - 56A 대학상담포인트 읽기/저장을 전용 2028 대학입시DB로 이관
+          - 기본정보 연결시트의 구형 52~58 입시DB fallback 제거
+          - 대입기초·전형이해·수능최저·입결·오늘의 대학·내신산정·권장과목 공용 캐시 구조 유지
+          - 학생연락처·공결·지각·급식지도·야자감독 등 일반 UEP_SPREADSHEET_ID 운영 경로는 변경하지 않음
+          - 기본정보 연결시트의 기존 52~58 중복 탭은 이번 버전에서 삭제하지 않음(실사용 검증 후 삭제 예정)
+          - 59/59A 모집단위 DB 연결은 새 대학 메뉴 개편 단계에서 별도 진행
+          - 신규 MutationObserver/전역 click 우회/setTimeout DOM 보정 없음
+          '@
+          if($LASTEXITCODE -ne 0){throw 'release creation failed'}
+      - name: Update auto-update policy
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $policy=Get-Content uep-policy.json -Raw|ConvertFrom-Json
+          $policy.latestVersion='0.82.84'
+          $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.84/UEP-update.zip'
+          $policy.sha256=$env:UEP_ZIP_SHA256
+          $policy.message='UEP 0.82.84 · 입시DB 원본 단일화'
+          $policy.forceUpdate=$false
+          $policy.updateEnabled=$true
+          $policy|ConvertTo-Json -Depth 20|Set-Content uep-policy.json -Encoding utf8
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add uep-policy.json
+          git commit -m 'Set update policy to UEP 0.82.84'
+          if($LASTEXITCODE -ne 0){throw 'policy commit failed'}
+          git push origin HEAD:main
+          if($LASTEXITCODE -ne 0){throw 'policy push failed'}
+      - name: Final release and policy verification
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $release=gh api repos/$env:GITHUB_REPOSITORY/releases/tags/v0.82.84 | ConvertFrom-Json
+          if($LASTEXITCODE -ne 0){throw 'release fetch failed'}
+          $zip=$release.assets|Where-Object {$_.name -eq 'UEP-update.zip'}
+          if(!$zip){throw 'release ZIP asset missing'}
+          if($zip.digest -ne ('sha256:'+$env:UEP_ZIP_SHA256)){throw "release digest mismatch: $($zip.digest)"}
+          $remote=(gh api repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json -H 'Accept: application/vnd.github.raw+json')|ConvertFrom-Json
+          if($LASTEXITCODE -ne 0){throw 'remote policy fetch failed'}
+          if($remote.latestVersion -ne '0.82.84'){throw 'remote latestVersion mismatch'}
+          if($remote.sha256 -ne $env:UEP_ZIP_SHA256){throw 'remote policy SHA mismatch'}
+          if($remote.downloadUrl -ne 'https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.84/UEP-update.zip'){throw 'remote downloadUrl mismatch'}
+          Write-Host "RELEASE_OK size=$($zip.size) digest=$($zip.digest)"
