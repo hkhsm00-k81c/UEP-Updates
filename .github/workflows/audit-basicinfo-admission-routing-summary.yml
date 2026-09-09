@@ -1,0 +1,42 @@
+name: Audit BasicInfo Admission Routing Summary
+on:
+  push:
+    paths:
+      - '.github/workflows/audit-basicinfo-admission-routing-summary.yml'
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          gh release download v0.82.83 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE -ne 0){throw 'download failed'}
+          Expand-Archive source/UEP-update.zip app -Force
+          $g='app/resources/app/gyomuon.js'
+          $m='app/resources/app/electron/main.cjs'
+          function ShowHits([string]$file,[string]$pattern,[string]$label){
+            $hits=Select-String -Path $file -Pattern $pattern
+            Write-Host "### $label COUNT=$($hits.Count)"
+            foreach($h in $hits){Write-Host ("{0}:{1}" -f $h.LineNumber,$h.Line.Trim())}
+          }
+          Write-Host '=== IDS ==='
+          ShowHits $g '1bphoIQ11E2qsc3ksOqrXuO7xqS4CFyH8Dagbld7A1hg' 'GY OLD_BASIC_ID'
+          ShowHits $m '1bphoIQ11E2qsc3ksOqrXuO7xqS4CFyH8Dagbld7A1hg' 'MAIN OLD_BASIC_ID'
+          ShowHits $g '1BHSdaUbOhp9p_9RB0XGgrfOo4wS_Z8Up0ocSCAMYIIk' 'GY NEW_ADMISSION_ID'
+          ShowHits $m '1BHSdaUbOhp9p_9RB0XGgrfOo4wS_Z8Up0ocSCAMYIIk' 'MAIN NEW_ADMISSION_ID'
+          Write-Host '=== LOADER DEFINITIONS ==='
+          ShowHits $g 'UEP_ADMISSIONS_SPREADSHEET_ID|uep08259AdmissionEntries|52_대입기초|53_전형이해|53A_전형세부유형DB|53B_전형유형별대학DB|53C_전형DB점검|54_수능최저DB|55_대학입결DB|56_대학입시마스터|56A_대학상담포인트DB|57_내신산정DB|58_권장과목DB|59_모집단위DB|59A_전형별모집단위DB' 'GY ADMISSION NAMES'
+          ShowHits $m 'UEP_ADMISSIONS_SPREADSHEET_ID|uep08259AdmissionEntries|52_대입기초|53_전형이해|53A_전형세부유형DB|53B_전형유형별대학DB|53C_전형DB점검|54_수능최저DB|55_대학입결DB|56_대학입시마스터|56A_대학상담포인트DB|57_내신산정DB|58_권장과목DB|59_모집단위DB|59A_전형별모집단위DB' 'MAIN ADMISSION NAMES'
+          Write-Host '=== CACHE ROUTING ==='
+          ShowHits $g 'admissionMinimumRows|admissionResults|admissionMaster|admissionCounsel|admissionCalculation|admissionRecommended|admissionStructure|admissionUnit' 'GY CACHES'
+          Write-Host '=== CONSUMER TERMS ==='
+          ShowHits $g '종합분석|대학별 입결|대학별입결|수능최저|학사생|학생정보|상담|오늘의 대학' 'GY CONSUMERS'
+          Write-Host '=== BASIC-INFO EXCLUSION GUARDS ==='
+          ShowHits $m '52_|53_|53A_|53B_|53C_|54_|55_|56_|56A_|57_|58_|admission|입시' 'MAIN BASIC/ADMISSION ROUTING'
