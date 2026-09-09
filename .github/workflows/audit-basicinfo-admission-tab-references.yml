@@ -1,0 +1,45 @@
+name: Audit BasicInfo Admission Tab References
+on:
+  push:
+    paths: ['audit-basicinfo-admission-tabs.trigger']
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        env:
+          GH_TOKEN: '${{ github.token }}'
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          gh release download v0.82.83 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE -ne 0){throw 'download failed'}
+          Expand-Archive source/UEP-update.zip app -Force
+          $root='app/resources/app'
+          $files=@("$root/gyomuon.js","$root/electron/main.cjs")
+          $patterns=@(
+            '52_대입기초','53_전형이해','53A_전형세부유형DB','53B_전형유형별대학DB','53C_전형DB점검',
+            '54_수능최저DB','55_대학입결DB','56_대학입시마스터','56A_대학상담포인트DB','57_내신산정DB','58_권장과목DB',
+            'UEP_ADMISSIONS_SPREADSHEET_ID','admissionMinimumRows','admissionResults','admissionMaster','admissionCounsel','admissionCalculation','admissionRecommended',
+            '기본정보 연결시트','BASIC','basicInfo','종합분석','수능최저','대학별 입결','학사생','학생정보','상담','오늘의 대학'
+          )
+          foreach($f in $files){
+            Write-Host "===== FILE: $f ====="
+            $lines=Get-Content $f
+            foreach($p in $patterns){
+              $hits=Select-String -Path $f -Pattern ([regex]::Escape($p))
+              if($hits){
+                Write-Host "--- PATTERN: $p / COUNT=$($hits.Count) ---"
+                foreach($h in $hits){
+                  $s=[Math]::Max(1,$h.LineNumber-2); $e=[Math]::Min($lines.Count,$h.LineNumber+2)
+                  for($i=$s;$i -le $e;$i++){ Write-Host ("{0}: {1}" -f $i,$lines[$i-1]) }
+                  Write-Host ""
+                }
+              }
+            }
+          }
+          Write-Host '===== SPREADSHEET IDS ====='
+          Select-String -Path $files -Pattern '1bphoIQ11E2qsc3ksOqrXuO7xqS4CFyH8Dagbld7A1hg|1BHSdaUbOhp9p_9RB0XGgrfOo4wS_Z8Up0ocSCAMYIIk' -Context 2,2 | ForEach-Object { $_.ToString() | Write-Host }
