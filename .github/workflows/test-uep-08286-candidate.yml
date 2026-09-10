@@ -1,0 +1,67 @@
+name: Test UEP 0.82.86 Candidate
+on:
+  push:
+    paths:
+      - 'test-08286.trigger'
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download stable v0.82.85 baseline
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,output|Out-Null
+          gh release download v0.82.85 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE -ne 0){throw 'v0.82.85 baseline download failed'}
+          Expand-Archive source/UEP-update.zip app -Force
+      - name: Apply 0.82.86 candidate patch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node scripts/patch-uep-08286-admissions-version-popup.js app/resources/app
+          if($LASTEXITCODE -ne 0){throw '0.82.86 patch failed'}
+      - name: Syntax and regression checks
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check app/resources/app/electron/main.cjs
+          if($LASTEXITCODE -ne 0){throw 'main.cjs syntax failed'}
+          node --check app/resources/app/gyomuon.js
+          if($LASTEXITCODE -ne 0){throw 'gyomuon.js syntax failed'}
+          node scripts/test-uep-08286-admissions-version-popup.js app/resources/app
+          if($LASTEXITCODE -ne 0){throw '0.82.86 regression failed'}
+      - name: Build candidate ZIP
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Compress-Archive -Path app/* -DestinationPath output/UEP-update-0.82.86-candidate.zip -CompressionLevel Optimal
+          if(!(Test-Path output/UEP-update-0.82.86-candidate.zip)){throw 'candidate ZIP not created'}
+      - name: Re-open candidate and verify
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force verify|Out-Null
+          Expand-Archive output/UEP-update-0.82.86-candidate.zip verify -Force
+          node --check verify/resources/app/electron/main.cjs
+          if($LASTEXITCODE -ne 0){throw 'packaged main.cjs syntax failed'}
+          node --check verify/resources/app/gyomuon.js
+          if($LASTEXITCODE -ne 0){throw 'packaged gyomuon.js syntax failed'}
+          node scripts/test-uep-08286-admissions-version-popup.js verify/resources/app
+          if($LASTEXITCODE -ne 0){throw 'packaged regression failed'}
+      - name: Candidate SHA256
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $hash=(Get-FileHash output/UEP-update-0.82.86-candidate.zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  UEP-update-0.82.86-candidate.zip" | Set-Content output/sha256.txt -Encoding ascii
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uep-08286-candidate
+          path: output
+          retention-days: 3
