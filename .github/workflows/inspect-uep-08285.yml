@@ -1,0 +1,58 @@
+name: Inspect UEP 0.82.85 Source
+on:
+  push:
+    paths:
+      - 'inspect-08285.trigger'
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download current v0.82.85 package
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,report|Out-Null
+          gh release download v0.82.85 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE -ne 0){throw 'v0.82.85 download failed'}
+          Expand-Archive source/UEP-update.zip app -Force
+      - name: Inspect version popup and admissions paths
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $root='app/resources/app'
+          $patterns=@('0.65','0.82.81','APP_VERSION','release','changelog','update','popup','modal','lastShown','lastVersion','fromVersion','previousVersion','UEP_ADMISSIONS','SPREADSHEET_ID','52_대입기초','54_수능최저DB','56_대학입시마스터')
+          $files=Get-ChildItem $root -Recurse -File -Include *.js,*.cjs,*.json,*.html,*.txt | Where-Object {$_.Length -lt 15MB}
+          $out=New-Object System.Collections.Generic.List[string]
+          foreach($f in $files){
+            $lines=Get-Content $f.FullName -ErrorAction SilentlyContinue
+            for($i=0;$i -lt $lines.Count;$i++){
+              foreach($p in $patterns){
+                if($lines[$i] -match [regex]::Escape($p)){
+                  $rel=$f.FullName.Substring((Resolve-Path $root).Path.Length+1)
+                  $start=[Math]::Max(0,$i-3); $end=[Math]::Min($lines.Count-1,$i+3)
+                  $out.Add("===== $rel : line $($i+1) : $p =====")
+                  for($j=$start;$j -le $end;$j++){$out.Add(('{0,6}: {1}' -f ($j+1),$lines[$j]))}
+                  $out.Add('')
+                  break
+                }
+              }
+            }
+          }
+          $out | Set-Content report/inspection.txt -Encoding utf8
+          Get-Content "$root/package.json" -Raw | Set-Content report/package.json -Encoding utf8
+          if(Test-Path "$root/electron/main.cjs"){
+            Select-String -Path "$root/electron/main.cjs" -Pattern 'UEP_ADMISSIONS|SPREADSHEET|admission|52_|53_|54_|55_|56_|57_|58_|59_' -Context 4,8 | Out-String -Width 500 | Set-Content report/admissions-main.txt -Encoding utf8
+          }
+          if(Test-Path "$root/gyomuon.js"){
+            Select-String -Path "$root/gyomuon.js" -Pattern 'APP_VERSION|0\.65|0\.82\.81|release|changelog|update|popup|modal|lastShown|lastVersion|fromVersion|previousVersion' -Context 5,10 | Out-String -Width 500 | Set-Content report/version-popup-renderer.txt -Encoding utf8
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uep-08285-inspection
+          path: report
+          retention-days: 3
