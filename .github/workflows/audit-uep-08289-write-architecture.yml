@@ -1,0 +1,41 @@
+name: Audit UEP 0.82.89 Write Architecture
+on:
+  push:
+    paths:
+      - 'audit-08289-write-architecture.trigger'
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect write architecture in v0.82.88 package
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.82.88 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE -ne 0){throw 'baseline download failed'}
+          Expand-Archive source/UEP-update.zip app -Force
+          $root='app/resources/app'
+          @'
+          const fs=require('fs'),path=require('path');
+          const root=process.argv[2];
+          const terms=[
+            'ipcRenderer','ipcMain','invoke(','handle(','send(','on(',
+            'fetch(','googleapis','sheets.googleapis.com','spreadsheets','values.append','values.update','batchUpdate',
+            'write','save','update','append','patch','put','post','School Read API','School Write API','Apps Script','script.google.com'
+          ];
+          const files=[];
+          function walk(d){for(const e of fs.readdirSync(d,{withFileTypes:true})){const p=path.join(d,e.name);if(e.isDirectory()){if(!['node_modules'].includes(e.name))walk(p);}else if(/\.(js|cjs|mjs|html|json)$/i.test(e.name))files.push(p)}}
+          walk(root);
+          for(const f of files){let s;try{s=fs.readFileSync(f,'utf8')}catch{continue};const lines=s.split(/\r?\n/);const hits=[];for(let i=0;i<lines.length;i++){const l=lines[i].toLowerCase();if(terms.some(t=>l.includes(t.toLowerCase())))hits.push(i)}if(!hits.length)continue;
+            const selected=new Set();for(const i of hits){for(let j=Math.max(0,i-2);j<=Math.min(lines.length-1,i+4);j++)selected.add(j)}
+            console.log('\n===== FILE '+path.relative(root,f)+' =====');let prev=-2;for(const i of [...selected].sort((a,b)=>a-b)){if(i>prev+1)console.log('---');console.log(String(i+1).padStart(6,' ')+': '+lines[i]);prev=i;}
+          }
+          '@ | Set-Content audit.js -Encoding UTF8
+          node audit.js $root
+          if($LASTEXITCODE -ne 0){throw 'audit failed'}
