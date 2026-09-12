@@ -20,35 +20,25 @@ jobs:
           gh release download v0.82.86 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
           if($LASTEXITCODE -ne 0){throw 'v0.82.86 download failed'}
           Expand-Archive source/UEP-update.zip app -Force
-      - name: Build exact sidebar report
+      - name: Build narrow source report
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          $root='app/resources/app'
+          $idx='app/resources/app/index.html'
+          $js='app/resources/app/gyomuon.js'
+          if(!(Test-Path $idx) -or !(Test-Path $js)){throw 'required app source missing'}
           $report='audit/uep-08286-menu-targets.txt'
-          "UEP v0.82.86 exact sidebar/menu inspection`r`n" | Set-Content $report -Encoding UTF8
-          "===== FILES CONTAINING NAV/MENU MARKUP =====" | Add-Content $report
-          Get-ChildItem $root -Recurse -File -Include *.js,*.html,*.css | ForEach-Object {
-            $m=Select-String -Path $_.FullName -Pattern 'nav-item','nav-subitem','data-page="dashboard"','data-page=''dashboard''','sidebar' -SimpleMatch -ErrorAction SilentlyContinue
-            if($m){ "FILE: $($_.FullName.Substring((Resolve-Path $root).Path.Length+1))" | Add-Content $report; $m | Select-Object -First 80 | ForEach-Object { "{0,6}: {1}" -f $_.LineNumber,$_.Line } | Add-Content $report }
-          }
-          "`r`n===== INDEX/HTML CANDIDATE CONTEXT =====" | Add-Content $report
-          Get-ChildItem $root -Recurse -File -Include *.html | ForEach-Object {
-            $lines=Get-Content $_.FullName
-            $matches=Select-String -Path $_.FullName -Pattern 'nav-item','nav-subitem','data-page' -SimpleMatch
-            if($matches){
-              "FILE: $($_.FullName.Substring((Resolve-Path $root).Path.Length+1))" | Add-Content $report
-              foreach($m in ($matches | Select-Object -First 50)){
-                $s=[Math]::Max(1,$m.LineNumber-8); $e=[Math]::Min($lines.Count,$m.LineNumber+15)
-                "--- lines $s-$e ---" | Add-Content $report
-                for($i=$s;$i -le $e;$i++){ "{0,6}: {1}" -f $i,$lines[$i-1] | Add-Content $report }
-              }
-            }
-          }
-          "`r`n===== APP PACKAGE METADATA / VERSION =====" | Add-Content $report
-          Get-ChildItem $root -File -Include package.json,*.json | ForEach-Object { "--- $($_.Name) ---" | Add-Content $report; Get-Content $_.FullName | Select-Object -First 120 | Add-Content $report }
-          Select-String -Path "$root/*" -Pattern 'APP_VERSION','0.82.86','latestVersion' -SimpleMatch -ErrorAction SilentlyContinue | Select-Object -First 120 | ForEach-Object { "{0}: {1}" -f $_.Path,$_.Line } | Add-Content $report
-      - name: Commit exact report
+          $i=Get-Content $idx; $g=Get-Content $js
+          "UEP v0.82.86 exact source snippets`r`n" | Set-Content $report -Encoding UTF8
+          "===== index.html lines 55-110 =====" | Add-Content $report
+          for($n=55;$n -le [Math]::Min(110,$i.Count);$n++){ "{0,5}: {1}" -f $n,$i[$n-1] | Add-Content $report }
+          "`r`n===== gyomuon.js lines 320-490 =====" | Add-Content $report
+          for($n=320;$n -le [Math]::Min(490,$g.Count);$n++){ "{0,5}: {1}" -f $n,$g[$n-1] | Add-Content $report }
+          "`r`n===== gyomuon.js lines 1228-1340 =====" | Add-Content $report
+          for($n=1228;$n -le [Math]::Min(1340,$g.Count);$n++){ "{0,5}: {1}" -f $n,$g[$n-1] | Add-Content $report }
+          "`r`n===== VERSION MATCHES =====" | Add-Content $report
+          Select-String -Path $idx,$js,'app/resources/app/package.json' -Pattern 'APP_VERSION','0.82.86','version' -SimpleMatch -ErrorAction SilentlyContinue | Select-Object -First 100 | ForEach-Object { "{0}:{1}: {2}" -f (Split-Path $_.Path -Leaf),$_.LineNumber,$_.Line } | Add-Content $report
+      - name: Commit narrow report
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
@@ -57,7 +47,7 @@ jobs:
           git add audit/uep-08286-menu-targets.txt
           git diff --cached --quiet
           if($LASTEXITCODE -eq 0){ Write-Host 'No report changes'; exit 0 }
-          git commit -m 'Inspect exact UEP 0.82.86 sidebar source'
+          git commit -m 'Narrow UEP 0.82.86 menu source inspection'
           if($LASTEXITCODE -ne 0){throw 'git commit failed'}
           git push
           if($LASTEXITCODE -ne 0){throw 'git push failed'}
