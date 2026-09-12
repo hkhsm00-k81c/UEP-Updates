@@ -1,0 +1,54 @@
+name: Inspect UEP 0.82.86 Menu Targets
+on:
+  push:
+    paths:
+      - 'inspect-08286-menu-targets.trigger'
+permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download v0.82.86 package
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,audit|Out-Null
+          gh release download v0.82.86 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE -ne 0){throw 'v0.82.86 download failed'}
+          Expand-Archive source/UEP-update.zip app -Force
+      - name: Build compact menu target report
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $g='app/resources/app/gyomuon.js'
+          if(!(Test-Path $g)){throw 'gyomuon.js missing'}
+          $report='audit/uep-08286-menu-targets.txt'
+          $lines=Get-Content $g
+          "UEP v0.82.86 compact menu target inspection`r`n" | Set-Content $report -Encoding UTF8
+          $patterns=@('data-page','nav-item','대시보드','학생정보','프로그램','생활기록부','입시','openExternal','window.open','location.href','addEventListener(''click''','onclick=','sidebar')
+          foreach($pat in $patterns){
+            "`r`n===== $pat =====" | Add-Content $report
+            $matches=Select-String -Path $g -Pattern $pat -SimpleMatch | Select-Object -First 25
+            foreach($m in $matches){
+              $start=[Math]::Max(1,$m.LineNumber-5); $end=[Math]::Min($lines.Count,$m.LineNumber+10)
+              "--- lines $start-$end (match $($m.LineNumber)) ---" | Add-Content $report
+              for($i=$start;$i -le $end;$i++){ "{0,6}: {1}" -f $i,$lines[$i-1] | Add-Content $report }
+            }
+          }
+      - name: Commit compact report
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add audit/uep-08286-menu-targets.txt
+          git diff --cached --quiet
+          if($LASTEXITCODE -eq 0){ Write-Host 'No report changes'; exit 0 }
+          git commit -m 'Inspect UEP 0.82.86 menu targets'
+          if($LASTEXITCODE -ne 0){throw 'git commit failed'}
+          git push
+          if($LASTEXITCODE -ne 0){throw 'git push failed'}
