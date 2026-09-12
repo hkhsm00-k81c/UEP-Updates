@@ -20,24 +20,35 @@ jobs:
           gh release download v0.82.86 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
           if($LASTEXITCODE -ne 0){throw 'v0.82.86 download failed'}
           Expand-Archive source/UEP-update.zip app -Force
-      - name: Build targeted menu report
+      - name: Build exact sidebar report
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          $g='app/resources/app/gyomuon.js'
-          if(!(Test-Path $g)){throw 'gyomuon.js missing'}
+          $root='app/resources/app'
           $report='audit/uep-08286-menu-targets.txt'
-          $lines=Get-Content $g
-          "UEP v0.82.86 targeted menu inspection`r`n" | Set-Content $report -Encoding UTF8
-          "===== ALL data-page LINES =====" | Add-Content $report
-          Select-String -Path $g -Pattern 'data-page' -SimpleMatch | Select-Object -First 250 | ForEach-Object { "{0,6}: {1}" -f $_.LineNumber,$_.Line } | Add-Content $report
-          "`r`n===== LIKELY MENU / SIDEBAR LINES =====" | Add-Content $report
-          Select-String -Path $g -Pattern 'dashboard','students','dorm','timetable','attendance','scores','admissions','records','programs','settings' -SimpleMatch | Where-Object { $_.Line -match 'data-page|menu|sidebar|nav|button|items|pages|map' } | Select-Object -First 300 | ForEach-Object { "{0,6}: {1}" -f $_.LineNumber,$_.Line } | Add-Content $report
-          "`r`n===== NAVIGATE FUNCTION 1210-1285 =====" | Add-Content $report
-          for($i=1210;$i -le [Math]::Min(1285,$lines.Count);$i++){ "{0,6}: {1}" -f $i,$lines[$i-1] | Add-Content $report }
-          "`r`n===== FIRST 2200 LINES WITH MENU KEYWORDS =====" | Add-Content $report
-          for($i=1;$i -le [Math]::Min(2200,$lines.Count);$i++){ if($lines[$i-1] -match 'sidebar|nav|menu|data-page|dashboard|students|settings'){ "{0,6}: {1}" -f $i,$lines[$i-1] | Add-Content $report } }
-      - name: Commit targeted report
+          "UEP v0.82.86 exact sidebar/menu inspection`r`n" | Set-Content $report -Encoding UTF8
+          "===== FILES CONTAINING NAV/MENU MARKUP =====" | Add-Content $report
+          Get-ChildItem $root -Recurse -File -Include *.js,*.html,*.css | ForEach-Object {
+            $m=Select-String -Path $_.FullName -Pattern 'nav-item','nav-subitem','data-page="dashboard"','data-page=''dashboard''','sidebar' -SimpleMatch -ErrorAction SilentlyContinue
+            if($m){ "FILE: $($_.FullName.Substring((Resolve-Path $root).Path.Length+1))" | Add-Content $report; $m | Select-Object -First 80 | ForEach-Object { "{0,6}: {1}" -f $_.LineNumber,$_.Line } | Add-Content $report }
+          }
+          "`r`n===== INDEX/HTML CANDIDATE CONTEXT =====" | Add-Content $report
+          Get-ChildItem $root -Recurse -File -Include *.html | ForEach-Object {
+            $lines=Get-Content $_.FullName
+            $matches=Select-String -Path $_.FullName -Pattern 'nav-item','nav-subitem','data-page' -SimpleMatch
+            if($matches){
+              "FILE: $($_.FullName.Substring((Resolve-Path $root).Path.Length+1))" | Add-Content $report
+              foreach($m in ($matches | Select-Object -First 50)){
+                $s=[Math]::Max(1,$m.LineNumber-8); $e=[Math]::Min($lines.Count,$m.LineNumber+15)
+                "--- lines $s-$e ---" | Add-Content $report
+                for($i=$s;$i -le $e;$i++){ "{0,6}: {1}" -f $i,$lines[$i-1] | Add-Content $report }
+              }
+            }
+          }
+          "`r`n===== APP PACKAGE METADATA / VERSION =====" | Add-Content $report
+          Get-ChildItem $root -File -Include package.json,*.json | ForEach-Object { "--- $($_.Name) ---" | Add-Content $report; Get-Content $_.FullName | Select-Object -First 120 | Add-Content $report }
+          Select-String -Path "$root/*" -Pattern 'APP_VERSION','0.82.86','latestVersion' -SimpleMatch -ErrorAction SilentlyContinue | Select-Object -First 120 | ForEach-Object { "{0}: {1}" -f $_.Path,$_.Line } | Add-Content $report
+      - name: Commit exact report
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
@@ -46,7 +57,7 @@ jobs:
           git add audit/uep-08286-menu-targets.txt
           git diff --cached --quiet
           if($LASTEXITCODE -eq 0){ Write-Host 'No report changes'; exit 0 }
-          git commit -m 'Refine UEP 0.82.86 menu target inspection'
+          git commit -m 'Inspect exact UEP 0.82.86 sidebar source'
           if($LASTEXITCODE -ne 0){throw 'git commit failed'}
           git push
           if($LASTEXITCODE -ne 0){throw 'git push failed'}
