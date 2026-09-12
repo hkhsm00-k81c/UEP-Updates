@@ -1,0 +1,52 @@
+name: Audit UEP 0.82.86 Menu Routing
+on:
+  push:
+    paths:
+      - 'audit-08286.trigger'
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download v0.82.86 package
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app|Out-Null
+          gh release download v0.82.86 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE -ne 0){throw 'v0.82.86 download failed'}
+          Expand-Archive source/UEP-update.zip app -Force
+      - name: Audit renderer menu and routing
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $p='app/resources/app/gyomuon.js'
+          if(!(Test-Path $p)){throw 'gyomuon.js missing'}
+          $patterns=@('대시보드','학생정보','프로그램','생활기록부','입시','전자칠판','data-page','nav-item','sidebar','menu','route','openExternal','window.open','location.href')
+          foreach($pat in $patterns){
+            Write-Host "===== GYOMUON PATTERN: $pat ====="
+            Select-String -Path $p -Pattern $pat -SimpleMatch -Context 2,4 | Select-Object -First 20 | ForEach-Object { $_.ToString() }
+          }
+      - name: Audit Electron routing and external-open handlers
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $p='app/resources/app/electron/main.cjs'
+          if(!(Test-Path $p)){throw 'main.cjs missing'}
+          $patterns=@('openExternal','shell.','ipcMain','BrowserWindow','setWindowOpenHandler','will-navigate','loadURL','board','전자칠판')
+          foreach($pat in $patterns){
+            Write-Host "===== MAIN PATTERN: $pat ====="
+            Select-String -Path $p -Pattern $pat -SimpleMatch -Context 3,6 | Select-Object -First 30 | ForEach-Object { $_.ToString() }
+          }
+      - name: Audit package structure
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Write-Host '===== PACKAGE ====='
+          Get-Content app/resources/app/package.json -Raw
+          Write-Host '===== TOP LEVEL APP FILES ====='
+          Get-ChildItem app/resources/app -File | Select-Object Name,Length | Format-Table -AutoSize | Out-String | Write-Host
