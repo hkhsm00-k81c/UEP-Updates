@@ -1,0 +1,23 @@
+const fs=require('fs');
+const path=require('path');
+const root=path.resolve(process.argv[2]||'.');
+const index=fs.readFileSync(path.join(root,'index.html'),'utf8');
+const renderer=fs.readFileSync(path.join(root,'gyomuon.js'),'utf8');
+const pkg=JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8'));
+function must(c,m){if(!c)throw new Error(m);}
+must(pkg.version==='0.82.88','package version must be 0.82.88');
+must(renderer.includes('const APP_VERSION="0.82.88"; /* UEP_08288_BOARD_LIVE_CONNECT */'),'runtime version marker missing');
+must(index.includes('data-page="board"') && index.includes('UEP 전자칠판'),'board menu missing');
+must(renderer.includes('board: electronicBoardView'),'board render mapping missing');
+must(renderer.includes('UEP_BOARD_API_URL="https://script.google.com/macros/s/AKfycbxTyh5TG6e2uWvOJrKcY-jihOE_2dXZxhTCZWTvKF773Av9qgNAoHod_pwI8VI9885a/exec"'),'official Board API URL missing');
+must(renderer.includes('UEP_BOARD_DB_URL="https://docs.google.com/spreadsheets/d/1KStE1tJq6LTA8KR8fe56r7OxO1k9Ae8-lIfWw9d4wng/edit"'),'Board DB URL missing');
+must(renderer.includes('async function refreshElectronicBoardStatus()'),'live Board status loader missing');
+must(renderer.includes('Promise.resolve().then(refreshElectronicBoardStatus);'),'board initial live check missing');
+must(renderer.includes('fetch(UEP_BOARD_API_URL,{method:"GET",cache:"no-store"})'),'Board API fetch missing');
+must(renderer.includes('function openElectronicBoardDb()'),'Board DB opener missing');
+must(!renderer.includes('현재 버전은 확인되지 않은 URL이나 실행 명령을 임의로 사용하지 않습니다.'),'0.82.87 placeholder still present');
+const boardBlock=renderer.slice(renderer.indexOf('const UEP_BOARD_API_URL='),renderer.indexOf('function render(page)'));
+must(!boardBlock.includes('MutationObserver'),'Board feature must not use MutationObserver');
+must(!boardBlock.includes('setTimeout'),'Board feature must not use setTimeout');
+must(!boardBlock.includes('document.addEventListener("click"'),'Board feature must not add global click delegation');
+console.log('UEP 0.82.88 Board live connection regression OK');
