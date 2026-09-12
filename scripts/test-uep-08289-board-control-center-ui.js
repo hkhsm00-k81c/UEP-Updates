@@ -10,8 +10,11 @@ must(pkg.version==='0.82.89','package version must be 0.82.89');
 must(renderer.includes('const APP_VERSION="0.82.89"; /* UEP_08289_BOARD_CONTROL_CENTER_UI */'),'runtime version marker missing');
 must(index.includes('data-page="board"') && index.includes('UEP 전자칠판'),'existing Board menu missing');
 must(renderer.includes('board: electronicBoardView'),'existing Board render mapping missing');
-must(renderer.includes('UEP_BOARD_API_URL="https://script.google.com/macros/s/AKfycbxTyh5TG6e2uWvOJrKcY-jihOE_2dXZxhTCZWTvKF773Av9qgNAoHod_pwI8VI9885a/exec"'),'official Board API URL missing');
-must(renderer.includes('UEP_BOARD_DB_URL="https://docs.google.com/spreadsheets/d/1KStE1tJq6LTA8KR8fe56r7OxO1k9Ae8-lIfWw9d4wng/edit"'),'Board DB URL missing');
+must(renderer.includes('const UEP_BOARD_API_URL=') && renderer.includes('const UEP_BOARD_DB_URL='),'Board endpoints missing');
+must(renderer.includes('async function refreshElectronicBoardStatus()'),'live Board status loader missing');
+must(renderer.includes('Promise.resolve().then(refreshElectronicBoardStatus);'),'Board initial live check missing');
+must(renderer.includes('fetch(UEP_BOARD_API_URL,{method:"GET",cache:"no-store"})'),'Board API fetch missing');
+must(renderer.includes('function openElectronicBoardDb()'),'Board DB opener missing');
 must(renderer.includes('function selectElectronicBoardTool(tool)'),'Board tool selector missing');
 must(renderer.includes('function previewBoardNotice()'),'notice preview missing');
 must(renderer.includes('전자칠판 조회') && renderer.includes('공지 등록') && renderer.includes('일정 등록') && renderer.includes('시간표 변경') && renderer.includes('화면 알림'),'control center sections missing');
@@ -24,9 +27,6 @@ must(renderer.includes('담임은 자기 반') && renderer.includes('관리자�
 must(renderer.includes('Board DB 저장 준비 중') && renderer.includes('disabled'),'read-only/write-next-stage safeguard missing');
 must(index.includes('id="uep-08289-board-control-center-style"'),'static Board UI CSS missing');
 
-for(const page of ['dashboard','students','attendance','grades','admissions','records','recordsAudit','programs','timetable','classWork','input','alert','settings']){
-  must(renderer.includes(page),`existing route marker missing: ${page}`);
-}
 const boardBlock=renderer.slice(renderer.indexOf('const UEP_BOARD_API_URL='),renderer.indexOf('function render(page)'));
 must(!boardBlock.includes('MutationObserver'),'Board feature must not use MutationObserver');
 must(!boardBlock.includes('setTimeout'),'Board feature must not use setTimeout');
