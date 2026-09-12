@@ -1,1 +1,1 @@
-run 2026-09-12 exact-sidebar
+run 2026-09-12 narrow-source
