@@ -1,0 +1,44 @@
+name: Audit UEP 0.82.86 Menu Routing Focus
+on:
+  push:
+    paths:
+      - 'audit-08286-focus.trigger'
+permissions:
+  contents: write
+jobs:
+  audit:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download v0.82.86 package
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,audit|Out-Null
+          gh release download v0.82.86 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE -ne 0){throw 'v0.82.86 download failed'}
+          Expand-Archive source/UEP-update.zip app -Force
+      - name: Build focused audit report
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node scripts/audit-uep-08286-menu-focus.js app/resources/app audit/uep-08286-menu-focus.txt
+          if($LASTEXITCODE -ne 0){throw 'focused menu audit failed'}
+          if(!(Test-Path audit/uep-08286-menu-focus.txt)){throw 'focused audit report missing'}
+      - name: Commit focused audit report
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add audit/uep-08286-menu-focus.txt
+          git diff --cached --quiet
+          if($LASTEXITCODE -eq 0){Write-Host 'No focused audit changes'; exit 0}
+          git commit -m 'Record focused UEP 0.82.86 menu routing audit'
+          if($LASTEXITCODE -ne 0){throw 'audit commit failed'}
+          git pull --rebase origin main
+          if($LASTEXITCODE -ne 0){throw 'audit rebase failed'}
+          git push origin HEAD:main
+          if($LASTEXITCODE -ne 0){throw 'audit push failed'}
