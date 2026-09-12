@@ -1,1 +1,1 @@
-run 2026-09-12 second
+run 2026-09-12 exact-sidebar
