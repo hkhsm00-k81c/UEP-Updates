@@ -44,8 +44,8 @@ async function refreshElectronicBoardStatus(){
     const data=await response.json();
     if(!data||data.ok!==true)throw new Error((data&&data.error)||"INVALID_BOARD_API_RESPONSE");
     if(status){status.textContent="연결 정상"; status.dataset.state="ok";}
-    if(detail)detail.textContent=`UEP Board API ${data.version?"v"+data.version:""} · 실시간 연결됨`;
-    if(time)time.textContent=data.now?`서버 시각 ${data.now}`:"";
+    if(detail)detail.textContent="UEP Board API "+(data.version?"v"+data.version+" ":"")+"· 실시간 연결됨";
+    if(time)time.textContent=data.now?"서버 시각 "+data.now:"";
   }catch(error){
     if(status){status.textContent="연결 확인 필요"; status.dataset.state="error";}
     if(detail)detail.textContent="UEP Board API에 연결하지 못했습니다. 네트워크 또는 API 배포 상태를 확인해 주세요.";
