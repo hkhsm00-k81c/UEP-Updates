@@ -20,7 +20,7 @@ jobs:
           gh release download v0.82.86 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
           if($LASTEXITCODE -ne 0){throw 'v0.82.86 download failed'}
           Expand-Archive source/UEP-update.zip app -Force
-      - name: Build compact menu target report
+      - name: Build targeted menu report
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
@@ -28,18 +28,16 @@ jobs:
           if(!(Test-Path $g)){throw 'gyomuon.js missing'}
           $report='audit/uep-08286-menu-targets.txt'
           $lines=Get-Content $g
-          "UEP v0.82.86 compact menu target inspection`r`n" | Set-Content $report -Encoding UTF8
-          $patterns=@('data-page','nav-item','대시보드','학생정보','프로그램','생활기록부','입시','openExternal','window.open','location.href','addEventListener(''click''','onclick=','sidebar')
-          foreach($pat in $patterns){
-            "`r`n===== $pat =====" | Add-Content $report
-            $matches=Select-String -Path $g -Pattern $pat -SimpleMatch | Select-Object -First 25
-            foreach($m in $matches){
-              $start=[Math]::Max(1,$m.LineNumber-5); $end=[Math]::Min($lines.Count,$m.LineNumber+10)
-              "--- lines $start-$end (match $($m.LineNumber)) ---" | Add-Content $report
-              for($i=$start;$i -le $end;$i++){ "{0,6}: {1}" -f $i,$lines[$i-1] | Add-Content $report }
-            }
-          }
-      - name: Commit compact report
+          "UEP v0.82.86 targeted menu inspection`r`n" | Set-Content $report -Encoding UTF8
+          "===== ALL data-page LINES =====" | Add-Content $report
+          Select-String -Path $g -Pattern 'data-page' -SimpleMatch | Select-Object -First 250 | ForEach-Object { "{0,6}: {1}" -f $_.LineNumber,$_.Line } | Add-Content $report
+          "`r`n===== LIKELY MENU / SIDEBAR LINES =====" | Add-Content $report
+          Select-String -Path $g -Pattern 'dashboard','students','dorm','timetable','attendance','scores','admissions','records','programs','settings' -SimpleMatch | Where-Object { $_.Line -match 'data-page|menu|sidebar|nav|button|items|pages|map' } | Select-Object -First 300 | ForEach-Object { "{0,6}: {1}" -f $_.LineNumber,$_.Line } | Add-Content $report
+          "`r`n===== NAVIGATE FUNCTION 1210-1285 =====" | Add-Content $report
+          for($i=1210;$i -le [Math]::Min(1285,$lines.Count);$i++){ "{0,6}: {1}" -f $i,$lines[$i-1] | Add-Content $report }
+          "`r`n===== FIRST 2200 LINES WITH MENU KEYWORDS =====" | Add-Content $report
+          for($i=1;$i -le [Math]::Min(2200,$lines.Count);$i++){ if($lines[$i-1] -match 'sidebar|nav|menu|data-page|dashboard|students|settings'){ "{0,6}: {1}" -f $i,$lines[$i-1] | Add-Content $report } }
+      - name: Commit targeted report
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
@@ -48,7 +46,7 @@ jobs:
           git add audit/uep-08286-menu-targets.txt
           git diff --cached --quiet
           if($LASTEXITCODE -eq 0){ Write-Host 'No report changes'; exit 0 }
-          git commit -m 'Inspect UEP 0.82.86 menu targets'
+          git commit -m 'Refine UEP 0.82.86 menu target inspection'
           if($LASTEXITCODE -ne 0){throw 'git commit failed'}
           git push
           if($LASTEXITCODE -ne 0){throw 'git push failed'}
