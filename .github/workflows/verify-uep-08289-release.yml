@@ -1,0 +1,101 @@
+name: Verify UEP 0.82.89 Published Release
+on:
+  push:
+    paths:
+      - 'verify-08289-release.trigger'
+permissions:
+  contents: write
+jobs:
+  verify-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Download published v0.82.89 assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force published,verify,audit | Out-Null
+          gh release download v0.82.89 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --pattern sha256.txt --dir published
+          if($LASTEXITCODE -ne 0){throw 'published release asset download failed'}
+          if(!(Test-Path published/UEP-update.zip)){throw 'published UEP-update.zip missing'}
+          if(!(Test-Path published/sha256.txt)){throw 'published sha256.txt missing'}
+      - name: Verify published SHA256 and release metadata
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $actual=(Get-FileHash published/UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          $shaLine=(Get-Content published/sha256.txt -Raw).Trim()
+          $expected=($shaLine -split '\s+')[0].ToLower()
+          if($actual -ne $expected){throw 'published sha256.txt mismatch'}
+          $release=gh api repos/$env:GITHUB_REPOSITORY/releases/tags/v0.82.89 | ConvertFrom-Json
+          if($LASTEXITCODE -ne 0){throw 'release metadata fetch failed'}
+          $zip=$release.assets|Where-Object {$_.name -eq 'UEP-update.zip'}
+          if(!$zip){throw 'release ZIP metadata missing'}
+          if($zip.digest -ne ('sha256:'+$actual)){throw 'release asset digest mismatch'}
+          "UEP_ZIP_SHA256=$actual" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "UEP_ZIP_SIZE=$($zip.size)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Re-open published ZIP and run package checks
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Expand-Archive published/UEP-update.zip verify -Force
+          if(!(Test-Path verify/resources/app/package.json)){throw 'published package.json missing'}
+          $pkg=Get-Content verify/resources/app/package.json -Raw|ConvertFrom-Json
+          if($pkg.version -ne '0.82.89'){throw 'published package version mismatch'}
+          node --check verify/resources/app/gyomuon.js
+          if($LASTEXITCODE -ne 0){throw 'published gyomuon.js syntax failed'}
+          node --check verify/resources/app/electron/main.cjs
+          if($LASTEXITCODE -ne 0){throw 'published main.cjs syntax failed'}
+          node scripts/test-uep-08289-board-control-center-ui.js verify/resources/app
+          if($LASTEXITCODE -ne 0){throw 'published 0.82.89 regression failed'}
+      - name: Verify live Board API and update policy
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $boardUrl='https://script.google.com/macros/s/AKfycbxTyh5TG6e2uWvOJrKcY-jihOE_2dXZxhTCZWTvKF773Av9qgNAoHod_pwI8VI9885a/exec'
+          $r=Invoke-RestMethod -Uri $boardUrl -Method Get -MaximumRedirection 10
+          if(!$r.ok -or $r.service -ne 'UEP Board API'){throw 'Board API verification failed'}
+          $policy=(gh api repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json -H 'Accept: application/vnd.github.raw+json')|ConvertFrom-Json
+          if($LASTEXITCODE -ne 0){throw 'remote policy fetch failed'}
+          if($policy.latestVersion -ne '0.82.89'){throw 'remote latestVersion mismatch'}
+          if($policy.sha256 -ne $env:UEP_ZIP_SHA256){throw 'remote SHA mismatch'}
+          $expectedUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.89/UEP-update.zip'
+          if($policy.downloadUrl -ne $expectedUrl){throw 'remote downloadUrl mismatch'}
+          if(!$policy.updateEnabled){throw 'remote update policy disabled'}
+      - name: Record final published verification
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          @"
+          UEP 0.82.89 PUBLISHED RELEASE FINAL VERIFICATION
+          version=0.82.89
+          sha256=$env:UEP_ZIP_SHA256
+          size=$env:UEP_ZIP_SIZE
+          release-asset=PASS
+          sha256-file=PASS
+          package-version=PASS
+          syntax=PASS
+          regression=PASS
+          packaged-reopen=PASS
+          board-api=PASS
+          update-policy=PASS
+          final-verification=PASS
+          write-enabled=NO
+          "@ | Set-Content audit/uep-08289-published-release-final.txt -Encoding utf8
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add audit/uep-08289-published-release-final.txt
+          git diff --cached --quiet
+          if($LASTEXITCODE -eq 0){throw 'final verification report not changed'}
+          git commit -m 'Record UEP 0.82.89 published release final verification'
+          if($LASTEXITCODE -ne 0){throw 'verification report commit failed'}
+          git push origin HEAD:main
+          if($LASTEXITCODE -ne 0){throw 'verification report push failed'}
