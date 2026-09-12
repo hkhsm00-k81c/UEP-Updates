@@ -1,0 +1,84 @@
+name: Validate UEP 0.82.87 Electronic Board Menu
+on:
+  push:
+    paths:
+      - 'validate-08287-board.trigger'
+permissions:
+  contents: write
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Download stable v0.82.86 baseline
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,output,verify,audit|Out-Null
+          gh release download v0.82.86 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE -ne 0){throw 'v0.82.86 baseline download failed'}
+          Expand-Archive source/UEP-update.zip app -Force
+          if(!(Test-Path app/resources/app/package.json)){throw 'baseline package missing'}
+      - name: Apply 0.82.87 electronic-board patch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node scripts/patch-uep-08287-electronic-board-menu.js app/resources/app
+          if($LASTEXITCODE -ne 0){throw '0.82.87 patch failed'}
+      - name: Syntax and regression checks
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check app/resources/app/gyomuon.js
+          if($LASTEXITCODE -ne 0){throw 'gyomuon.js syntax failed'}
+          node --check app/resources/app/electron/main.cjs
+          if($LASTEXITCODE -ne 0){throw 'main.cjs syntax failed'}
+          node scripts/test-uep-08287-electronic-board-menu.js app/resources/app
+          if($LASTEXITCODE -ne 0){throw '0.82.87 regression failed'}
+      - name: Build candidate ZIP
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Compress-Archive -Path app/* -DestinationPath output/UEP-update-0.82.87-candidate.zip -CompressionLevel Optimal
+          if($LASTEXITCODE -ne 0){throw 'candidate compression failed'}
+          if(!(Test-Path output/UEP-update-0.82.87-candidate.zip)){throw 'candidate ZIP missing'}
+      - name: Re-open candidate and verify
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Expand-Archive output/UEP-update-0.82.87-candidate.zip verify -Force
+          node --check verify/resources/app/gyomuon.js
+          if($LASTEXITCODE -ne 0){throw 'packaged gyomuon.js syntax failed'}
+          node --check verify/resources/app/electron/main.cjs
+          if($LASTEXITCODE -ne 0){throw 'packaged main.cjs syntax failed'}
+          node scripts/test-uep-08287-electronic-board-menu.js verify/resources/app
+          if($LASTEXITCODE -ne 0){throw 'packaged 0.82.87 regression failed'}
+      - name: Record candidate verification
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $hash=(Get-FileHash output/UEP-update-0.82.87-candidate.zip -Algorithm SHA256).Hash.ToLower()
+          $pkg=Get-Content verify/resources/app/package.json -Raw|ConvertFrom-Json
+          @(
+            'UEP 0.82.87 ELECTRONIC BOARD MENU CANDIDATE',
+            ('version='+$pkg.version),
+            ('sha256='+$hash),
+            'baseline=v0.82.86 release asset UEP-update.zip',
+            'syntax=PASS',
+            'regression=PASS',
+            'packaged-reopen=PASS',
+            'release-created=NO'
+          ) | Set-Content audit/uep-08287-board-candidate.txt -Encoding utf8
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add audit/uep-08287-board-candidate.txt
+          git diff --cached --quiet
+          if($LASTEXITCODE -eq 0){Write-Host 'Candidate audit unchanged'; exit 0}
+          git commit -m 'Record UEP 0.82.87 electronic board candidate validation'
+          if($LASTEXITCODE -ne 0){throw 'candidate audit commit failed'}
+          git push origin HEAD:main
+          if($LASTEXITCODE -ne 0){throw 'candidate audit push failed'}
