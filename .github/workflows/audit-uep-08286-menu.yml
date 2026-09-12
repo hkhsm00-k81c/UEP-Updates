@@ -4,7 +4,7 @@ on:
     paths:
       - 'audit-08286.trigger'
 permissions:
-  contents: read
+  contents: write
 jobs:
   audit:
     runs-on: windows-latest
@@ -16,37 +16,52 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference='Stop'
-          New-Item -ItemType Directory -Force source,app|Out-Null
+          New-Item -ItemType Directory -Force source,app,audit|Out-Null
           gh release download v0.82.86 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
           if($LASTEXITCODE -ne 0){throw 'v0.82.86 download failed'}
           Expand-Archive source/UEP-update.zip app -Force
-      - name: Audit renderer menu and routing
+      - name: Build audit report
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          $p='app/resources/app/gyomuon.js'
-          if(!(Test-Path $p)){throw 'gyomuon.js missing'}
-          $patterns=@('대시보드','학생정보','프로그램','생활기록부','입시','전자칠판','data-page','nav-item','sidebar','menu','route','openExternal','window.open','location.href')
+          $report='audit/uep-08286-menu-routing.txt'
+          $g='app/resources/app/gyomuon.js'
+          $m='app/resources/app/electron/main.cjs'
+          $pkg='app/resources/app/package.json'
+          if(!(Test-Path $g)){throw 'gyomuon.js missing'}
+          if(!(Test-Path $m)){throw 'main.cjs missing'}
+          if(!(Test-Path $pkg)){throw 'package.json missing'}
+          "UEP v0.82.86 ACTUAL RELEASE PACKAGE AUDIT`r`nGenerated from Release asset UEP-update.zip`r`n" | Set-Content $report -Encoding UTF8
+          "===== PACKAGE.JSON =====" | Add-Content $report
+          Get-Content $pkg -Raw | Add-Content $report
+          "`r`n===== TOP LEVEL APP FILES =====" | Add-Content $report
+          Get-ChildItem app/resources/app -File | Select-Object Name,Length | Format-Table -AutoSize | Out-String | Add-Content $report
+          "`r`n===== GYOMUON MENU/ROUTING MATCHES =====" | Add-Content $report
+          $patterns=@('대시보드','학생정보','프로그램','생활기록부','입시','전자칠판','data-page','nav-item','sidebar','menu','route','openExternal','window.open','location.href','onclick','addEventListener')
           foreach($pat in $patterns){
-            Write-Host "===== GYOMUON PATTERN: $pat ====="
-            Select-String -Path $p -Pattern $pat -SimpleMatch -Context 2,4 | Select-Object -First 20 | ForEach-Object { $_.ToString() }
+            "`r`n--- PATTERN: $pat ---" | Add-Content $report
+            Select-String -Path $g -Pattern $pat -SimpleMatch -Context 4,8 | Select-Object -First 40 | ForEach-Object { $_.ToString() } | Add-Content $report
           }
-      - name: Audit Electron routing and external-open handlers
-        shell: pwsh
-        run: |
-          $ErrorActionPreference='Stop'
-          $p='app/resources/app/electron/main.cjs'
-          if(!(Test-Path $p)){throw 'main.cjs missing'}
+          "`r`n===== ELECTRON MAIN ROUTING MATCHES =====" | Add-Content $report
           $patterns=@('openExternal','shell.','ipcMain','BrowserWindow','setWindowOpenHandler','will-navigate','loadURL','board','전자칠판')
           foreach($pat in $patterns){
-            Write-Host "===== MAIN PATTERN: $pat ====="
-            Select-String -Path $p -Pattern $pat -SimpleMatch -Context 3,6 | Select-Object -First 30 | ForEach-Object { $_.ToString() }
+            "`r`n--- PATTERN: $pat ---" | Add-Content $report
+            Select-String -Path $m -Pattern $pat -SimpleMatch -Context 5,10 | Select-Object -First 50 | ForEach-Object { $_.ToString() } | Add-Content $report
           }
-      - name: Audit package structure
+          "`r`n===== ALL BOARD/ELECTRONIC BOARD REFERENCES IN APP TEXT FILES =====" | Add-Content $report
+          Get-ChildItem app/resources/app -Recurse -File -Include *.js,*.cjs,*.mjs,*.json,*.html,*.css | ForEach-Object {
+            Select-String -Path $_.FullName -Pattern '전자칠판','board','kiosk','display','NFC' -SimpleMatch -Context 2,4 -ErrorAction SilentlyContinue
+          } | Select-Object -First 500 | ForEach-Object { $_.ToString() } | Add-Content $report
+      - name: Commit audit report
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          Write-Host '===== PACKAGE ====='
-          Get-Content app/resources/app/package.json -Raw
-          Write-Host '===== TOP LEVEL APP FILES ====='
-          Get-ChildItem app/resources/app -File | Select-Object Name,Length | Format-Table -AutoSize | Out-String | Write-Host
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add audit/uep-08286-menu-routing.txt
+          git diff --cached --quiet
+          if($LASTEXITCODE -eq 0){ Write-Host 'No audit report changes'; exit 0 }
+          git commit -m 'Record UEP 0.82.86 menu routing audit'
+          if($LASTEXITCODE -ne 0){throw 'git commit failed'}
+          git push
+          if($LASTEXITCODE -ne 0){throw 'git push failed'}
