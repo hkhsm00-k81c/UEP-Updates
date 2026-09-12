@@ -2,50 +2,59 @@ const fs=require('fs');
 const path=require('path');
 const root=path.resolve(process.argv[2]||'.');
 const out=path.resolve(process.argv[3]||'audit/uep-08286-menu-focus.txt');
-const files=[
-  path.join(root,'gyomuon.js'),
-  path.join(root,'electron','main.cjs')
-];
 function read(p){return fs.readFileSync(p,'utf8');}
 function rel(p){return path.relative(root,p).replace(/\\/g,'/');}
-function esc(s){return s.replace(/\r/g,'').replace(/\u0000/g,'');}
-function snippets(text,needle,radius=1000,max=8){
-  const found=[]; let from=0;
-  while(found.length<max){
-    const i=text.indexOf(needle,from); if(i<0)break;
-    const a=Math.max(0,i-radius), b=Math.min(text.length,i+needle.length+radius);
-    found.push({i,a,b,s:text.slice(a,b)}); from=i+needle.length;
+function clean(s){return s.replace(/\r/g,'').replace(/\u0000/g,'');}
+function around(text,needle,before=900,after=1800){const i=text.indexOf(needle);if(i<0)return null;const a=Math.max(0,i-before),b=Math.min(text.length,i+needle.length+after);return {i,s:text.slice(a,b)};}
+function allTextFiles(dir,arr=[]){
+  for(const e of fs.readdirSync(dir,{withFileTypes:true})){
+    if(e.name==='node_modules'||e.name==='.git')continue;
+    const p=path.join(dir,e.name);
+    if(e.isDirectory())allTextFiles(p,arr);
+    else if(/\.(?:js|cjs|mjs|json|html|css)$/i.test(e.name))arr.push(p);
   }
-  return found;
+  return arr;
 }
-let report=[];
-report.push('UEP v0.82.86 focused menu/routing audit');
-report.push('Source: actual Release asset UEP-update.zip');
+const gy=path.join(root,'gyomuon.js');
+const main=path.join(root,'electron','main.cjs');
 const pkg=JSON.parse(read(path.join(root,'package.json')));
-report.push(`package.version=${pkg.version}`);
-const patterns=['대시보드','학생정보','프로그램','생활기록부','입시','대입','전자칠판','data-page','nav-item','sidebar','menu-item','setPage','showPage','navigate','route','openExternal','shell.openExternal','window.open','location.href'];
-for(const file of files){
-  if(!fs.existsSync(file))throw new Error('missing '+file);
-  const text=read(file);
-  report.push(`\n===== FILE ${rel(file)} bytes=${Buffer.byteLength(text)} =====`);
-  for(const pat of patterns){
-    const hits=snippets(text,pat);
-    if(!hits.length)continue;
-    report.push(`\n--- ${pat} hits=${hits.length}${hits.length===8?' (capped)':''} ---`);
-    hits.forEach((h,n)=>{
-      report.push(`\n[${n+1}] char=${h.i} range=${h.a}-${h.b}`);
-      report.push(esc(h.s));
-    });
+if(!fs.existsSync(gy)||!fs.existsSync(main))throw new Error('required app source missing');
+const g=read(gy),m=read(main);
+let report=['UEP v0.82.86 TARGETED MENU/ROUTING AUDIT','Source: actual Release asset UEP-update.zip',`package.version=${pkg.version}`];
+function add(title,text,needle,b=900,a=1800){const hit=around(text,needle,b,a);report.push(`\n===== ${title} =====`);if(!hit){report.push('NOT FOUND');return;}report.push(`char=${hit.i}`);report.push(clean(hit.s));}
+add('GYOMUON allowedPages',g,'const allowedPages = new Set(',300,1200);
+add('GYOMUON navigate function',g,'function navigate(',500,6500);
+add('GYOMUON render function',g,'function render(',500,5000);
+add('GYOMUON data-page event binding',g,'[data-page]',800,2600);
+add('MAIN openExternal',m,'openExternal',1200,3000);
+add('MAIN shell.openExternal',m,'shell.openExternal',1200,3000);
+report.push('\n===== FILES CONTAINING data-page / nav / sidebar =====');
+for(const f of allTextFiles(root)){
+  let t;try{t=read(f)}catch{continue}
+  const keys=['data-page','nav-item','sidebar'];const hits=keys.filter(k=>t.includes(k));
+  if(hits.length)report.push(`${rel(f)} :: ${hits.join(', ')}`);
+}
+report.push('\n===== EXACT MENU MARKUP SNIPPETS =====');
+let emitted=0;
+for(const f of allTextFiles(root)){
+  if(emitted>=12)break;
+  let t;try{t=read(f)}catch{continue}
+  for(const needle of ['data-page="dashboard"',"data-page='dashboard'",'data-page="students"',"data-page='students'",'>대시보드<','>학생정보<']){
+    if(emitted>=12)break;
+    const h=around(t,needle,1000,3500);if(!h)continue;
+    report.push(`\n--- ${rel(f)} needle=${needle} char=${h.i} ---`);report.push(clean(h.s));emitted++;
   }
 }
-// Also list app text filenames that contain likely board/menu terms, without dumping whole files.
-const exts=new Set(['.js','.cjs','.mjs','.json','.html','.css']);
-function walk(d,arr=[]){for(const e of fs.readdirSync(d,{withFileTypes:true})){const p=path.join(d,e.name);if(e.isDirectory())walk(p,arr);else if(exts.has(path.extname(e.name).toLowerCase()))arr.push(p);}return arr;}
-report.push('\n===== FILE HIT SUMMARY =====');
-for(const f of walk(root)){
-  let t; try{t=read(f)}catch{continue}
-  const hs=['전자칠판','board','kiosk','display','NFC','data-page','nav-item'].filter(x=>t.includes(x));
-  if(hs.length)report.push(`${rel(f)} :: ${hs.join(', ')}`);
+report.push('\n===== BOARD / ELECTRONIC BOARD REFERENCES =====');
+let boardCount=0;
+for(const f of allTextFiles(root)){
+  if(boardCount>=20)break;
+  let t;try{t=read(f)}catch{continue}
+  for(const needle of ['전자칠판','schoolBoard','board','kiosk']){
+    if(boardCount>=20)break;
+    const h=around(t,needle,500,1200);if(!h)continue;
+    report.push(`\n--- ${rel(f)} needle=${needle} char=${h.i} ---`);report.push(clean(h.s));boardCount++;
+  }
 }
 fs.mkdirSync(path.dirname(out),{recursive:true});
 fs.writeFileSync(out,report.join('\n'),'utf8');
