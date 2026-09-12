@@ -1,0 +1,46 @@
+name: Audit UEP 0.82.88 Board Connectivity
+on:
+  push:
+    paths:
+      - 'audit-08288-board-connectivity.trigger'
+permissions:
+  contents: write
+jobs:
+  audit:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Probe official Board endpoints
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force audit | Out-Null
+          $api='https://script.google.com/macros/s/AKfycbxTyh5TG6e2uWvOJrKcY-jihOE_2dXZxhTCZWTvKF773Av9qgNAoHod_pwI8VI9885a/exec'
+          $sheet='https://docs.google.com/spreadsheets/d/1KStE1tJq6LTA8KR8fe56r7OxO1k9Ae8-lIfWw9d4wng/gviz/tq?tqx=out:csv&sheet=01_Board%EB%A7%88%EC%8A%A4%ED%84%B0'
+          $lines=@('UEP 0.82.88 BOARD CONNECTIVITY AUDIT')
+          try {
+            $r=Invoke-WebRequest -Uri $api -MaximumRedirection 10 -UseBasicParsing
+            $lines += ('boardApi.status=' + [int]$r.StatusCode)
+            $lines += ('boardApi.body=' + (($r.Content -replace '[\r\n]+',' ') -replace '\s+',' ').Trim())
+          } catch { $lines += ('boardApi.error=' + $_.Exception.Message) }
+          try {
+            $s=Invoke-WebRequest -Uri $sheet -MaximumRedirection 10 -UseBasicParsing
+            $lines += ('boardSheet.status=' + [int]$s.StatusCode)
+            $body=(($s.Content -replace '[\r\n]+',' | ') -replace '\s+',' ').Trim()
+            if($body.Length -gt 1200){$body=$body.Substring(0,1200)}
+            $lines += ('boardSheet.body=' + $body)
+          } catch { $lines += ('boardSheet.error=' + $_.Exception.Message) }
+          $lines | Set-Content audit/uep-08288-board-connectivity.txt -Encoding utf8
+      - name: Commit report
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add audit/uep-08288-board-connectivity.txt
+          git diff --cached --quiet
+          if($LASTEXITCODE -eq 0){exit 0}
+          git commit -m 'Record UEP 0.82.88 board connectivity audit'
+          if($LASTEXITCODE -ne 0){throw 'audit commit failed'}
+          git push origin HEAD:main
+          if($LASTEXITCODE -ne 0){throw 'audit push failed'}
