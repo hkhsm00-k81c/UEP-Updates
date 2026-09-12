@@ -1,0 +1,142 @@
+name: Build Release UEP 0.82.90 Board Exam Mode UI
+on:
+  push:
+    paths:
+      - 'release-08290-board-exam.trigger'
+permissions:
+  contents: write
+jobs:
+  build-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download stable v0.82.89 baseline
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,output,verify | Out-Null
+          gh release download v0.82.89 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE -ne 0){throw 'v0.82.89 baseline download failed'}
+          Expand-Archive source/UEP-update.zip app -Force
+          $pkg=Get-Content app/resources/app/package.json -Raw|ConvertFrom-Json
+          if($pkg.version -ne '0.82.89'){throw 'baseline version mismatch'}
+      - name: Apply 0.82.90 Board exam mode UI patch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check scripts/patch-uep-08290-board-exam-mode-ui.js
+          if($LASTEXITCODE -ne 0){throw 'patch script syntax failed'}
+          node scripts/patch-uep-08290-board-exam-mode-ui.js app/resources/app
+          if($LASTEXITCODE -ne 0){throw '0.82.90 patch failed'}
+      - name: Syntax and regression checks
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check app/resources/app/gyomuon.js
+          if($LASTEXITCODE -ne 0){throw 'gyomuon.js syntax failed'}
+          node --check app/resources/app/electron/main.cjs
+          if($LASTEXITCODE -ne 0){throw 'main.cjs syntax failed'}
+          node scripts/test-uep-08290-board-exam-mode-ui.js app/resources/app
+          if($LASTEXITCODE -ne 0){throw '0.82.90 regression failed'}
+      - name: Verify live UEP Board API
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $url='https://script.google.com/macros/s/AKfycbxTyh5TG6e2uWvOJrKcY-jihOE_2dXZxhTCZWTvKF773Av9qgNAoHod_pwI8VI9885a/exec'
+          $r=Invoke-RestMethod -Uri $url -Method Get -MaximumRedirection 10
+          if(!$r.ok){throw 'UEP Board API did not return ok=true'}
+          if($r.service -ne 'UEP Board API'){throw 'UEP Board API identity mismatch'}
+      - name: Build update ZIP
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Compress-Archive -Path app/* -DestinationPath output/UEP-update.zip -CompressionLevel Optimal
+          if(!(Test-Path output/UEP-update.zip)){throw 'UEP-update.zip not created'}
+          if((Get-Item output/UEP-update.zip).Length -le 0){throw 'UEP-update.zip empty'}
+      - name: Re-open package and verify
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Expand-Archive output/UEP-update.zip verify -Force
+          node --check verify/resources/app/gyomuon.js
+          if($LASTEXITCODE -ne 0){throw 'packaged gyomuon.js syntax failed'}
+          node --check verify/resources/app/electron/main.cjs
+          if($LASTEXITCODE -ne 0){throw 'packaged main.cjs syntax failed'}
+          node scripts/test-uep-08290-board-exam-mode-ui.js verify/resources/app
+          if($LASTEXITCODE -ne 0){throw 'packaged 0.82.90 regression failed'}
+          $pkg=Get-Content verify/resources/app/package.json -Raw|ConvertFrom-Json
+          if($pkg.version -ne '0.82.90'){throw 'packaged version mismatch'}
+      - name: Generate SHA256
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $hash=(Get-FileHash output/UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  UEP-update.zip" | Set-Content output/sha256.txt -Encoding ascii
+          "UEP_ZIP_SHA256=$hash" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Create GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          gh release view v0.82.90 --repo $env:GITHUB_REPOSITORY *> $null
+          if($LASTEXITCODE -eq 0){throw 'v0.82.90 already exists'}
+          gh release create v0.82.90 output/UEP-update.zip output/sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.90' --notes @'
+          UEP v0.82.90 · UEP Board 관리자 시험모드 UI
+          - 화면 알림 기능을 관리자 전용 시험모드로 재설계
+          - 내신 지필고사 / 모의고사 / 기타 시험 선택
+          - 전체 시간표 / 현재 교시 중심 / 현재+전체 분할 화면 구성
+          - 출결현황 표시 옵션(숫자만 / 미확인 인원 포함 / 숨김)
+          - 시험문제 정정·문항 오류·시험시간 변경용 긴급 공지 문구 편집
+          - 시험 전 / 시험 중 / 종료 10분 전 / 쉬는 시간 / 다음 교시 준비 등 시간별 화면 단계 편집
+          - 시험모드 적용 대상에 특정 반·학년·전교·특별실 구조 포함
+          - 공지 작성 화면에 현재 지원 형식 명시: 텍스트 지원, 링크·이미지·유튜브는 준비 중
+          - 공지/일정 대상에 특별실 추가
+          - 시간표 변경 학급 선택에 1~3학년 각 1~9반 표시
+          - 시간표 변경 필드를 변경 과목·교사·장소·선택 사유로 정리
+          - 기존 22_시험운영·23_시험시간표와 분리하지 않고 향후 쓰기 API에서 연결할 구조
+          - v0.82.89 기존 기능 및 Board API 연결 유지
+          - 실제 Board DB 쓰기는 아직 비활성화
+          '@
+          if($LASTEXITCODE -ne 0){throw 'release creation failed'}
+      - name: Update auto-update policy
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $policy=Get-Content uep-policy.json -Raw|ConvertFrom-Json
+          $policy.latestVersion='0.82.90'
+          $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.90/UEP-update.zip'
+          $policy.sha256=$env:UEP_ZIP_SHA256
+          $policy.message='UEP 0.82.90 · 전자칠판 관리자 시험모드 UI'
+          $policy.forceUpdate=$false
+          $policy.updateEnabled=$true
+          $policy|ConvertTo-Json -Depth 20|Set-Content uep-policy.json -Encoding utf8
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add uep-policy.json
+          git diff --cached --quiet
+          if($LASTEXITCODE -eq 0){throw 'uep-policy.json was not changed'}
+          git commit -m 'Set update policy to UEP 0.82.90'
+          if($LASTEXITCODE -ne 0){throw 'policy commit failed'}
+          git push origin HEAD:main
+          if($LASTEXITCODE -ne 0){throw 'policy push failed'}
+      - name: Final verification
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $release=gh api repos/$env:GITHUB_REPOSITORY/releases/tags/v0.82.90 | ConvertFrom-Json
+          if($LASTEXITCODE -ne 0){throw 'release fetch failed'}
+          $zip=$release.assets|Where-Object {$_.name -eq 'UEP-update.zip'}
+          if(!$zip){throw 'release ZIP missing'}
+          if($zip.digest -ne ('sha256:'+$env:UEP_ZIP_SHA256)){throw 'release digest mismatch'}
+          $shaAsset=$release.assets|Where-Object {$_.name -eq 'sha256.txt'}
+          if(!$shaAsset){throw 'sha256.txt missing'}
+          $remote=(gh api repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json -H 'Accept: application/vnd.github.raw+json')|ConvertFrom-Json
+          if($remote.latestVersion -ne '0.82.90'){throw 'remote latestVersion mismatch'}
+          if($remote.sha256 -ne $env:UEP_ZIP_SHA256){throw 'remote SHA mismatch'}
+          if($remote.downloadUrl -ne 'https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.90/UEP-update.zip'){throw 'remote downloadUrl mismatch'}
+          Write-Host "RELEASE_OK version=0.82.90 size=$($zip.size) digest=$($zip.digest)"
