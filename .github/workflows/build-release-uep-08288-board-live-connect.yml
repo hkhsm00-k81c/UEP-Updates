@@ -1,0 +1,136 @@
+name: Build Release UEP 0.82.88 Board Live Connect
+on:
+  push:
+    paths:
+      - 'release-08288-board-live.trigger'
+permissions:
+  contents: write
+jobs:
+  build-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Download stable v0.82.87 baseline
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,output,verify|Out-Null
+          gh release download v0.82.87 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE -ne 0){throw 'v0.82.87 baseline download failed'}
+          Expand-Archive source/UEP-update.zip app -Force
+          if(!(Test-Path app/resources/app/package.json)){throw 'baseline package missing'}
+      - name: Apply 0.82.88 Board live patch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node scripts/patch-uep-08288-board-live-connect.js app/resources/app
+          if($LASTEXITCODE -ne 0){throw '0.82.88 patch failed'}
+      - name: Syntax and regression checks
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check app/resources/app/gyomuon.js
+          if($LASTEXITCODE -ne 0){throw 'gyomuon.js syntax failed'}
+          node --check app/resources/app/electron/main.cjs
+          if($LASTEXITCODE -ne 0){throw 'main.cjs syntax failed'}
+          node scripts/test-uep-08288-board-live-connect.js app/resources/app
+          if($LASTEXITCODE -ne 0){throw '0.82.88 regression failed'}
+      - name: Verify live UEP Board API
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $url='https://script.google.com/macros/s/AKfycbxTyh5TG6e2uWvOJrKcY-jihOE_2dXZxhTCZWTvKF773Av9qgNAoHod_pwI8VI9885a/exec'
+          $r=Invoke-RestMethod -Uri $url -Method Get -MaximumRedirection 10
+          if(!$r.ok){throw 'UEP Board API did not return ok=true'}
+          if($r.service -ne 'UEP Board API'){throw 'UEP Board API service identity mismatch'}
+          Write-Host "BOARD_API_OK version=$($r.version) now=$($r.now)"
+      - name: Build update ZIP
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Compress-Archive -Path app/* -DestinationPath output/UEP-update.zip -CompressionLevel Optimal
+          if(!(Test-Path output/UEP-update.zip)){throw 'UEP-update.zip not created'}
+          $zip=Get-Item output/UEP-update.zip
+          if($zip.Length -le 0){throw 'UEP-update.zip empty'}
+      - name: Re-open package and verify
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Expand-Archive output/UEP-update.zip verify -Force
+          node --check verify/resources/app/gyomuon.js
+          if($LASTEXITCODE -ne 0){throw 'packaged gyomuon.js syntax failed'}
+          node --check verify/resources/app/electron/main.cjs
+          if($LASTEXITCODE -ne 0){throw 'packaged main.cjs syntax failed'}
+          node scripts/test-uep-08288-board-live-connect.js verify/resources/app
+          if($LASTEXITCODE -ne 0){throw 'packaged 0.82.88 regression failed'}
+          $pkg=Get-Content verify/resources/app/package.json -Raw|ConvertFrom-Json
+          if($pkg.version -ne '0.82.88'){throw 'packaged version mismatch'}
+      - name: Generate SHA256
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $hash=(Get-FileHash output/UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  UEP-update.zip" | Set-Content output/sha256.txt -Encoding ascii
+          "UEP_ZIP_SHA256=$hash" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Create GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          gh release view v0.82.88 --repo $env:GITHUB_REPOSITORY *> $null
+          if($LASTEXITCODE -eq 0){throw 'v0.82.88 already exists'}
+          gh release create v0.82.88 output/UEP-update.zip output/sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.88' --notes @'
+          UEP v0.82.88 · UEP 전자칠판 실제 서비스 연결 1단계
+          - v0.82.87의 정식 메뉴/라우팅 구조를 유지하면서 실제 UEP Board API에 연결
+          - 전자칠판 화면 진입 시 공식 Board API 상태·서버 버전·서버 시각을 실시간 확인
+          - 연결 새로고침 제공
+          - [UEP] UEP Board DB를 운영 원본으로 바로 열 수 있도록 연결
+          - BoardID/학급/NFC 설정을 PC에 중복 저장하지 않고 Board DB 원본을 유지
+          - MutationObserver, setTimeout DOM 보정, 전역 click 우회 없이 기존 렌더 구조 안에서 구현
+          - v0.82.87의 기존 기능 유지
+          '@
+          if($LASTEXITCODE -ne 0){throw 'release creation failed'}
+      - name: Update auto-update policy
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $policy=Get-Content uep-policy.json -Raw|ConvertFrom-Json
+          $policy.latestVersion='0.82.88'
+          $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.88/UEP-update.zip'
+          $policy.sha256=$env:UEP_ZIP_SHA256
+          $policy.message='UEP 0.82.88 · UEP 전자칠판 실제 Board 서비스 연결'
+          $policy.forceUpdate=$false
+          $policy.updateEnabled=$true
+          $policy|ConvertTo-Json -Depth 20|Set-Content uep-policy.json -Encoding utf8
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add uep-policy.json
+          git diff --cached --quiet
+          if($LASTEXITCODE -eq 0){throw 'uep-policy.json was not changed'}
+          git commit -m 'Set update policy to UEP 0.82.88'
+          if($LASTEXITCODE -ne 0){throw 'policy commit failed'}
+          git push origin HEAD:main
+          if($LASTEXITCODE -ne 0){throw 'policy push failed'}
+      - name: Final verification
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $release=gh api repos/$env:GITHUB_REPOSITORY/releases/tags/v0.82.88 | ConvertFrom-Json
+          if($LASTEXITCODE -ne 0){throw 'release fetch failed'}
+          $zip=$release.assets|Where-Object {$_.name -eq 'UEP-update.zip'}
+          if(!$zip){throw 'release ZIP missing'}
+          if($zip.digest -ne ('sha256:'+$env:UEP_ZIP_SHA256)){throw 'release digest mismatch'}
+          $shaAsset=$release.assets|Where-Object {$_.name -eq 'sha256.txt'}
+          if(!$shaAsset){throw 'sha256.txt missing'}
+          $remote=(gh api repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json -H 'Accept: application/vnd.github.raw+json')|ConvertFrom-Json
+          if($remote.latestVersion -ne '0.82.88'){throw 'remote latestVersion mismatch'}
+          if($remote.sha256 -ne $env:UEP_ZIP_SHA256){throw 'remote SHA mismatch'}
+          if($remote.downloadUrl -notmatch '/v0\.82\.88/UEP-update\.zip$'){throw 'remote downloadUrl mismatch'}
+          Write-Host "RELEASE_OK version=0.82.88 size=$($zip.size) digest=$($zip.digest)"
