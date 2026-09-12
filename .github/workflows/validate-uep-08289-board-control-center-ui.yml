@@ -1,0 +1,102 @@
+name: Validate UEP 0.82.89 Board Control Center UI
+on:
+  push:
+    paths:
+      - 'validate-08289-board-ui.trigger'
+permissions:
+  contents: write
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Download stable v0.82.88 baseline
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,output,verify,audit | Out-Null
+          gh release download v0.82.88 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE -ne 0){throw 'v0.82.88 baseline download failed'}
+          Expand-Archive source/UEP-update.zip app -Force
+          if(!(Test-Path app/resources/app/package.json)){throw 'baseline package missing'}
+          $pkg=Get-Content app/resources/app/package.json -Raw|ConvertFrom-Json
+          if($pkg.version -ne '0.82.88'){throw 'baseline version mismatch'}
+      - name: Apply 0.82.89 Board control center UI patch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check scripts/patch-uep-08289-board-control-center-ui.js
+          if($LASTEXITCODE -ne 0){throw 'patch script syntax failed'}
+          node scripts/patch-uep-08289-board-control-center-ui.js app/resources/app
+          if($LASTEXITCODE -ne 0){throw '0.82.89 patch failed'}
+      - name: Syntax and regression checks
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check app/resources/app/gyomuon.js
+          if($LASTEXITCODE -ne 0){throw 'gyomuon.js syntax failed'}
+          node --check app/resources/app/electron/main.cjs
+          if($LASTEXITCODE -ne 0){throw 'main.cjs syntax failed'}
+          node scripts/test-uep-08289-board-control-center-ui.js app/resources/app
+          if($LASTEXITCODE -ne 0){throw '0.82.89 regression failed'}
+      - name: Verify live UEP Board API
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $url='https://script.google.com/macros/s/AKfycbxTyh5TG6e2uWvOJrKcY-jihOE_2dXZxhTCZWTvKF773Av9qgNAoHod_pwI8VI9885a/exec'
+          $r=Invoke-RestMethod -Uri $url -Method Get -MaximumRedirection 10
+          if(!$r.ok){throw 'UEP Board API did not return ok=true'}
+          if($r.service -ne 'UEP Board API'){throw 'UEP Board API service identity mismatch'}
+          Write-Host "BOARD_API_OK version=$($r.version) now=$($r.now)"
+      - name: Build candidate ZIP
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Compress-Archive -Path app/* -DestinationPath output/UEP-update.zip -CompressionLevel Optimal
+          if(!(Test-Path output/UEP-update.zip)){throw 'candidate ZIP not created'}
+          if((Get-Item output/UEP-update.zip).Length -le 0){throw 'candidate ZIP empty'}
+      - name: Re-open candidate and verify
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Expand-Archive output/UEP-update.zip verify -Force
+          node --check verify/resources/app/gyomuon.js
+          if($LASTEXITCODE -ne 0){throw 'packaged gyomuon.js syntax failed'}
+          node --check verify/resources/app/electron/main.cjs
+          if($LASTEXITCODE -ne 0){throw 'packaged main.cjs syntax failed'}
+          node scripts/test-uep-08289-board-control-center-ui.js verify/resources/app
+          if($LASTEXITCODE -ne 0){throw 'packaged 0.82.89 regression failed'}
+          $pkg=Get-Content verify/resources/app/package.json -Raw|ConvertFrom-Json
+          if($pkg.version -ne '0.82.89'){throw 'packaged version mismatch'}
+      - name: Record candidate verification
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $hash=(Get-FileHash output/UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          @"
+          UEP 0.82.89 BOARD CONTROL CENTER UI CANDIDATE
+          version=0.82.89
+          sha256=$hash
+          baseline=v0.82.88 release asset UEP-update.zip
+          board-api=official UEP Board API
+          board-db=official UEP Board DB
+          ui=PASS
+          syntax=PASS
+          regression=PASS
+          packaged-reopen=PASS
+          write-enabled=NO
+          release-created=NO
+          "@ | Set-Content audit/uep-08289-board-control-center-ui-candidate.txt -Encoding utf8
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add audit/uep-08289-board-control-center-ui-candidate.txt
+          git diff --cached --quiet
+          if($LASTEXITCODE -eq 0){throw 'candidate report not changed'}
+          git commit -m 'Record UEP 0.82.89 Board control center UI candidate validation'
+          if($LASTEXITCODE -ne 0){throw 'candidate report commit failed'}
+          git push origin HEAD:main
+          if($LASTEXITCODE -ne 0){throw 'candidate report push failed'}
