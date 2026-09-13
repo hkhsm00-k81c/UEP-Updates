@@ -13,7 +13,7 @@ const afterPos=src.indexOf(after,innerStart);
 if(afterPos<0)throw new Error('rendererHelpers following statement missing');
 const closePos=src.lastIndexOf('`;',afterPos);
 if(closePos<innerStart)throw new Error('rendererHelpers closing delimiter missing');
-const fixedInner=src.slice(innerStart,closePos).replace(/`/g,'\\`');
+const fixedInner=src.slice(innerStart,closePos).replace(/`/g,'\\`').replace(/\$\{/g,'\\${');
 src=src.slice(0,innerStart)+fixedInner+src.slice(closePos);
 const temp=path.join(__dirname,'.tmp-patch-uep-08297-fixed.js');
 fs.writeFileSync(temp,src,'utf8');
