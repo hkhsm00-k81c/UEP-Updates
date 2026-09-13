@@ -15,6 +15,7 @@ const closePos=src.lastIndexOf('`;',afterPos);
 if(closePos<innerStart)throw new Error('rendererHelpers closing delimiter missing');
 const fixedInner=src.slice(innerStart,closePos).replace(/`/g,'\\`').replace(/\$\{/g,'\\${');
 src=src.slice(0,innerStart)+fixedInner+src.slice(closePos);
+src=src.replace("renderer=replaceOnce(renderer,'// __UEP_08296_BOARD_SCREEN_MIRROR_RENDERER__'","renderer=replaceOnce(renderer,'// __UEP_08295_BOARD_CARD_OPERATION_RENDERER__'");
 const temp=path.join(__dirname,'.tmp-patch-uep-08297-fixed.js');
 fs.writeFileSync(temp,src,'utf8');
 try{
