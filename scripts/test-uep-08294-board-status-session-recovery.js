@@ -12,8 +12,8 @@ const pkg=JSON.parse(read('package.json'));
 must(pkg.version==='0.82.94','package version mismatch');
 must(renderer.includes('UEP_08294_BOARD_STATUS_SESSION_RECOVERY'),'runtime marker missing');
 
-// Existing five Board tools must remain in source.
-for(const tool of ['status','notice','schedule','timetable','exam']){
+// Existing five Board tools must remain in source. The lookup tool key has always been "boards".
+for(const tool of ['boards','notice','schedule','timetable','exam']){
   must(renderer.includes(`data-board-tool="${tool}"`),`Board tool missing: ${tool}`);
 }
 must(renderer.includes('function boardAdminUiAllowed()'),'exam admin UI guard missing');
