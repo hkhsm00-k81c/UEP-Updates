@@ -8,9 +8,10 @@ must(r.includes('function boardCanManageLive08298'),'UI authorization helper mis
 must(r.includes('boardAdminUiAllowed()'),'admin visibility missing');
 must(r.includes("bg===ug&&bc===uc"),'homeroom visibility missing');
 must(r.includes('me===author'),'owner visibility missing');
+must(r.includes('deleteBoardPreviewItem08297'),'live delete action missing');
+must(r.includes('>내리기</button>'),'live take-down button missing');
 must(m.includes('boardManagedDelete08297'),'delete backend regression');
 must(m.includes('boardHomeroomTarget08297'),'server homeroom authorization regression');
-must(r.includes('boardLiveDelete08297'),'live delete action regression');
 must(r.includes('boardMineList')&&r.includes('boardManagedUpdate')&&r.includes('boardManagedDelete'),'owner manage regression');
 must(r.includes('refreshSelectedBoardPreview08297'),'live preview regression');
 console.log('UEP 0.82.98 regression OK');
