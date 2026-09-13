@@ -1,0 +1,39 @@
+name: Audit UEP 0.82.91 Grade Focus
+on:
+  push:
+    paths:
+      - 'audit-08291-grade-focus.trigger'
+permissions:
+  contents: write
+jobs:
+  audit:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Focus grade loading code
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.82.91 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          Expand-Archive source/UEP-update.zip app -Force
+          @'
+          const fs=require('fs');
+          function slice(file,a,b){const lines=fs.readFileSync(file,'utf8').split(/\r?\n/);return lines.slice(a-1,b).map((x,i)=>String(a+i).padStart(6,' ')+': '+x).join('\n');}
+          let out=[];
+          out.push('===== google-data score map =====\n'+slice('app/resources/app/electron/google-data.cjs',880,970));
+          out.push('\n===== google-data dorm + summary =====\n'+slice('app/resources/app/electron/google-data.cjs',1530,1600));
+          out.push('\n===== google-data return =====\n'+slice('app/resources/app/electron/google-data.cjs',1700,1800));
+          out.push('\n===== staged loading =====\n'+slice('app/resources/app/gyomuon.js',3988,4030));
+          out.push('\n===== readonly normalize =====');
+          const g=fs.readFileSync('app/resources/app/gyomuon.js','utf8').split(/\r?\n/);for(let i=0;i<g.length;i++){if(g[i].includes('function uep08123NormalizeReadonlyCache'))out.push(g.slice(i,Math.min(g.length,i+70)).map((x,j)=>String(i+j+1).padStart(6,' ')+': '+x).join('\n'));}
+          fs.writeFileSync('audit/uep-08291-grade-focus.txt',out.join('\n'),'utf8');
+          '@ | Set-Content focus.js -Encoding UTF8
+          node focus.js
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add audit/uep-08291-grade-focus.txt
+          git commit -m 'audit: focus 0.82.91 grade loading'
+          git push
