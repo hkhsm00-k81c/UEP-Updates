@@ -25,8 +25,9 @@ must(main.includes('boardHomeroomTarget08297'),'homeroom delete permission missi
 must(preload.includes('boardMineList: (payload)'),'mine list preload missing');
 must(preload.includes('boardManagedUpdate: (payload)'),'managed update preload missing');
 must(preload.includes('boardManagedDelete: (payload)'),'managed delete preload missing');
-must(renderer.includes('id="boardMyNotice08297"'),'my notice UI missing');
-must(renderer.includes('id="boardMySchedule08297"'),'my schedule UI missing');
+must(renderer.includes('ensureBoardMineMount08297'),'runtime owner panel mount missing');
+must(renderer.includes('boardMyNotice08297'),'my notice mount id missing');
+must(renderer.includes('boardMySchedule08297'),'my schedule mount id missing');
 must(renderer.includes('내가 올린 공지'),'my notice heading missing');
 must(renderer.includes('내가 올린 일정'),'my schedule heading missing');
 must(renderer.includes('수정 저장'),'edit action missing');
