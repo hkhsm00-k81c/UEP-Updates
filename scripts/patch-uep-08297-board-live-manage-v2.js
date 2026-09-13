@@ -7,8 +7,8 @@ let src=fs.readFileSync(base,'utf8');
 
 // Mount owner-management through the already rendered Board section rather than
 // statically splicing source panel boundaries.
-src=src.replace("renderer=injectPanelHtml(renderer,'notice','schedule',noticeMount);\nrenderer=injectPanelHtml(renderer,'schedule','timetable',scheduleMount);",'');
-const fnNeedle='async function refreshBoardMine08297(kind){\n';
+src=src.replace(/renderer=injectPanelHtml\(renderer,'notice','schedule',noticeMount\);\s*renderer=injectPanelHtml\(renderer,'schedule','timetable',scheduleMount\);/,'');
+const fnNeedle='async function refreshBoardMine08297(kind){';
 if(!src.includes(fnNeedle))throw new Error('refreshBoardMine08297 function start missing');
 const ensure=`function ensureBoardMineMount08297(kind){
   const id=kind==='notice'?'boardMyNotice08297':'boardMySchedule08297';
@@ -20,7 +20,7 @@ const ensure=`function ensureBoardMineMount08297(kind){
   section.insertAdjacentHTML('beforeend','<div class="board-my-manage-shell"><div class="board-section-head compact"><div><small>'+tag+'</small><h4>'+title+'</h4><p>'+sub+'</p></div><button class="btn secondary" type="button" onclick="refreshBoardMine08297(&quot;'+kind+'&quot;)">새로고침</button></div><div id="'+id+'" class="board-my-list"><div class="board-empty-state compact">목록을 불러오는 중입니다.</div></div></div>');
 }
 `;
-src=src.replace(fnNeedle,ensure+fnNeedle+'  ensureBoardMineMount08297(kind);\n');
+src=src.replace(fnNeedle,ensure+fnNeedle+'\n  ensureBoardMineMount08297(kind);');
 
 const marker='const rendererHelpers=`';
 const start=src.indexOf(marker);
