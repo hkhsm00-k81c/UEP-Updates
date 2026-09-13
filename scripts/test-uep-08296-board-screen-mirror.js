@@ -22,14 +22,13 @@ must(preload.includes('boardDbDetail: (payload)'),'detail preload bridge missing
 
 // Read-only Board mirror must follow the actual Board app data model.
 must(main.includes('async function boardDbDetail08296'),'0.82.96 detail reader missing');
-must(main.includes("'05_학급시간표'"),'physical Board timetable source missing');
-must(main.includes("'09_일정'"),'physical Board schedule source missing');
-must(main.includes("'22_시험운영'"),'exam operation source missing');
-must(main.includes("'23_시험시간표'"),'today exam timetable source missing');
+must(main.includes("boardSheetObjects08296(ctx.token,'05_학급시간표'"),'physical Board timetable source missing');
+must(main.includes("boardSheetObjects08296(ctx.token,'09_일정'"),'physical Board schedule source missing');
+must(main.includes("boardSheetObjects08296(ctx.token,'22_시험운영'"),'exam operation source missing');
+must(main.includes("boardSheetObjects08296(ctx.token,'23_시험시간표'"),'today exam timetable source missing');
 must(main.includes("const displayMode=exam.active?'EXAM'"),'Board display mode precedence missing');
 must(main.includes('screenScheduleCount:exam.active?exam.timetable.length:schedules.length'),'screen schedule count must use exam timetable in exam mode');
-must(main.includes('end<today'),'upcoming schedule semantics missing');
-must(!main.includes('if(start&&start>today)continue;if(end&&end<today)continue;'),'old current-only schedule filter still active in effective mirror');
+must(main.includes("const start=boardDate08296(r['일자']),end=boardDate08296(r['종료일'])||start;if(!start||end<today)return false;"),'Board-style upcoming schedule filter missing');
 
 // Query is a preview, not an edit-navigation hub.
 must(renderer.includes('현재 전자칠판 화면 조회'),'mirror heading missing');
