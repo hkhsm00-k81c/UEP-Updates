@@ -1,0 +1,44 @@
+name: Audit UEP 0.82.91 Grade Links
+on:
+  push:
+    paths:
+      - 'audit-08291-grade-links.trigger'
+permissions:
+  contents: write
+jobs:
+  audit:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect grade/student/dorm routing in v0.82.91 package
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app | Out-Null
+          gh release download v0.82.91 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE -ne 0){throw 'v0.82.91 download failed'}
+          Expand-Archive source/UEP-update.zip app -Force
+          $root='app/resources/app'
+          @'
+          const fs=require('fs'),path=require('path');
+          const root=process.argv[2];
+          const terms=['학사생 자료가 없습니다','학사생','성적·입시 요약','최근 내신','내신 통계','내신 시험을 선택하세요','모의고사 통계','시험별 추이','학생 개인 대시보드','renderGrades','renderDorm','renderStudent','grade','mock','내신','모의고사'];
+          const files=[];
+          function walk(d){for(const e of fs.readdirSync(d,{withFileTypes:true})){const p=path.join(d,e.name);if(e.isDirectory()){if(e.name!=='node_modules')walk(p);}else if(/\.(js|cjs|mjs|html|json)$/i.test(e.name))files.push(p)}}
+          walk(root);
+          let out=[];
+          for(const f of files){let s;try{s=fs.readFileSync(f,'utf8')}catch{continue};const lines=s.split(/\r?\n/);const hits=[];for(let i=0;i<lines.length;i++){if(terms.some(t=>lines[i].toLowerCase().includes(t.toLowerCase())))hits.push(i)}if(!hits.length)continue;
+            const sel=new Set();for(const i of hits){for(let j=Math.max(0,i-8);j<=Math.min(lines.length-1,i+14);j++)sel.add(j)}
+            out.push('\n===== FILE '+path.relative(root,f)+' =====');let prev=-2;for(const i of [...sel].sort((a,b)=>a-b)){if(i>prev+1)out.push('---');out.push(String(i+1).padStart(6,' ')+': '+lines[i]);prev=i;}
+          }
+          fs.writeFileSync('audit/uep-08291-grade-links.txt',out.join('\n'),'utf8');
+          '@ | Set-Content audit-grade.js -Encoding UTF8
+          node audit-grade.js $root
+          if($LASTEXITCODE -ne 0){throw 'audit failed'}
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add audit/uep-08291-grade-links.txt
+          git commit -m 'audit: inspect 0.82.91 grade links'
+          git push
