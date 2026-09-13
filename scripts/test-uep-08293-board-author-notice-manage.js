@@ -28,6 +28,9 @@ ok(main.includes('__UEP_08292_BOARD_TARGET_FIX__'),'board target fix missing');
 ok(main.includes('boardDbWrite08291'),'board write missing');
 ok(renderer.includes('saveBoardTimetable08291'),'timetable write missing');
 ok(renderer.includes('applyBoardExam08291'),'exam write missing');
-// No disallowed patch patterns introduced.
-ok(!renderer.includes('MutationObserver'),'MutationObserver introduced');
+// This patch itself must not add post-render hacks. Older baseline code may already contain legacy observers.
+const patchRegion=renderer.slice(renderer.indexOf('__UEP_08293_BOARD_AUTHOR_NOTICE_MANAGE_RENDERER__'),renderer.indexOf('function electronicBoardView(){'));
+ok(!patchRegion.includes('MutationObserver'),'0.82.93 patch introduced MutationObserver');
+ok(!patchRegion.includes('setTimeout('),'0.82.93 patch introduced setTimeout DOM workaround');
+ok(!patchRegion.includes("document.addEventListener('click'"),'0.82.93 patch introduced global click workaround');
 console.log('UEP 0.82.93 regression PASS');
