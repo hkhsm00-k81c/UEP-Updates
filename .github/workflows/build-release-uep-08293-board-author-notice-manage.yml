@@ -1,0 +1,130 @@
+name: Build Release UEP 0.82.93 Board Author Notice Manage
+on:
+  push:
+    paths:
+      - 'release-08293-board-notice.trigger'
+permissions:
+  contents: write
+jobs:
+  build-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download stable v0.82.92 baseline
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,output,verify | Out-Null
+          gh release download v0.82.92 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE -ne 0){throw 'v0.82.92 baseline download failed'}
+          Expand-Archive source/UEP-update.zip app -Force
+          $pkg=Get-Content app/resources/app/package.json -Raw|ConvertFrom-Json
+          if($pkg.version -ne '0.82.92'){throw 'baseline version mismatch'}
+      - name: Apply 0.82.93 patch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check scripts/patch-uep-08293-board-author-notice-manage-v2.js
+          if($LASTEXITCODE -ne 0){throw 'patch syntax failed'}
+          node scripts/patch-uep-08293-board-author-notice-manage-v2.js app/resources/app
+          if($LASTEXITCODE -ne 0){throw 'patch failed'}
+      - name: Syntax and regression checks
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check app/resources/app/gyomuon.js
+          if($LASTEXITCODE -ne 0){throw 'gyomuon syntax failed'}
+          node --check app/resources/app/electron/main.cjs
+          if($LASTEXITCODE -ne 0){throw 'main syntax failed'}
+          node --check app/resources/app/electron/preload.cjs
+          if($LASTEXITCODE -ne 0){throw 'preload syntax failed'}
+          node scripts/test-uep-08293-board-author-notice-manage.js app/resources/app
+          if($LASTEXITCODE -ne 0){throw '0.82.93 regression failed'}
+      - name: Build update ZIP
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Compress-Archive -Path app/* -DestinationPath output/UEP-update.zip -CompressionLevel Optimal
+          if(!(Test-Path output/UEP-update.zip)){throw 'UEP-update.zip missing'}
+          if((Get-Item output/UEP-update.zip).Length -le 0){throw 'UEP-update.zip empty'}
+      - name: Re-open package and verify
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Expand-Archive output/UEP-update.zip verify -Force
+          node --check verify/resources/app/gyomuon.js
+          node --check verify/resources/app/electron/main.cjs
+          node --check verify/resources/app/electron/preload.cjs
+          node scripts/test-uep-08293-board-author-notice-manage.js verify/resources/app
+          $pkg=Get-Content verify/resources/app/package.json -Raw|ConvertFrom-Json
+          if($pkg.version -ne '0.82.93'){throw 'packaged version mismatch'}
+      - name: Generate SHA256
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $hash=(Get-FileHash output/UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  UEP-update.zip" | Set-Content output/sha256.txt -Encoding ascii
+          "UEP_ZIP_SHA256=$hash" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Create GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          gh release view v0.82.93 --repo $env:GITHUB_REPOSITORY *> $null
+          if($LASTEXITCODE -eq 0){throw 'v0.82.93 already exists'}
+          gh release create v0.82.93 output/UEP-update.zip output/sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.93' --notes @'
+          UEP v0.82.93 · 전자칠판 공지 작성자·저장검증·공지관리
+          - UEP PC 공지 저장 시 현재 로그인 교사명을 작성자로 기록
+          - 공지 저장 직후 실제 추가된 Sheet 행을 다시 읽어 공지ID·작성자 일치 확인
+          - 성공/실패 메시지에 실제 저장 결과를 명확히 표시
+          - 전자칠판 공지 화면에 현재 공지 관리 영역 추가
+          - 등록자는 본인 공지를 내릴 수 있고 담임은 자기 반 대상 공지를 내릴 수 있으며 관리자는 전체 관리
+          - 실제 행 삭제 대신 사용여부=N 논리삭제 + 수정일 + 운영로그 기록
+          - v0.82.92 성적·학사 단계 로딩 복구 유지
+          - 기존 공지·일정·05A 시간표변경·시험모드 Board DB 쓰기 유지
+          '@
+          if($LASTEXITCODE -ne 0){throw 'release creation failed'}
+      - name: Update auto-update policy
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $policy=Get-Content uep-policy.json -Raw|ConvertFrom-Json
+          $policy.latestVersion='0.82.93'
+          $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.93/UEP-update.zip'
+          $policy.sha256=$env:UEP_ZIP_SHA256
+          $policy.message='UEP 0.82.93 · 전자칠판 공지 작성자 및 공지관리 안정화'
+          $policy.forceUpdate=$false
+          $policy.updateEnabled=$true
+          $policy|ConvertTo-Json -Depth 20|Set-Content uep-policy.json -Encoding utf8
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add uep-policy.json
+          git diff --cached --quiet
+          if($LASTEXITCODE -eq 0){throw 'uep-policy.json was not changed'}
+          git commit -m 'Set update policy to UEP 0.82.93'
+          if($LASTEXITCODE -ne 0){throw 'policy commit failed'}
+          git push origin HEAD:main
+          if($LASTEXITCODE -ne 0){throw 'policy push failed'}
+      - name: Final verification
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $release=gh api repos/$env:GITHUB_REPOSITORY/releases/tags/v0.82.93 | ConvertFrom-Json
+          if($LASTEXITCODE -ne 0){throw 'release fetch failed'}
+          $zip=$release.assets|Where-Object {$_.name -eq 'UEP-update.zip'}
+          if(!$zip){throw 'release ZIP missing'}
+          if($zip.digest -ne ('sha256:'+$env:UEP_ZIP_SHA256)){throw 'release digest mismatch'}
+          $shaAsset=$release.assets|Where-Object {$_.name -eq 'sha256.txt'}
+          if(!$shaAsset){throw 'sha256.txt missing'}
+          $remoteRaw=gh api repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json -H 'Accept: application/vnd.github.raw+json'
+          if($LASTEXITCODE -ne 0){throw 'remote policy fetch failed'}
+          $remote=$remoteRaw|ConvertFrom-Json
+          if($remote.latestVersion -ne '0.82.93'){throw 'remote latestVersion mismatch'}
+          if($remote.sha256 -ne $env:UEP_ZIP_SHA256){throw 'remote SHA mismatch'}
+          if($remote.downloadUrl -ne 'https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.93/UEP-update.zip'){throw 'remote downloadUrl mismatch'}
+          Write-Host "RELEASE_OK version=0.82.93 size=$($zip.size) digest=$($zip.digest)"
