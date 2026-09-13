@@ -1,0 +1,151 @@
+name: Build Release UEP 0.82.91 Board DB Write
+on:
+  push:
+    paths:
+      - 'release-08291-board-write.trigger'
+permissions:
+  contents: write
+jobs:
+  build-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download stable v0.82.90 baseline
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,output,verify | Out-Null
+          gh release download v0.82.90 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE -ne 0){throw 'v0.82.90 baseline download failed'}
+          Expand-Archive source/UEP-update.zip app -Force
+          $pkg=Get-Content app/resources/app/package.json -Raw|ConvertFrom-Json
+          if($pkg.version -ne '0.82.90'){throw 'baseline version mismatch'}
+      - name: Apply 0.82.91 Board DB write patch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check scripts/run-patch-uep-08291-board-db-write.js
+          if($LASTEXITCODE -ne 0){throw 'patch runner syntax failed'}
+          node scripts/run-patch-uep-08291-board-db-write.js app/resources/app
+          if($LASTEXITCODE -ne 0){throw 'patch failed'}
+      - name: Syntax and regression checks
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check app/resources/app/gyomuon.js
+          if($LASTEXITCODE -ne 0){throw 'gyomuon syntax failed'}
+          node --check app/resources/app/electron/main.cjs
+          if($LASTEXITCODE -ne 0){throw 'main syntax failed'}
+          node --check app/resources/app/electron/preload.cjs
+          if($LASTEXITCODE -ne 0){throw 'preload syntax failed'}
+          node scripts/test-uep-08291-board-db-write.js app/resources/app
+          if($LASTEXITCODE -ne 0){throw 'regression failed'}
+      - name: Verify Board API endpoint and best-effort cloud probe
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $renderer=Get-Content app/resources/app/gyomuon.js -Raw
+          $url='https://script.google.com/macros/s/AKfycbxTyh5TG6e2uWvOJrKcY-jihOE_2dXZxhTCZWTvKF773Av9qgNAoHod_pwI8VI9885a/exec'
+          if(!$renderer.Contains($url)){throw 'packaged Board API endpoint mismatch'}
+          try {
+            $r=Invoke-RestMethod -Uri $url -Method Get -MaximumRedirection 10 -TimeoutSec 20
+            if($r.ok -and $r.service -eq 'UEP Board API'){Write-Host 'cloud-probe=PASS'}
+            else {Write-Warning 'cloud-probe=UNEXPECTED_RESPONSE'}
+          } catch {
+            Write-Warning ('cloud-probe=UNAVAILABLE_FROM_GITHUB_RUNNER; '+$_.Exception.Message)
+          }
+      - name: Build update ZIP
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Compress-Archive -Path app/* -DestinationPath output/UEP-update.zip -CompressionLevel Optimal
+          if(!(Test-Path output/UEP-update.zip)){throw 'UEP-update.zip not created'}
+          if((Get-Item output/UEP-update.zip).Length -le 0){throw 'UEP-update.zip empty'}
+      - name: Re-open package and verify
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Expand-Archive output/UEP-update.zip verify -Force
+          node --check verify/resources/app/gyomuon.js
+          if($LASTEXITCODE -ne 0){throw 'packaged gyomuon syntax failed'}
+          node --check verify/resources/app/electron/main.cjs
+          if($LASTEXITCODE -ne 0){throw 'packaged main syntax failed'}
+          node --check verify/resources/app/electron/preload.cjs
+          if($LASTEXITCODE -ne 0){throw 'packaged preload syntax failed'}
+          node scripts/test-uep-08291-board-db-write.js verify/resources/app
+          if($LASTEXITCODE -ne 0){throw 'packaged regression failed'}
+          $pkg=Get-Content verify/resources/app/package.json -Raw|ConvertFrom-Json
+          if($pkg.version -ne '0.82.91'){throw 'packaged version mismatch'}
+      - name: Generate SHA256
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $hash=(Get-FileHash output/UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  UEP-update.zip" | Set-Content output/sha256.txt -Encoding ascii
+          "UEP_ZIP_SHA256=$hash" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Create GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          gh release view v0.82.91 --repo $env:GITHUB_REPOSITORY *> $null
+          if($LASTEXITCODE -eq 0){throw 'v0.82.91 already exists'}
+          gh release create v0.82.91 output/UEP-update.zip output/sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.91' --notes @'
+          UEP v0.82.91 · UEP Board DB 실제 쓰기 연결 1차
+          - UEP 로그인 세션으로 사용자·역할을 검증한 뒤 Board DB 쓰기 실행
+          - 서비스계정 토큰은 Electron main process에서만 사용하고 renderer에는 노출하지 않음
+          - Board DB 쓰기 대상 탭을 화이트리스트로 제한
+          - 공지 등록 → 06_1학년공지 / 07_2학년공지 / 08_전교공지 기록
+          - 일정 등록 → 09_일정 기록
+          - 시간표 변경 → 05A_임시시간표변경 기록
+          - 시험모드 적용 → 22_시험운영 / 23_시험시간표 기록(관리자 전용)
+          - 15_운영로그에 PC 쓰기 성공/실패 이력 기록
+          - 전자칠판 조회에서 관리자 전체 Board / 일반 담임 자기반 Board 조회
+          - 1~3학년 1~9반 실제 대상 선택지 연결
+          - v0.82.90 기존 전자칠판 UI와 기존 UEP 기능 유지
+          - 주의: 05A 임시시간표변경의 Android Board 우선적용 로직은 다음 단계에서 연결 예정
+          - 주의: 특별실 단독 공지/일정/시험모드는 대상 판정 확장 후 연결 예정
+          '@
+          if($LASTEXITCODE -ne 0){throw 'release creation failed'}
+      - name: Update auto-update policy
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $policy=Get-Content uep-policy.json -Raw|ConvertFrom-Json
+          $policy.latestVersion='0.82.91'
+          $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.91/UEP-update.zip'
+          $policy.sha256=$env:UEP_ZIP_SHA256
+          $policy.message='UEP 0.82.91 · 전자칠판 Board DB 실제 쓰기 연결 1차'
+          $policy.forceUpdate=$false
+          $policy.updateEnabled=$true
+          $policy|ConvertTo-Json -Depth 20|Set-Content uep-policy.json -Encoding utf8
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add uep-policy.json
+          git diff --cached --quiet
+          if($LASTEXITCODE -eq 0){throw 'uep-policy.json was not changed'}
+          git commit -m 'Set update policy to UEP 0.82.91'
+          if($LASTEXITCODE -ne 0){throw 'policy commit failed'}
+          git push origin HEAD:main
+          if($LASTEXITCODE -ne 0){throw 'policy push failed'}
+      - name: Final verification
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $release=gh api repos/$env:GITHUB_REPOSITORY/releases/tags/v0.82.91 | ConvertFrom-Json
+          if($LASTEXITCODE -ne 0){throw 'release fetch failed'}
+          $zip=$release.assets|Where-Object {$_.name -eq 'UEP-update.zip'}
+          if(!$zip){throw 'release ZIP missing'}
+          if($zip.digest -ne ('sha256:'+$env:UEP_ZIP_SHA256)){throw 'release digest mismatch'}
+          $shaAsset=$release.assets|Where-Object {$_.name -eq 'sha256.txt'}
+          if(!$shaAsset){throw 'sha256.txt missing'}
+          $remote=(gh api repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json -H 'Accept: application/vnd.github.raw+json')|ConvertFrom-Json
+          if($remote.latestVersion -ne '0.82.91'){throw 'remote latestVersion mismatch'}
+          if($remote.sha256 -ne $env:UEP_ZIP_SHA256){throw 'remote SHA mismatch'}
+          if($remote.downloadUrl -ne 'https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.91/UEP-update.zip'){throw 'remote downloadUrl mismatch'}
+          Write-Host "RELEASE_OK version=0.82.91 size=$($zip.size) digest=$($zip.digest)"
