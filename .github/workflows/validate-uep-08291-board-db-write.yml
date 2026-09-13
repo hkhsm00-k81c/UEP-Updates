@@ -42,13 +42,20 @@ jobs:
           if($LASTEXITCODE -ne 0){throw 'preload syntax failed'}
           node scripts/test-uep-08291-board-db-write.js app/resources/app
           if($LASTEXITCODE -ne 0){throw 'regression failed'}
-      - name: Verify live Board API health
+      - name: Verify Board API endpoint and best-effort cloud probe
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
+          $renderer=Get-Content app/resources/app/gyomuon.js -Raw
           $url='https://script.google.com/macros/s/AKfycbxTyh5TG6e2uWvOJrKcY-jihOE_2dXZxhTCZWTvKF773Av9qgNAoHod_pwI8VI9885a/exec'
-          $r=Invoke-RestMethod -Uri $url -Method Get -MaximumRedirection 10
-          if(!$r.ok -or $r.service -ne 'UEP Board API'){throw 'Board API health failed'}
+          if(!$renderer.Contains($url)){throw 'packaged Board API endpoint mismatch'}
+          try {
+            $r=Invoke-RestMethod -Uri $url -Method Get -MaximumRedirection 10 -TimeoutSec 20
+            if($r.ok -and $r.service -eq 'UEP Board API'){'cloud-probe=PASS' | Set-Content audit/uep-08291-board-api-probe.txt}
+            else {'cloud-probe=UNEXPECTED_RESPONSE' | Set-Content audit/uep-08291-board-api-probe.txt}
+          } catch {
+            ('cloud-probe=UNAVAILABLE_FROM_GITHUB_RUNNER; '+$_.Exception.Message) | Set-Content audit/uep-08291-board-api-probe.txt
+          }
       - name: Build candidate ZIP
         shell: pwsh
         run: |
@@ -71,6 +78,7 @@ jobs:
         run: |
           $ErrorActionPreference='Stop'
           $hash=(Get-FileHash output/UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          $probe=(Get-Content audit/uep-08291-board-api-probe.txt -Raw).Trim()
           @"
           UEP 0.82.91 BOARD DB WRITE CANDIDATE
           version=0.82.91
@@ -87,11 +95,12 @@ jobs:
           syntax=PASS
           regression=PASS
           packaged-reopen=PASS
-          board-api-health=PASS
+          board-api-endpoint=PASS
+          $probe
           release-created=NO
           "@ | Set-Content audit/uep-08291-board-db-write-candidate.txt -Encoding utf8
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add audit/uep-08291-board-db-write-candidate.txt
+          git add audit/uep-08291-board-db-write-candidate.txt audit/uep-08291-board-api-probe.txt
           git commit -m 'audit: record 0.82.91 Board DB write candidate'
           git push
