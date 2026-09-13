@@ -1,0 +1,97 @@
+name: Validate UEP 0.82.91 Board DB Write
+on:
+  push:
+    paths:
+      - 'validate-08291-board-write.trigger'
+permissions:
+  contents: write
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download stable v0.82.90 baseline
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force source,app,output,verify | Out-Null
+          gh release download v0.82.90 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE -ne 0){throw 'v0.82.90 baseline download failed'}
+          Expand-Archive source/UEP-update.zip app -Force
+          $pkg=Get-Content app/resources/app/package.json -Raw|ConvertFrom-Json
+          if($pkg.version -ne '0.82.90'){throw 'baseline version mismatch'}
+      - name: Apply 0.82.91 Board DB write patch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check scripts/patch-uep-08291-board-db-write.js
+          if($LASTEXITCODE -ne 0){throw 'patch syntax failed'}
+          node scripts/patch-uep-08291-board-db-write.js app/resources/app
+          if($LASTEXITCODE -ne 0){throw 'patch failed'}
+      - name: Syntax and regression checks
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check app/resources/app/gyomuon.js
+          if($LASTEXITCODE -ne 0){throw 'gyomuon syntax failed'}
+          node --check app/resources/app/electron/main.cjs
+          if($LASTEXITCODE -ne 0){throw 'main syntax failed'}
+          node --check app/resources/app/electron/preload.cjs
+          if($LASTEXITCODE -ne 0){throw 'preload syntax failed'}
+          node scripts/test-uep-08291-board-db-write.js app/resources/app
+          if($LASTEXITCODE -ne 0){throw 'regression failed'}
+      - name: Verify live Board API health
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $url='https://script.google.com/macros/s/AKfycbxTyh5TG6e2uWvOJrKcY-jihOE_2dXZxhTCZWTvKF773Av9qgNAoHod_pwI8VI9885a/exec'
+          $r=Invoke-RestMethod -Uri $url -Method Get -MaximumRedirection 10
+          if(!$r.ok -or $r.service -ne 'UEP Board API'){throw 'Board API health failed'}
+      - name: Build candidate ZIP
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Compress-Archive -Path app/* -DestinationPath output/UEP-update.zip -CompressionLevel Optimal
+          if(!(Test-Path output/UEP-update.zip)){throw 'candidate ZIP missing'}
+      - name: Re-open candidate and verify
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Expand-Archive output/UEP-update.zip verify -Force
+          node --check verify/resources/app/gyomuon.js
+          node --check verify/resources/app/electron/main.cjs
+          node --check verify/resources/app/electron/preload.cjs
+          node scripts/test-uep-08291-board-db-write.js verify/resources/app
+          $pkg=Get-Content verify/resources/app/package.json -Raw|ConvertFrom-Json
+          if($pkg.version -ne '0.82.91'){throw 'packaged version mismatch'}
+      - name: Record candidate verification
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $hash=(Get-FileHash output/UEP-update.zip -Algorithm SHA256).Hash.ToLower()
+          @"
+          UEP 0.82.91 BOARD DB WRITE CANDIDATE
+          version=0.82.91
+          sha256=$hash
+          baseline=v0.82.90 release asset UEP-update.zip
+          school-read-session-guard=PASS
+          service-account-main-process-only=PASS
+          board-db-whitelist=PASS
+          notice-write-ui=PASS
+          schedule-write-ui=PASS
+          timetable-05A-write-ui=PASS
+          exam-admin-write-ui=PASS
+          board-status-read-ui=PASS
+          syntax=PASS
+          regression=PASS
+          packaged-reopen=PASS
+          board-api-health=PASS
+          release-created=NO
+          "@ | Set-Content audit/uep-08291-board-db-write-candidate.txt -Encoding utf8
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add audit/uep-08291-board-db-write-candidate.txt
+          git commit -m 'audit: record 0.82.91 Board DB write candidate'
+          git push
