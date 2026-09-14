@@ -1,0 +1,73 @@
+name: Publish UEP 0.83.02 stable
+on:
+  push:
+    branches: [main]
+    paths:
+      - publish-08302.trigger
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download validated artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/uep08302
+          gh api repos/${GITHUB_REPOSITORY}/actions/artifacts/10356769171/zip > /tmp/uep08302/artifact.zip
+          unzip -q /tmp/uep08302/artifact.zip -d /tmp/uep08302/artifact
+          test -f /tmp/uep08302/artifact/UEP-update.zip
+      - name: Verify validated package and SHA256
+        run: |
+          set -euo pipefail
+          ZIP=/tmp/uep08302/artifact/UEP-update.zip
+          EXPECTED=925c4560f5fd379c1076e2fc54b1fe38e4caed998e3f714a785a4dd63266cd4b
+          ACTUAL=$(sha256sum "$ZIP" | awk '{print $1}')
+          test "$ACTUAL" = "$EXPECTED"
+          rm -rf /tmp/uep08302/verify && mkdir -p /tmp/uep08302/verify
+          unzip -q "$ZIP" -d /tmp/uep08302/verify
+          ROOT=/tmp/uep08302/verify/resources/app
+          test "$(node -p "require('$ROOT/package.json').version")" = "0.83.02"
+          grep -q 'const APP_VERSION="0.83.02"' "$ROOT/gyomuon.js"
+          node scripts/test-uep-08302-stability.js "$ROOT"
+          printf '%s  UEP-update.zip\n' "$ACTUAL" > /tmp/uep08302/sha256.txt
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view v0.83.02 -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo 'v0.83.02 already exists'; exit 1
+          fi
+          gh release create v0.83.02 \
+            /tmp/uep08302/artifact/UEP-update.zip \
+            /tmp/uep08302/sha256.txt \
+            -R "$GITHUB_REPOSITORY" \
+            --target main \
+            --title 'UEP v0.83.02 Stable' \
+            --notes 'UEP 0.83.02 안정화판. 실제 설치 버전과 상단 버전 표시를 일치시키고, 업데이트 후 최초 실행 시 수정사항 팝업을 1회 표시합니다. 전자칠판 관리 메뉴의 복수 대상, 특별실 전체/개별 대상, 특별실 운영모드, 현재 화면 조회, 공지·일정 저장 경로를 함께 회귀검증했습니다.'
+      - name: Update stable manifests only after release succeeds
+        env:
+          SHA256: 925c4560f5fd379c1076e2fc54b1fe38e4caed998e3f714a785a4dd63266cd4b
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs=require('fs');
+          const sha=process.env.SHA256;
+          const policy=JSON.parse(fs.readFileSync('uep-policy.json','utf8'));
+          policy.latestVersion='0.83.02';
+          policy.sha256=sha;
+          policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.83.02/UEP-update.zip';
+          policy.message='UEP 0.83.02 · 버전표시·업데이트 팝업·전자칠판 관리 안정화';
+          fs.writeFileSync('uep-policy.json',JSON.stringify(policy,null,2)+'\n');
+          const version={version:'0.83.02',channel:'stable',downloadUrl:policy.downloadUrl,notes:'UEP 0.83.02 버전표시 · 업데이트 팝업 · 전자칠판 관리 안정화',sha256:sha};
+          fs.writeFileSync('uep-version.json',JSON.stringify(version,null,2)+'\n');
+          NODE
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add uep-policy.json uep-version.json
+          git commit -m 'release: publish UEP 0.83.02 stable manifests'
+          git push origin HEAD:main
