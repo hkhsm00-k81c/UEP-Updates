@@ -1,0 +1,42 @@
+name: Validate UEP 0.82.99 Board School Read
+on:
+  push:
+    paths:
+      - 'validate-08299-board-school-read.trigger'
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download stable v0.82.98 baseline
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'; New-Item -ItemType Directory -Force source,app,verify|Out-Null
+          gh release download v0.82.98 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE -ne 0){throw 'baseline download failed'}
+          Expand-Archive source/UEP-update.zip app -Force
+          $pkg=Get-Content app/resources/app/package.json -Raw|ConvertFrom-Json; if($pkg.version -ne '0.82.98'){throw 'baseline mismatch'}
+      - name: Apply patch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'; node --check scripts/patch-uep-08299-board-school-read.js; if($LASTEXITCODE -ne 0){throw 'patch syntax failed'}
+          node scripts/patch-uep-08299-board-school-read.js app/resources/app; if($LASTEXITCODE -ne 0){throw 'patch failed'}
+      - name: Syntax and regression checks
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'; node --check app/resources/app/gyomuon.js; if($LASTEXITCODE -ne 0){throw 'renderer syntax failed'}
+          node --check app/resources/app/electron/main.cjs; if($LASTEXITCODE -ne 0){throw 'main syntax failed'}
+          node scripts/test-uep-08299-board-school-read.js app/resources/app; if($LASTEXITCODE -ne 0){throw 'regression failed'}
+      - name: Package reopen check
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'; Compress-Archive -Path app/* -DestinationPath UEP-update-candidate.zip -CompressionLevel Optimal
+          Expand-Archive UEP-update-candidate.zip verify -Force
+          node --check verify/resources/app/gyomuon.js; if($LASTEXITCODE -ne 0){throw 'packaged renderer syntax failed'}
+          node --check verify/resources/app/electron/main.cjs; if($LASTEXITCODE -ne 0){throw 'packaged main syntax failed'}
+          node scripts/test-uep-08299-board-school-read.js verify/resources/app; if($LASTEXITCODE -ne 0){throw 'packaged regression failed'}
+          Write-Host 'VALIDATION_OK version=0.82.99 release_not_created=true'
