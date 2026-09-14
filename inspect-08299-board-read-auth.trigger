@@ -1,1 +1,1 @@
-inspect 0.82.98 board read auth
+inspect 0.82.98 board read auth v2
