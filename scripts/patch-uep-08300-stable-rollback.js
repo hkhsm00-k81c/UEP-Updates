@@ -1,0 +1,13 @@
+const fs=require('fs'),path=require('path');
+const root=path.resolve(process.argv[2]||'.');
+const pkgPath=path.join(root,'package.json'),rendererPath=path.join(root,'gyomuon.js');
+const pkg=JSON.parse(fs.readFileSync(pkgPath,'utf8'));
+if(pkg.version!=='0.82.98') throw new Error('baseline must be 0.82.98, got '+pkg.version);
+pkg.version='0.83.00';
+fs.writeFileSync(pkgPath,JSON.stringify(pkg,null,2)+'\n','utf8');
+let r=fs.readFileSync(rendererPath,'utf8');
+const before=r;
+r=r.replace(/const APP_VERSION="0\.82\.98";[^\n]*/,'const APP_VERSION="0.83.00"; /* UEP_08300_STABLE_ROLLBACK */');
+if(r===before||!r.includes('APP_VERSION="0.83.00"')) throw new Error('renderer version replacement failed');
+fs.writeFileSync(rendererPath,r,'utf8');
+console.log('UEP 0.83.00 stable rollback applied: 0.82.98 behavior preserved');
