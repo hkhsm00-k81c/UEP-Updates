@@ -24,8 +24,6 @@ must(pkg.version==='0.82.98','baseline package version mismatch: '+pkg.version);
 renderer=renderer.replace(/const APP_VERSION="0\.82\.98";[^\n]*/,'const APP_VERSION="0.82.99"; /* UEP_08299_BOARD_SCHOOL_READ */');
 must(renderer.includes('APP_VERSION="0.82.99"'),'runtime version replacement failed');
 
-const oldReadMatch=/async function boardReadRange08291\([\s\S]*?\n\}/;
-const oldRead=main.match(oldReadMatch);must(oldRead,'boardReadRange08291 source not found');
 const readSource=`// __UEP_08299_BOARD_SCHOOL_READ__
 const UEP_BOARD_SCHOOL_READ_TOKEN_08299='__UEP_BOARD_SCHOOL_READ_08299__';
 const UEP_BOARD_SCHOOL_READ_CACHE_08299=new Map();
@@ -52,7 +50,7 @@ async function boardReadRange08291(token,a1){
   const url='https://sheets.googleapis.com/v4/spreadsheets/'+UEP_BOARD_DB_ID_08291+'/values/'+encodeURIComponent(a1)+'?majorDimension=ROWS&valueRenderOption=FORMATTED_VALUE';
   const data=await boardSheetsJson08291(token,url,{method:'GET'});return data.values||[];
 }`;
-main=main.replace(oldReadMatch,readSource);
+main=replaceFunction(main,'boardReadRange08291',readSource);
 
 const contextSource=`async function boardDbReadContext08294(ui={}){
   let status=null;try{status=await schoolReadSessionStatus({verify:true});}catch{}
