@@ -1,1 +1,1 @@
-inspect 0.82.98 board read auth v3
+inspect after School Read API 0.81.07 deployment
