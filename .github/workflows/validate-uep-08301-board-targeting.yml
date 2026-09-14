@@ -1,0 +1,54 @@
+name: Validate UEP 0.83.01 Board targeting
+on:
+  push:
+    branches:
+      - work/uep-08301-board-targeting
+    paths:
+      - validate-08301-board-targeting.trigger
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download UEP 0.83.00 stable baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/uep08301/base /tmp/uep08301/app /tmp/uep08301/verify out
+          gh release download v0.83.00 -R "$GITHUB_REPOSITORY" -p 'UEP-update.zip' -D /tmp/uep08301/base
+          unzip -q /tmp/uep08301/base/UEP-update.zip -d /tmp/uep08301/app
+          test "$(node -p "require('/tmp/uep08301/app/resources/app/package.json').version")" = "0.83.00"
+      - name: Decode and apply 0.83.01 patch
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import base64,gzip,pathlib
+          src=pathlib.Path('scripts/patch-uep-08301-board-targeting.py.gz.b64').read_bytes()
+          pathlib.Path('/tmp/patch08301.py').write_bytes(gzip.decompress(base64.b64decode(src)))
+          PY
+          python /tmp/patch08301.py /tmp/uep08301/app/resources/app
+      - name: Syntax and regression checks
+        run: |
+          set -euo pipefail
+          node --check /tmp/uep08301/app/resources/app/electron/main.cjs
+          node --check /tmp/uep08301/app/resources/app/gyomuon.js
+          node scripts/test-uep-08301-board-targeting.js /tmp/uep08301/app/resources/app
+      - name: Repack and verify packaged contents
+        run: |
+          set -euo pipefail
+          cd /tmp/uep08301/app
+          zip -qr /tmp/uep08301/UEP-update.zip .
+          unzip -q /tmp/uep08301/UEP-update.zip -d /tmp/uep08301/verify
+          node --check /tmp/uep08301/verify/resources/app/electron/main.cjs
+          node --check /tmp/uep08301/verify/resources/app/gyomuon.js
+          node "$GITHUB_WORKSPACE/scripts/test-uep-08301-board-targeting.js" /tmp/uep08301/verify/resources/app
+          sha256sum /tmp/uep08301/UEP-update.zip | tee "$GITHUB_WORKSPACE/out/sha256.txt"
+          cp /tmp/uep08301/UEP-update.zip "$GITHUB_WORKSPACE/out/UEP-update.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uep-08301-validated-package
+          path: out
+          retention-days: 3
