@@ -1,0 +1,54 @@
+name: Validate UEP 0.83.02 stability
+on:
+  push:
+    branches:
+      - work/uep-08302-stability-board-menu
+    paths:
+      - validate-08302-stability.trigger
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download UEP 0.83.01 stable baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/uep08302/base /tmp/uep08302/app /tmp/uep08302/repack
+          gh release download v0.83.01 -R "$GITHUB_REPOSITORY" -p 'UEP-update.zip' -D /tmp/uep08302/base
+          unzip -q /tmp/uep08302/base/UEP-update.zip -d /tmp/uep08302/app
+          test "$(node -p "require('/tmp/uep08302/app/resources/app/package.json').version")" = "0.83.01"
+      - name: Apply 0.83.02 stability patch
+        run: |
+          set -euo pipefail
+          python scripts/patch-uep-08302.py /tmp/uep08302/app/resources/app
+      - name: Syntax and regression checks
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/uep08302/app/resources/app
+          node --check "$ROOT/gyomuon.js"
+          node --check "$ROOT/electron/main.cjs"
+          node scripts/test-uep-08302-stability.js "$ROOT"
+      - name: Repack and verify packaged contents
+        run: |
+          set -euo pipefail
+          cd /tmp/uep08302/app
+          zip -qr /tmp/uep08302/repack/UEP-update.zip .
+          rm -rf /tmp/uep08302/verify
+          mkdir -p /tmp/uep08302/verify
+          unzip -q /tmp/uep08302/repack/UEP-update.zip -d /tmp/uep08302/verify
+          ROOT=/tmp/uep08302/verify/resources/app
+          test "$(node -p "require('$ROOT/package.json').version")" = "0.83.02"
+          grep -q 'const APP_VERSION="0.83.02"' "$ROOT/gyomuon.js"
+          ! grep -q 'const APP_VERSION="0.83.00"' "$ROOT/gyomuon.js"
+          node "$GITHUB_WORKSPACE/scripts/test-uep-08302-stability.js" "$ROOT"
+          sha256sum /tmp/uep08302/repack/UEP-update.zip
+      - name: Upload validated package
+        uses: actions/upload-artifact@v4
+        with:
+          name: uep-08302-validated-package
+          path: /tmp/uep08302/repack/UEP-update.zip
+          retention-days: 2
