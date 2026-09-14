@@ -1,0 +1,60 @@
+name: Build Release UEP 0.82.99 Board School Read
+on:
+  push:
+    paths:
+      - 'release-08299-board-school-read.trigger'
+permissions:
+  contents: write
+jobs:
+  build-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download stable v0.82.98 baseline
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'; New-Item -ItemType Directory -Force source,app,output,verify|Out-Null
+          gh release download v0.82.98 --repo $env:GITHUB_REPOSITORY --pattern UEP-update.zip --dir source
+          if($LASTEXITCODE -ne 0){throw 'baseline download failed'}
+          Expand-Archive source/UEP-update.zip app -Force
+          $pkg=Get-Content app/resources/app/package.json -Raw|ConvertFrom-Json; if($pkg.version -ne '0.82.98'){throw 'baseline mismatch'}
+      - name: Apply patch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'; node --check scripts/patch-uep-08299-board-school-read.js; if($LASTEXITCODE -ne 0){throw 'patch syntax failed'}
+          node scripts/patch-uep-08299-board-school-read.js app/resources/app; if($LASTEXITCODE -ne 0){throw 'patch failed'}
+      - name: Syntax and regression checks
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'; node --check app/resources/app/gyomuon.js; if($LASTEXITCODE -ne 0){throw 'renderer syntax failed'}
+          node --check app/resources/app/electron/main.cjs; if($LASTEXITCODE -ne 0){throw 'main syntax failed'}
+          node scripts/test-uep-08299-board-school-read.js app/resources/app; if($LASTEXITCODE -ne 0){throw 'regression failed'}
+      - name: Build and verify package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'; Compress-Archive -Path app/* -DestinationPath output/UEP-update.zip -CompressionLevel Optimal
+          Expand-Archive output/UEP-update.zip verify -Force
+          node --check verify/resources/app/gyomuon.js; if($LASTEXITCODE -ne 0){throw 'packaged renderer syntax failed'}
+          node --check verify/resources/app/electron/main.cjs; if($LASTEXITCODE -ne 0){throw 'packaged main syntax failed'}
+          node scripts/test-uep-08299-board-school-read.js verify/resources/app; if($LASTEXITCODE -ne 0){throw 'packaged regression failed'}
+      - name: SHA256 and release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'; $hash=(Get-FileHash output/UEP-update.zip -Algorithm SHA256).Hash.ToLower(); "$hash  UEP-update.zip"|Set-Content output/sha256.txt -Encoding ascii; "UEP_ZIP_SHA256=$hash"|Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          gh release create v0.82.99 output/UEP-update.zip output/sha256.txt --repo $env:GITHUB_REPOSITORY --title 'UEP v0.82.99' --notes 'UEP v0.82.99 · 전자칠판 조회 경로를 School Read API 우선으로 전환. 담임/교사 PC의 조회는 로컬 Google 서비스계정 연결에 의존하지 않고 UEP 로그인 세션과 공용 Read API를 사용합니다. 기존 0.82.97~0.82.98의 자동갱신·관리 UI·권한 기능 유지. 쓰기 경로는 기존 인증된 write 경로를 유지합니다.'
+          if($LASTEXITCODE -ne 0){throw 'release failed'}
+      - name: Update policy
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'; $policy=Get-Content uep-policy.json -Raw|ConvertFrom-Json; $policy.latestVersion='0.82.99'; $policy.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.82.99/UEP-update.zip'; $policy.sha256=$env:UEP_ZIP_SHA256; $policy.message='UEP 0.82.99 · 전자칠판 School Read 조회 전환'; $policy.forceUpdate=$false; $policy.updateEnabled=$true; $policy|ConvertTo-Json -Depth 20|Set-Content uep-policy.json -Encoding utf8
+          git config user.name 'github-actions[bot]'; git config user.email '41898282+github-actions[bot]@users.noreply.github.com'; git add uep-policy.json; git commit -m 'Set update policy to UEP 0.82.99'; if($LASTEXITCODE -ne 0){throw 'policy commit failed'}; git push origin HEAD:main; if($LASTEXITCODE -ne 0){throw 'policy push failed'}
+      - name: Final verification
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'; $release=gh api repos/$env:GITHUB_REPOSITORY/releases/tags/v0.82.99|ConvertFrom-Json; if($LASTEXITCODE -ne 0){throw 'release fetch failed'}; $zip=$release.assets|Where-Object {$_.name -eq 'UEP-update.zip'}; if(!$zip){throw 'ZIP missing'}; if($zip.digest -ne ('sha256:'+$env:UEP_ZIP_SHA256)){throw 'digest mismatch'}; $raw=gh api repos/$env:GITHUB_REPOSITORY/contents/uep-policy.json -H 'Accept: application/vnd.github.raw+json'; $remote=$raw|ConvertFrom-Json; if($remote.latestVersion -ne '0.82.99' -or $remote.sha256 -ne $env:UEP_ZIP_SHA256){throw 'remote policy mismatch'}; Write-Host "RELEASE_OK version=0.82.99 digest=$($zip.digest)"
