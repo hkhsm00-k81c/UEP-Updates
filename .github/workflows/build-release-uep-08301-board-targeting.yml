@@ -1,0 +1,98 @@
+name: Build Release UEP 0.83.01 Board Targeting
+on:
+  push:
+    branches: [main]
+    paths:
+      - release-08301-board-targeting.trigger
+permissions:
+  contents: write
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download UEP 0.83.00 stable baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/uep08301/base /tmp/uep08301/app /tmp/uep08301/verify output
+          gh release download v0.83.00 -R "$GITHUB_REPOSITORY" -p 'UEP-update.zip' -D /tmp/uep08301/base
+          unzip -q /tmp/uep08301/base/UEP-update.zip -d /tmp/uep08301/app
+          test "$(node -p "require('/tmp/uep08301/app/resources/app/package.json').version")" = "0.83.00"
+      - name: Decode and apply 0.83.01 patch
+        run: |
+          set -euo pipefail
+          echo '04327f4b1aca63490a9b7efa0272b3abcb5c91d2ca441fde1efa6afd6dc99120  scripts/patch08301.part1.b64' | sha256sum -c -
+          echo '662078f875c3b00db12bfac5bc7bd84602d433ab24fe5a2c24c9506fa99ea418  scripts/patch08301.part2.b64' | sha256sum -c -
+          echo 'aba71bb71b247deaef04bdcae4ad4511aed93729208ac5a0a8fec0fd466f0656  scripts/patch08301.part3.b64' | sha256sum -c -
+          echo '53506ccb761138f1c10e93364d4554c3f4e70283fbd924660d76787c1720e466  scripts/patch08301.part4.b64' | sha256sum -c -
+          echo 'db2b5e9ac0660dee0536ee7b7a133206e1e272338be0f066e0ff1fded9b3a5ec  scripts/patch08301.part5.b64' | sha256sum -c -
+          cat scripts/patch08301.part{1,2,3,4,5}.b64 > /tmp/patch08301.gz.b64
+          echo '82782a45b315d6e7c280b40b70b28526b1abfccd93d171fab5ebb5c86f666d0f  /tmp/patch08301.gz.b64' | sha256sum -c -
+          base64 -d -i /tmp/patch08301.gz.b64 > /tmp/patch08301.py.gz
+          echo '3d55c58eea1bb27560d615cf1ffd9bb2625c0d9424b5e949a73b83f06d41a8d4  /tmp/patch08301.py.gz' | sha256sum -c -
+          gzip -dc /tmp/patch08301.py.gz > /tmp/patch08301.py
+          echo 'e1da407f50620b946dc4b08b8fe3512ff43dc1d5157ae605c81f6974d98eeaaa  /tmp/patch08301.py' | sha256sum -c -
+          python /tmp/patch08301.py /tmp/uep08301/app/resources/app
+      - name: Syntax and regression checks
+        run: |
+          set -euo pipefail
+          node --check /tmp/uep08301/app/resources/app/electron/main.cjs
+          node --check /tmp/uep08301/app/resources/app/gyomuon.js
+          node scripts/test-uep-08301-board-targeting.js /tmp/uep08301/app/resources/app
+      - name: Repack and verify packaged contents
+        run: |
+          set -euo pipefail
+          cd /tmp/uep08301/app
+          zip -qr /tmp/uep08301/UEP-update.zip .
+          unzip -q /tmp/uep08301/UEP-update.zip -d /tmp/uep08301/verify
+          node --check /tmp/uep08301/verify/resources/app/electron/main.cjs
+          node --check /tmp/uep08301/verify/resources/app/gyomuon.js
+          node "$GITHUB_WORKSPACE/scripts/test-uep-08301-board-targeting.js" /tmp/uep08301/verify/resources/app
+          HASH=$(sha256sum /tmp/uep08301/UEP-update.zip | awk '{print $1}')
+          echo "$HASH  UEP-update.zip" > "$GITHUB_WORKSPACE/output/sha256.txt"
+          cp /tmp/uep08301/UEP-update.zip "$GITHUB_WORKSPACE/output/UEP-update.zip"
+          echo "UEP_ZIP_SHA256=$HASH" >> "$GITHUB_ENV"
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view v0.83.01 -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo 'v0.83.01 already exists'; exit 1
+          fi
+          gh release create v0.83.01 output/UEP-update.zip output/sha256.txt \
+            -R "$GITHUB_REPOSITORY" \
+            --title 'UEP v0.83.01 Stable' \
+            --notes 'UEP v0.83.01. 전자칠판 공지/일정 복수 학급 대상, 전교=일반교실 의미 고정, 특별실 전체/개별 Board 대상, Board 마스터 기반 특별실 목록, 특별실 수업/특별실 모드 중앙 제어, 특별실 일정/시간표 분리를 반영합니다.'
+      - name: Update stable policy
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const fs=require('fs');
+          const p=JSON.parse(fs.readFileSync('uep-policy.json','utf8'));
+          p.latestVersion='0.83.01';
+          p.downloadUrl='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.83.01/UEP-update.zip';
+          p.sha256=process.env.UEP_ZIP_SHA256;
+          p.message='UEP 0.83.01 · Board 복수대상 및 특별실 제어';
+          p.forceUpdate=false;
+          p.updateEnabled=true;
+          fs.writeFileSync('uep-policy.json', JSON.stringify(p,null,2)+'\n');
+          NODE
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add uep-policy.json
+          git commit -m 'Set update policy to UEP 0.83.01'
+          git push origin HEAD:main
+      - name: Final verification
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          RELEASE=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/v0.83.01")
+          DIGEST=$(printf '%s' "$RELEASE" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const r=JSON.parse(s);const a=r.assets.find(x=>x.name==='UEP-update.zip');if(!a)process.exit(2);process.stdout.write(a.digest||'')})")
+          test "$DIGEST" = "sha256:$UEP_ZIP_SHA256"
+          POLICY=$(curl -fsSL "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/uep-policy.json")
+          printf '%s' "$POLICY" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const p=JSON.parse(s);if(p.latestVersion!=='0.83.01'||p.sha256!==process.env.UEP_ZIP_SHA256)process.exit(3)})"
+          echo "RELEASE_OK version=0.83.01 digest=$DIGEST"
