@@ -1,0 +1,48 @@
+name: Audit UEP PC 0.83.03 Board control UI
+on:
+  push:
+    branches: [main]
+    paths:
+      - audit-08303-board-control-ui.trigger
+permissions:
+  contents: write
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pull latest repository state
+        run: git pull --rebase origin main
+      - name: Download 0.83.02 UEP PC release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/u && mkdir -p /tmp/u
+          gh release download v0.83.02 -R "$GITHUB_REPOSITORY" -p UEP-update.zip -D /tmp/u
+          unzip -q /tmp/u/UEP-update.zip -d /tmp/u/app
+      - name: Extract Board control UI and device fields
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          js=Path('/tmp/u/app/resources/app/gyomuon.js').read_text(encoding='utf-8').splitlines()
+          main=Path('/tmp/u/app/resources/app/electron/main.cjs').read_text(encoding='utf-8').splitlines()
+          out=Path('audit/08302-board'); out.mkdir(parents=True,exist_ok=True)
+          def grab(lines, needles, path, before=35, after=80):
+              picks=set()
+              for i,l in enumerate(lines):
+                  if any(n in l for n in needles):
+                      picks.update(range(max(0,i-before),min(len(lines),i+after)))
+              Path(path).write_text('\n'.join(f'{i+1}: {lines[i]}' for i in sorted(picks)),encoding='utf-8')
+          grab(js,['board-summary-card-08294','조회 가능한 교실 Board','boardDbStatus','boardDbDetail','전자칠판 조회','SPECIAL_ROOM','마지막접속','앱버전','BoardID'],out/'08303-ui-focused.txt')
+          grab(main,['25_기기등록','마지막접속','앱버전','기기명','기기역할','지정BoardID','boardDbStatus08301','boardDbDetail'],out/'08303-device-focused.txt')
+          PY
+      - name: Commit audit extracts
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git pull --rebase origin main
+          git add audit/08302-board/08303-*-focused.txt
+          git diff --cached --quiet || (git commit -m 'audit: inspect UEP PC Board control UI fields' && git push)
