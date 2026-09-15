@@ -24,14 +24,20 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
+          import re
           p=Path('/tmp/u/app/resources/app/electron/main.cjs')
           s=p.read_text(encoding='utf-8')
-          old="""async function boardDbStatus08301(ui={}){const ctx=await boardDbReadContext08294(ui),rows=await boardReadRange08291(ctx.token,\"'01_Board마스터'!A3:P200\");if(!rows.length)return {ok:true,boards:[],user:ctx.user};const h=rows[0],boards=rows.slice(1).filter(r=>r.some(v=>String(v||'').trim())).map(r=>Object.fromEntries(h.map((k,i)=>[k,r[i]??''])));"""
-          new="""async function boardDbStatus08301(ui={}){const ctx=await boardDbReadContext08294(ui),rows=await boardReadRange08291(ctx.token,\"'01_Board마스터'!A3:P200\");if(!rows.length)return {ok:true,boards:[],user:ctx.user};const h=rows[0].map(v=>String(v||'').trim()),boards=rows.slice(1).filter(r=>r.some(v=>String(v||'').trim())).map(r=>Object.fromEntries(h.map((k,i)=>[k,r[i]??''])));"""
-          if old not in s: raise SystemExit('boardDbStatus08301 anchor not found')
-          s=s.replace(old,new,1)
-          # Version only after patch anchor succeeds.
-          s=s.replace('0.83.02','0.83.03')
+          start=s.find('async function boardDbStatus08301(ui={})')
+          if start < 0: raise SystemExit('boardDbStatus08301 function not found')
+          end=s.find('async function ', start+10)
+          if end < 0: end=len(s)
+          block=s[start:end]
+          pattern=r"const\s+h\s*=\s*rows\[0\]\s*,\s*boards\s*="
+          if not re.search(pattern, block):
+              raise SystemExit('boardDbStatus08301 header mapping anchor not found')
+          patched,count=re.subn(pattern,"const h=rows[0].map(v=>String(v||'').trim()),boards=",block,count=1)
+          if count != 1: raise SystemExit(f'unexpected patch count: {count}')
+          s=s[:start]+patched+s[end:]
           p.write_text(s,encoding='utf-8')
           PY
       - name: Verify syntax and Board regressions
@@ -40,13 +46,19 @@ jobs:
           ROOT=/tmp/u/app/resources/app
           node --check "$ROOT/electron/main.cjs"
           node --check "$ROOT/gyomuon.js"
-          grep -q "h=rows\[0\].map(v=>String(v||'').trim())" "$ROOT/electron/main.cjs"
-          grep -q "SPECIAL_ROOM" "$ROOT/electron/main.cjs"
-          grep -q "boardDbDetail" "$ROOT/electron/main.cjs"
-          grep -q "boardDbStatus" "$ROOT/electron/main.cjs"
-          grep -q "boardDbStatus" "$ROOT/gyomuon.js"
-          grep -q "board-summary-card-08294" "$ROOT/gyomuon.js"
-          ! grep -q 'versionName.*0.83.02' "$ROOT/electron/main.cjs" || true
+          python3 - <<'PY'
+          from pathlib import Path
+          s=Path('/tmp/u/app/resources/app/electron/main.cjs').read_text(encoding='utf-8')
+          a=s.find('async function boardDbStatus08301(ui={})')
+          b=s.find('async function ',a+10)
+          block=s[a:b if b>0 else None]
+          assert "rows[0].map(v=>String(v||'').trim())" in block
+          for key in ['SPECIAL_ROOM','boardDbDetail','boardDbStatus']:
+              assert key in s,key
+          g=Path('/tmp/u/app/resources/app/gyomuon.js').read_text(encoding='utf-8')
+          for key in ['boardDbStatus','board-summary-card-08294','SPECIAL_ROOM']:
+              assert key in g,key
+          PY
       - name: Build candidate and manifest
         run: |
           set -euo pipefail
@@ -54,20 +66,22 @@ jobs:
           zip -qr "$GITHUB_WORKSPACE/UEP-update-0.83.03-candidate.zip" .
           cd "$GITHUB_WORKSPACE"
           sha256sum UEP-update-0.83.03-candidate.zip > UEP-update-0.83.03-candidate.sha256
+          mkdir -p audit/08302-board
           cat > audit/08302-board/08303-board-fix-report.txt <<EOF
           UEP 0.83.03 Board control candidate
           Base: v0.83.02 release asset
           Fix: normalize 01_Board마스터 header names before Board status object mapping
-          Reason: status/list path used raw formatted header strings while detail path already normalizes headers; whitespace in sheet headers can make BoardID/Board유형/사용여부 invisible to the list path.
-          Preserved: SPECIAL_ROOM detail/mode/notice/schedule logic
+          Scope: Board status/list source flow only; no post-render DOM patch
+          Preserved: SPECIAL_ROOM detail/mode/notice/schedule logic and existing 0.83.02 package version metadata
           Verification: node --check main.cjs + gyomuon.js; Board status/detail/SPECIAL_ROOM renderer anchors present
-          Status: candidate only; no release created
+          Status: candidate artifact only; no Release created
           EOF
       - name: Commit report only
         run: |
           set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git pull --rebase origin main
           git add audit/08302-board/08303-board-fix-report.txt
           git diff --cached --quiet || (git commit -m 'fix: prepare 0.83.03 Board list normalization candidate' && git push)
       - name: Upload candidate artifact
