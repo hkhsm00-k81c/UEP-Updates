@@ -1,0 +1,60 @@
+name: Audit UEP 0.83.02 updater path
+on:
+  push:
+    branches: [main]
+    paths: [audit-08302-updater-path.trigger]
+permissions:
+  contents: write
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Pull latest
+        run: git pull --rebase origin main
+      - name: Download actual 0.83.02 release
+        env: {GH_TOKEN: "${{ github.token }}"}
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/u && mkdir -p /tmp/u audit/08302-updater
+          gh release download v0.83.02 -R "$GITHUB_REPOSITORY" -p UEP-update.zip -D /tmp/u
+          unzip -q /tmp/u/UEP-update.zip -d /tmp/u/app
+      - name: Trace updater
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          root=Path('/tmp/u/app/resources/app')
+          pats=['latestVersion','latest-version','update','업데이트','UEP-update.zip','sha256','releases/latest','api.github.com','github.com','version','autoUpdater','electron-updater','download']
+          out=[]
+          for p in root.rglob('*'):
+            if not p.is_file() or p.suffix.lower() not in {'.js','.cjs','.mjs','.json','.html'}: continue
+            try:s=p.read_text(encoding='utf-8',errors='ignore')
+            except:continue
+            hits=[]
+            for pat in pats:
+              for m in re.finditer(re.escape(pat),s,re.I):
+                a=max(0,m.start()-900); b=min(len(s),m.end()+1600)
+                hits.append((m.start(),pat,s[a:b]))
+            if hits:
+              out.append('\n\n===== '+str(p.relative_to(root))+' =====')
+              seen=set()
+              for pos,pat,snip in sorted(hits)[:80]:
+                key=snip[:300]
+                if key in seen: continue
+                seen.add(key); out.append(f'\n--- {pat} @ {pos} ---\n{snip}')
+          Path('audit/08302-updater/updater-trace.txt').write_text('\n'.join(out),encoding='utf-8')
+          PY
+          grep -RniE "latestVersion|UEP-update\.zip|releases/latest|sha256|autoUpdater|electron-updater|check.*update|update.*check" /tmp/u/app/resources/app --include='*.js' --include='*.cjs' --include='*.json' > audit/08302-updater/updater-grep.txt || true
+      - name: Commit audit
+        run: |
+          set -euo pipefail
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add audit/08302-updater
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'audit: UEP 0.83.02 updater path'
+          for i in 1 2 3; do git pull --rebase origin main && git push && exit 0; sleep 2; done
+          exit 1
