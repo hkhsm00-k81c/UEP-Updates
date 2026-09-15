@@ -1,0 +1,45 @@
+name: Diagnose UEP 0.83.02 Board list exact
+on:
+  push:
+    branches: [main]
+    paths:
+      - diagnose-08302-board-list-exact.trigger
+permissions:
+  contents: write
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pull 0.83.02 and extract exact list functions
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/u && mkdir -p /tmp/u
+          gh release download v0.83.02 -R "$GITHUB_REPOSITORY" -p UEP-update.zip -D /tmp/u
+          unzip -q /tmp/u/UEP-update.zip -d /tmp/u/app
+          JS=/tmp/u/app/resources/app/gyomuon.js
+          MAIN=/tmp/u/app/resources/app/electron/main.cjs
+          mkdir -p audit/08302-board
+          python3 - <<'PY'
+          from pathlib import Path
+          def blocks(src, needles, out):
+              lines=Path(src).read_text(encoding='utf-8').splitlines()
+              picks=set()
+              for i,l in enumerate(lines):
+                  if any(n in l for n in needles):
+                      for j in range(max(0,i-45),min(len(lines),i+90)): picks.add(j)
+              Path(out).write_text('\n'.join(f'{i+1}: {lines[i]}' for i in sorted(picks)),encoding='utf-8')
+          blocks('/tmp/u/app/resources/app/gyomuon.js',['boardDbList','boardStatusUser08294','renderBoardStatus','board-summary-card-08294','조회 가능한 교실 Board','boardAdminUiAllowed'], 'audit/08302-board/gyomuon-list-exact.txt')
+          blocks('/tmp/u/app/resources/app/electron/main.cjs',['boardDbList','boardDbReadContext08294','01_Board마스터','25_기기등록','isAdmin','학년부장'], 'audit/08302-board/main-list-exact.txt')
+          PY
+      - name: Commit diagnosis
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add audit/08302-board/*-list-exact.txt
+          git diff --cached --quiet && exit 0
+          git commit -m 'audit: diagnose exact 0.83.02 Board list path'
+          git push
