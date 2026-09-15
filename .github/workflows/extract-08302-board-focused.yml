@@ -1,0 +1,34 @@
+name: Extract UEP 0.83.02 Board focused source
+on:
+  push:
+    branches: [main]
+    paths:
+      - extract-08302-board-focused.trigger
+permissions:
+  contents: write
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pull current release and extract focused Board source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/uep08302 && mkdir -p /tmp/uep08302
+          gh release download v0.83.02 -R "$GITHUB_REPOSITORY" -p 'UEP-update.zip' -D /tmp/uep08302
+          unzip -q /tmp/uep08302/UEP-update.zip -d /tmp/uep08302/app
+          ROOT=/tmp/uep08302/app/resources/app
+          mkdir -p audit/08302-board
+          grep -n -C 25 -E '조회 가능한 교실 Board가 없습니다|Board 목록·상태 읽기 API 연동 예정|renderBoard|board.*cards|board.*status|board.*list|특별실 전체|SPECIAL_ROOM|boardMaster|Board마스터' "$ROOT/gyomuon.js" > audit/08302-board/gyomuon-focused.txt || true
+          grep -n -C 30 -E 'board.*status|board.*list|SPECIAL_ROOM|boardMaster|Board마스터|25_기기등록|기기등록|board-api|boardApi' "$ROOT/electron/main.cjs" > audit/08302-board/main-focused.txt || true
+      - name: Commit focused extracts
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add audit/08302-board
+          git diff --cached --quiet && exit 0
+          git commit -m 'audit: extract focused 0.83.02 Board source'
+          git push
