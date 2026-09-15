@@ -20,16 +20,15 @@ jobs:
           rm -rf /tmp/u /tmp/out && mkdir -p /tmp/u /tmp/out
           gh release download v0.83.02 -R "$GITHUB_REPOSITORY" -p UEP-update.zip -D /tmp/u
           unzip -q /tmp/u/UEP-update.zip -d /tmp/u/app
-      - name: Patch Board list and image notice PC UI
+      - name: Patch Board list source flow
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
           import re
-          p=Path('/tmp/u/app/resources/app/gyomuon.js')
+          p=Path('/tmp/u/app/resources/app/electron/main.cjs')
           s=p.read_text(encoding='utf-8')
-          # Board master header normalization: source-flow fix, not DOM patch.
-          a=s.find('async function boardDbStatus08301')
+          a=s.find('async function boardDbStatus08301(ui={})')
           if a<0: raise SystemExit('boardDbStatus08301 missing')
           b=s.find('\nasync function ',a+10)
           if b<0: b=len(s)
@@ -38,60 +37,41 @@ jobs:
           if n==0 and "rows[0].map(v=>String(v||'').trim())" not in chunk:
               raise SystemExit('Board header anchor missing')
           s=s[:a]+chunk2+s[b:]
-          # Add image selection helpers near existing notice preview.
-          marker='function previewBoardNotice(){'
-          i=s.find(marker)
-          if i<0: raise SystemExit('previewBoardNotice missing')
-          helper=r'''let UEP_08303_NOTICE_IMAGE=null;
-          function boardNoticeImageChanged08303(input){
-            const file=input?.files?.[0]||null,preview=document.getElementById('boardNoticeImagePreview08303'),name=document.getElementById('boardNoticeImageName08303');
-            UEP_08303_NOTICE_IMAGE=file;if(name)name.textContent=file?file.name:'선택된 이미지 없음';
-            if(!preview)return; if(!file){preview.removeAttribute('src');preview.hidden=true;return;}
-            if(!/^image\/(png|jpeg|webp)$/i.test(file.type)){input.value='';UEP_08303_NOTICE_IMAGE=null;preview.hidden=true;toast('PNG·JPG·WEBP 이미지만 사용할 수 있습니다.');return;}
-            const r=new FileReader();r.onload=()=>{preview.src=String(r.result||'');preview.hidden=false;};r.readAsDataURL(file);
-          }
-          function boardNoticeContentType08303(){return UEP_08303_NOTICE_IMAGE?'IMAGE':'TEXT';}
-          '''
-          if 'UEP_08303_NOTICE_IMAGE' not in s: s=s[:i]+helper+s[i:]
-          # Inject file chooser + contain preview into notice panel markup, using stable notice body id.
-          anchor='id="boardNoticeBody"'
-          j=s.find(anchor)
-          if j<0: raise SystemExit('boardNoticeBody markup missing')
-          close=s.find('</label>',j)
-          if close<0: raise SystemExit('notice body label close missing')
-          close+=len('</label>')
-          ui='''<div class="board-image-notice-08303"><label>이미지 공지 · Canva PNG/JPG<input id="boardNoticeImage08303" type="file" accept="image/png,image/jpeg,image/webp" onchange="boardNoticeImageChanged08303(this)"></label><small id="boardNoticeImageName08303">선택된 이미지 없음</small><div style="min-height:180px;max-height:420px;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#f4f6f8;border-radius:16px;padding:12px"><img id="boardNoticeImagePreview08303" hidden alt="Board 이미지 공지 미리보기" style="display:block;width:100%;height:100%;max-height:396px;object-fit:contain;object-position:center"></div><small>전자칠판에서도 원본 비율을 유지해 전체 이미지가 보이도록 표시합니다. 자르지 않습니다.</small></div>'''
-          if 'boardNoticeImage08303' not in s: s=s[:close]+ui+s[close:]
           p.write_text(s,encoding='utf-8')
           PY
       - name: Verify PC regressions
         run: |
           set -euo pipefail
-          cd /tmp/u/app/resources/app
-          node --check gyomuon.js
-          node --check electron/main.cjs
-          grep -q "boardNoticeImage08303" gyomuon.js
-          grep -q "object-fit:contain" gyomuon.js
-          grep -q "boardNoticeContentType08303" gyomuon.js
-          grep -q "rows\[0\].map(v=>String(v||'').trim())" electron/main.cjs
-          grep -q "SPECIAL_ROOM" gyomuon.js
-          grep -q "boardDbDetail" electron/main.cjs
+          ROOT=/tmp/u/app/resources/app
+          node --check "$ROOT/gyomuon.js"
+          node --check "$ROOT/electron/main.cjs"
+          python3 - <<'PY'
+          from pathlib import Path
+          m=Path('/tmp/u/app/resources/app/electron/main.cjs').read_text(encoding='utf-8')
+          a=m.find('async function boardDbStatus08301(ui={})')
+          b=m.find('\nasync function ',a+10)
+          block=m[a:b if b>0 else None]
+          assert "rows[0].map(v=>String(v||'').trim())" in block
+          for k in ['boardDbDetail','SPECIAL_ROOM']:
+              assert k in m,k
+          g=Path('/tmp/u/app/resources/app/gyomuon.js').read_text(encoding='utf-8')
+          for k in ['boardDbStatus','board-summary-card-08294','SPECIAL_ROOM']:
+              assert k in g,k
+          PY
       - name: Build candidate
         run: |
           set -euo pipefail
           cd /tmp/u/app
-          zip -qr /tmp/out/UEP-update-0.83.03-board-bundle-candidate.zip .
-          sha256sum /tmp/out/UEP-update-0.83.03-board-bundle-candidate.zip | tee /tmp/out/UEP-update-0.83.03-board-bundle-candidate.sha256
+          zip -qr /tmp/out/UEP-update-0.83.03-board-control-candidate.zip .
+          sha256sum /tmp/out/UEP-update-0.83.03-board-control-candidate.zip | tee /tmp/out/UEP-update-0.83.03-board-control-candidate.sha256
           cat >/tmp/out/STATUS.txt <<'EOF'
-          UEP PC 0.83.03 Board bundle candidate
-          - Board master header normalization
-          - Canva/image notice file chooser and contain-only preview
-          - Existing text notice and SPECIAL_ROOM paths preserved
-          - Image persistence/API/Android rendering intentionally not claimed yet
-          - Candidate only; no Release created
+          UEP PC Board control candidate
+          - Board master header normalization in Electron backend
+          - Existing SPECIAL_ROOM/detail/notice/schedule paths preserved
+          - Candidate only; release/version metadata intentionally unchanged pending field validation
           EOF
       - uses: actions/upload-artifact@v4
         with:
-          name: UEP-0.83.03-board-bundle-candidate
+          name: UEP-0.83.03-board-control-candidate-r2
           path: /tmp/out/*
           retention-days: 7
