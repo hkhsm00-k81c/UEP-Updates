@@ -1,0 +1,303 @@
+2170-  const temp = path.join(dir, `school-board-state.${process.pid}.${Date.now()}.${crypto.randomBytes(4).toString("hex")}.tmp`);
+2171-  const payload = JSON.stringify(value, null, 2);
+2172-  try {
+2173-    await fs.writeFile(temp, payload, "utf8");
+2174-    try {
+2175-      await fs.rename(temp, target);
+2176-    } catch (renameError) {
+2177-      // Windows may reject replacement by rename when the destination exists.
+2178-      // Fall back to a direct write; this keeps user data available instead
+2179-      // of failing the entire state:save IPC call.
+2180-      await fs.writeFile(target, payload, "utf8");
+2181-      try { await fs.unlink(temp); } catch {}
+2182-    }
+2183-  } finally {
+2184-    try { await fs.unlink(temp); } catch {}
+2185-  }
+2186-  try { await writeQuickLaunchSettings08197(value); } catch (error) { console.warn("[UEP] quick launch backup failed", error?.message || error); }
+2187-  return { ok: true, savedAt: new Date().toISOString() };
+2188-}
+2189-function writeState(value) {
+2190-  // Serialize renderer saves so rapid UI updates cannot race each other.
+2191-  const task = stateWriteChain.then(() => writeStateNow(value));
+2192-  stateWriteChain = task.catch(() => {});
+2193-  return task;
+2194-}
+2195-
+2196-
+2197-// __UEP_08291_BOARD_DB_WRITE__
+2198-// __UEP_08292_BOARD_TARGET_FIX__
+2199-const UEP_BOARD_DB_ID_08291='1KStE1tJq6LTA8KR8fe56r7OxO1k9Ae8-lIfWw9d4wng';
+2200:const UEP_BOARD_WRITE_SHEETS_08291=new Set(['01_Board마스터','05A_임시시간표변경','06_1학년공지','07_2학년공지','08_전교공지','09_일정','15_운영로그','22_시험운영','23_시험시간표']);
+2201-function boardWriteError08291(message,code='UEP_BOARD_WRITE_ERROR'){const e=new Error(message);e.code=code;return e;}
+2202-function boardSafeText08291(value,max=500){return String(value??'').trim().slice(0,max);}
+2203-function boardNow08291(){return new Date().toISOString();}
+2204-function boardId08291(prefix){return prefix+'-'+Date.now().toString(36).toUpperCase()+'-'+crypto.randomBytes(3).toString('hex').toUpperCase();}
+2205-async function boardWriteContext08291({adminOnly=false}={}){
+2206-  const status=await schoolReadSessionStatus({verify:true});
+2207-  if(!status?.authenticated||!status?.user)throw boardWriteError08291('UEP 로그인 세션을 확인해 주세요.','UEP_BOARD_LOGIN_REQUIRED');
+2208-  const user=status.user;
+2209-  const isAdmin=Boolean(user.isAdmin)||/관리자/.test(String(user.role||''));
+2210-  if(adminOnly&&!isAdmin)throw boardWriteError08291('관리자 전용 기능입니다.','UEP_BOARD_ADMIN_REQUIRED');
+2211-  const credentials=await resolveSchoolServiceAccount();
+2212-  if(!validateServiceAccount(credentials))throw boardWriteError08291('UEP 학교 서비스 계정 연결을 확인해 주세요.','UEP_BOARD_SERVICE_ACCOUNT_REQUIRED');
+2213-  const token=await getSheetsToken(credentials);
+2214-  return {token,user,isAdmin};
+2215-}
+2216-async function boardSheetsJson08291(token,url,options={}){
+2217-  const response=await net.fetch(url,{...options,headers:{authorization:'Bearer '+token,'content-type':'application/json;charset=UTF-8',...(options.headers||{})}});
+2218-  let data={};try{data=await response.json();}catch{}
+2219:  if(!response.ok)throw boardWriteError08291(data?.error?.message||('Board DB HTTP '+response.status),'UEP_BOARD_SHEETS_HTTP');
+2220-  return data;
+2221-}
+2222-async function boardAppend08291(token,sheet,values){
+2223-  if(!UEP_BOARD_WRITE_SHEETS_08291.has(sheet))throw boardWriteError08291('허용되지 않은 Board DB 탭입니다.','UEP_BOARD_SHEET_NOT_ALLOWED');
+2224-  const range=encodeURIComponent("'"+sheet+"'!A:Z");
+2225-  const url='https://sheets.googleapis.com/v4/spreadsheets/'+UEP_BOARD_DB_ID_08291+'/values/'+range+':append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS';
+2226-  return boardSheetsJson08291(token,url,{method:'POST',body:JSON.stringify({majorDimension:'ROWS',values:[values]})});
+2227-}
+2228-async function boardReadRange08291(token,a1){
+2229-  const url='https://sheets.googleapis.com/v4/spreadsheets/'+UEP_BOARD_DB_ID_08291+'/values/'+encodeURIComponent(a1)+'?majorDimension=ROWS&valueRenderOption=FORMATTED_VALUE';
+2230-  const data=await boardSheetsJson08291(token,url,{method:'GET'});return data.values||[];
+2231-}
+2232-function boardTarget08291(raw,user){
+2233-  const normalize=v=>String(v??'').replace(/\u00a0/g,' ').replace(/[·ㆍ]/g,' ').replace(/\s+/g,' ').trim();
+2234-  const digit=v=>normalize(v).match(/\d{1,2}/)?.[0]||'';
+2235-  const target=normalize(boardSafeText08291(raw,80))||'내 반';
+2236-  if(target==='내 반'){
+2237-    const grade=digit(user?.grade), classNo=digit(user?.homeroom);
+2238-    if(!grade||!classNo)throw boardWriteError08291('담임 학년·반 정보를 확인해 주세요.','UEP_BOARD_HOMEROOM_INVALID');
+2239-    return {label:grade+'학년 '+classNo+'반',grade,classNo,scope:'class'};
+2240-  }
+2241-  if(target==='전교')return {label:'전교',grade:'전체',classNo:'전체',scope:'school'};
+2242-  const compact=target.replace(/\s+/g,'');
+2243-  const gradeAll=compact.match(/^([123])학년전체$/);
+2244-  if(gradeAll)return {label:gradeAll[1]+'학년 전체',grade:gradeAll[1],classNo:'전체',scope:'grade'};
+2245-  const cls=compact.match(/^([123])학년(\d{1,2})반$/);
+2246-  if(cls)return {label:cls[1]+'학년 '+String(Number(cls[2]))+'반',grade:cls[1],classNo:String(Number(cls[2])),scope:'class'};
+2247-  const short=compact.match(/^([123])[-_.](\d{1,2})$/);
+2248-  if(short)return {label:short[1]+'학년 '+String(Number(short[2]))+'반',grade:short[1],classNo:String(Number(short[2])),scope:'class'};
+2249-  if(compact.startsWith('특별실'))return {label:target,grade:'',classNo:'',scope:'special'};
+--
+2377-function boardSeoulWeekday08296(){return new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',weekday:'long'}).format(new Date()).slice(0,1);}
+2378-function boardDate08296(v){
+2379-  const s=String(v??'').trim();if(!s)return '';
+2380-  let m=s.match(/^(\d{4})[-/.]\s*(\d{1,2})[-/.]\s*(\d{1,2})/);if(!m)return /^\d{4}-\d{2}-\d{2}/.test(s)?s.slice(0,10):s;
+2381-  return m[1]+'-'+String(Number(m[2])).padStart(2,'0')+'-'+String(Number(m[3])).padStart(2,'0');
+2382-}
+2383-function boardClock08296(v){
+2384-  const s=String(v??'').trim();if(!s)return '';
+2385-  const m=s.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/);if(!m)return s;
+2386-  return String(Number(m[1])).padStart(2,'0')+':'+m[2]+':'+(m[3]||'00');
+2387-}
+2388-function boardEnabled08296(v){const s=String(v??'').trim().toUpperCase();return !s||s==='Y'||s==='TRUE'||s==='1'||s==='사용';}
+2389-function boardClassNorm08296(v){const s=String(v??'').trim();return String(Number(s)||s);}
+2390-function boardPriority08296(v){const s=String(v??'').trim();const n=Number(s);if(!Number.isNaN(n)&&s!=='')return n;if(s==='긴급')return 3;if(s==='중요'||s==='높음')return 2;return 1;}
+2391-async function boardSheetObjects08296(token,sheet,range='A3:Z1000'){
+2392-  const rows=await boardReadRange08291(token,"'"+sheet+"'!"+range);if(!rows.length)return [];
+2393-  const h=rows[0].map(v=>String(v??'').trim());return rows.slice(1).filter(r=>r.some(v=>String(v??'').trim())).map(r=>Object.fromEntries(h.map((k,i)=>[k,r[i]??''])));
+2394-}
+2395-function boardNoticeVisible08296(r,grade,classNo,today,nowClock){
+2396-  if(!boardEnabled08296(r['사용여부']))return false;
+2397-  const sd=boardDate08296(r['게시시작']),ed=boardDate08296(r['게시종료']),st=boardClock08296(r['게시시작시각']),et=boardClock08296(r['게시종료시각']);
+2398-  if(sd&&today<sd)return false;if(ed&&today>ed)return false;if(sd===today&&st&&nowClock<st)return false;if(ed===today&&et&&nowClock>et)return false;
+2399-  const tg=String(r['대상학년']||'').trim(),tc=boardClassNorm08296(r['대상반']),target=String(r['표시대상']||'').trim();
+2400-  if(tg&&tg!=='전체'&&tg!==grade)return false;if(tc&&tc!=='전체'&&tc!==boardClassNorm08296(classNo))return false;
+2401-  if(!target||target==='전체'||target==='전교')return true;return target.includes(grade+'학년')||target.includes(boardClassNorm08296(classNo)+'반');
+2402-}
+2403-async function boardDbDetail08296(payload={}){
+2404-  const ui=payload?.user&&typeof payload.user==='object'?payload.user:{};
+2405-  const requestedId=boardSafeText08291(payload?.boardId,120);if(!requestedId)throw boardWriteError08291('BoardID를 확인해 주세요.','UEP_BOARD_ID_REQUIRED');
+2406-  const ctx=await boardDbReadContext08294(ui);
+2407:  const masters=await boardSheetObjects08296(ctx.token,'01_Board마스터','A3:N100');
+2408-  if(!masters.length)throw boardWriteError08291('Board 마스터가 비어 있습니다.','UEP_BOARD_MASTER_EMPTY');
+2409-  const visible=ctx.isAdmin?masters:masters.filter(b=>String(b['학년']||'')===String(ctx.user.grade||'')&&boardClassNorm08296(b['반'])===boardClassNorm08296(ctx.user.homeroom||''));
+2410-  const board=visible.find(b=>String(b['BoardID']||'').trim()===requestedId);if(!board)throw boardWriteError08291('이 Board를 조회할 권한이 없거나 BoardID가 변경되었습니다.','UEP_BOARD_NOT_VISIBLE');
+2411-  const boardId=String(board['BoardID']||'').trim(),schoolYear=String(board['학년도']||'').trim(),grade=String(board['학년']||'').trim(),classNo=boardClassNorm08296(board['반']);
+2412-  const today=boardSeoulToday08296(),nowClock=boardSeoulClock08296(),weekday=boardSeoulWeekday08296();
+2413-
+2414-  const noticeSheets=grade==='1'?['06_1학년공지','08_전교공지']:grade==='2'?['07_2학년공지','08_전교공지']:['08_전교공지'];
+2415-  let notices=[];
+2416-  for(const sheet of noticeSheets){
+2417-    const rows=await boardSheetObjects08296(ctx.token,sheet,'A3:V500');
+2418-    notices=notices.concat(rows.filter(r=>boardNoticeVisible08296(r,grade,classNo,today,nowClock)).map(r=>({
+2419-      id:String(r['공지ID']||''),title:String(r['제목']||''),body:String(r['핵심문구']||''),importance:boardPriority08296(r['중요도']),source:sheet,author:String(r['작성자']||''),start:boardDate08296(r['게시시작']),end:boardDate08296(r['게시종료'])
+2420-    })));
+2421-  }
+2422-  notices.sort((a,b)=>b.importance-a.importance);notices=notices.slice(0,12);
+2423-
+2424-  let schedules=(await boardSheetObjects08296(ctx.token,'09_일정','A3:T800')).filter(r=>{
+2425-    if(!boardEnabled08296(r['사용여부']))return false;const start=boardDate08296(r['일자']),end=boardDate08296(r['종료일'])||start;if(!start||end<today)return false;
+2426-    const tg=String(r['대상학년']||'').trim(),tc=boardClassNorm08296(r['대상반']);return (!tg||tg==='전체'||tg===grade)&&(!tc||tc==='전체'||tc===classNo);
+2427-  }).map(r=>({id:String(r['일정ID']||''),date:boardDate08296(r['일자']),endDate:boardDate08296(r['종료일'])||boardDate08296(r['일자']),category:String(r['구분']||''),title:String(r['제목']||''),body:String(r['핵심문구']||''),startPeriod:String(r['시작교시']||''),startTime:boardClock08296(r['시작시각']).slice(0,5),endPeriod:String(r['종료교시']||''),endTime:boardClock08296(r['종료시각']).slice(0,5),author:String(r['작성자']||'')}));
+2428-  schedules.sort((a,b)=>a.date.localeCompare(b.date)||(Number(a.startPeriod||999)-Number(b.startPeriod||999))||String(a.startTime||'99:99').localeCompare(String(b.startTime||'99:99')));schedules=schedules.slice(0,12);
+2429-
+2430-  let timetable=(await boardSheetObjects08296(ctx.token,'05_학급시간표','A3:Q800')).filter(r=>boardEnabled08296(r['사용여부'])&&String(r['BoardID']||'').trim()===boardId&&(!schoolYear||String(r['학년도']||'').trim()===schoolYear)&&String(r['학년']||'').trim()===grade&&boardClassNorm08296(r['반'])===classNo&&String(r['요일']||'').trim()===weekday).map(r=>({period:Number(r['교시']||0),subject:String(r['과목']||''),teacher:String(r['교사']||''),room:String(r['교실']||'')})).sort((a,b)=>a.period-b.period);
+2431-
+2432-  const exams=(await boardSheetObjects08296(ctx.token,'22_시험운영','A3:Q300')).filter(r=>{
+2433-    if(!boardEnabled08296(r['사용여부']))return false;const tg=String(r['대상학년']||'').trim(),tc=boardClassNorm08296(r['대상반']);if(tg&&tg!=='전체'&&tg!==grade)return false;if(tc&&tc!=='전체'&&tc!==classNo)return false;
+2434-    const end=boardDate08296(r['시험종료일']||r['종료일']);return !end||end>=today;
+2435-  }).sort((a,b)=>boardDate08296(a['시험시작일']||a['시작일']).localeCompare(boardDate08296(b['시험시작일']||b['시작일'])));
+2436-  const examRow=exams[0]||null;let exam={active:false,examId:'',examName:'',startDate:'',endDate:'',timetable:[],cautions:[]};
+2437-  if(examRow){
+2438-    const examId=String(examRow['시험ID']||''),startDate=boardDate08296(examRow['시험시작일']||examRow['시작일']),endDate=boardDate08296(examRow['시험종료일']||examRow['종료일'])||startDate;
+2439-    const examTimetable=(await boardSheetObjects08296(ctx.token,'23_시험시간표','A3:Q600')).filter(r=>boardEnabled08296(r['사용여부'])&&String(r['시험ID']||'')===examId&&boardDate08296(r['시험일자']||r['일자'])===today).filter(r=>{const tg=String(r['대상학년']||'').trim(),tc=boardClassNorm08296(r['대상반']);return (!tg||tg==='전체'||tg===grade)&&(!tc||tc==='전체'||tc===classNo);}).map(r=>({period:String(r['교시']||''),subject:String(r['과목']||''),startTime:boardClock08296(r['시작시각']).slice(0,5),endTime:boardClock08296(r['종료시각']).slice(0,5)})).sort((a,b)=>Number(a.period||999)-Number(b.period||999));
+2440-    exam={active:today>=startDate&&today<=endDate&&examTimetable.length>0,examId,examName:String(examRow['시험명']||''),startDate,endDate,timetable:examTimetable,cautions:['유의사항1','유의사항2','유의사항3'].map(k=>String(examRow[k]||'').trim()).filter(Boolean)};
+2441-  }
+2442-  const hm=nowClock.slice(0,5);const displayMode=exam.active?'EXAM':(hm>='16:30'&&hm<'22:00'?'NIGHT':'GENERAL');
+2443-  return {ok:true,board,grade,classNo,displayMode,notices,schedules,timetable,exam,screenScheduleCount:exam.active?exam.timetable.length:schedules.length,sessionVerified:ctx.sessionVerified,fallback:ctx.fallback};
+2444-}
+2445-
+2446-// __UEP_08295_BOARD_CARD_OPERATION_CONNECT__
+2447-function boardDate08295(v){return String(v||'').trim().slice(0,10);}
+2448-function boardToday08295(){return new Date().toISOString().slice(0,10);}
+2449-function boardRowActive08295(v){return String(v||'').trim().toUpperCase()==='Y';}
+2450-function boardTargetMatch08295(value,grade,classNo){
+2451-  const s=String(value||'').replace(/\s+/g,'').trim();
+2452-  const g=String(grade||''),c=String(Number(classNo||0)||classNo||'');
+2453-  return !s||s==='전체'||s==='전교'||s===g+'학년전체'||s===c||s===g+'학년'+c+'반';
+2454-}
+2455-async function boardDbDetail08295(payload={}){
+2456-  const ui=payload?.user&&typeof payload.user==='object'?payload.user:{};
+2457-  const requestedId=boardSafeText08291(payload?.boardId,120);
+2458-  if(!requestedId)throw boardWriteError08291('BoardID를 확인해 주세요.','UEP_BOARD_ID_REQUIRED');
+2459-  const ctx=await boardDbReadContext08294(ui);
+2460:  const masterRows=await boardReadRange08291(ctx.token,"'01_Board마스터'!A3:N100");
+2461-  if(!masterRows.length)throw boardWriteError08291('Board 마스터가 비어 있습니다.','UEP_BOARD_MASTER_EMPTY');
+2462-  const h=masterRows[0].map(v=>String(v||''));
+2463-  const all=masterRows.slice(1).filter(r=>r.some(v=>String(v||'').trim())).map(r=>Object.fromEntries(h.map((k,i)=>[k,r[i]??''])));
+2464-  const visible=ctx.isAdmin?all:all.filter(b=>String(b['학년']||'')===String(ctx.user.grade||'')&&String(b['반']||'')===String(ctx.user.homeroom||''));
+2465-  const board=visible.find(b=>String(b['BoardID']||'').trim()===requestedId);
+2466-  if(!board)throw boardWriteError08291('이 Board를 조회할 권한이 없거나 BoardID가 변경되었습니다.','UEP_BOARD_NOT_VISIBLE');
+2467-  const grade=String(board['학년']||'').trim(),classNo=String(board['반']||'').trim(),today=boardToday08295();
+2468-  const noticeSheets=grade==='1'?['06_1학년공지','08_전교공지']:grade==='2'?['07_2학년공지','08_전교공지']:['08_전교공지'];
+2469-  const notices=[];
+2470-  for(const sheet of noticeSheets){
+2471-    const rows=await boardReadRange08291(ctx.token,"'"+sheet+"'!A3:V500");
+2472-    for(const r of rows){
+2473-      if(!r?.length||!boardRowActive08295(r[9]))continue;
+2474-      const start=boardDate08295(r[4]),end=boardDate08295(r[5]);
+2475-      if(start&&start>today)continue;if(end&&end<today)continue;
+2476-      if(sheet!=='08_전교공지'&&!boardTargetMatch08295(r[2],grade,classNo)&&!boardTargetMatch08295(r[3],grade,classNo))continue;
+2477-      if(sheet==='08_전교공지'&&r[20]&&String(r[20]).trim()!==grade&&String(r[20]).trim()!=='전체')continue;
+2478-      notices.push({id:String(r[0]||''),target:String(r[2]||''),importance:String(r[6]||''),title:String(r[7]||''),body:String(r[8]||''),author:String(r[10]||''),start,end,sheet});
+2479-    }
+2480-  }
+2481-  const schedules=[];
+2482-  for(const r of await boardReadRange08291(ctx.token,"'09_일정'!A3:T800")){
+2483-    if(!r?.length||!boardRowActive08295(r[9]))continue;
+2484-    const start=boardDate08295(r[1]),end=boardDate08295(r[2]||r[1]);if(start&&start>today)continue;if(end&&end<today)continue;
+2485-    const rg=String(r[4]||'').trim(),rc=String(r[5]||'').trim();
+2486-    if(rg&&rg!=='전체'&&rg!==grade)continue;if(rc&&rc!=='전체'&&String(Number(rc)||rc)!==String(Number(classNo)||classNo))continue;
+2487-    schedules.push({id:String(r[0]||''),start,end,category:String(r[3]||''),title:String(r[6]||''),body:String(r[7]||'')});
+2488-  }
+2489-  const timetable=[];
+2490-  for(const r of await boardReadRange08291(ctx.token,"'05A_임시시간표변경'!A3:R800")){
+2491-    if(!r?.length||!boardRowActive08295(r[12]))continue;if(boardDate08295(r[2])!==today)continue;
+2492-    if(String(r[5]||'').trim()!==grade||String(Number(r[6])||r[6]||'')!==String(Number(classNo)||classNo))continue;
+2493-    timetable.push({id:String(r[0]||''),date:boardDate08295(r[2]),period:String(r[7]||''),subject:String(r[8]||''),teacher:String(r[9]||''),place:String(r[10]||''),reason:String(r[11]||'')});
+2494-  }
+2495-  const exams=[];
+2496-  for(const r of await boardReadRange08291(ctx.token,"'22_시험운영'!A3:Q300")){
+2497-    if(!r?.length||!boardRowActive08295(r[12]))continue;
+2498-    const start=boardDate08295(r[2]),end=boardDate08295(r[3]||r[2]);if(start&&start>today)continue;if(end&&end<today)continue;
+2499-    const rg=String(r[4]||'').trim(),rc=String(r[5]||'').trim();if(rg&&rg!=='전체'&&rg!==grade)continue;if(rc&&rc!=='전체'&&String(Number(rc)||rc)!==String(Number(classNo)||classNo))continue;
+2500-    exams.push({id:String(r[0]||''),name:String(r[1]||''),start,end,modeStart:String(r[7]||''),modeEnd:String(r[8]||''),urgent:String(r[11]||'')});
+2501-  }
+2502-  return {ok:true,board,grade,classNo,notices,schedules,timetable,exams,sessionVerified:ctx.sessionVerified,fallback:ctx.fallback};
+2503-}
+2504-
+2505-
+2506-// __UEP_08301_BOARD_TARGETING__
+2507-function boardTargetBase08301(raw,user){
+2508-  const norm=v=>String(v??'').replace(/\s+/g,' ').trim(),digit=v=>norm(v).match(/\d{1,2}/)?.[0]||'';const target=norm(raw)||'내 반',compact=target.replace(/\s+/g,'');
+2509-  if(target==='내 반'){const grade=digit(user?.grade),classNo=digit(user?.homeroom);if(!grade||!classNo)throw boardWriteError08291('담임 학년·반 정보를 확인해 주세요.','UEP_BOARD_HOMEROOM_INVALID');return {label:grade+'학년 '+classNo+'반',grade,classNo,kind:'일반교실'};}
+2510-  if(target==='전교')return {label:'전교',grade:'전체',classNo:'전체',kind:'일반교실'};
+2511-  let m=compact.match(/^([123])학년전체$/);if(m)return {label:m[1]+'학년 전체',grade:m[1],classNo:'전체',kind:'일반교실'};
+2512-  m=compact.match(/^([123])학년(\d{1,2})반$/);if(m)return {label:m[1]+'학년 '+String(Number(m[2]))+'반',grade:m[1],classNo:String(Number(m[2])),kind:'일반교실'};
+2513:  if(['특별실','특별실전체','SPECIAL_ALL','ALL_SPECIAL_ROOMS'].includes(compact))return {label:'특별실 전체',grade:'',classNo:'',kind:'특별실전체',boardId:'ALL_SPECIAL_ROOMS'};
+2514-  throw boardWriteError08291('표시 대상을 확인해 주세요. ['+target+']','UEP_BOARD_TARGET_INVALID');
+2515-}
+2516-async function boardTargets08301(ctx,d={}){
+2517:  const raw=Array.isArray(d.targets)&&d.targets.length?d.targets:[d.target||'내 반'],masters=await boardSheetObjects08296(ctx.token,'01_Board마스터','A3:P200'),special=masters.filter(b=>String(b['Board유형']||'')==='SPECIAL_ROOM'&&boardEnabled08296(b['사용여부'])),out=[];
+2518-  for(const v of raw){let t;const s=boardSafeText08291(v,160);if(s.startsWith('BOARD:')){const id=s.slice(6),b=special.find(x=>String(x['BoardID']||'')===id);if(!b)throw boardWriteError08291('특별실 Board를 찾을 수 없습니다. ['+id+']','UEP_BOARD_SPECIAL_NOT_FOUND');t={label:String(b['설치위치']||id),grade:'',classNo:'',kind:'특별실',boardId:id};}else t=boardTargetBase08301(s,ctx.user);const key=[t.grade,t.classNo,t.kind,t.boardId].join('|');if(!out.some(x=>x._key===key))out.push({...t,_key:key});}
+2519-  return out.map(({_key,...x})=>x);
+2520-}
+2521-async function boardVerifyAppend08301(token,result,id,author){const range=String(result?.updates?.updatedRange||'');if(!range)throw boardWriteError08291('저장 범위 재확인 실패','UEP_BOARD_VERIFY');const row=(await boardReadRange08291(token,range))?.[0]||[];if(String(row[0]||'')!==id||!row.some(v=>String(v||'')===String(author||'')))throw boardWriteError08291('Board DB 저장 후 재확인에 실패했습니다.','UEP_BOARD_VERIFY');return range;}
+2522-async function boardDbWrite08301(payload={}){
+2523-  const kind=String(payload.kind||'');if(!['noticeCreate','scheduleCreate','boardModeSet'].includes(kind))return boardDbWrite08291(payload);
+2524-  const ctx=await boardWriteContext08291({adminOnly:kind==='boardModeSet'}),d=payload.data&&typeof payload.data==='object'?payload.data:{};ctx.displayAuthor=boardDisplayAuthor08293(ctx,d);const author=boardSafeText08291(ctx.displayAuthor||ctx.user.name,80),authorId=boardSafeText08291(ctx.user.userId||ctx.user.email,120),now=boardNow08291();
+2525-  try{
+2526:    if(kind==='boardModeSet'){const id=boardSafeText08291(d.boardId,120),mode=boardSafeText08291(d.mode,20).toUpperCase(),rows=await boardReadRange08291(ctx.token,"'01_Board마스터'!A3:P200");if(!id||!['CLASS','SPECIAL'].includes(mode))throw boardWriteError08291('특별실과 운영모드를 확인해 주세요.','UEP_BOARD_MODE_INVALID');const h=rows[0]||[],ic=h.indexOf('BoardID'),tc=h.indexOf('Board유형'),mc=h.indexOf('기본모드'),idx=rows.slice(1).findIndex(r=>String(r[ic]||'')===id&&String(r[tc]||'')==='SPECIAL_ROOM');if(idx<0||mc<0)throw boardWriteError08291('특별실 Board를 찾을 수 없습니다.','UEP_BOARD_SPECIAL_NOT_FOUND');const rn=idx+4,col=boardCol08297(mc+1);await boardUpdateValues08293(ctx.token,[{range:"'01_Board마스터'!"+col+rn,values:[[mode]]}]);const ck=await boardReadRange08291(ctx.token,"'01_Board마스터'!"+col+rn+':'+col+rn);if(String(ck?.[0]?.[0]||'').toUpperCase()!==mode)throw boardWriteError08291('운영모드 저장 재확인 실패','UEP_BOARD_MODE_VERIFY');await boardAudit08291(ctx,'특별실운영모드','SUCCESS',id+' / '+mode,id);return {ok:true,boardId:id,mode,verified:true};}
+2527-    const targets=await boardTargets08301(ctx,d);if(!targets.length)throw boardWriteError08291('표시 대상을 선택해 주세요.','UEP_BOARD_TARGET_REQUIRED');const saved=[];
+2528-    if(kind==='noticeCreate'){const type=boardSafeText08291(d.type,40)||'일반',importance=type==='긴급'?'긴급':(['조회(아침)','종례(하교)'].includes(type)?'중요':'일반');for(const t of targets){const id=boardId08291('NOTICE-PC'),sheet=t.grade==='1'?'06_1학년공지':t.grade==='2'?'07_2학년공지':'08_전교공지',start=boardSafeText08291(d.startDate,20),end=boardSafeText08291(d.endDate,20),title=boardSafeText08291(d.title,100),body=boardSafeText08291(d.body,1000);const row=sheet==='08_전교공지'?[id,'UEP PC',t.label,t.grade||'',t.classNo||'',start,end,importance,title,body,'Y',author,now,now,'유형:'+type,type,'','',authorId,boardSafeText08291(d.linkUrl,500),'',t.boardId||'',t.kind]:[id,'UEP PC',t.label,t.classNo||'',start,end,importance,title,body,'Y',author,now,now,'유형:'+type,type,'','',authorId,boardSafeText08291(d.linkUrl,500),'',t.boardId||'',t.kind];const ap=await boardAppend08291(ctx.token,sheet,row),range=await boardVerifyAppend08301(ctx.token,ap,id,author);saved.push({id,sheet,target:t.label,range});}}
+2529-    else{for(const t of targets){const id=boardId08291('SCHEDULE-PC');await boardAppend08291(ctx.token,'09_일정',[id,boardSafeText08291(d.date,20),boardSafeText08291(d.endDate||d.date,20),boardSafeText08291(d.category,50)||'학교일정',t.grade||'',t.classNo||'',boardSafeText08291(d.title,120),boardSafeText08291(d.body,1000),boardSafeText08291(d.importance,20)||'일반','Y','UEP PC',id,now,'',boardSafeText08291(d.startPeriod,20),boardSafeText08291(d.startTime,20),boardSafeText08291(d.endPeriod,20),boardSafeText08291(d.endTime,20),author,authorId,t.boardId||'',t.kind]);saved.push({id,sheet:'09_일정',target:t.label});}}
+2530-    await boardAudit08291(ctx,kind==='noticeCreate'?'공지':'일정','SUCCESS',saved.map(x=>x.id+' / '+x.target).join(' ; '),saved[0]?.id||'PC');return {ok:true,ids:saved.map(x=>x.id),items:saved,target:saved.map(x=>x.target).join(', '),sheet:saved.length===1?saved[0].sheet:'MULTI',verified:kind==='noticeCreate',author};
+2531-  }catch(e){await boardAudit08291(ctx,kind,'FAIL',e?.message||String(e));throw e;}
+2532-}
+2533:function boardSpecialMatch08301(v,b){const raw=String(v||'').trim(),id=String(b['BoardID']||'').replace(/\s+/g,''),loc=String(b['설치위치']||'').replace(/\s+/g,'');if(!raw)return false;return raw.split(/[\n,;|/]+/).some(x=>{const s=String(x||'').replace(/\s+/g,'');return s==='ALL_SPECIAL_ROOMS'||s==='특별실전체'||s===id||(s.length>=4&&s===loc);});}
+2534:async function boardDbStatus08301(ui={}){const ctx=await boardDbReadContext08294(ui),rows=await boardReadRange08291(ctx.token,"'01_Board마스터'!A3:P200");if(!rows.length)return {ok:true,boards:[],user:ctx.user};const h=rows[0],boards=rows.slice(1).filter(r=>r.some(v=>String(v||'').trim())).map(r=>Object.fromEntries(h.map((k,i)=>[k,r[i]??'']))),visible=ctx.isAdmin?boards:boards.filter(b=>String(b['학년']||'')===String(ctx.user.grade||'')&&String(b['반']||'')===String(ctx.user.homeroom||''));return {ok:true,boards:visible,user:ctx.user,isAdmin:ctx.isAdmin,sessionVerified:ctx.sessionVerified,fallback:ctx.fallback};}
+2535-async function boardDbDetail08301(payload={}){
+2536:  const base=await boardDbDetail08296(payload),ui=payload?.user&&typeof payload.user==='object'?payload.user:{},ctx=await boardDbReadContext08294(ui),masters=await boardSheetObjects08296(ctx.token,'01_Board마스터','A3:P200'),board=masters.find(b=>String(b['BoardID']||'')===String(payload.boardId||''))||base.board,special=String(board?.['Board유형']||'')==='SPECIAL_ROOM';
+2537-  const allSchedules=await boardSheetObjects08296(ctx.token,'09_일정','A3:V1200');if(!special){const specialIds=new Set(allSchedules.filter(r=>String(r['대상BoardID']||'').trim()||/^특별실/.test(String(r['대상구분']||''))).map(r=>String(r['일정ID']||'')));base.schedules=(base.schedules||[]).filter(x=>!specialIds.has(String(x.id||'')));base.screenScheduleCount=base.exam?.active?(base.exam.timetable||[]).length:base.schedules.length;return base;}
+2538-  const today=boardSeoulToday08296(),weekday=boardSeoulWeekday08296(),boardId=String(board['BoardID']||''),year=String(board['학년도']||'');
+2539-  const notices=(await boardSheetObjects08296(ctx.token,'08_전교공지','A3:W800')).filter(r=>boardEnabled08296(r['사용여부'])&&(!boardDate08296(r['게시시작'])||boardDate08296(r['게시시작'])<=today)&&(!boardDate08296(r['게시종료'])||boardDate08296(r['게시종료'])>=today)&&(boardSpecialMatch08301(r['대상BoardID'],board)||boardSpecialMatch08301(r['대상구분'],board)||boardSpecialMatch08301(r['표시대상'],board))).map(r=>({id:String(r['공지ID']||''),title:String(r['제목']||''),body:String(r['핵심문구']||''),importance:boardPriority08296(r['중요도']),source:'08_전교공지',author:String(r['작성자']||'')})).sort((a,b)=>b.importance-a.importance).slice(0,12);
+2540-  const schedules=allSchedules.filter(r=>{if(!boardEnabled08296(r['사용여부']))return false;const st=boardDate08296(r['일자']),ed=boardDate08296(r['종료일'])||st;return st&&ed>=today&&(boardSpecialMatch08301(r['대상BoardID'],board)||boardSpecialMatch08301(r['대상구분'],board));}).map(r=>({id:String(r['일정ID']||''),date:boardDate08296(r['일자']),endDate:boardDate08296(r['종료일'])||boardDate08296(r['일자']),category:String(r['구분']||''),title:String(r['제목']||''),body:String(r['핵심문구']||''),startPeriod:String(r['시작교시']||''),startTime:boardClock08296(r['시작시각']).slice(0,5),endPeriod:String(r['종료교시']||''),endTime:boardClock08296(r['종료시각']).slice(0,5),author:String(r['작성자']||'')})).sort((a,b)=>a.date.localeCompare(b.date)).slice(0,12);
+2541-  const timetable=(await boardSheetObjects08296(ctx.token,'05_학급시간표','A3:Q1200')).filter(r=>boardEnabled08296(r['사용여부'])&&String(r['BoardID']||'')===boardId&&(!year||String(r['학년도']||'')===year)&&String(r['요일']||'')===weekday).map(r=>({period:Number(r['교시']||0),subject:String(r['과목']||''),teacher:String(r['담당교사']||r['교사']||''),room:String(r['교실']||''),grade:String(r['학년']||''),classNo:boardClassNorm08296(r['반'])})).sort((a,b)=>a.period-b.period);
+2542-  return {...base,board,grade:'',classNo:'',displayMode:String(board['기본모드']||'SPECIAL').toUpperCase()==='CLASS'?'CLASS':'SPECIAL',notices,schedules,timetable,exam:{active:false,examName:'',timetable:[],cautions:[]},screenScheduleCount:schedules.length};
+2543-}
+2544-
+2545-// __UEP_08294_BOARD_STATUS_SESSION_RECOVERY__
+2546-async function boardDbReadContext08294(ui={}){
+2547-  let status=null;try{status=await schoolReadSessionStatus({verify:true});}catch{}
+2548-  const verified=Boolean(status?.authenticated&&status?.user);
+2549-  const uiUser=ui&&typeof ui==='object'?ui:{};
+2550-  const user=verified?status.user:{
+2551-    name:boardSafeText08291(uiUser.name,80),
+2552-    email:boardSafeText08291(uiUser.email,120),
+2553-    grade:boardSafeText08291(uiUser.grade,10),
+2554-    homeroom:boardSafeText08291(uiUser.homeroom,10),
+2555-    role:boardSafeText08291(uiUser.role,120),
+2556-    isAdmin:false
+2557-  };
+2558-  if(!verified&&!user.name&&!user.email)throw boardWriteError08291('UEP 로그인 정보를 확인해 주세요.','UEP_BOARD_LOGIN_REQUIRED');
+2559-  const credentials=await resolveSchoolServiceAccount();
+2560-  if(!validateServiceAccount(credentials))throw boardWriteError08291('UEP 학교 서비스 계정 연결을 확인해 주세요.','UEP_BOARD_SERVICE_ACCOUNT_REQUIRED');
+2561-  const token=await getSheetsToken(credentials);
+2562-  const isAdmin=verified&&(Boolean(user.isAdmin)||/관리자/.test(String(user.role||'')));
+2563-  return {token,user,isAdmin,sessionVerified:verified,fallback:!verified};
+2564-}
+2565-
+2566-async function boardDbStatus08291(ui={}){
+2567-  const ctx=await boardDbReadContext08294(ui);
+2568:  const rows=await boardReadRange08291(ctx.token,"'01_Board마스터'!A3:N100");if(!rows.length)return {ok:true,boards:[],user:ctx.user};
+2569-  const header=rows[0].map(v=>String(v||''));const boards=rows.slice(1).filter(r=>r.some(v=>String(v||'').trim())).map(r=>Object.fromEntries(header.map((h,i)=>[h,r[i]??''])));
+2570-  const visible=ctx.isAdmin?boards:boards.filter(b=>String(b['학년']||'')===String(ctx.user.grade||'')&&String(b['반']||'')===String(ctx.user.homeroom||''));
+2571-  return {ok:true,boards:visible,user:ctx.user,isAdmin:ctx.isAdmin,sessionVerified:ctx.sessionVerified,fallback:ctx.fallback};
+2572-}
+2573-
+2574-// __UEP_08293_BOARD_AUTHOR_NOTICE_MANAGE__
+2575-function boardDisplayAuthor08293(ctx,data={}){
+2576-  const candidates=[data.author,ctx?.displayAuthor,ctx?.user?.name,ctx?.user?.displayName,ctx?.user?.teacherName];
+2577-  const name=candidates.map(v=>boardSafeText08291(v,80)).find(v=>v&&v!=='???'&&v!=='-');
+2578-  return name||'UEP 교사';
+2579-}
+2580-function boardUserIds08293(ctx){return new Set([ctx?.user?.userId,ctx?.user?.id,ctx?.user?.email].map(v=>boardSafeText08291(v,120)).filter(Boolean));}
+2581-async function boardVerifyAppend08293(token,appendResult,expectedId,author=''){
+2582-  const range=String(appendResult?.updates?.updatedRange||'').trim();if(!range)return {ok:false,reason:'updatedRange 없음'};
+2583-  const rows=await boardReadRange08291(token,range),row=rows?.[0]||[];const id=String(row[0]||'').trim(),savedAuthor=String(row[10]||'').trim();
+2584-  if(id!==String(expectedId||''))return {ok:false,reason:'저장 ID 재확인 실패',range};if(author&&savedAuthor!==author)return {ok:false,reason:'작성자 재확인 실패',range,savedAuthor};return {ok:true,range,savedAuthor};
+2585-}
+2586-async function boardUpdateValues08293(token,data){
+2587-  const url='https://sheets.googleapis.com/v4/spreadsheets/'+UEP_BOARD_DB_ID_08291+'/values:batchUpdate';
+2588-  return boardSheetsJson08291(token,url,{method:'POST',body:JSON.stringify({valueInputOption:'USER_ENTERED',data})});
+2589-}
+2590-async function boardNoticeRows08293(ctx){
+2591-  const sheets=['06_1학년공지','07_2학년공지','08_전교공지'],ids=boardUserIds08293(ctx),mineGrade=String(ctx.user?.grade||'').replace(/\D/g,''),mineClass=String(ctx.user?.homeroom||'').replace(/\D/g,''),out=[];
+2592-  for(const sheet of sheets){
+2593-    const values=await boardReadRange08291(ctx.token,"'"+sheet+"'!A3:U3000");if(!values.length)continue;const h=values[0].map(v=>String(v||''));
+2594-    values.slice(1).forEach((r,i)=>{if(!r.some(v=>String(v||'').trim()))return;const o=Object.fromEntries(h.map((k,j)=>[k,r[j]??'']));if(String(o['사용여부']||'Y').trim().toUpperCase()==='N')return;
+2595-      const authorId=String(o['작성자ID']||'').trim(),author=String(o['작성자']||'').trim(),target=String(o['표시대상']||''),classNo=String(o['대상반']||'').replace(/\D/g,'');
+2596-      const sheetGrade=sheet==='06_1학년공지'?'1':sheet==='07_2학년공지'?'2':'';const own=(authorId&&ids.has(authorId))||(!authorId&&author&&author===boardDisplayAuthor08293(ctx,{}));
+2597-      const homeroom=Boolean(mineGrade&&mineClass&&sheetGrade===mineGrade&&classNo===mineClass&&/\d+학년\s*\d+반/.test(target));if(!ctx.isAdmin&&!own&&!homeroom)return;
+2598-      out.push({sheet,rowNumber:i+4,noticeId:String(o['공지ID']||''),target,importance:String(o['중요도']||''),title:String(o['제목']||''),message:String(o['핵심문구']||''),startDate:String(o['게시시작']||''),endDate:String(o['게시종료']||''),author,authorId,own,homeroom,canDelete:Boolean(ctx.isAdmin||own||homeroom)});
