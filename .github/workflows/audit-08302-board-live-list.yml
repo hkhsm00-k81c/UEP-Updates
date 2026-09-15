@@ -1,0 +1,45 @@
+name: Audit UEP 0.83.02 Board live list
+on:
+  push:
+    branches: [main]
+    paths:
+      - audit-08302-board-live-list.trigger
+permissions:
+  contents: write
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download current 0.83.02 release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/uep08302
+          gh release download v0.83.02 -R "$GITHUB_REPOSITORY" -p 'UEP-update.zip' -D /tmp/uep08302
+          unzip -q /tmp/uep08302/UEP-update.zip -d /tmp/uep08302/app
+      - name: Inspect Board list flow
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/uep08302/app/resources/app
+          OUT="$GITHUB_WORKSPACE/audit-08302-board-live-list.txt"
+          {
+            echo '=== BOARD UI KEYWORDS ==='
+            grep -n -E '조회 가능한 교실 Board|Board 목록|특별실|전자칠판 조회|board.*list|list.*board|boardMaster|Board마스터|실시간 카드|현재 화면' "$ROOT/gyomuon.js" || true
+            echo '=== BACKEND KEYWORDS ==='
+            grep -n -E 'board.*list|list.*board|Board마스터|특별실|25_기기등록|기기등록|board.*status|status.*board|board-master|boardMaster' "$ROOT/electron/main.cjs" || true
+            echo '=== UI BOARD AREA ==='
+            sed -n '1180,1700p' "$ROOT/gyomuon.js"
+            echo '=== BACKEND BOARD AREA ==='
+            sed -n '2200,2850p' "$ROOT/electron/main.cjs"
+          } > "$OUT"
+      - name: Commit audit report
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add audit-08302-board-live-list.txt
+          git diff --cached --quiet && exit 0
+          git commit -m 'audit: inspect 0.83.02 Board live-list flow'
+          git push
