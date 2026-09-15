@@ -11,6 +11,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Pull latest repository state
         run: git pull --rebase origin main
       - name: Download 0.83.02 UEP PC release
@@ -38,11 +40,16 @@ jobs:
           grab(js,['board-summary-card-08294','조회 가능한 교실 Board','boardDbStatus','boardDbDetail','전자칠판 조회','SPECIAL_ROOM','마지막접속','앱버전','BoardID'],out/'08303-ui-focused.txt')
           grab(main,['25_기기등록','마지막접속','앱버전','기기명','기기역할','지정BoardID','boardDbStatus08301','boardDbDetail'],out/'08303-device-focused.txt')
           PY
-      - name: Commit audit extracts
+      - name: Commit audit extracts safely
         run: |
           set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git pull --rebase origin main
           git add audit/08302-board/08303-*-focused.txt
-          git diff --cached --quiet || (git commit -m 'audit: inspect UEP PC Board control UI fields' && git push)
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'audit: inspect UEP PC Board control UI fields'
+          for n in 1 2 3; do
+            git pull --rebase origin main && git push && exit 0
+            sleep 2
+          done
+          exit 1
