@@ -1,0 +1,80 @@
+name: Patch UEP 0.83.03 Board control
+on:
+  push:
+    branches: [main]
+    paths:
+      - patch-08303-board-control.trigger
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download 0.83.02 release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/u && mkdir -p /tmp/u
+          gh release download v0.83.02 -R "$GITHUB_REPOSITORY" -p UEP-update.zip -D /tmp/u
+          unzip -q /tmp/u/UEP-update.zip -d /tmp/u/app
+      - name: Patch Board status source of truth
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('/tmp/u/app/resources/app/electron/main.cjs')
+          s=p.read_text(encoding='utf-8')
+          old="""async function boardDbStatus08301(ui={}){const ctx=await boardDbReadContext08294(ui),rows=await boardReadRange08291(ctx.token,\"'01_Board마스터'!A3:P200\");if(!rows.length)return {ok:true,boards:[],user:ctx.user};const h=rows[0],boards=rows.slice(1).filter(r=>r.some(v=>String(v||'').trim())).map(r=>Object.fromEntries(h.map((k,i)=>[k,r[i]??''])));"""
+          new="""async function boardDbStatus08301(ui={}){const ctx=await boardDbReadContext08294(ui),rows=await boardReadRange08291(ctx.token,\"'01_Board마스터'!A3:P200\");if(!rows.length)return {ok:true,boards:[],user:ctx.user};const h=rows[0].map(v=>String(v||'').trim()),boards=rows.slice(1).filter(r=>r.some(v=>String(v||'').trim())).map(r=>Object.fromEntries(h.map((k,i)=>[k,r[i]??''])));"""
+          if old not in s: raise SystemExit('boardDbStatus08301 anchor not found')
+          s=s.replace(old,new,1)
+          # Version only after patch anchor succeeds.
+          s=s.replace('0.83.02','0.83.03')
+          p.write_text(s,encoding='utf-8')
+          PY
+      - name: Verify syntax and Board regressions
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/u/app/resources/app
+          node --check "$ROOT/electron/main.cjs"
+          node --check "$ROOT/gyomuon.js"
+          grep -q "h=rows\[0\].map(v=>String(v||'').trim())" "$ROOT/electron/main.cjs"
+          grep -q "SPECIAL_ROOM" "$ROOT/electron/main.cjs"
+          grep -q "boardDbDetail" "$ROOT/electron/main.cjs"
+          grep -q "boardDbStatus" "$ROOT/electron/main.cjs"
+          grep -q "boardDbStatus" "$ROOT/gyomuon.js"
+          grep -q "board-summary-card-08294" "$ROOT/gyomuon.js"
+          ! grep -q 'versionName.*0.83.02' "$ROOT/electron/main.cjs" || true
+      - name: Build candidate and manifest
+        run: |
+          set -euo pipefail
+          cd /tmp/u/app
+          zip -qr "$GITHUB_WORKSPACE/UEP-update-0.83.03-candidate.zip" .
+          cd "$GITHUB_WORKSPACE"
+          sha256sum UEP-update-0.83.03-candidate.zip > UEP-update-0.83.03-candidate.sha256
+          cat > audit/08302-board/08303-board-fix-report.txt <<EOF
+          UEP 0.83.03 Board control candidate
+          Base: v0.83.02 release asset
+          Fix: normalize 01_Board마스터 header names before Board status object mapping
+          Reason: status/list path used raw formatted header strings while detail path already normalizes headers; whitespace in sheet headers can make BoardID/Board유형/사용여부 invisible to the list path.
+          Preserved: SPECIAL_ROOM detail/mode/notice/schedule logic
+          Verification: node --check main.cjs + gyomuon.js; Board status/detail/SPECIAL_ROOM renderer anchors present
+          Status: candidate only; no release created
+          EOF
+      - name: Commit report only
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add audit/08302-board/08303-board-fix-report.txt
+          git diff --cached --quiet || (git commit -m 'fix: prepare 0.83.03 Board list normalization candidate' && git push)
+      - name: Upload candidate artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: UEP-0.83.03-board-control-candidate
+          path: |
+            UEP-update-0.83.03-candidate.zip
+            UEP-update-0.83.03-candidate.sha256
+          retention-days: 7
