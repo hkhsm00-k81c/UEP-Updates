@@ -1,0 +1,55 @@
+name: Audit UEP PC 0.83.04 opening targets
+on:
+  push:
+    branches: [design/pc-opening-08304]
+    paths:
+      - audit-08304-opening-targets.trigger
+permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: design/pc-opening-08304
+          fetch-depth: 0
+      - name: Download stable 0.83.03 package
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/uep08304 && mkdir -p /tmp/uep08304
+          gh release download v0.83.03 -R "$GITHUB_REPOSITORY" -p UEP-update.zip -D /tmp/uep08304
+          unzip -q /tmp/uep08304/UEP-update.zip -d /tmp/uep08304/app
+      - name: Extract exact startup readiness targets
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          root=Path('/tmp/uep08304/app/resources/app')
+          out=Path('audit/08304-opening'); out.mkdir(parents=True,exist_ok=True)
+          targets={
+            'gyomuon.js':['userAuthGate','classList.add("hidden")','classList.remove("hidden")','loadGoogle','loadSheet','batch-read','학생기본','기본정보','bootstrap','initialize','DOMContentLoaded'],
+            'index.html':['userAuthGate','__UEP_BOOT_FAILSAFE_08084__'],
+          }
+          for name, needles in targets.items():
+            f=root/name
+            lines=f.read_text(encoding='utf-8',errors='replace').splitlines()
+            picks=set()
+            for i,l in enumerate(lines):
+              if any(n.lower() in l.lower() for n in needles):
+                picks.update(range(max(0,i-18),min(len(lines),i+42)))
+            text='\n'.join(f'{i+1}: {lines[i]}' for i in sorted(picks))
+            (out/(name+'.startup.txt')).write_text(text,encoding='utf-8')
+          PY
+      - name: Commit extracts to design branch
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add audit/08304-opening
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'audit: capture exact startup readiness targets'
+          git pull --rebase origin design/pc-opening-08304
+          git push origin design/pc-opening-08304

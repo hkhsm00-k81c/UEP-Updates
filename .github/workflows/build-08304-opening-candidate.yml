@@ -1,0 +1,79 @@
+name: Build UEP PC 0.83.04 opening candidate
+on:
+  push:
+    branches: [design/pc-opening-08304]
+    paths:
+      - build-08304-opening-candidate.trigger
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: design/pc-opening-08304
+      - name: Download stable 0.83.03 package
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/uep08304 && mkdir -p /tmp/uep08304
+          gh release download v0.83.03 -R "$GITHUB_REPOSITORY" -p UEP-update.zip -D /tmp/uep08304
+          unzip -q /tmp/uep08304/UEP-update.zip -d /tmp/uep08304/app
+      - name: Apply opening cover patch
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          root=Path('/tmp/uep08304/app/resources/app')
+          html=root/'index.html'
+          js=root/'gyomuon.js'
+          h=html.read_text(encoding='utf-8')
+          j=js.read_text(encoding='utf-8')
+
+          style='''\n<style id="uep08304OpeningCoverStyle">\n.user-auth-gate{background:linear-gradient(115deg,rgba(8,28,52,.78),rgba(8,28,52,.28)),linear-gradient(180deg,#274c68,#d99a62);background-image:linear-gradient(115deg,rgba(8,28,52,.78),rgba(8,28,52,.28)),url("uep-opening-campus.jpg");background-size:cover;background-position:center;overflow:hidden}\n.user-auth-gate:before{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(4,19,36,.08),rgba(4,19,36,.38));pointer-events:none}\n.user-auth-gate .uep-opening-card{position:relative;z-index:1;width:min(760px,calc(100vw - 96px));margin:0;background:transparent;border:0;box-shadow:none;color:#fff;padding:0}\n.uep-opening-brand{display:flex;align-items:center;gap:18px;margin-bottom:28px}.uep-opening-mark{width:68px;height:68px;border:1px solid rgba(255,255,255,.45);border-radius:20px;display:grid;place-items:center;background:rgba(255,255,255,.12);backdrop-filter:blur(10px);font-size:34px;font-weight:800}.uep-opening-brand small{display:block;font-size:13px;letter-spacing:.16em;opacity:.86}.uep-opening-brand h1{margin:5px 0 0;font-size:42px;line-height:1.08;letter-spacing:-.035em}.uep-opening-copy{font-size:20px;line-height:1.55;margin:0 0 34px;max-width:620px;text-shadow:0 2px 14px rgba(0,0,0,.22)}\n.uep-opening-status{display:flex;align-items:center;gap:12px;width:max-content;max-width:100%;padding:12px 16px;border:1px solid rgba(255,255,255,.28);border-radius:999px;background:rgba(7,25,43,.28);backdrop-filter:blur(12px);font-size:13px}.uep-opening-status i{width:9px;height:9px;border-radius:50%;background:#fff;box-shadow:0 0 0 5px rgba(255,255,255,.12);animation:uep08304Pulse 1.4s ease-in-out infinite}.uep-opening-status b{font-weight:700}.uep-opening-status span{opacity:.8}.uep-opening-footer{position:absolute;left:48px;right:48px;bottom:30px;z-index:1;display:flex;justify-content:space-between;color:rgba(255,255,255,.78);font-size:11px;letter-spacing:.04em}\n@keyframes uep08304Pulse{50%{opacity:.38;transform:scale(.82)}}\n@media(max-width:800px){.user-auth-gate .uep-opening-card{width:calc(100vw - 48px)}.uep-opening-brand h1{font-size:32px}.uep-opening-copy{font-size:17px}.uep-opening-footer{left:24px;right:24px}}\n</style>\n'''
+          if 'uep08304OpeningCoverStyle' not in h:
+              h=h.replace('</head>',style+'</head>',1)
+
+          old='<body><div id="userAuthGate" class="user-auth-gate"><section class="user-auth-card user-auth-loading"><div class="user-auth-brand"><span>U</span><div><small>UNHO EDUCATION PLATFORM</small><h2>자동 로그인 중…</h2><p>저장된 사용자와 연결 정보를 확인하고 있습니다.</p></div></div></section></div>'
+          new='''<body><div id="userAuthGate" class="user-auth-gate"><section class="uep-opening-card"><div class="uep-opening-brand"><span class="uep-opening-mark">U</span><div><small>UNHO HIGH SCHOOL</small><h1>UNHO Education Platform</h1></div></div><p class="uep-opening-copy">학생의 오늘을 연결하고, 더 나은 내일을 준비합니다.<br><strong>Connect Data. Grow Students.</strong></p><div class="uep-opening-status"><i></i><b>학교 데이터를 연결하고 있습니다</b><span>학생 기본정보 · 권한 확인</span></div></section><div class="uep-opening-footer"><span>운호고등학교 · 自律 · 勤勉 · 正直</span><span>UEP</span></div></div>'''
+          if old not in h:
+              raise SystemExit('initial userAuthGate target not found')
+          h=h.replace(old,new,1)
+
+          old_auto='gate.innerHTML=`<section class="user-auth-card auto-login-transition"><div class="user-auth-brand"><span>U</span><div><small>UNHO EDUCATION PLATFORM</small><h2>자동 로그인 중…</h2><p>${escapeHtml(state.auth.user.name)} · ${escapeHtml(maskEmail(state.auth.user.email))}</p></div></div><div class="auto-login-progress"><i></i></div><footer>승인된 UEP 세션을 확인했습니다.</footer></section>`;'
+          new_auto='gate.innerHTML=`<section class="uep-opening-card"><div class="uep-opening-brand"><span class="uep-opening-mark">U</span><div><small>UNHO HIGH SCHOOL</small><h1>UNHO Education Platform</h1></div></div><p class="uep-opening-copy">학생의 오늘을 연결하고, 더 나은 내일을 준비합니다.<br><strong>Connect Data. Grow Students.</strong></p><div class="uep-opening-status"><i></i><b>UEP를 준비하고 있습니다</b><span>${escapeHtml(state.auth.user.name)} · 학생 기본정보 연결</span></div></section><div class="uep-opening-footer"><span>운호고등학교 · 自律 · 勤勉 · 正直</span><span>UEP</span></div>`;'
+          if old_auto not in j:
+              raise SystemExit('auto-login transition target not found')
+          j=j.replace(old_auto,new_auto,1)
+
+          # Preserve existing auth/data lifecycle. The cover is still removed only by the existing hideUserAuthGate path.
+          html.write_text(h,encoding='utf-8')
+          js.write_text(j,encoding='utf-8')
+          PY
+      - name: Regression checks
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/uep08304/app/resources/app
+          node --check "$ROOT/gyomuon.js"
+          node --check "$ROOT/electron/main.cjs"
+          node --check "$ROOT/electron/preload.cjs"
+          grep -q 'uep08304OpeningCoverStyle' "$ROOT/index.html"
+          grep -q 'Connect Data. Grow Students.' "$ROOT/index.html"
+          grep -q 'UEP를 준비하고 있습니다' "$ROOT/gyomuon.js"
+          grep -q 'function hideUserAuthGate' "$ROOT/gyomuon.js"
+      - name: Package candidate
+        run: |
+          set -euo pipefail
+          cd /tmp/uep08304/app
+          zip -qr "$GITHUB_WORKSPACE/UEP-0.83.04-opening-candidate.zip" .
+          cd "$GITHUB_WORKSPACE"
+          sha256sum UEP-0.83.04-opening-candidate.zip > UEP-0.83.04-opening-candidate.sha256.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UEP-0.83.04-opening-candidate
+          path: |
+            UEP-0.83.04-opening-candidate.zip
+            UEP-0.83.04-opening-candidate.sha256.txt
+          retention-days: 7
