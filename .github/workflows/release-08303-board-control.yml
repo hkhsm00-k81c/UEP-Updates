@@ -1,4 +1,4 @@
-name: Release UEP PC 0.83.03 Board control
+name: Release UEP PC 0.83.04 Opening
 on:
   push:
     branches: [main]
@@ -11,63 +11,50 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: {fetch-depth: 0}
-      - name: Pull latest
-        run: git pull --rebase origin main
       - name: Guard tag
         env: {GH_TOKEN: "${{ github.token }}"}
         run: |
           set -euo pipefail
-          if gh release view v0.83.03 -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then echo 'v0.83.03 already exists'; exit 1; fi
-      - name: Download and patch v0.83.02
+          if gh release view v0.83.04 -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then echo 'v0.83.04 already exists'; exit 1; fi
+      - name: Download verified candidate artifact
         env: {GH_TOKEN: "${{ github.token }}"}
         run: |
           set -euo pipefail
           rm -rf /tmp/u /tmp/out && mkdir -p /tmp/u /tmp/out
-          gh release download v0.83.02 -R "$GITHUB_REPOSITORY" -p UEP-update.zip -D /tmp/u
-          unzip -q /tmp/u/UEP-update.zip -d /tmp/u/app
-          python3 - <<'PY'
-          from pathlib import Path
-          import re,json
-          root=Path('/tmp/u/app/resources/app')
-          p=root/'electron/main.cjs'; s=p.read_text(encoding='utf-8')
-          a=s.find('async function boardDbStatus08301(ui={})')
-          if a<0: raise SystemExit('boardDbStatus08301 missing')
-          b=s.find('\nasync function ',a+10); b=b if b>=0 else len(s)
-          block=s[a:b]
-          block2,n=re.subn(r'const\s+h\s*=\s*rows\[0\]\s*,\s*boards\s*=',"const h=rows[0].map(v=>String(v||'').trim()),boards=",block,count=1)
-          if n==0 and "rows[0].map(v=>String(v||'').trim())" not in block: raise SystemExit('header patch anchor missing')
-          p.write_text(s[:a]+block2+s[b:],encoding='utf-8')
-          # Version metadata: update package.json where present and renderer-visible 0.83.02 literals.
-          for q in [Path('/tmp/u/app/package.json'),root/'package.json']:
-              if q.exists():
-                  try:
-                      d=json.loads(q.read_text(encoding='utf-8')); d['version']='0.83.03'; q.write_text(json.dumps(d,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
-                  except Exception as e: raise SystemExit(f'package version failed {q}: {e}')
-          g=root/'gyomuon.js'; gs=g.read_text(encoding='utf-8'); gs=gs.replace('0.83.02','0.83.03'); g.write_text(gs,encoding='utf-8')
-          PY
-      - name: Verify release package
+          gh run download 35049235280 -R "$GITHUB_REPOSITORY" -n UEP-0.83.04-opening-candidate -D /tmp/u
+          unzip -q /tmp/u/UEP-0.83.04-opening-candidate.zip -d /tmp/u/app
+      - name: Install verified opening assets
         run: |
           set -euo pipefail
           ROOT=/tmp/u/app/resources/app
-          node --check "$ROOT/electron/main.cjs"
+          base64 -d release-assets/08304/campus-mini.b64 > "$ROOT/uep-opening-campus.jpg"
+          base64 -d release-assets/08304/mark-tiny.b64 > "$ROOT/uep-school-mark.png"
+          echo '192a2a78027739cb83b78c7b0bf2aa726fbfc20adc709e57a00dd7bc8fdbd208  /tmp/u/app/resources/app/uep-opening-campus.jpg' | sha256sum -c -
+          echo 'b03c5e5266c0df2eb75eec4f307dd8de82388c6ef79d58e93aa65f4668c4cede  /tmp/u/app/resources/app/uep-school-mark.png' | sha256sum -c -
+      - name: Verify and finalize package
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/u/app/resources/app
           node --check "$ROOT/gyomuon.js"
+          node --check "$ROOT/electron/main.cjs"
+          node --check "$ROOT/electron/preload.cjs"
+          grep -q 'Connect Data. Grow Students.' "$ROOT/index.html"
+          grep -q 'function hideUserAuthGate' "$ROOT/gyomuon.js"
+          grep -q 'uep-opening-campus.jpg' "$ROOT/index.html"
+          test -s "$ROOT/uep-opening-campus.jpg"
+          test -s "$ROOT/uep-school-mark.png"
           python3 - <<'PY'
           from pathlib import Path
           import json
           root=Path('/tmp/u/app/resources/app')
-          m=(root/'electron/main.cjs').read_text(encoding='utf-8')
-          a=m.find('async function boardDbStatus08301(ui={})'); b=m.find('\nasync function ',a+10); block=m[a:b if b>=0 else None]
-          assert "rows[0].map(v=>String(v||'').trim())" in block
-          g=(root/'gyomuon.js').read_text(encoding='utf-8')
-          for k in ['boardDbStatus','board-summary-card-08294','SPECIAL_ROOM']: assert k in g,k
-          for k in ['boardDbDetail','SPECIAL_ROOM']: assert k in m,k
-          versions=[]
           for q in [Path('/tmp/u/app/package.json'),root/'package.json']:
-              if q.exists(): versions.append(json.loads(q.read_text(encoding='utf-8')).get('version'))
-          assert versions and all(v=='0.83.03' for v in versions),versions
-          assert '0.83.03' in g
+              if q.exists():
+                  d=json.loads(q.read_text(encoding='utf-8')); d['version']='0.83.04'; q.write_text(json.dumps(d,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          g=root/'gyomuon.js'; s=g.read_text(encoding='utf-8').replace('0.83.03','0.83.04'); g.write_text(s,encoding='utf-8')
           PY
-      - name: Build SHA and manifest
+          node --check "$ROOT/gyomuon.js"
+          grep -q '0.83.04' "$ROOT/gyomuon.js"
+      - name: Build SHA
         run: |
           set -euo pipefail
           cd /tmp/u/app
@@ -79,16 +66,16 @@ jobs:
         env: {GH_TOKEN: "${{ github.token }}"}
         run: |
           set -euo pipefail
-          gh release create v0.83.03 /tmp/out/UEP-update.zip /tmp/out/sha256.txt -R "$GITHUB_REPOSITORY" --title 'UEP v0.83.03 Stable' --notes 'UEP PC 전자칠판 조회 복구. Board API 연결은 정상이나 조회 가능한 Board가 0개로 표시되던 목록 매핑 경로에서 01_Board마스터 헤더를 정규화합니다. 기존 특별실(SPECIAL_ROOM) 상세조회·운영모드·공지·일정 경로는 유지하며 문법 및 회귀검사를 통과한 패키지만 배포합니다.'
+          gh release create v0.83.04 /tmp/out/UEP-update.zip /tmp/out/sha256.txt -R "$GITHUB_REPOSITORY" --title 'UEP v0.83.04 Stable' --notes 'UEP PC 로그인 이후 대시보드 준비 구간에 운호고 오프닝 커버를 적용합니다. 기존 인증·데이터 준비 완료 경로를 유지하며 실제 준비 완료 시 커버를 제거합니다. 문법·자산 해시·회귀검사를 통과한 패키지만 배포합니다.'
       - name: Verify Release assets
         env: {GH_TOKEN: "${{ github.token }}"}
         run: |
           set -euo pipefail
-          gh release view v0.83.03 -R "$GITHUB_REPOSITORY" --json tagName,name,assets > /tmp/release.json
+          gh release view v0.83.04 -R "$GITHUB_REPOSITORY" --json tagName,name,assets > /tmp/release.json
           python3 - <<'PY'
           import json
           d=json.load(open('/tmp/release.json'))
-          assert d['tagName']=='v0.83.03'
+          assert d['tagName']=='v0.83.04'
           names={x['name'] for x in d['assets']}
           assert {'UEP-update.zip','sha256.txt'} <= names,names
           PY
