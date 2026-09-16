@@ -22,29 +22,26 @@ jobs:
           rm -rf /tmp/uep08304 && mkdir -p /tmp/uep08304
           gh release download v0.83.03 -R "$GITHUB_REPOSITORY" -p UEP-update.zip -D /tmp/uep08304
           unzip -q /tmp/uep08304/UEP-update.zip -d /tmp/uep08304/app
-      - name: Extract precise startup integration targets
+      - name: Extract exact startup readiness targets
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
           root=Path('/tmp/uep08304/app/resources/app')
           out=Path('audit/08304-opening'); out.mkdir(parents=True,exist_ok=True)
-          files=[root/'gyomuon.js',root/'index.html',root/'electron/main.cjs',root/'electron/preload.cjs',root/'electron/google-data.cjs']
-          needles=[
-            'login','로그인','dashboard','대시보드','student','학생기본','기본정보',
-            'batch-read','google','sheet','load','loading','initialize','init','bootstrap',
-            'DOMContentLoaded','Promise.all','Promise.allSettled','requestAnimationFrame',
-            'showPage','showSection','navigate','currentUser','auth','permission','권한'
-          ]
-          for f in files:
-            if not f.exists(): continue
+          targets={
+            'gyomuon.js':['userAuthGate','classList.add("hidden")','classList.remove("hidden")','loadGoogle','loadSheet','batch-read','학생기본','기본정보','bootstrap','initialize','DOMContentLoaded'],
+            'index.html':['userAuthGate','__UEP_BOOT_FAILSAFE_08084__'],
+          }
+          for name, needles in targets.items():
+            f=root/name
             lines=f.read_text(encoding='utf-8',errors='replace').splitlines()
             picks=set()
             for i,l in enumerate(lines):
-              ll=l.lower()
-              if any(n.lower() in ll for n in needles):
-                picks.update(range(max(0,i-12),min(len(lines),i+28)))
-            (out/(f.name+'.focused.txt')).write_text('\n'.join(f'{i+1}: {lines[i]}' for i in sorted(picks)),encoding='utf-8')
+              if any(n.lower() in l.lower() for n in needles):
+                picks.update(range(max(0,i-18),min(len(lines),i+42)))
+            text='\n'.join(f'{i+1}: {lines[i]}' for i in sorted(picks))
+            (out/(name+'.startup.txt')).write_text(text,encoding='utf-8')
           PY
       - name: Commit extracts to design branch
         run: |
@@ -53,6 +50,6 @@ jobs:
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add audit/08304-opening
           if git diff --cached --quiet; then exit 0; fi
-          git commit -m 'audit: capture precise UEP opening integration targets'
+          git commit -m 'audit: capture exact startup readiness targets'
           git pull --rebase origin design/pc-opening-08304
           git push origin design/pc-opening-08304
