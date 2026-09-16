@@ -1,0 +1,343 @@
+38:const googleUserOAuthPath = () => path.join(stableUserDataRoot(), "google-user-oauth.bin");
+39:const googleUserOAuthRecoveryPath = () => path.join(stableUserDataRoot(), "google-user-oauth.recovery.json");
+42:const googleUserOAuthCanonicalPath = () => path.join(googleUserOAuthCanonicalRoot(), 'google-user-oauth.bin');
+43:const googleUserOAuthCanonicalRecoveryPath = () => path.join(googleUserOAuthCanonicalRoot(), 'google-user-oauth.recovery.json');
+45:const schoolReadDevicePath = () => path.join(stableUserDataRoot(), "uep-device-id.txt");
+46:const schoolReadSessionPath = () => path.join(stableUserDataRoot(), "uep-school-read-session.bin");
+58:  for (const fileName of ["Local State","school-board-state.json","quick-launch-settings.json","google-service-account.bin","google-service-account.recovery.json","google-user-oauth.bin","google-user-oauth.recovery.json","neis-api-key.bin","neis-dashboard-cache.json","comcigan-timetable-cache.json"]) await migrateStableUserFile(fileName);
+127:  let token=''; try{token=JSON.parse(el?.textContent||'{}').csrfToken||'';}catch{}
+128:  if(!token) throw new Error('컴시간 CSRF 토큰을 찾지 못했습니다.');
+130:  const r=await fetch(url,{credentials:'include',headers:{'Content-Type':'application/json','x-csrf-token':token}});
+209:  const token=(m?.[1]||"").trim();
+210:  if(!token) return ["",""];
+211:  if(/부$|부\s/.test(token)) return [token.replace(/\s*확정$/,""),""];
+212:  const parts=token.split(/\s+/);
+214:  return ["",token.replace(/\s*확정$/," ").trim()];
+216:async function sheetsRequest(token,url,options={}) {
+217:  const response=await fetch(url,{...options,headers:{authorization:`Bearer ${token}`,"content-type":"application/json",...(options.headers||{})}});
+221:async function replaceCalendarRows(token, rows=[]) {
+223:  await sheetsRequest(token,`${base}/${encodeURIComponent("'41_학교캘린더'!A4:W3000")}:clear`,{method:"POST",body:"{}"});
+224:  if(rows.length) await sheetsRequest(token,`${base}/${encodeURIComponent(`'41_학교캘린더'!A4:W${rows.length+3}`)}?valueInputOption=USER_ENTERED`,{method:"PUT",body:JSON.stringify({majorDimension:"ROWS",values:rows})});
+226:async function ensureCalendarSchema(token) {
+229:  await sheetsRequest(token,`${base}/${encodeURIComponent("'41_학교캘린더'!A1:W3")}?valueInputOption=USER_ENTERED`,{method:"PUT",body:JSON.stringify({majorDimension:"ROWS",values})});
+231:async function currentCalendarRows(token) {
+232:  const vr=await readSheetBatch(token,UEP_PROCESSING_SPREADSHEET_ID,["'41_학교캘린더'!A1:W3000"]);
+248:    value.token_uri === "https://oauth2.googleapis.com/token"
+337:let schoolReadPolicyCache={url:'',expiresAt:0};
+338:function schoolReadError(message,code='UEP_SCHOOL_READ_ERROR'){const e=new Error(message);e.code=code;return e;}
+340:  if(schoolReadPolicyCache.url&&schoolReadPolicyCache.expiresAt>Date.now())return schoolReadPolicyCache.url;
+342:  try{response=await net.fetch(UEP_UPDATE_POLICY_URL,{cache:'no-store'});}catch(error){throw schoolReadError('UEP School Read API 설정을 확인하지 못했습니다.','UEP_SCHOOL_READ_POLICY_UNAVAILABLE');}
+343:  if(!response.ok)throw schoolReadError('UEP School Read API 설정 조회 실패 ('+response.status+')','UEP_SCHOOL_READ_POLICY_UNAVAILABLE');
+345:  const url=String(policy?.schoolReadApiUrl||UEP_SCHOOL_READ_API_FALLBACK||'').trim();
+346:  if(!/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec(?:\?.*)?$/i.test(url))throw schoolReadError('UEP School Read API 배포 URL이 아직 등록되지 않았습니다.','UEP_SCHOOL_READ_NOT_CONFIGURED');
+347:  schoolReadPolicyCache={url,expiresAt:Date.now()+10*60*1000};
+351:  try{const saved=String(await fs.readFile(schoolReadDevicePath(),'utf8')).trim();if(saved)return saved;}catch{}
+353:  await fs.mkdir(path.dirname(schoolReadDevicePath()),{recursive:true});
+354:  await fs.writeFile(schoolReadDevicePath(),id,'utf8');
+358:  try{const value=await readEncrypted(schoolReadSessionPath());return value&&typeof value==='object'?value:null;}catch{return null;}
+360:async function saveSchoolReadSession(value){await saveEncrypted(schoolReadSessionPath(),value);return value;}
+361:async function clearSchoolReadSession(){try{await fs.unlink(schoolReadSessionPath());}catch(error){if(error?.code!=='ENOENT')throw error;}liveDataCache=null;liveDataFetchedAt=0;return {ok:true};}
+362:async function schoolReadPost(action,payload={}){
+366:  if(!response.ok)throw schoolReadError(data?.message||('School Read API HTTP '+response.status),data?.code||'UEP_SCHOOL_READ_HTTP_ERROR');
+369:async function loginSchoolReadUser({name='',email=''}={}){
+371:  const result=await schoolReadPost('login',{name:String(name||'').trim(),email:String(email||'').trim(),deviceId});
+372:  if(result?.ok&&result?.token){await saveSchoolReadSession({token:String(result.token),deviceId,user:result.user||{},expiresAt:Date.now()+Math.max(300,Number(result.expiresIn||0))*1000,savedAt:new Date().toISOString()});liveDataCache=null;liveDataFetchedAt=0;}
+375:async function schoolReadSessionStatus({verify=true}={}){
+378:  const session=await readSchoolReadSession();
+379:  if(!session?.token||!session?.deviceId)return {ok:endpointReady,authenticated:false,endpointReady,reason:endpointError,user:null,mode:'school_read_api'};
+380:  if(!verify)return {ok:true,authenticated:true,endpointReady,user:session.user||null,mode:'school_read_api'};
+381:  try{const result=await schoolReadPost('verify-token',{token:session.token,deviceId:session.deviceId});if(!result?.ok)throw schoolReadError(result?.message||'UEP 세션 확인 실패',result?.code||'UEP_SCHOOL_READ_TOKEN_INVALID');session.user=result.user||session.user||{};await saveSchoolReadSession(session);return {ok:true,authenticated:true,endpointReady:true,user:session.user,expiresAt:result.expiresAt||'',mode:'school_read_api'};}catch(error){await clearSchoolReadSession();return {ok:false,authenticated:false,endpointReady,reason:String(error?.message||error),code:error?.code||'',user:null,mode:'school_read_api'};}
+383:async function schoolReadBatchRead(spreadsheetId,ranges){
+384:  const session=await readSchoolReadSession();
+385:  if(!session?.token||!session?.deviceId)throw schoolReadError('UEP 로그인이 필요합니다.','UEP_SCHOOL_READ_LOGIN_REQUIRED');
+386:  const result=await schoolReadPost('batch-read',{token:session.token,deviceId:session.deviceId,spreadsheetId,ranges});
+387:  if(!result?.ok)throw schoolReadError(result?.message||'학교 데이터를 읽지 못했습니다.',result?.code||'UEP_SCHOOL_READ_BATCH_FAILED');
+421:  if(!payload||payload.version!==1||payload.algorithm!=='aes-256-gcm')throw new Error('invalid OAuth recovery token');
+437:  throw new Error('OAuth recovery token not found');
+467:  const response=await net.fetch('https://openidconnect.googleapis.com/v1/userinfo',{headers:{authorization:`Bearer ${accessToken}`}});
+472:  if(!saved?.refresh_token) throw googleOAuthError("Google 계정 연결을 다시 승인해 주세요.","UEP_GOOGLE_USER_AUTH_REQUIRED");
+478:  const body=new URLSearchParams({client_id:clientId,refresh_token:String(saved.refresh_token),grant_type:'refresh_token'});
+479:  const response=await net.fetch('https://oauth2.googleapis.com/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:body.toString()});
+498:  if(saved.access_token && Number(saved.expires_at||0)>Date.now()+90000) return String(saved.access_token);
+500:  if(!saved.access_token) throw googleOAuthError("Google 계정 액세스 토큰을 받지 못했습니다.","UEP_GOOGLE_USER_AUTH_REQUIRED");
+501:  return String(saved.access_token);
+504:  if(credentials){if(!validateServiceAccount(credentials))throw new Error("Google 서비스 계정 인증정보가 올바르지 않습니다.");return {token:await getSheetsToken(credentials),mode:'service_account',account:credentials.client_email||''};}
+505:  const session=await readSchoolReadSession();
+506:  if(session?.token&&session?.deviceId)return {token:'UEP_SCHOOL_READ:'+session.token,mode:'school_read_api',account:String(session?.user?.email||'')};
+507:  throw schoolReadError('교사 이름과 이메일로 UEP 로그인 후 학교 데이터를 불러올 수 있습니다.','UEP_SCHOOL_READ_LOGIN_REQUIRED');
+509:async function authorizeGoogleUser({loginHint=''}={}){
+521:      if(u.pathname!=='/' && u.pathname!=='/oauth2callback'){res.writeHead(404);res.end('Not found');return;}
+541:    const authUrl=new URL('https://accounts.google.com/o/oauth2/v2/auth');
+542:    authUrl.searchParams.set('client_id',clientId);
+543:    authUrl.searchParams.set('redirect_uri',redirectUri);
+544:    authUrl.searchParams.set('response_type','code');
+545:    authUrl.searchParams.set('scope','openid email https://www.googleapis.com/auth/spreadsheets.readonly');
+546:    authUrl.searchParams.set('code_challenge',challenge);
+547:    authUrl.searchParams.set('code_challenge_method','S256');
+548:    authUrl.searchParams.set('state',state);
+549:    authUrl.searchParams.set('access_type','offline');
+550:    authUrl.searchParams.set('prompt','consent');
+551:    if(String(loginHint||'').includes('@')) authUrl.searchParams.set('login_hint',String(loginHint).trim());
+552:    await shell.openExternal(authUrl.toString());
+561:    body.set('grant_type','authorization_code');
+562:    const response=await net.fetch('https://oauth2.googleapis.com/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded;charset=UTF-8','accept':'application/json'},body:body.toString()});
+574:    const tokenPayload=await response.json();
+575:    if(!tokenPayload.access_token) throw googleOAuthError('Google 액세스 토큰을 받지 못했습니다.','UEP_GOOGLE_OAUTH_TOKEN_FAILED');
+577:    try{info=await googleUserInfo(tokenPayload.access_token);}catch{}
+580:      const parts=String(tokenPayload.id_token||'').split('.');
+583:    const fallbackEmail=String(loginHint||'').trim();
+584:    const saved={...tokenPayload,client_id:clientId,email:String(info?.email||idTokenInfo?.email||fallbackEmail||''),sub:String(info?.sub||idTokenInfo?.sub||''),expires_at:Date.now()+Math.max(60,Number(tokenPayload.expires_in||3600))*1000,created_at:new Date().toISOString(),updated_at:new Date().toISOString()};
+587:    if(!verifySaved?.access_token) throw googleOAuthError('Google 승인 토큰 저장 확인에 실패했습니다.','UEP_GOOGLE_OAUTH_PERSIST_FAILED');
+597:    return {ok:true,authorized:true,mode:'user_oauth',account:saved.email,sourceName:data?.sourceName||UEP_SPREADSHEET_NAME,preview:data?.summary||null,syncedAt:data?.syncedAt||'',syncOk,syncError,syncCode};
+614:    scope: "https://www.googleapis.com/auth/spreadsheets",
+615:    aud: credentials.token_uri,
+622:    grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+625:  const response = await fetch(credentials.token_uri, {
+632:  if (!payload.access_token) throw new Error("Google 인증 토큰을 받지 못했습니다.");
+633:  return payload.access_token;
+636:async function readSheetBatch(token, spreadsheetId, ranges, attempt = 0) {
+637:  if(String(token||'').startsWith('UEP_SCHOOL_READ:')) return schoolReadBatchRead(spreadsheetId,ranges);
+643:  const response = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
+651:      return readSheetBatch(token, spreadsheetId, ranges, attempt + 1);
+680:async function updateSheetValues(token, spreadsheetId, range, values, attempt=0) {
+685:    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+694:      return updateSheetValues(token,spreadsheetId,range,values,attempt+1);
+701:async function batchUpdateSheetValues(token, spreadsheetId, data, attempt=0) {
+707:    headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"},
+716:      return batchUpdateSheetValues(token,spreadsheetId,items,attempt+1);
+747:  const token=await getSheetsToken(account);
+749:  const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,[range]);
+766:    await appendSheetValues(token,UEP_SPREADSHEET_ID,"'04_학생연락식별정보'!A:Z",[row]);
+770:    await updateSheetValues(token,UEP_SPREADSHEET_ID,`'04_학생연락식별정보'!${col}${sheetRow}:${col}${sheetRow}`,[[value]]);
+781:  const token = await getSheetsToken(account);
+784:  const sessionId = String(payload.sessionId||"").trim();
+815:    ? {sheet:"12_차시일정", keyNames:["차시ID"], keyValue:sessionId, fields:{date:["실제수업일","운영일자","예정일"], start:["시작시각"], end:["종료시각"], place:["장소"], teacher:["담당교사"]}}
+825:  const result = await readSheetBatch(token, UEP_SPREADSHEET_ID, [range]);
+875:    await updateSheetValues(token,UEP_SPREADSHEET_ID,`'${specs.sheet}'!${col}${sheetRow}:${col}${sheetRow}`,[[value]]);
+879:    const settingResult=await readSheetBatch(token,UEP_SPREADSHEET_ID,[settingRange]);
+889:    await updateSheetValues(token,UEP_SPREADSHEET_ID,`'00_UEP설정'!${col}${settingRow+1}:${col}${settingRow+1}`,[[commonReportFormUrl]]);
+891:  const programPatch={source,programId,sessionId,date,endDate,time:startTime&&endTime?startTime+'~'+endTime:time,startTime,endTime,place,teacher,title,actualTitle:title,recordTitle,department,subject,reportRequired:reportRequired===undefined?undefined:reportRequired==='Y',reportToAuthority:reportToAuthority===undefined?undefined:reportToAuthority==='Y',reportAgency,reportAfterDays,reportDeadline,photoRequired:photoRequired===undefined?undefined:photoRequired==='Y',memo,type:activityType,activityType,afterType,weekdays,operationPeriod,targetGrade,nightLinked:nightLinked===undefined?undefined:nightLinked==='Y',affectsAttendance:nightLinked===undefined?undefined:nightLinked==='Y',attendanceMethod,status,reportFormUrl:commonReportFormUrl===undefined?undefined:commonReportFormUrl,commonReportFormUrl};
+896:      const sameSession=!sessionId||String(row?.sessionId||'')===sessionId;
+906:async function clearSheetValues(token, spreadsheetId, range) {
+910:    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+940:  const token=await getSheetsToken(account);
+942:  const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,[range]);
+956:  if(sheetRow>0) await updateSheetValues(token,UEP_SPREADSHEET_ID,`'30_공결기록'!A${sheetRow}:Z${sheetRow}`,values);
+957:  else await appendSheetValues(token,UEP_SPREADSHEET_ID,"'30_공결기록'!A:Z",values);
+967:  const token=await getSheetsToken(account);
+968:  const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,["'30_공결기록'!A3:Z3000"]);
+973:  await clearSheetValues(token,UEP_SPREADSHEET_ID,`'30_공결기록'!A${sheetRow}:Z${sheetRow}`);
+984:  const token=await getSheetsToken(account); const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,["'31_지각기록'!A3:P3000"]); const matrix=result?.[0]?.values||[], rows=matrix.slice(1);
+989:  if(sheetRow>0)await updateSheetValues(token,UEP_SPREADSHEET_ID,`'31_지각기록'!A${sheetRow}:P${sheetRow}`,values); else await appendSheetValues(token,UEP_SPREADSHEET_ID,"'31_지각기록'!A:P",values);
+995:  const token=await getSheetsToken(account); const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,["'31_지각기록'!A3:P3000"]); const rows=(result?.[0]?.values||[]).slice(1);
+997:  await clearSheetValues(token,UEP_SPREADSHEET_ID,`'31_지각기록'!A${pos+4}:P${pos+4}`);const operational=await fetchOperationalData();return {ok:true,patch:operational.patch||{}};
+1065:  const token=await getSheetsToken(account), now=new Date().toISOString();
+1068:  const result=await readSheetBatch(token,UEP_RULES_SPREADSHEET_ID,[range]);
+1073:  if(pos>=0) await updateSheetValues(token,UEP_RULES_SPREADSHEET_ID,`'40_학사외출규칙'!A${pos+4}:X${pos+4}`,row);
+1074:  else await appendSheetValues(token,UEP_RULES_SPREADSHEET_ID,"'40_학사외출규칙'!A:X",row);
+1083:  const token=await getSheetsToken(account), range="'40_학사외출규칙'!A3:X1000";
+1084:  const result=await readSheetBatch(token,UEP_RULES_SPREADSHEET_ID,[range]);
+1088:  await clearSheetValues(token,UEP_RULES_SPREADSHEET_ID,`'40_학사외출규칙'!A${pos+4}:X${pos+4}`);
+1098:  const token=await getSheetsToken(account),now=new Date().toISOString(),today=now.slice(0,10);
+1099:  const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,["'56A_대학상담포인트DB'!A1:P1200"]);
+1115:  if(dataRow>=0){const sheetRow=dataRow+1;await updateSheetValues(token,UEP_SPREADSHEET_ID,`'56A_대학상담포인트DB'!A${sheetRow}:P${sheetRow}`,[row]);}else await appendSheetValues(token,UEP_SPREADSHEET_ID,"'56A_대학상담포인트DB'!A:P",[row]);
+1123:  const token=await getSheetsToken(account), now=new Date().toISOString(), id=String(payload.id||`CNS-${crypto.randomUUID()}`);
+1125:  const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,["'45_학생상담기록'!A3:R5000"]); const rows=(result?.[0]?.values||[]).slice(1); const pos=rows.findIndex(r=>String(r?.[0]||"")===id);
+1126:  if(pos>=0)await updateSheetValues(token,UEP_SPREADSHEET_ID,`'45_학생상담기록'!A${pos+4}:R${pos+4}`,row); else await appendSheetValues(token,UEP_SPREADSHEET_ID,"'45_학생상담기록'!A:R",row);
+1141:  const token=await getSheetsToken(account),now=new Date().toISOString(),id=String(payload.id||`OUT-TEACHER-${crypto.randomUUID()}`),grade=String(payload.grade||studentNo.slice(0,1)||'1'),className=String(payload.className||studentNo.slice(1,2)||''),number=String(payload.number||studentNo.slice(-2)).replace(/^0/,'');
+1142:  const existing=await readSheetBatch(token,UEP_SPREADSHEET_ID,["'02_학사외출_일자별'!A3:AD5000"]),matrix=existing?.[0]?.values||[],headers=(matrix[0]||[]).map(x=>String(x||'').trim()),col=(...names)=>names.map(n=>headers.indexOf(n)).find(i=>i>=0);
+1147:  await appendSheetValues(token,UEP_SPREADSHEET_ID,"'02_학사외출_일자별'!A:AD",row);
+1151:  const token=await getSheetsToken(account), now=new Date().toISOString(), id=String(payload.id||`GUIDE-${crypto.randomUUID()}`);
+1153:  const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,["'46_학생지도기록'!A3:N5000"]); const rows=(result?.[0]?.values||[]).slice(1); const pos=rows.findIndex(r=>String(r?.[0]||"")===id);
+1154:  if(pos>=0)await updateSheetValues(token,UEP_SPREADSHEET_ID,`'46_학생지도기록'!A${pos+4}:N${pos+4}`,row); else await appendSheetValues(token,UEP_SPREADSHEET_ID,"'46_학생지도기록'!A:N",row);
+1167:  const token=await getSheetsToken(account);
+1169:  const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,[range]);
+1179:  await updateSheetValues(token,UEP_SPREADSHEET_ID,`'43_야자감독계획'!${colLetter}${sheetRow}:${colLetter}${sheetRow}`,[[teacher]]);
+1195:  const token=await getSheetsToken(account);
+1197:  const result=await readSheetBatch(token,UEP_SPREADSHEET_ID,[range]);
+1213:  await updateSheetValues(token,UEP_SPREADSHEET_ID,`'42_급식지도계획'!${colLetter(teacherCol)}${sheetRow}:${colLetter(teacherCol)}${sheetRow}`,[[teacher]]);
+1214:  if(typeCol>=0) await updateSheetValues(token,UEP_SPREADSHEET_ID,`'42_급식지도계획'!${colLetter(typeCol)}${sheetRow}:${colLetter(typeCol)}${sheetRow}`,[[dutyType]]);
+1233:  const auth=await getReadonlySheetsAuth();
+1234:  const result=await readSheetBatch(auth.token,UEP_INPUT_CENTER_SPREADSHEET_ID,["'02_자료원본'!A1:X10000"]);
+1248:  let token=null;
+1252:    token=await getSheetsToken(account);
+1280:    const result=await readSheetBatch(token,UEP_INPUT_CENTER_SPREADSHEET_ID,["'02_자료원본'!A3:X10000"]);
+1299:    await appendSheetValues(token,UEP_INPUT_CENTER_SPREADSHEET_ID,"'01_입력배치'!A:R",[batchRow]);
+1300:    if(newItems.length)await appendSheetValues(token,UEP_INPUT_CENTER_SPREADSHEET_ID,"'02_자료원본'!A:X",newItems.map(x=>x.row));
+1301:    for(const item of updateItems)await updateSheetValues(token,UEP_INPUT_CENTER_SPREADSHEET_ID,`'02_자료원본'!A${item.existing.sheetRow}:X${item.existing.sheetRow}`,[item.row]);
+1303:    await appendSheetValues(token,UEP_INPUT_CENTER_SPREADSHEET_ID,"'90_처리로그'!A:P",[logRow]);
+1369:async function appendSheetValues(token, spreadsheetId, range, values) {
+1375:    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+1419:async function queueSelectedReportRepair08204(token,reason=''){
+1422:  await appendSheetValues(token,UEP_PROCESSING_SPREADSHEET_ID,"'92_재처리대기'!A:K",[[id,'03_선택활동보고서','선택보고서 자동정규화','원본-정규화 무결성',String(reason||'자동 복구 실패'),now,'0','','대기','','v0.82.04 자동감지']]);
+1424:async function repairSelectedReportTailGaps08204(token,current=[]){
+1436:    readSheetBatch(token,RESPONSE_SHEET_ID,["'03_선택활동보고서'!A1:M5000"]),
+1437:    readSheetBatch(token,UEP_SPREADSHEET_ID,["'02_학생마스터'!A1:R1500"]),
+1438:    readSheetBatch(token,UEP_SPREADSHEET_ID,["'10_선택활동마스터'!A1:AL1500"])
+1485:  await updateSheetValues(token,UEP_PROCESSING_SPREADSHEET_ID,`'21_선택보고서_정규화'!A${start}:X${end}`,rows);
+1492:async function ensureSelectedReportNormalization(token){
+1494:  const currentResult=await readSheetBatch(token,UEP_PROCESSING_SPREADSHEET_ID,[`'${target}'!A1:X5000`]);
+1500:    try{return await repairSelectedReportTailGaps08204(token,current);}
+1501:    catch(error){try{await queueSelectedReportRepair08204(token,error?.message||String(error));}catch{}throw error;}
+1506:    readSheetBatch(token,RESPONSE_SHEET_ID,["'03_선택활동보고서'!A1:M5000"]),
+1507:    readSheetBatch(token,UEP_SPREADSHEET_ID,["'02_학생마스터'!A1:R1500"]),
+1508:    readSheetBatch(token,UEP_SPREADSHEET_ID,["'10_선택활동마스터'!A1:AL1500"])
+1558:  await clearSheetValues(token,UEP_PROCESSING_SPREADSHEET_ID,`'${target}'!A3:X5000`);
+1559:  await updateSheetValues(token,UEP_PROCESSING_SPREADSHEET_ID,`'${target}'!A3:X${rows.length+3}`,[required,...rows]);
+1567:  const auth=await getReadonlySheetsAuth(credentials),token=auth.token;
+1571:    readSheetBatch(token,UEP_SPREADSHEET_ID,operationalEntries.map(([,range])=>range)),
+1572:    readSheetBatch(token,UEP_PROCESSING_SPREADSHEET_ID,["'30_야자출결_정규화'!A1:U70000"]),
+1573:    readSheetBatch(token,UEP_SPREADSHEET_ID,afterEntries.map(([,range])=>range))
+1612:  const auth = await getReadonlySheetsAuth(credentials);
+1613:  const token = auth.token;
+1628:      const valueRanges = await readSheetBatch(token, UEP_SPREADSHEET_ID, chunk.map(([, range]) => range));
+1634:          const one = await readSheetBatch(token, UEP_SPREADSHEET_ID, [range]);
+1647:  if(auth.mode!=='school_read_api') await ensureSelectedReportNormalization(token);
+1661:    const result = await readSheetBatch(token, UEP_PROCESSING_SPREADSHEET_ID, processingRanges.map(([,range])=>range));
+1668:      try{const one=await readSheetBatch(token,UEP_PROCESSING_SPREADSHEET_ID,[range]);matrices[logicalName]=one?.[0]?.values||[];}
+1678:    const inputResult=await readSheetBatch(token,UEP_INPUT_CENTER_SPREADSHEET_ID,["'02_자료원본'!A1:X10000"]);
+1688:    const rawSelection = await readSheetBatch(token, "1K-Me8Pm8T2d5fGHoqSPEAu4RXozETUQ-N5pZVxjs8Hw", ["'06_선택과목응답'!A1:U2000"]);
+1699:    const ruleValueRanges = await readSheetBatch(token, UEP_RULES_SPREADSHEET_ID, ruleEntries.map(([, range]) => range));
+1706:        const one = await readSheetBatch(token, UEP_RULES_SPREADSHEET_ID, [range]);
+1718:      token,
+1741:    const one = await readSheetBatch(token, curriculumSpreadsheetId, [range]);
+1754:      const result=await readSheetBatch(token,officialSourceId,officialTabs.map(tab=>`'${tab.replace(/'/g,"''")}'!A1:AM1200`));
+1765:  try{for(let offset=0;offset<uep08259AdmissionEntries.length;offset+=6){const chunk=uep08259AdmissionEntries.slice(offset,offset+6);try{const vr=await schoolReadBatchRead(UEP_ADMISSIONS_SPREADSHEET_ID,chunk.map(([,range])=>range));assignValueRangesByRange(matrices,chunk,vr);}catch(primaryError){console.warn('[UEP] 새 입시DB School Read 실패, 기존 52~58 안전원본으로 전환',primaryError?.message||primaryError);const legacyChunk=chunk.filter(([logicalName])=>!/^59A?_/.test(logicalName));for(const [logicalName] of chunk){if(/^59A?_/.test(logicalName))matrices[logicalName]=[];}if(legacyChunk.length){const fallbackVr=await schoolReadBatchRead(UEP_ADMISSIONS_FALLBACK_SPREADSHEET_ID,legacyChunk.map(([,range])=>range));assignValueRangesByRange(matrices,legacyChunk,fallbackVr);}}}}catch(admissionError){console.warn('[UEP] 2028 입시DB 조회 실패',admissionError?.message||admissionError);for(const [logicalName] of uep08259AdmissionEntries)if(!Array.isArray(matrices[logicalName]))matrices[logicalName]=[];}
+1824:    account: auth.account || "",
+2206:  const status=await schoolReadSessionStatus({verify:true});
+2207:  if(!status?.authenticated||!status?.user)throw boardWriteError08291('UEP 로그인 세션을 확인해 주세요.','UEP_BOARD_LOGIN_REQUIRED');
+2213:  const token=await getSheetsToken(credentials);
+2214:  return {token,user,isAdmin};
+2216:async function boardSheetsJson08291(token,url,options={}){
+2217:  const response=await net.fetch(url,{...options,headers:{authorization:'Bearer '+token,'content-type':'application/json;charset=UTF-8',...(options.headers||{})}});
+2222:async function boardAppend08291(token,sheet,values){
+2226:  return boardSheetsJson08291(token,url,{method:'POST',body:JSON.stringify({majorDimension:'ROWS',values:[values]})});
+2228:async function boardReadRange08291(token,a1){
+2230:  const data=await boardSheetsJson08291(token,url,{method:'GET'});return data.values||[];
+2254:  try{await boardAppend08291(ctx.token,'15_운영로그',[boardId,boardId,boardNow08291(),'PC_WRITE',feature,result,boardSafeText08291(detail,1000),'0.82.91',boardSafeText08291((ctx.displayAuthor||ctx.user?.name||'')+' / '+(ctx.user?.email||''),300)]);}catch(error){console.warn('[UEP Board audit]',error);}
+2269:      const appended=await boardAppend08291(ctx.token,noticeSheet08291(t),row);const verified=await boardVerifyAppend08293(ctx.token,appended,id,ctx.displayAuthor);if(!verified.ok)throw boardWriteError08291('Board DB 저장 후 재확인에 실패했습니다: '+verified.reason,'UEP_BOARD_NOTICE_VERIFY');await boardAudit08291(ctx,'공지','SUCCESS',id+' / '+t.label,id);return {ok:true,id,target:t.label,sheet:noticeSheet08291(t),verified:true,range:verified.range,author:ctx.displayAuthor};
+2274:      await boardAppend08291(ctx.token,'09_일정',[id,boardSafeText08291(d.date,20),boardSafeText08291(d.endDate||d.date,20),boardSafeText08291(d.category,50)||'학교일정',t.grade,t.classNo,boardSafeText08291(d.title,120),boardSafeText08291(d.body,1000),boardSafeText08291(d.importance,20)||'일반','Y','UEP PC',id,now,'',boardSafeText08291(d.startPeriod,20),'',boardSafeText08291(d.endPeriod,20),'',boardSafeText08291(ctx.displayAuthor||ctx.user.name,80),boardSafeText08291(ctx.user.userId||ctx.user.email,120)]);
+2280:      await boardAppend08291(ctx.token,'05A_임시시간표변경',[id,boardId,boardSafeText08291(d.date,20),new Date().getFullYear(),'2',cls.grade,cls.classNo,boardSafeText08291(d.period,10),boardSafeText08291(d.subject,80),boardSafeText08291(d.teacher,80),boardSafeText08291(d.place,80),boardSafeText08291(d.reason,200),'Y',boardSafeText08291(ctx.displayAuthor||ctx.user.name,80),boardSafeText08291(ctx.user.userId||ctx.user.email,120),now,now,'UEP PC']);
+2286:      await boardAppend08291(ctx.token,'22_시험운영',[id,boardSafeText08291(d.name,120)||'시험',date,date,t.grade,t.classNo,'Y',boardSafeText08291(d.modeStart,10),boardSafeText08291(d.modeEnd,10),boardSafeText08291(d.caution1,300),boardSafeText08291(d.caution2,300),boardSafeText08291(d.urgent,500),'Y','UEP PC',id,now,'layout='+boardSafeText08291(d.layout,80)+'; attendance='+boardSafeText08291(d.attendance,80)]);
+2287:      const periods=Array.isArray(d.periods)?d.periods:[];for(const p of periods){if(!boardSafeText08291(p.subject,80))continue;await boardAppend08291(ctx.token,'23_시험시간표',[boardId08291('EXAMP'),id,date,t.grade,t.classNo,boardSafeText08291(p.period,10),boardSafeText08291(p.subject,80),boardSafeText08291(p.start,10),boardSafeText08291(p.end,10),'Y','UEP PC',id,now,'']);}
+2300:  const values=await boardReadRange08291(ctx.token,"'"+sheet+"'!A3:"+endCol+maxRow);if(!values.length)return [];
+2304:  const hv=await boardReadRange08291(ctx.token,"'"+sheet+"'!A3:Z3");const h=(hv[0]||[]).map(v=>String(v||'').trim());const data=[];
+2307:  await boardUpdateValues08293(ctx.token,data);return data.length;
+2310:  const ids=boardUserIds08293(ctx),authorId=String(o['작성자ID']||'').trim(),author=String(o['작성자']||'').trim();
+2311:  return Boolean((authorId&&ids.has(authorId))||(!authorId&&author&&author===boardDisplayAuthor08293(ctx,{})));
+2327:        out.push({kind,sheet,rowNumber:x.rowNumber,id:String(o['공지ID']||''),target:String(o['표시대상']||''),title:String(o['제목']||''),body:String(o['핵심문구']||''),startDate:boardDate08296(o['게시시작']),endDate:boardDate08296(o['게시종료']),importance:String(o['중요도']||''),durationType:String(o['게시시간유형']||''),startTime:String(o['게시시작시각']||''),endTime:String(o['게시종료시각']||''),author:String(o['작성자']||''),own:true});
+2334:      out.push({kind,sheet:'09_일정',rowNumber:x.rowNumber,id:String(o['일정ID']||''),target,title:String(o['제목']||''),body:String(o['핵심문구']||''),date:boardDate08296(o['일자']),endDate:boardDate08296(o['종료일']),category:String(o['구분']||''),importance:String(o['중요도']||''),startPeriod:String(o['시작교시']||''),endPeriod:String(o['종료교시']||''),author:String(o['작성자']||''),own:true});
+2391:async function boardSheetObjects08296(token,sheet,range='A3:Z1000'){
+2392:  const rows=await boardReadRange08291(token,"'"+sheet+"'!"+range);if(!rows.length)return [];
+2407:  const masters=await boardSheetObjects08296(ctx.token,'01_Board마스터','A3:N100');
+2417:    const rows=await boardSheetObjects08296(ctx.token,sheet,'A3:V500');
+2419:      id:String(r['공지ID']||''),title:String(r['제목']||''),body:String(r['핵심문구']||''),importance:boardPriority08296(r['중요도']),source:sheet,author:String(r['작성자']||''),start:boardDate08296(r['게시시작']),end:boardDate08296(r['게시종료'])
+2424:  let schedules=(await boardSheetObjects08296(ctx.token,'09_일정','A3:T800')).filter(r=>{
+2427:  }).map(r=>({id:String(r['일정ID']||''),date:boardDate08296(r['일자']),endDate:boardDate08296(r['종료일'])||boardDate08296(r['일자']),category:String(r['구분']||''),title:String(r['제목']||''),body:String(r['핵심문구']||''),startPeriod:String(r['시작교시']||''),startTime:boardClock08296(r['시작시각']).slice(0,5),endPeriod:String(r['종료교시']||''),endTime:boardClock08296(r['종료시각']).slice(0,5),author:String(r['작성자']||'')}));
+2430:  let timetable=(await boardSheetObjects08296(ctx.token,'05_학급시간표','A3:Q800')).filter(r=>boardEnabled08296(r['사용여부'])&&String(r['BoardID']||'').trim()===boardId&&(!schoolYear||String(r['학년도']||'').trim()===schoolYear)&&String(r['학년']||'').trim()===grade&&boardClassNorm08296(r['반'])===classNo&&String(r['요일']||'').trim()===weekday).map(r=>({period:Number(r['교시']||0),subject:String(r['과목']||''),teacher:String(r['교사']||''),room:String(r['교실']||'')})).sort((a,b)=>a.period-b.period);
+2432:  const exams=(await boardSheetObjects08296(ctx.token,'22_시험운영','A3:Q300')).filter(r=>{
+2439:    const examTimetable=(await boardSheetObjects08296(ctx.token,'23_시험시간표','A3:Q600')).filter(r=>boardEnabled08296(r['사용여부'])&&String(r['시험ID']||'')===examId&&boardDate08296(r['시험일자']||r['일자'])===today).filter(r=>{const tg=String(r['대상학년']||'').trim(),tc=boardClassNorm08296(r['대상반']);return (!tg||tg==='전체'||tg===grade)&&(!tc||tc==='전체'||tc===classNo);}).map(r=>({period:String(r['교시']||''),subject:String(r['과목']||''),startTime:boardClock08296(r['시작시각']).slice(0,5),endTime:boardClock08296(r['종료시각']).slice(0,5)})).sort((a,b)=>Number(a.period||999)-Number(b.period||999));
+2443:  return {ok:true,board,grade,classNo,displayMode,notices,schedules,timetable,exam,screenScheduleCount:exam.active?exam.timetable.length:schedules.length,sessionVerified:ctx.sessionVerified,fallback:ctx.fallback};
+2460:  const masterRows=await boardReadRange08291(ctx.token,"'01_Board마스터'!A3:N100");
+2471:    const rows=await boardReadRange08291(ctx.token,"'"+sheet+"'!A3:V500");
+2478:      notices.push({id:String(r[0]||''),target:String(r[2]||''),importance:String(r[6]||''),title:String(r[7]||''),body:String(r[8]||''),author:String(r[10]||''),start,end,sheet});
+2482:  for(const r of await boardReadRange08291(ctx.token,"'09_일정'!A3:T800")){
+2490:  for(const r of await boardReadRange08291(ctx.token,"'05A_임시시간표변경'!A3:R800")){
+2496:  for(const r of await boardReadRange08291(ctx.token,"'22_시험운영'!A3:Q300")){
+2502:  return {ok:true,board,grade,classNo,notices,schedules,timetable,exams,sessionVerified:ctx.sessionVerified,fallback:ctx.fallback};
+2517:  const raw=Array.isArray(d.targets)&&d.targets.length?d.targets:[d.target||'내 반'],masters=await boardSheetObjects08296(ctx.token,'01_Board마스터','A3:P200'),special=masters.filter(b=>String(b['Board유형']||'')==='SPECIAL_ROOM'&&boardEnabled08296(b['사용여부'])),out=[];
+2521:async function boardVerifyAppend08301(token,result,id,author){const range=String(result?.updates?.updatedRange||'');if(!range)throw boardWriteError08291('저장 범위 재확인 실패','UEP_BOARD_VERIFY');const row=(await boardReadRange08291(token,range))?.[0]||[];if(String(row[0]||'')!==id||!row.some(v=>String(v||'')===String(author||'')))throw boardWriteError08291('Board DB 저장 후 재확인에 실패했습니다.','UEP_BOARD_VERIFY');return range;}
+2524:  const ctx=await boardWriteContext08291({adminOnly:kind==='boardModeSet'}),d=payload.data&&typeof payload.data==='object'?payload.data:{};ctx.displayAuthor=boardDisplayAuthor08293(ctx,d);const author=boardSafeText08291(ctx.displayAuthor||ctx.user.name,80),authorId=boardSafeText08291(ctx.user.userId||ctx.user.email,120),now=boardNow08291();
+2526:    if(kind==='boardModeSet'){const id=boardSafeText08291(d.boardId,120),mode=boardSafeText08291(d.mode,20).toUpperCase(),rows=await boardReadRange08291(ctx.token,"'01_Board마스터'!A3:P200");if(!id||!['CLASS','SPECIAL'].includes(mode))throw boardWriteError08291('특별실과 운영모드를 확인해 주세요.','UEP_BOARD_MODE_INVALID');const h=rows[0]||[],ic=h.indexOf('BoardID'),tc=h.indexOf('Board유형'),mc=h.indexOf('기본모드'),idx=rows.slice(1).findIndex(r=>String(r[ic]||'')===id&&String(r[tc]||'')==='SPECIAL_ROOM');if(idx<0||mc<0)throw boardWriteError08291('특별실 Board를 찾을 수 없습니다.','UEP_BOARD_SPECIAL_NOT_FOUND');const rn=idx+4,col=boardCol08297(mc+1);await boardUpdateValues08293(ctx.token,[{range:"'01_Board마스터'!"+col+rn,values:[[mode]]}]);const ck=await boardReadRange08291(ctx.token,"'01_Board마스터'!"+col+rn+':'+col+rn);if(String(ck?.[0]?.[0]||'').toUpperCase()!==mode)throw boardWriteError08291('운영모드 저장 재확인 실패','UEP_BOARD_MODE_VERIFY');await boardAudit08291(ctx,'특별실운영모드','SUCCESS',id+' / '+mode,id);return {ok:true,boardId:id,mode,verified:true};}
+2528:    if(kind==='noticeCreate'){const type=boardSafeText08291(d.type,40)||'일반',importance=type==='긴급'?'긴급':(['조회(아침)','종례(하교)'].includes(type)?'중요':'일반');for(const t of targets){const id=boardId08291('NOTICE-PC'),sheet=t.grade==='1'?'06_1학년공지':t.grade==='2'?'07_2학년공지':'08_전교공지',start=boardSafeText08291(d.startDate,20),end=boardSafeText08291(d.endDate,20),title=boardSafeText08291(d.title,100),body=boardSafeText08291(d.body,1000);const row=sheet==='08_전교공지'?[id,'UEP PC',t.label,t.grade||'',t.classNo||'',start,end,importance,title,body,'Y',author,now,now,'유형:'+type,type,'','',authorId,boardSafeText08291(d.linkUrl,500),'',t.boardId||'',t.kind]:[id,'UEP PC',t.label,t.classNo||'',start,end,importance,title,body,'Y',author,now,now,'유형:'+type,type,'','',authorId,boardSafeText08291(d.linkUrl,500),'',t.boardId||'',t.kind];const ap=await boardAppend08291(ctx.token,sheet,row),range=await boardVerifyAppend08301(ctx.token,ap,id,author);saved.push({id,sheet,target:t.label,range});}}
+2529:    else{for(const t of targets){const id=boardId08291('SCHEDULE-PC');await boardAppend08291(ctx.token,'09_일정',[id,boardSafeText08291(d.date,20),boardSafeText08291(d.endDate||d.date,20),boardSafeText08291(d.category,50)||'학교일정',t.grade||'',t.classNo||'',boardSafeText08291(d.title,120),boardSafeText08291(d.body,1000),boardSafeText08291(d.importance,20)||'일반','Y','UEP PC',id,now,'',boardSafeText08291(d.startPeriod,20),boardSafeText08291(d.startTime,20),boardSafeText08291(d.endPeriod,20),boardSafeText08291(d.endTime,20),author,authorId,t.boardId||'',t.kind]);saved.push({id,sheet:'09_일정',target:t.label});}}
+2530:    await boardAudit08291(ctx,kind==='noticeCreate'?'공지':'일정','SUCCESS',saved.map(x=>x.id+' / '+x.target).join(' ; '),saved[0]?.id||'PC');return {ok:true,ids:saved.map(x=>x.id),items:saved,target:saved.map(x=>x.target).join(', '),sheet:saved.length===1?saved[0].sheet:'MULTI',verified:kind==='noticeCreate',author};
+2534:async function boardDbStatus08301(ui={}){const ctx=await boardDbReadContext08294(ui),rows=await boardReadRange08291(ctx.token,"'01_Board마스터'!A3:P200");if(!rows.length)return {ok:true,boards:[],user:ctx.user};const h=rows[0].map(v=>String(v||'').trim()),boards=rows.slice(1).filter(r=>r.some(v=>String(v||'').trim())).map(r=>Object.fromEntries(h.map((k,i)=>[k,r[i]??'']))),visible=ctx.isAdmin?boards:boards.filter(b=>String(b['학년']||'')===String(ctx.user.grade||'')&&String(b['반']||'')===String(ctx.user.homeroom||''));return {ok:true,boards:visible,user:ctx.user,isAdmin:ctx.isAdmin,sessionVerified:ctx.sessionVerified,fallback:ctx.fallback};}
+2536:  const base=await boardDbDetail08296(payload),ui=payload?.user&&typeof payload.user==='object'?payload.user:{},ctx=await boardDbReadContext08294(ui),masters=await boardSheetObjects08296(ctx.token,'01_Board마스터','A3:P200'),board=masters.find(b=>String(b['BoardID']||'')===String(payload.boardId||''))||base.board,special=String(board?.['Board유형']||'')==='SPECIAL_ROOM';
+2537:  const allSchedules=await boardSheetObjects08296(ctx.token,'09_일정','A3:V1200');if(!special){const specialIds=new Set(allSchedules.filter(r=>String(r['대상BoardID']||'').trim()||/^특별실/.test(String(r['대상구분']||''))).map(r=>String(r['일정ID']||'')));base.schedules=(base.schedules||[]).filter(x=>!specialIds.has(String(x.id||'')));base.screenScheduleCount=base.exam?.active?(base.exam.timetable||[]).length:base.schedules.length;return base;}
+2539:  const notices=(await boardSheetObjects08296(ctx.token,'08_전교공지','A3:W800')).filter(r=>boardEnabled08296(r['사용여부'])&&(!boardDate08296(r['게시시작'])||boardDate08296(r['게시시작'])<=today)&&(!boardDate08296(r['게시종료'])||boardDate08296(r['게시종료'])>=today)&&(boardSpecialMatch08301(r['대상BoardID'],board)||boardSpecialMatch08301(r['대상구분'],board)||boardSpecialMatch08301(r['표시대상'],board))).map(r=>({id:String(r['공지ID']||''),title:String(r['제목']||''),body:String(r['핵심문구']||''),importance:boardPriority08296(r['중요도']),source:'08_전교공지',author:String(r['작성자']||'')})).sort((a,b)=>b.importance-a.importance).slice(0,12);
+2540:  const schedules=allSchedules.filter(r=>{if(!boardEnabled08296(r['사용여부']))return false;const st=boardDate08296(r['일자']),ed=boardDate08296(r['종료일'])||st;return st&&ed>=today&&(boardSpecialMatch08301(r['대상BoardID'],board)||boardSpecialMatch08301(r['대상구분'],board));}).map(r=>({id:String(r['일정ID']||''),date:boardDate08296(r['일자']),endDate:boardDate08296(r['종료일'])||boardDate08296(r['일자']),category:String(r['구분']||''),title:String(r['제목']||''),body:String(r['핵심문구']||''),startPeriod:String(r['시작교시']||''),startTime:boardClock08296(r['시작시각']).slice(0,5),endPeriod:String(r['종료교시']||''),endTime:boardClock08296(r['종료시각']).slice(0,5),author:String(r['작성자']||'')})).sort((a,b)=>a.date.localeCompare(b.date)).slice(0,12);
+2541:  const timetable=(await boardSheetObjects08296(ctx.token,'05_학급시간표','A3:Q1200')).filter(r=>boardEnabled08296(r['사용여부'])&&String(r['BoardID']||'')===boardId&&(!year||String(r['학년도']||'')===year)&&String(r['요일']||'')===weekday).map(r=>({period:Number(r['교시']||0),subject:String(r['과목']||''),teacher:String(r['담당교사']||r['교사']||''),room:String(r['교실']||''),grade:String(r['학년']||''),classNo:boardClassNorm08296(r['반'])})).sort((a,b)=>a.period-b.period);
+2547:  let status=null;try{status=await schoolReadSessionStatus({verify:true});}catch{}
+2548:  const verified=Boolean(status?.authenticated&&status?.user);
+2561:  const token=await getSheetsToken(credentials);
+2563:  return {token,user,isAdmin,sessionVerified:verified,fallback:!verified};
+2568:  const rows=await boardReadRange08291(ctx.token,"'01_Board마스터'!A3:N100");if(!rows.length)return {ok:true,boards:[],user:ctx.user};
+2571:  return {ok:true,boards:visible,user:ctx.user,isAdmin:ctx.isAdmin,sessionVerified:ctx.sessionVerified,fallback:ctx.fallback};
+2576:  const candidates=[data.author,ctx?.displayAuthor,ctx?.user?.name,ctx?.user?.displayName,ctx?.user?.teacherName];
+2581:async function boardVerifyAppend08293(token,appendResult,expectedId,author=''){
+2583:  const rows=await boardReadRange08291(token,range),row=rows?.[0]||[];const id=String(row[0]||'').trim(),savedAuthor=String(row[10]||'').trim();
+2584:  if(id!==String(expectedId||''))return {ok:false,reason:'저장 ID 재확인 실패',range};if(author&&savedAuthor!==author)return {ok:false,reason:'작성자 재확인 실패',range,savedAuthor};return {ok:true,range,savedAuthor};
+2586:async function boardUpdateValues08293(token,data){
+2588:  return boardSheetsJson08291(token,url,{method:'POST',body:JSON.stringify({valueInputOption:'USER_ENTERED',data})});
+2593:    const values=await boardReadRange08291(ctx.token,"'"+sheet+"'!A3:U3000");if(!values.length)continue;const h=values[0].map(v=>String(v||''));
+2595:      const authorId=String(o['작성자ID']||'').trim(),author=String(o['작성자']||'').trim(),target=String(o['표시대상']||''),classNo=String(o['대상반']||'').replace(/\D/g,'');
+2596:      const sheetGrade=sheet==='06_1학년공지'?'1':sheet==='07_2학년공지'?'2':'';const own=(authorId&&ids.has(authorId))||(!authorId&&author&&author===boardDisplayAuthor08293(ctx,{}));
+2598:      out.push({sheet,rowNumber:i+4,noticeId:String(o['공지ID']||''),target,importance:String(o['중요도']||''),title:String(o['제목']||''),message:String(o['핵심문구']||''),startDate:String(o['게시시작']||''),endDate:String(o['게시종료']||''),author,authorId,own,homeroom,canDelete:Boolean(ctx.isAdmin||own||homeroom)});
+2608:  const now=boardNow08291();await boardUpdateValues08293(ctx.token,[{range:"'"+sheet+"'!J"+item.rowNumber,values:[['N']]},{range:"'"+sheet+"'!M"+item.rowNumber,values:[[now]]}]);
+2609:  const check=await boardReadRange08291(ctx.token,"'"+sheet+"'!A"+item.rowNumber+":M"+item.rowNumber);if(String(check?.[0]?.[9]||'').trim().toUpperCase()!=='N')throw boardWriteError08291('공지 삭제 상태 재확인에 실패했습니다.','UEP_BOARD_NOTICE_DELETE_VERIFY');
+2635:  ipcMain.handle("uep:schoolReadLogin", async (_event,payload={}) => { try{return await loginSchoolReadUser(payload);}catch(error){return {ok:false,code:error?.code||'UEP_SCHOOL_READ_ERROR',message:error?.message||String(error)};} });
+2636:ipcMain.handle("uep:schoolReadSessionStatus", async (_event,payload={}) => { try{return await schoolReadSessionStatus(payload);}catch(error){return {ok:false,authenticated:false,code:error?.code||'UEP_SCHOOL_READ_ERROR',reason:error?.message||String(error),mode:'school_read_api'};} });
+2637:ipcMain.handle("uep:schoolReadLogout", async () => { try{return await clearSchoolReadSession();}catch(error){return {ok:false,reason:error?.message||String(error)};} });
+2665:    if (validateServiceAccount(credentials)) return {ok:true,encryption:safeStorage.isEncryptionAvailable(),local:false,mode:"service_account",account:credentials.client_email||"",userOAuth:false,autoConnected:true,loginIdentityGateway:true,approvalRequired:false,tokenExchangeRequired:false};
+2667:  return {ok:true,local:true,mode:"login_identity",account:"",userOAuth:false,autoConnected:true,loginIdentityGateway:true,approvalRequired:false,tokenExchangeRequired:false,reason:"UEP 로그인 이름·이메일로 교사·담임을 식별합니다."};
+2669:ipcMain.handle("google:authorizeUser", async () => {
+2670:  return {ok:true,skipped:true,mode:"login_identity",autoConnected:true,approvalRequired:false,tokenExchangeRequired:false,message:"별도 Google 계정 승인은 사용하지 않습니다. UEP 로그인 이름·이메일로 담임 권한을 적용합니다."};
+2673:  const result={authorized:false,account:"",tokenOk:false,sheetsOk:false,reason:"",status:0};
+2677:    result.authorized=true;result.account=String(saved.email||"");
+2678:    const token=await getGoogleUserSheetsToken();
+2679:    result.tokenOk=Boolean(token);
+2681:      await readSheetBatch(token,UEP_SPREADSHEET_ID,["'01_사용자계정'!A1:B2"]);
+2751:    const token=await getSheetsToken(account);const result=await readSheetBatch(token,UEP_INPUT_CENTER_SPREADSHEET_ID,["'02_자료원본'!A3:X10000"]);const rows=(result?.[0]?.values||[]).slice(1);
+2754:    await batchUpdateSheetValues(token,UEP_INPUT_CENTER_SPREADSHEET_ID,writes);
+2765:    const token=await getSheetsToken(account);
+2768:    const existingResult=await readSheetBatch(token,UEP_PROCESSING_SPREADSHEET_ID,[`'${targetSheet}'!A3:X${INPUT_END_ROW}`]);
+2825:    await batchUpdateSheetValues(token,UEP_PROCESSING_SPREADSHEET_ID,reportUpdates);
+2832:      await updateSheetValues(token,UEP_PROCESSING_SPREADSHEET_ID,`'${targetSheet}'!A${start}:X${end}`,news.map(a=>a.row));
+2835:    const srcResult=await readSheetBatch(token,UEP_INPUT_CENTER_SPREADSHEET_ID,["'02_자료원본'!A3:X10000"]);
+2843:    await batchUpdateSheetValues(token,UEP_PROCESSING_SPREADSHEET_ID,deleteWrites);
+2847:    const verifyResult=await readSheetBatch(token,UEP_PROCESSING_SPREADSHEET_ID,[`'${targetSheet}'!A3:X${INPUT_END_ROW}`]);
+2865:    await batchUpdateSheetValues(token,UEP_INPUT_CENTER_SPREADSHEET_ID,statusWrites);
+2894:async function readNoticeSheetMatrix(token, sheetName, range) {
+2895:  const result = await readSheetBatch(token, UEP_SPREADSHEET_ID, [`'${sheetName}'!${range}`]);
+2906:    "담당부서":String(payload.department||"1학년부"),"담당자":String(payload.author||""),"상태":String(payload.status||"게시"),
+2907:    "수정일시":nowIso,"수정자":String(payload.author||"UEP"),"비고":String(payload.note||"UEP 화면 입력"),
+2919:    const token = await getSheetsToken(account);
+2920:    const matrix = await readNoticeSheetMatrix(token, "01_사용자계정", "A1:Z500");
+2937:    await updateSheetValues(token,UEP_SPREADSHEET_ID,`'01_사용자계정'!A${rowIndex+1}:${columnLetter(headers.length-1)}${rowIndex+1}`,[row]);
+2951:    const token=await getSheetsToken(account);
+2952:    const matrix=await readNoticeSheetMatrix(token,'00_UEP설정','A1:F500');
+2962:      await updateSheetValues(token,UEP_SPREADSHEET_ID,`'00_UEP설정'!A${rowIndex+1}:${columnLetter(headers.length-1)}${rowIndex+1}`,[row]);
+2966:      await appendSheetValues(token,UEP_SPREADSHEET_ID,`'00_UEP설정'!A:${columnLetter(headers.length-1)}`,[row]);
+2976:    const session=await readSchoolReadSession().catch(()=>null);
+2977:    if(session?.token&&session?.deviceId){
+2978:      const ranges=await schoolReadBatchRead(UEP_SPREADSHEET_ID,["'00_UEP설정'!A3:E100"]);
+2983:      const token=await getSheetsToken(account);
+2984:      const matrix=await readNoticeSheetMatrix(token,'00_UEP설정','A3:E100');
+3005:    const token=await getSheetsToken(account);
+3006:    const matrix=await readNoticeSheetMatrix(token,'00_UEP설정','A1:F500');
+3015:      await updateSheetValues(token,UEP_SPREADSHEET_ID,`'00_UEP설정'!A${rowIndex+1}:${columnLetter(headers.length-1)}${rowIndex+1}`,[row]);
+3032:    const token = await getSheetsToken(account);
+3035:    const matrix = await readNoticeSheetMatrix(token, "40_공지마감", "A1:AZ2000");
+3046:      await updateSheetValues(token,UEP_SPREADSHEET_ID,`'40_공지마감'!${columnLetter(col)}${header.index+1}:${columnLetter(col)}${header.index+1}`,[["마감유형"]]);
+3054:      await updateSheetValues(token, UEP_SPREADSHEET_ID, `'40_공지마감'!A${rowIndex+1}:${endCol}${rowIndex+1}`, [row]);
+3056:      await appendSheetValues(token, UEP_SPREADSHEET_ID, `'40_공지마감'!A:${endCol}`, [row]);
+3065:    const token=await getSheetsToken(account), matrix=await readNoticeSheetMatrix(token,"40_공지마감","A1:V2000");
+3069:    if(statusCol>=0) await updateSheetValues(token,UEP_SPREADSHEET_ID,`'40_공지마감'!${columnLetter(statusCol)}${rowIndex+1}:${columnLetter(statusCol)}${rowIndex+1}` ,[["삭제"]]);
+3070:    if(modifiedCol>=0) await updateSheetValues(token,UEP_SPREADSHEET_ID,`'40_공지마감'!${columnLetter(modifiedCol)}${rowIndex+1}:${columnLetter(modifiedCol)}${rowIndex+1}` ,[[new Date().toISOString()]]);
+3077:    if(schoolSession?.token&&schoolSession?.deviceId){
+3079:      const result=await schoolReadPost('notice-receipt-save',{token:schoolSession.token,deviceId:schoolSession.deviceId,noticeId:String(payload.noticeId||'').trim(),teacher:String(payload.teacher||'').trim(),userId:String(payload.userId||'').trim(),grade:String(payload.grade||''),classNo:String(payload.classNo||''),confirmed:payload.confirmed!==false,submitted:Boolean(payload.submitted),read:payload.read!==false,dismissed:Boolean(payload.dismissed),detailViewed:Boolean(payload.detailViewed),sourceType:String(payload.sourceType||'직접공지'),note:String(payload.note||'UEP 담임 확인')}).catch(error=>({ok:false,reason:error?.message||'School Read 공지확인 저장 실패'}));
+3083:    const auth=await resolveGoogleReadAuth().catch(()=>null);
+3084:    if(auth?.mode==='school_read_api'){
+3086:      const result=await schoolReadApiRequest(auth,{action:'notice-receipt-save',noticeId:String(payload.noticeId||'').trim(),teacher:String(payload.teacher||'').trim(),userId:String(payload.userId||'').trim(),confirmedAt:new Date().toISOString()}).catch(error=>({ok:false,reason:error?.message||'School Read 공지확인 저장 실패'}));
+3091:    const token=await getSheetsToken(account), now=new Date().toISOString();
+3094:    const matrix=await readNoticeSheetMatrix(token,"44_공지확인현황","A1:Q3000");
+3109:    if(rowIndex>=0) await updateSheetValues(token,UEP_SPREADSHEET_ID,`'44_공지확인현황'!A${rowIndex+1}:Q${rowIndex+1}`,[row]);
+3110:    else await appendSheetValues(token,UEP_SPREADSHEET_ID,"'44_공지확인현황'!A:Q",[row]);
+3120:      const credentials=await readEncrypted(credentialPath()); const token=await getSheetsToken(credentials); await ensureCalendarSchema(token); const existing=await currentCalendarRows(token);
+3123:      await replaceCalendarRows(token,[...existing.map(calendarObjectToRow),calendarObjectToRow(row)]);
+3130:      const credentials=await readEncrypted(credentialPath()); const token=await getSheetsToken(credentials); await ensureCalendarSchema(token); const existing=await currentCalendarRows(token);
+3135:      await replaceCalendarRows(token,existing.map(calendarObjectToRow));
+3340:        headers:{"content-type":"application/json","authorization":`Bearer ${apiKey}`},
+3490:// Nothing is embedded in the app and no personal Google OAuth token is required.
+3532:// __UEP_08298_BOARD_MANAGE_VISIBILITY__: boardManagedDelete08297 remains authoritative for admin/owner/homeroom.
