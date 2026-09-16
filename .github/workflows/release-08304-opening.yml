@@ -1,0 +1,71 @@
+name: Release UEP PC 0.83.04 Opening
+on:
+  push:
+    branches: [main]
+    paths: [release-08304-opening.trigger]
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Guard tag
+        env: {GH_TOKEN: "${{ github.token }}"}
+        run: |
+          set -euo pipefail
+          if gh release view v0.83.04 -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then echo 'v0.83.04 already exists'; exit 1; fi
+      - name: Download verified candidate artifact
+        env: {GH_TOKEN: "${{ github.token }}"}
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/u /tmp/out && mkdir -p /tmp/u /tmp/out
+          gh run download 35049235280 -R "$GITHUB_REPOSITORY" -n UEP-0.83.04-opening-candidate -D /tmp/u
+          unzip -q /tmp/u/UEP-0.83.04-opening-candidate.zip -d /tmp/u/app
+      - name: Verify and finalize package
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/u/app/resources/app
+          node --check "$ROOT/gyomuon.js"
+          node --check "$ROOT/electron/main.cjs"
+          node --check "$ROOT/electron/preload.cjs"
+          grep -q 'Connect Data. Grow Students.' "$ROOT/index.html"
+          grep -q 'function hideUserAuthGate' "$ROOT/gyomuon.js"
+          test -s "$ROOT/uep-opening-campus.jpg"
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          root=Path('/tmp/u/app/resources/app')
+          for q in [Path('/tmp/u/app/package.json'),root/'package.json']:
+              if q.exists():
+                  d=json.loads(q.read_text(encoding='utf-8')); d['version']='0.83.04'; q.write_text(json.dumps(d,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          g=root/'gyomuon.js'; s=g.read_text(encoding='utf-8').replace('0.83.03','0.83.04'); g.write_text(s,encoding='utf-8')
+          PY
+          node --check "$ROOT/gyomuon.js"
+          grep -q '0.83.04' "$ROOT/gyomuon.js"
+      - name: Build SHA
+        run: |
+          set -euo pipefail
+          cd /tmp/u/app
+          zip -qr /tmp/out/UEP-update.zip .
+          cd /tmp/out
+          sha256sum UEP-update.zip | tee sha256.txt
+          test -s UEP-update.zip && test -s sha256.txt
+      - name: Create Release
+        env: {GH_TOKEN: "${{ github.token }}"}
+        run: |
+          set -euo pipefail
+          gh release create v0.83.04 /tmp/out/UEP-update.zip /tmp/out/sha256.txt -R "$GITHUB_REPOSITORY" --title 'UEP v0.83.04 Stable' --notes 'UEP PC 로그인 이후 대시보드 준비 구간에 운호고 오프닝 커버를 적용합니다. 기존 인증·데이터 준비 완료 경로를 유지하며 실제 준비 완료 시 커버를 제거합니다. 문법 및 회귀검사를 통과한 패키지만 배포합니다.'
+      - name: Verify Release assets
+        env: {GH_TOKEN: "${{ github.token }}"}
+        run: |
+          set -euo pipefail
+          gh release view v0.83.04 -R "$GITHUB_REPOSITORY" --json tagName,name,assets > /tmp/release.json
+          python3 - <<'PY'
+          import json
+          d=json.load(open('/tmp/release.json'))
+          assert d['tagName']=='v0.83.04'
+          names={x['name'] for x in d['assets']}
+          assert {'UEP-update.zip','sha256.txt'} <= names,names
+          PY
