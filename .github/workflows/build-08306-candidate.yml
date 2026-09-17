@@ -1,0 +1,136 @@
+name: Build UEP PC 0.83.06 AutoLogin Opening Candidate
+on:
+  push:
+    branches: [fix/pc-autologin-opening-08306]
+    paths:
+      - '.github/workflows/build-08306-candidate.yml'
+      - 'build-08306.trigger'
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download 0.83.05 stable
+        env: {GH_TOKEN: "${{ github.token }}"}
+        run: |
+          set -euo pipefail
+          gh release download v0.83.05 --repo "$GITHUB_REPOSITORY" --pattern UEP-update.zip --dir /tmp
+          rm -rf /tmp/u && mkdir /tmp/u
+          unzip -q /tmp/UEP-update.zip -d /tmp/u
+          echo "APP=/tmp/u/resources/app" >> "$GITHUB_ENV"
+      - name: Patch auto-login persistence and opening lifecycle
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os,re,json
+          from pathlib import Path
+          app=Path(os.environ['APP'])
+          main=app/'electron/main.cjs'; s=main.read_text()
+          old="async function loginSchoolReadUser({name='',email=''}={}){\n  const deviceId=await getOrCreateSchoolReadDeviceId();\n  const result=await schoolReadPost('login',{name:String(name||'').trim(),email:String(email||'').trim(),deviceId});\n  if(result?.ok&&result?.token){await saveSchoolReadSession({token:String(result.token),deviceId,user:result.user||{},expiresAt:Date.now()+Math.max(300,Number(result.expiresIn||0))*1000,savedAt:new Date().toISOString()});liveDataCache=null;liveDataFetchedAt=0;}\n  return result;\n}"
+          new="async function loginSchoolReadUser({name='',email='',remember=false}={}){\n  const deviceId=await getOrCreateSchoolReadDeviceId();\n  const result=await schoolReadPost('login',{name:String(name||'').trim(),email:String(email||'').trim(),deviceId});\n  if(result?.ok&&result?.token){await saveSchoolReadSession({token:String(result.token),deviceId,user:result.user||{},remember:Boolean(remember),expiresAt:Date.now()+Math.max(300,Number(result.expiresIn||0))*1000,savedAt:new Date().toISOString()});liveDataCache=null;liveDataFetchedAt=0;}\n  return result;\n}"
+          assert old in s; s=s.replace(old,new,1)
+          s=s.replace("if(!verify)return {ok:true,authenticated:true,endpointReady,user:session.user||null,mode:'school_read_api'};","if(!verify)return {ok:true,authenticated:true,endpointReady,remember:Boolean(session.remember),user:session.user||null,mode:'school_read_api'};",1)
+          s=s.replace("return {ok:true,authenticated:true,verified:true,endpointReady:true,user:session.user,expiresAt:result.expiresAt||'',mode:'school_read_api'};","return {ok:true,authenticated:true,verified:true,endpointReady:true,remember:Boolean(session.remember),user:session.user,expiresAt:result.expiresAt||'',mode:'school_read_api'};",1)
+          s=s.replace("return {ok:true,authenticated:true,verified:false,degraded:true,endpointReady,user:session.user||null,reason:String(error?.message||error),code,mode:'school_read_api'};","return {ok:true,authenticated:true,verified:false,degraded:true,endpointReady,remember:Boolean(session.remember),user:session.user||null,reason:String(error?.message||error),code,mode:'school_read_api'};",1)
+          main.write_text(s)
+
+          g=app/'gyomuon.js'; s=g.read_text()
+          # Startup auto-login must be based on the encrypted School Read session, not a 1.2s renderer timeout.
+          old="""  // 자동로그인을 선택한 사용자는 네트워크/Google Sheet 확인을 기다리지 않고
+  // 마지막 정상 로컬 사용자 세션으로 즉시 UI를 연다. 계정 유효성은 백그라운드 동기화 후 재검증한다.
+  let resumedRememberedSession=false;
+  try {
+    resumedRememberedSession=await withStartupTimeout(restoreRememberedSessionImmediately(),1200,false);
+  } catch (rememberError) {
+    console.warn('[UEP] 자동 사용자 복원 실패 - 화면을 먼저 엽니다.', rememberError);
+    resumedRememberedSession=false;
+  }"""
+          new="""  // 0.83.06: 시작 화면은 인증과 학생 기본정보가 모두 준비될 때까지 유지한다.
+  // 자동로그인 여부는 Electron의 암호화 School Read 세션에 함께 저장하여 렌더러 상태 유실과 분리한다.
+  let resumedRememberedSession=false;
+  window.__uep08306AuthReady=false;
+  window.__uep08306CoreDataReady=false;"""
+          assert old in s; s=s.replace(old,new,1)
+          # Cache readiness is only true after real student basic data exists.
+          s=s.replace("window.__uep08305CoreDataReady=Boolean(readonlyCache?.students?.length);","window.__uep08305CoreDataReady=Boolean(readonlyCache?.students?.length); window.__uep08306CoreDataReady=window.__uep08305CoreDataReady;",1)
+          old="""  // 여기서는 백그라운드에서 최신 계정 유효성을 재검증한다.
+  // 자동로그인 세션은 이미 화면을 열었으므로 네트워크 지연이 시작 화면을 막지 않는다.
+  const finalAuthReady=await initializeUserSessionGate();
+  if(finalAuthReady && window.__uep08305CoreDataReady){
+    uep08305ReleaseBootCover();
+    if(!resumedRememberedSession) navigate(state.activePage || "dashboard");
+  }else if(finalAuthReady){
+    const statusNode=document.querySelector('#userAuthGate .uep-opening-status span');
+    if(statusNode)statusNode.textContent='학생 기본정보 연결을 확인하고 있습니다';
+  }"""
+          new="""  // 0.83.06: 오프닝 종료 조건 = 인증 완료 AND 학생 기본정보 준비 완료.
+  const finalAuthReady=await initializeUserSessionGate();
+  window.__uep08306AuthReady=Boolean(finalAuthReady);
+  if(finalAuthReady && window.__uep08306CoreDataReady){
+    uep08305ReleaseBootCover();
+    navigate(state.activePage || "dashboard");
+  }else if(finalAuthReady){
+    const statusNode=document.querySelector('#userAuthGate .uep-opening-status span');
+    if(statusNode)statusNode.textContent='학생 기본정보 연결을 확인하고 있습니다';
+  }"""
+          assert old in s; s=s.replace(old,new,1)
+          # Replace form handler: remember flag is persisted with encrypted session; after login, return to opening and keep it until cache has students.
+          pat=r"document\.getElementById\('userAuthForm'\)\?\.addEventListener\('submit',async event=>\{.*?\}\);\n\}"
+          m=re.search(pat,s,flags=re.S); assert m
+          new_handler="""document.getElementById('userAuthForm')?.addEventListener('submit',async event=>{event.preventDefault();const name=document.getElementById('userAuthName')?.value,email=document.getElementById('userAuthEmail')?.value,remember=Boolean(document.getElementById('userAuthRemember')?.checked);const submit=event.submitter||document.querySelector('#userAuthForm button[type="submit"]');if(submit){submit.disabled=true;submit.textContent='확인 중…';}try{if(!window.schoolBoard?.schoolReadLogin)throw new Error('이 UEP 빌드에는 School Read API 로그인이 없습니다.');const result=await window.schoolBoard.schoolReadLogin({name,email,remember});if(!result?.ok){authGateMessage(result?.message||'UEP 로그인에 실패했습니다.');return;}const a=result.user||{};const account={id:String(a.userId||''),email:String(a.email||email||'').trim(),name:uep08125PickTeacherName(a.name,name),role:String(a.role||''),admin:a.isAdmin?'Y':'N',grade:String(a.grade||'1'),classNo:String(a.homeroom||''),department:String(a.department||((a.grade||1)+'학년부')),active:true,activeRaw:'Y'};const user=accountToSession(account);state.auth.user=user;state.auth.rememberUser=remember;state.auth.rememberedUser=remember?{id:user.id,name:user.name,email:user.email}:null;state.settings.userProfile={...state.settings.userProfile,...user};state.settings.loginUserName=user.name;state.settings.teacherName=user.name;googleConnectionStatus={ok:true,encryption:true,mode:'school_read_api'};await save();window.__uep08305BootCoverHold=true;window.__uep08306AuthReady=true;const gate=document.getElementById('userAuthGate');if(gate){document.body.classList.add('uep-auth-locked');gate.classList.remove('hidden');gate.innerHTML=`<section class="uep-opening-card"><div class="uep-opening-brand"><span class="uep-opening-mark">U</span><div><small>UNHO HIGH SCHOOL</small><h1>UNHO Education Platform</h1></div></div><p class="uep-opening-copy">학생의 오늘을 연결하고, 더 나은 내일을 준비합니다.<br><strong>Connect Data. Grow Students.</strong></p><div class="uep-opening-status"><i></i><b>학교 데이터를 연결하고 있습니다</b><span>${escapeHtml(user.name)} · 학생 기본정보 연결</span></div></section><div class="uep-opening-footer"><span>운호고등학교 · 自律 · 勤勉 · 正直</span><span>UEP</span></div>`;}const cached=await window.schoolBoard?.readReadonlyCache?.();if(cached?.ok&&cached.data){readonlyCache=uep08123NormalizeReadonlyCache(cached.data);window.__uep08305CoreDataReady=Boolean(readonlyCache?.students?.length);window.__uep08306CoreDataReady=window.__uep08305CoreDataReady;googleConnectionError='';updateTopSyncStatus();}if(window.__uep08306AuthReady&&window.__uep08306CoreDataReady){uep08305ReleaseBootCover();navigate(state.activePage||'dashboard');}startReadonlyAutoRefresh();uep08250StartBackgroundStages();}catch(error){renderUserAuthGate({switchUser:true});authGateMessage(error?.message||'UEP 로그인에 실패했습니다.');}finally{if(submit){submit.disabled=false;submit.textContent='UEP 시작';}}});
+}"""
+          s=s[:m.start()]+new_handler+s[m.end():]
+          # initializeUserSessionGate: trust encrypted persisted remember flag returned by main process.
+          start=s.index('async function initializeUserSessionGate(){')
+          end=s.index('async function lockCurrentUser()',start)
+          replacement="""async function initializeUserSessionGate(){
+  if(!window.schoolBoard?.schoolReadSessionStatus){renderUserAuthGate({switchUser:true});return false;}
+  try{
+    const status=await window.schoolBoard.schoolReadSessionStatus({verify:true});
+    const remembered=state?.auth?.rememberedUser||state?.auth?.user||{};
+    if(status?.authenticated && (status?.remember || state?.auth?.rememberUser)){
+      const a=status.user||{};const account={id:String(a.userId||remembered?.id||''),email:String(a.email||remembered?.email||'').trim(),name:uep08125PickTeacherName(a.name,remembered?.name),role:String(a.role||''),admin:a.isAdmin?'Y':'N',grade:String(a.grade||'1'),classNo:String(a.homeroom||''),department:String(a.department||((a.grade||1)+'학년부')),active:true,activeRaw:'Y'};state.auth.user=accountToSession(account);state.auth.rememberUser=true;state.auth.rememberedUser={id:state.auth.user.id,name:state.auth.user.name,email:state.auth.user.email};state.settings.userProfile={...state.settings.userProfile,...state.auth.user};state.settings.loginUserName=state.auth.user.name;state.settings.teacherName=state.auth.user.name;googleConnectionStatus={ok:true,encryption:true,mode:'school_read_api'};authSessionReady=true;state.auth.locked=false;await save();uep08292KickAcademicStage();return true;
+    }
+  }catch(error){console.warn('[UEP] 저장된 School Read 세션 확인 실패',error);}
+  state.auth.user=null;authSessionReady=false;state.auth.locked=true;window.__uep08305BootCoverHold=false;renderUserAuthGate({switchUser:true});authGateMessage('교사 이름과 이메일로 UEP를 시작하세요.');return false;
+}
+"""
+          s=s[:start]+replacement+s[end:]
+          # Remove obsolete watchdog hack instead of relying on delayed DOM hiding.
+          s=re.sub(r"// __UEP_AUTOLOGIN_WATCHDOG_08083__\n\(function\(\)\{.*?\}\)\(\);\n", "// __UEP_AUTOLOGIN_WATCHDOG_08083_REMOVED_08306__\n", s, count=1, flags=re.S)
+          g.write_text(s)
+          # version
+          p=app/'package.json'; j=json.loads(p.read_text()); j['version']='0.83.06'; p.write_text(json.dumps(j,ensure_ascii=False,indent=2)+'\n')
+          # initialize 08306 readiness flags in document
+          idx=app/'index.html'; h=idx.read_text(); h=h.replace('window.__uep08305BootCoverHold=true;window.__uep08305CoreDataReady=false;','window.__uep08305BootCoverHold=true;window.__uep08305CoreDataReady=false;window.__uep08306AuthReady=false;window.__uep08306CoreDataReady=false;',1); idx.write_text(h)
+          PY
+      - name: Regression checks
+        run: |
+          set -euo pipefail
+          node --check "$APP/electron/main.cjs"
+          node --check "$APP/gyomuon.js"
+          node --check "$APP/electron/preload.cjs"
+          test "$(node -p "require('$APP/package.json').version")" = '0.83.06'
+          grep -F "remember:Boolean(session.remember)" "$APP/electron/main.cjs"
+          grep -F "schoolReadLogin({name,email,remember})" "$APP/gyomuon.js"
+          grep -F "window.__uep08306AuthReady" "$APP/gyomuon.js"
+          grep -F "window.__uep08306CoreDataReady" "$APP/gyomuon.js"
+          grep -F "오프닝 종료 조건 = 인증 완료 AND 학생 기본정보 준비 완료" "$APP/gyomuon.js"
+          grep -F "__UEP_AUTOLOGIN_WATCHDOG_08083_REMOVED_08306__" "$APP/gyomuon.js"
+          ! grep -F "withStartupTimeout(restoreRememberedSessionImmediately(),1200,false)" "$APP/gyomuon.js"
+          test "$(stat -c%s "$APP/uep-opening-campus.png")" = '2175905'
+          echo '68c5c65a7751d97f1318349341c61d03e018768720e150e081878c695dabd6b9  /tmp/u/resources/app/uep-opening-campus.png' | sha256sum -c -
+      - name: Package candidate
+        run: |
+          cd /tmp/u
+          zip -qr /tmp/UEP-update-0.83.06-candidate.zip .
+          sha256sum /tmp/UEP-update-0.83.06-candidate.zip > /tmp/UEP-update-0.83.06-candidate.sha256.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UEP-0.83.06-autologin-opening-candidate
+          path: |
+            /tmp/UEP-update-0.83.06-candidate.zip
+            /tmp/UEP-update-0.83.06-candidate.sha256.txt
+          retention-days: 7
