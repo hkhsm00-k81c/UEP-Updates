@@ -12,21 +12,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Download stable 0.83.04 and discover app root
+      - name: Download stable 0.83.04
+        env: {GH_TOKEN: "${{ github.token }}"}
         run: |
           set -euo pipefail
           rm -f /tmp/UEP-update.zip
           gh release download v0.83.04 --repo "$GITHUB_REPOSITORY" --pattern UEP-update.zip --dir /tmp
           rm -rf /tmp/u && mkdir /tmp/u
           unzip -q /tmp/UEP-update.zip -d /tmp/u
-          MAIN_PATH="$(find /tmp/u -type f -name main.cjs -path '*/resources/app/main.cjs' -print -quit)"
-          test -n "$MAIN_PATH"
-          APP_DIR="$(dirname "$MAIN_PATH")"
-          test -f "$APP_DIR/gyomuon.js"
-          test -f "$APP_DIR/preload.cjs"
-          test -f "$APP_DIR/package.json"
-          echo "APP_DIR=$APP_DIR" >> "$GITHUB_ENV"
-          echo "Discovered APP_DIR=$APP_DIR"
+          ROOT=/tmp/u/resources/app
+          test -f "$ROOT/gyomuon.js"
+          test -f "$ROOT/electron/main.cjs"
+          test -f "$ROOT/electron/preload.cjs"
+          test -f "$ROOT/package.json"
+          echo "APP_DIR=$ROOT" >> "$GITHUB_ENV"
       - name: Audit readonly startup functions
         run: |
           set -euo pipefail
@@ -37,7 +36,7 @@ jobs:
           python3 - <<'PY'
           import os
           from pathlib import Path
-          p=Path(os.environ['APP_DIR'])/'main.cjs'; s=p.read_text()
+          p=Path(os.environ['APP_DIR'])/'electron/main.cjs'; s=p.read_text()
           old="try{const result=await schoolReadPost('verify-token',{token:session.token,deviceId:session.deviceId});if(!result?.ok)throw schoolReadError(result?.message||'UEP 세션 확인 실패',result?.code||'UEP_SCHOOL_READ_TOKEN_INVALID');session.user=result.user||session.user||{};await saveSchoolReadSession(session);return {ok:true,authenticated:true,endpointReady:true,user:session.user,expiresAt:result.expiresAt||'',mode:'school_read_api'};}catch(error){await clearSchoolReadSession();return {ok:false,authenticated:false,endpointReady,reason:String(error?.message||error),code:error?.code||'',user:null,mode:'school_read_api'};}"
           new="try{const result=await schoolReadPost('verify-token',{token:session.token,deviceId:session.deviceId});if(!result?.ok)throw schoolReadError(result?.message||'UEP 세션 확인 실패',result?.code||'UEP_SCHOOL_READ_TOKEN_INVALID');session.user=result.user||session.user||{};await saveSchoolReadSession(session);return {ok:true,authenticated:true,verified:true,endpointReady:true,user:session.user,expiresAt:result.expiresAt||'',mode:'school_read_api'};}catch(error){const code=String(error?.code||'');const terminalAuthCodes=new Set(['UEP_SCHOOL_READ_TOKEN_INVALID','UEP_SCHOOL_READ_LOGIN_REQUIRED','UEP_SCHOOL_READ_DEVICE_NOT_APPROVED','UEP_SCHOOL_READ_DEVICE_REVOKED','UEP_SCHOOL_READ_USER_INACTIVE','UEP_SCHOOL_READ_USER_NOT_FOUND']);if(terminalAuthCodes.has(code)){await clearSchoolReadSession();return {ok:false,authenticated:false,verified:false,endpointReady,reason:String(error?.message||error),code,user:null,mode:'school_read_api'};}console.warn('[UEP] School Read 세션 재검증 일시 실패 - 기존 세션 유지',code,error?.message||error);return {ok:true,authenticated:true,verified:false,degraded:true,endpointReady,user:session.user||null,reason:String(error?.message||error),code,mode:'school_read_api'};}"
           if old not in s: raise SystemExit('target schoolReadSessionStatus block not found exactly')
@@ -51,16 +50,20 @@ jobs:
           from pathlib import Path
           root=Path(os.environ['APP_DIR'])
           p=root/'package.json'; j=json.loads(p.read_text()); j['version']='0.83.05'; p.write_text(json.dumps(j,ensure_ascii=False,indent=2)+'\n')
+          outer=Path('/tmp/u/package.json')
+          if outer.exists():
+              j=json.loads(outer.read_text()); j['version']='0.83.05'; outer.write_text(json.dumps(j,ensure_ascii=False,indent=2)+'\n')
           g=root/'gyomuon.js'; g.write_text(g.read_text().replace('0.83.04','0.83.05'))
           PY
       - name: Regression checks
         run: |
           set -euo pipefail
-          node --check "$APP_DIR/main.cjs"
+          node --check "$APP_DIR/electron/main.cjs"
           node --check "$APP_DIR/gyomuon.js"
-          node --check "$APP_DIR/preload.cjs"
-          grep -F "terminalAuthCodes" "$APP_DIR/main.cjs"
-          grep -F "degraded:true" "$APP_DIR/main.cjs"
+          node --check "$APP_DIR/electron/preload.cjs"
+          grep -F "terminalAuthCodes" "$APP_DIR/electron/main.cjs"
+          grep -F "degraded:true" "$APP_DIR/electron/main.cjs"
+          grep -F "function hideUserAuthGate" "$APP_DIR/gyomuon.js"
           test "$(node -p "require('$APP_DIR/package.json').version")" = "0.83.05"
       - name: Package candidate
         run: |
