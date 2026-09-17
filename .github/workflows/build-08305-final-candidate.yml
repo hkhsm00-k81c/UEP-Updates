@@ -1,4 +1,4 @@
-name: Build UEP PC 0.83.05 Final Candidate
+name: Publish UEP PC 0.83.05 Verified Candidate
 on:
   push:
     branches: [fix/pc-auth-updater-08305]
@@ -7,77 +7,79 @@ on:
       - 'build-08305-final-candidate.trigger'
 permissions:
   actions: read
-  contents: read
+  contents: write
 jobs:
-  build:
+  publish:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Verify selected high-resolution campus asset
+        with: {fetch-depth: 0}
+      - name: Guard existing release
+        env: {GH_TOKEN: "${{ github.token }}"}
         run: |
           set -euo pipefail
-          ASSET='release-assets/08305/uep-opening-campus.png'
-          test -f "$ASSET"
-          test "$(stat -c%s "$ASSET")" = '2175905'
-          echo '68c5c65a7751d97f1318349341c61d03e018768720e150e081878c695dabd6b9  release-assets/08305/uep-opening-campus.png' | sha256sum -c -
+          if gh release view v0.83.05 -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then echo 'v0.83.05 already exists'; exit 1; fi
+      - name: Download and verify final candidate
+        env: {GH_TOKEN: "${{ github.token }}"}
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/final /tmp/verify && mkdir -p /tmp/final /tmp/verify
+          gh run download 35182825900 -R "$GITHUB_REPOSITORY" -n UEP-0.83.05-final-candidate -D /tmp/final
+          cp /tmp/final/UEP-update-0.83.05-final-candidate.zip UEP-update.zip
+          sha256sum UEP-update.zip | awk '{print $1 "  UEP-update.zip"}' > sha256.txt
+          unzip -q UEP-update.zip -d /tmp/verify
+          APP=/tmp/verify/resources/app
+          test "$(node -p "require('$APP/package.json').version")" = '0.83.05'
+          node --check "$APP/electron/main.cjs"
+          node --check "$APP/gyomuon.js"
+          node --check "$APP/electron/preload.cjs"
+          grep -F 'terminalAuthCodes' "$APP/electron/main.cjs"
+          grep -F 'degraded:true' "$APP/electron/main.cjs"
+          grep -F '__uep08305BootCoverHold' "$APP/gyomuon.js"
+          grep -F '__uep08305CoreDataReady' "$APP/gyomuon.js"
+          grep -F 'uep08305ReleaseBootCover' "$APP/gyomuon.js"
+          grep -F 'uep-opening-campus.png' "$APP/index.html"
+          test "$(stat -c%s "$APP/uep-opening-campus.png")" = '2175905'
+          echo '68c5c65a7751d97f1318349341c61d03e018768720e150e081878c695dabd6b9  /tmp/verify/resources/app/uep-opening-campus.png' | sha256sum -c -
+      - name: Create v0.83.05 Release
+        env: {GH_TOKEN: "${{ github.token }}"}
+        run: |
+          set -euo pipefail
+          gh release create v0.83.05 UEP-update.zip sha256.txt -R "$GITHUB_REPOSITORY" --target main --title 'UEP v0.83.05 Stable' --notes 'UEP 0.83.05 · 로그인 세션 재검증 안정화 · 실제 인증/학생기본정보 준비 기반 오프닝 · 고해상도 학교 전경 복원'
+      - name: Update main updater metadata
+        env: {GH_TOKEN: "${{ github.token }}"}
+        run: |
+          set -euo pipefail
+          SHA=$(sha256sum UEP-update.zip | awk '{print $1}'); export SHA
+          git fetch origin main
+          git checkout -B release-meta origin/main
           python3 - <<'PY'
+          import json,os
           from pathlib import Path
-          b=Path('release-assets/08305/uep-opening-campus.png').read_bytes()
-          assert b[:8] == b'\x89PNG\r\n\x1a\n', 'campus asset is not PNG'
+          sha=os.environ['SHA']; url='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.83.05/UEP-update.zip'
+          p=Path('uep-policy.json'); j=json.loads(p.read_text()); j.update(sha256=sha,latestVersion='0.83.05',downloadUrl=url,message='UEP 0.83.05 · 로그인 세션 안정화 및 오프닝 개선'); p.write_text(json.dumps(j,ensure_ascii=False,indent=2)+'\n')
+          p=Path('uep-version.json'); j=json.loads(p.read_text()); j.update(version='0.83.05',downloadUrl=url,notes='UEP 0.83.05 · 로그인 세션 안정화 및 오프닝 개선',sha256=sha); p.write_text(json.dumps(j,ensure_ascii=False,indent=2)+'\n')
           PY
-      - name: Download verified auth/readiness candidate
-        env:
-          GH_TOKEN: ${{ github.token }}
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add uep-policy.json uep-version.json
+          git commit -m 'release: point updater metadata to 0.83.05'
+          git push origin HEAD:main
+      - name: Verify published state
+        env: {GH_TOKEN: "${{ github.token }}"}
         run: |
           set -euo pipefail
-          mkdir -p /tmp/base
-          gh run download 35178823114 --repo "$GITHUB_REPOSITORY" -n UEP-0.83.05-auth-session-candidate -D /tmp/base
-          test -f /tmp/base/UEP-update-0.83.05-auth-candidate.zip
-          rm -rf /tmp/u && mkdir /tmp/u
-          unzip -q /tmp/base/UEP-update-0.83.05-auth-candidate.zip -d /tmp/u
-          test -f /tmp/u/resources/app/gyomuon.js
-          echo 'APP_DIR=/tmp/u/resources/app' >> "$GITHUB_ENV"
-      - name: Install high-resolution campus asset
-        run: |
-          set -euo pipefail
-          cp release-assets/08305/uep-opening-campus.png "$APP_DIR/uep-opening-campus.png"
-          python3 - <<'PY'
-          import os
-          from pathlib import Path
-          root=Path(os.environ['APP_DIR'])
-          p=root/'index.html'; s=p.read_text()
-          if 'uep-opening-campus.jpg' in s:
-              s=s.replace('uep-opening-campus.jpg','uep-opening-campus.png')
-          if 'uep-opening-campus.png' not in s:
-              raise SystemExit('opening campus image reference missing')
-          p.write_text(s)
+          SHA=$(sha256sum UEP-update.zip | awk '{print $1}')
+          gh release view v0.83.05 -R "$GITHUB_REPOSITORY" --json tagName,name,isDraft,isPrerelease,assets > /tmp/release.json
+          git fetch origin main
+          git show origin/main:uep-policy.json > /tmp/policy.json
+          git show origin/main:uep-version.json > /tmp/version.json
+          SHA="$SHA" python3 - <<'PY'
+          import json,os
+          r=json.load(open('/tmp/release.json')); p=json.load(open('/tmp/policy.json')); v=json.load(open('/tmp/version.json'))
+          sha=os.environ['SHA']; url='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.83.05/UEP-update.zip'
+          assert r['tagName']=='v0.83.05' and r['name']=='UEP v0.83.05 Stable' and not r['isDraft'] and not r['isPrerelease']
+          assert {'UEP-update.zip','sha256.txt'} <= {a['name'] for a in r['assets']}
+          assert p['latestVersion']=='0.83.05' and p['sha256']==sha and p['downloadUrl']==url
+          assert v['version']=='0.83.05' and v['sha256']==sha and v['downloadUrl']==url
           PY
-      - name: Final regression checks
-        run: |
-          set -euo pipefail
-          node --check "$APP_DIR/electron/main.cjs"
-          node --check "$APP_DIR/gyomuon.js"
-          node --check "$APP_DIR/electron/preload.cjs"
-          test "$(node -p "require('$APP_DIR/package.json').version")" = '0.83.05'
-          grep -F 'terminalAuthCodes' "$APP_DIR/electron/main.cjs"
-          grep -F 'degraded:true' "$APP_DIR/electron/main.cjs"
-          grep -F '__uep08305BootCoverHold' "$APP_DIR/gyomuon.js"
-          grep -F '__uep08305CoreDataReady' "$APP_DIR/gyomuon.js"
-          grep -F 'uep08305ReleaseBootCover' "$APP_DIR/gyomuon.js"
-          grep -F 'uep-opening-campus.png' "$APP_DIR/index.html"
-          test "$(stat -c%s "$APP_DIR/uep-opening-campus.png")" = '2175905'
-          echo '68c5c65a7751d97f1318349341c61d03e018768720e150e081878c695dabd6b9  /tmp/u/resources/app/uep-opening-campus.png' | sha256sum -c -
-      - name: Package final candidate
-        run: |
-          set -euo pipefail
-          cd /tmp/u
-          zip -qr "$GITHUB_WORKSPACE/UEP-update-0.83.05-final-candidate.zip" .
-          cd "$GITHUB_WORKSPACE"
-          sha256sum UEP-update-0.83.05-final-candidate.zip > sha256-final-candidate.txt
-      - uses: actions/upload-artifact@v4
-        with:
-          name: UEP-0.83.05-final-candidate
-          path: |
-            UEP-update-0.83.05-final-candidate.zip
-            sha256-final-candidate.txt
-          retention-days: 7
