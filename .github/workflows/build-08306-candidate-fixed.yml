@@ -1,0 +1,54 @@
+name: Build UEP PC 0.83.06 AutoLogin Opening Candidate Fixed
+on:
+  push:
+    branches: [fix/pc-autologin-opening-08306]
+    paths:
+      - '.github/workflows/build-08306-candidate-fixed.yml'
+      - 'build-08306-fixed.trigger'
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download 0.83.05 stable and extract patch script
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release download v0.83.05 --repo "$GITHUB_REPOSITORY" --pattern UEP-update.zip --dir /tmp
+          rm -rf /tmp/u && mkdir /tmp/u
+          unzip -q /tmp/UEP-update.zip -d /tmp/u
+          echo "APP=/tmp/u/resources/app" >> "$GITHUB_ENV"
+          python3 -c "from pathlib import Path; s=Path('.github/workflows/build-08306-candidate.yml').read_text(); a=s.index(\"          python3 - <<'PY'\")+len(\"          python3 - <<'PY'\\n\"); b=s.index('          PY',a); Path('/tmp/patch08306.py').write_text(s[a:b])"
+      - name: Patch auto-login persistence and opening lifecycle
+        run: python3 /tmp/patch08306.py
+      - name: Regression checks
+        run: |
+          set -euo pipefail
+          node --check "$APP/electron/main.cjs"
+          node --check "$APP/gyomuon.js"
+          node --check "$APP/electron/preload.cjs"
+          test "$(node -p "require('$APP/package.json').version")" = '0.83.06'
+          grep -F "remember:Boolean(session.remember)" "$APP/electron/main.cjs"
+          grep -F "schoolReadLogin({name,email,remember})" "$APP/gyomuon.js"
+          grep -F "window.__uep08306AuthReady" "$APP/gyomuon.js"
+          grep -F "window.__uep08306CoreDataReady" "$APP/gyomuon.js"
+          grep -F "오프닝 종료 조건 = 인증 완료 AND 학생 기본정보 준비 완료" "$APP/gyomuon.js"
+          grep -F "__UEP_AUTOLOGIN_WATCHDOG_08083_REMOVED_08306__" "$APP/gyomuon.js"
+          ! grep -F "withStartupTimeout(restoreRememberedSessionImmediately(),1200,false)" "$APP/gyomuon.js"
+          test "$(stat -c%s "$APP/uep-opening-campus.png")" = '2175905'
+          echo '68c5c65a7751d97f1318349341c61d03e018768720e150e081878c695dabd6b9  /tmp/u/resources/app/uep-opening-campus.png' | sha256sum -c -
+      - name: Package candidate
+        run: |
+          cd /tmp/u
+          zip -qr /tmp/UEP-update-0.83.06-candidate.zip .
+          sha256sum /tmp/UEP-update-0.83.06-candidate.zip > /tmp/UEP-update-0.83.06-candidate.sha256.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UEP-0.83.06-autologin-opening-candidate
+          path: |
+            /tmp/UEP-update-0.83.06-candidate.zip
+            /tmp/UEP-update-0.83.06-candidate.sha256.txt
+          retention-days: 7
