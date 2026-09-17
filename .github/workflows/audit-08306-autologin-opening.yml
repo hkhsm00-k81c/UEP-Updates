@@ -21,28 +21,29 @@ jobs:
           rm -rf /tmp/u && mkdir /tmp/u
           unzip -q /tmp/UEP-update.zip -d /tmp/u
           echo "APP_DIR=/tmp/u/resources/app" >> "$GITHUB_ENV"
-      - name: Inspect authentication persistence and boot lifecycle
+      - name: Extract authentication persistence and boot lifecycle
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import os,re
+          import os
           from pathlib import Path
-          root=Path(os.environ['APP_DIR'])
+          root=Path(os.environ['APP_DIR']); out=[]
+          terms=['remember','자동로그인','autoLogin','autologin','schoolReadSession','saveSchoolReadSession','loadSchoolReadSession','initializeUserSessionGate','renderUserAuthGate','hideUserAuthGate','BootCoverHold','CoreDataReady','readonlyCache','schoolReadLogin']
           for fn in ['gyomuon.js','electron/main.cjs','electron/preload.cjs','index.html']:
-            p=root/fn
-            s=p.read_text(errors='replace')
-            print('\n===== '+fn+' =====')
-            terms=['remember','자동로그인','autoLogin','autologin','schoolReadSession','saveSchoolReadSession','loadSchoolReadSession','initializeUserSessionGate','renderUserAuthGate','hideUserAuthGate','BootCoverHold','CoreDataReady','readonlyCache','schoolReadLogin']
-            lines=s.splitlines()
-            hits=[]
-            for i,line in enumerate(lines):
-              if any(t.lower() in line.lower() for t in terms): hits.append(i)
-            shown=set()
+            lines=(root/fn).read_text(errors='replace').splitlines(); out.append('\n===== '+fn+' =====')
+            hits=[i for i,line in enumerate(lines) if any(t.lower() in line.lower() for t in terms)]
+            ranges=[]
             for i in hits:
-              a=max(0,i-3); b=min(len(lines),i+5)
-              key=(a,b)
-              if key in shown: continue
-              shown.add(key)
-              print(f'--- {a+1}-{b} ---')
-              for j in range(a,b): print(f'{j+1}: {lines[j]}')
+              a=max(0,i-5); b=min(len(lines),i+8)
+              if ranges and a <= ranges[-1][1]: ranges[-1]=(ranges[-1][0],max(ranges[-1][1],b))
+              else: ranges.append((a,b))
+            for a,b in ranges:
+              out.append(f'--- {a+1}-{b} ---')
+              out.extend(f'{j+1}: {lines[j]}' for j in range(a,b))
+          Path('auth-audit.txt').write_text('\n'.join(out))
           PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uep-08306-auth-audit
+          path: auth-audit.txt
+          retention-days: 3
