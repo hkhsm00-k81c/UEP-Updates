@@ -1,0 +1,48 @@
+name: Audit UEP PC 0.83.06 AutoLogin Opening
+on:
+  push:
+    branches: [fix/pc-autologin-opening-08306]
+    paths:
+      - '.github/workflows/audit-08306-autologin-opening.yml'
+      - 'audit-08306.trigger'
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download 0.83.05 stable
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release download v0.83.05 --repo "$GITHUB_REPOSITORY" --pattern UEP-update.zip --dir /tmp
+          rm -rf /tmp/u && mkdir /tmp/u
+          unzip -q /tmp/UEP-update.zip -d /tmp/u
+          echo "APP_DIR=/tmp/u/resources/app" >> "$GITHUB_ENV"
+      - name: Inspect authentication persistence and boot lifecycle
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os,re
+          from pathlib import Path
+          root=Path(os.environ['APP_DIR'])
+          for fn in ['gyomuon.js','electron/main.cjs','electron/preload.cjs','index.html']:
+            p=root/fn
+            s=p.read_text(errors='replace')
+            print('\n===== '+fn+' =====')
+            terms=['remember','자동로그인','autoLogin','autologin','schoolReadSession','saveSchoolReadSession','loadSchoolReadSession','initializeUserSessionGate','renderUserAuthGate','hideUserAuthGate','BootCoverHold','CoreDataReady','readonlyCache','schoolReadLogin']
+            lines=s.splitlines()
+            hits=[]
+            for i,line in enumerate(lines):
+              if any(t.lower() in line.lower() for t in terms): hits.append(i)
+            shown=set()
+            for i in hits:
+              a=max(0,i-3); b=min(len(lines),i+5)
+              key=(a,b)
+              if key in shown: continue
+              shown.add(key)
+              print(f'--- {a+1}-{b} ---')
+              for j in range(a,b): print(f'{j+1}: {lines[j]}')
+          PY
