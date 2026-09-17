@@ -1,10 +1,11 @@
-name: Release UEP PC 0.83.04 Opening
+name: Release UEP PC 0.83.05 Auth Opening
 on:
   push:
     branches: [main]
-    paths: [release-08304-opening.trigger]
+    paths: [release-08305-auth-opening.trigger]
 permissions:
   contents: write
+  actions: read
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -15,77 +16,70 @@ jobs:
         env: {GH_TOKEN: "${{ github.token }}"}
         run: |
           set -euo pipefail
-          if gh release view v0.83.04 -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then echo 'v0.83.04 already exists'; exit 1; fi
-      - name: Download verified candidate artifact
+          if gh release view v0.83.05 -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then echo 'v0.83.05 already exists'; exit 1; fi
+      - name: Download verified final candidate
         env: {GH_TOKEN: "${{ github.token }}"}
         run: |
           set -euo pipefail
-          rm -rf /tmp/u /tmp/out && mkdir -p /tmp/u /tmp/out
-          gh run download 35049235280 -R "$GITHUB_REPOSITORY" -n UEP-0.83.04-opening-candidate -D /tmp/u
-          unzip -q /tmp/u/UEP-0.83.04-opening-candidate.zip -d /tmp/u/app
-      - name: Install verified opening assets
+          rm -rf /tmp/final /tmp/verify && mkdir -p /tmp/final /tmp/verify
+          gh run download 35182825900 -R "$GITHUB_REPOSITORY" -n UEP-0.83.05-final-candidate -D /tmp/final
+          test -f /tmp/final/UEP-update-0.83.05-final-candidate.zip
+          cp /tmp/final/UEP-update-0.83.05-final-candidate.zip UEP-update.zip
+          sha256sum UEP-update.zip | awk '{print $1 "  UEP-update.zip"}' > sha256.txt
+          unzip -q UEP-update.zip -d /tmp/verify
+      - name: Verify production package
         run: |
           set -euo pipefail
-          ROOT=/tmp/u/app/resources/app
-          CAMPUS=release-assets/08304/campus-mini.b64
-          MARK=release-assets/08304/mark-tiny.b64
-          base64 -d "$CAMPUS" > "$ROOT/uep-opening-campus.jpg"
-          base64 -d "$MARK" > "$ROOT/uep-school-mark.png"
-          echo "campus bytes=$(stat -c%s "$ROOT/uep-opening-campus.jpg") type=$(file -b "$ROOT/uep-opening-campus.jpg")"
-          echo "mark bytes=$(stat -c%s "$ROOT/uep-school-mark.png") type=$(file -b "$ROOT/uep-school-mark.png")"
-          echo "campus sha256=$(sha256sum "$ROOT/uep-opening-campus.jpg" | awk '{print $1}')"
-          echo "mark sha256=$(sha256sum "$ROOT/uep-school-mark.png" | awk '{print $1}')"
-          diff -q <(tr -d '\r\n' < "$CAMPUS") <(base64 -w0 "$ROOT/uep-opening-campus.jpg")
-          diff -q <(tr -d '\r\n' < "$MARK") <(base64 -w0 "$ROOT/uep-school-mark.png")
-          test "$(xxd -p -l 3 "$ROOT/uep-opening-campus.jpg")" = "ffd8ff"
-          test "$(xxd -p -l 8 "$ROOT/uep-school-mark.png")" = "89504e470d0a1a0a"
-          test -s "$ROOT/uep-opening-campus.jpg"
-          test -s "$ROOT/uep-school-mark.png"
-      - name: Verify and finalize package
-        run: |
-          set -euo pipefail
-          ROOT=/tmp/u/app/resources/app
-          node --check "$ROOT/gyomuon.js"
-          node --check "$ROOT/electron/main.cjs"
-          node --check "$ROOT/electron/preload.cjs"
-          grep -q 'Connect Data. Grow Students.' "$ROOT/index.html"
-          grep -q 'function hideUserAuthGate' "$ROOT/gyomuon.js"
-          grep -q 'uep-opening-campus.jpg' "$ROOT/index.html"
-          test -s "$ROOT/uep-opening-campus.jpg"
-          test -s "$ROOT/uep-school-mark.png"
-          python3 - <<'PY'
-          from pathlib import Path
-          import json
-          root=Path('/tmp/u/app/resources/app')
-          for q in [Path('/tmp/u/app/package.json'),root/'package.json']:
-              if q.exists():
-                  d=json.loads(q.read_text(encoding='utf-8')); d['version']='0.83.04'; q.write_text(json.dumps(d,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
-          g=root/'gyomuon.js'; s=g.read_text(encoding='utf-8').replace('0.83.03','0.83.04'); g.write_text(s,encoding='utf-8')
-          PY
-          node --check "$ROOT/gyomuon.js"
-          grep -q '0.83.04' "$ROOT/gyomuon.js"
-      - name: Build SHA
-        run: |
-          set -euo pipefail
-          cd /tmp/u/app
-          zip -qr /tmp/out/UEP-update.zip .
-          cd /tmp/out
-          sha256sum UEP-update.zip | tee sha256.txt
-          test -s UEP-update.zip && test -s sha256.txt
+          APP=/tmp/verify/resources/app
+          test "$(node -p "require('$APP/package.json').version")" = '0.83.05'
+          node --check "$APP/electron/main.cjs"
+          node --check "$APP/gyomuon.js"
+          node --check "$APP/electron/preload.cjs"
+          grep -F 'terminalAuthCodes' "$APP/electron/main.cjs"
+          grep -F 'degraded:true' "$APP/electron/main.cjs"
+          grep -F '__uep08305BootCoverHold' "$APP/gyomuon.js"
+          grep -F '__uep08305CoreDataReady' "$APP/gyomuon.js"
+          grep -F 'uep08305ReleaseBootCover' "$APP/gyomuon.js"
+          grep -F 'uep-opening-campus.png' "$APP/index.html"
+          test "$(stat -c%s "$APP/uep-opening-campus.png")" = '2175905'
+          echo '68c5c65a7751d97f1318349341c61d03e018768720e150e081878c695dabd6b9  /tmp/verify/resources/app/uep-opening-campus.png' | sha256sum -c -
       - name: Create Release
         env: {GH_TOKEN: "${{ github.token }}"}
         run: |
           set -euo pipefail
-          gh release create v0.83.04 /tmp/out/UEP-update.zip /tmp/out/sha256.txt -R "$GITHUB_REPOSITORY" --title 'UEP v0.83.04 Stable' --notes 'UEP PC 로그인 이후 대시보드 준비 구간에 운호고 오프닝 커버를 적용합니다. 기존 인증·데이터 준비 완료 경로를 유지하며 실제 준비 완료 시 커버를 제거합니다. 문법·자산·회귀검사를 통과한 패키지만 배포합니다.'
-      - name: Verify Release assets
+          gh release create v0.83.05 UEP-update.zip sha256.txt -R "$GITHUB_REPOSITORY" --target main --title 'UEP v0.83.05 Stable' --notes 'UEP 0.83.05 · 로그인 세션 재검증 안정화 · 실제 인증/학생기본정보 준비 기반 오프닝 · 고해상도 학교 전경 복원'
+      - name: Update updater metadata
+        run: |
+          set -euo pipefail
+          SHA=$(sha256sum UEP-update.zip | awk '{print $1}'); export SHA
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          sha=os.environ['SHA']; url='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.83.05/UEP-update.zip'
+          p=Path('uep-policy.json'); j=json.loads(p.read_text()); j.update(sha256=sha,latestVersion='0.83.05',downloadUrl=url,message='UEP 0.83.05 · 로그인 세션 안정화 및 오프닝 개선'); p.write_text(json.dumps(j,ensure_ascii=False,indent=2)+'\n')
+          p=Path('uep-version.json'); j=json.loads(p.read_text()); j.update(version='0.83.05',downloadUrl=url,notes='UEP 0.83.05 · 로그인 세션 안정화 및 오프닝 개선',sha256=sha); p.write_text(json.dumps(j,ensure_ascii=False,indent=2)+'\n')
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add uep-policy.json uep-version.json
+          git commit -m 'release: point updater metadata to 0.83.05'
+          git pull --rebase origin main
+          git push origin HEAD:main
+      - name: Verify Release and metadata
         env: {GH_TOKEN: "${{ github.token }}"}
         run: |
           set -euo pipefail
-          gh release view v0.83.04 -R "$GITHUB_REPOSITORY" --json tagName,name,assets > /tmp/release.json
-          python3 - <<'PY'
-          import json
-          d=json.load(open('/tmp/release.json'))
-          assert d['tagName']=='v0.83.04'
-          names={x['name'] for x in d['assets']}
-          assert {'UEP-update.zip','sha256.txt'} <= names,names
+          SHA=$(sha256sum UEP-update.zip | awk '{print $1}')
+          gh release view v0.83.05 -R "$GITHUB_REPOSITORY" --json tagName,name,isDraft,isPrerelease,assets > /tmp/release.json
+          git fetch origin main
+          git show origin/main:uep-policy.json > /tmp/policy.json
+          git show origin/main:uep-version.json > /tmp/version.json
+          SHA="$SHA" python3 - <<'PY'
+          import json,os
+          r=json.load(open('/tmp/release.json')); p=json.load(open('/tmp/policy.json')); v=json.load(open('/tmp/version.json'))
+          sha=os.environ['SHA']; url='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.83.05/UEP-update.zip'
+          assert r['tagName']=='v0.83.05' and r['name']=='UEP v0.83.05 Stable' and not r['isDraft'] and not r['isPrerelease']
+          assert {'UEP-update.zip','sha256.txt'} <= {a['name'] for a in r['assets']}
+          assert p['latestVersion']=='0.83.05' and p['sha256']==sha and p['downloadUrl']==url
+          assert v['version']=='0.83.05' and v['sha256']==sha and v['downloadUrl']==url
           PY
