@@ -1,0 +1,113 @@
+name: Build UEP PC 0.83.05 Auth Session Candidate
+on:
+  push:
+    branches: [fix/pc-auth-updater-08305]
+    paths:
+      - '.github/workflows/build-08305-auth-session-candidate.yml'
+      - 'build-08305-auth-session.trigger'
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download stable 0.83.04
+        env: {GH_TOKEN: "${{ github.token }}"}
+        run: |
+          set -euo pipefail
+          rm -f /tmp/UEP-update.zip
+          gh release download v0.83.04 --repo "$GITHUB_REPOSITORY" --pattern UEP-update.zip --dir /tmp
+          rm -rf /tmp/u && mkdir /tmp/u
+          unzip -q /tmp/UEP-update.zip -d /tmp/u
+          ROOT=/tmp/u/resources/app
+          test -f "$ROOT/gyomuon.js"
+          test -f "$ROOT/electron/main.cjs"
+          test -f "$ROOT/electron/preload.cjs"
+          test -f "$ROOT/package.json"
+          echo "APP_DIR=$ROOT" >> "$GITHUB_ENV"
+      - name: Patch School Read session verification
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          p=Path(os.environ['APP_DIR'])/'electron/main.cjs'; s=p.read_text()
+          old="try{const result=await schoolReadPost('verify-token',{token:session.token,deviceId:session.deviceId});if(!result?.ok)throw schoolReadError(result?.message||'UEP 세션 확인 실패',result?.code||'UEP_SCHOOL_READ_TOKEN_INVALID');session.user=result.user||session.user||{};await saveSchoolReadSession(session);return {ok:true,authenticated:true,endpointReady:true,user:session.user,expiresAt:result.expiresAt||'',mode:'school_read_api'};}catch(error){await clearSchoolReadSession();return {ok:false,authenticated:false,endpointReady,reason:String(error?.message||error),code:error?.code||'',user:null,mode:'school_read_api'};}"
+          new="try{const result=await schoolReadPost('verify-token',{token:session.token,deviceId:session.deviceId});if(!result?.ok)throw schoolReadError(result?.message||'UEP 세션 확인 실패',result?.code||'UEP_SCHOOL_READ_TOKEN_INVALID');session.user=result.user||session.user||{};await saveSchoolReadSession(session);return {ok:true,authenticated:true,verified:true,endpointReady:true,user:session.user,expiresAt:result.expiresAt||'',mode:'school_read_api'};}catch(error){const code=String(error?.code||'');const terminalAuthCodes=new Set(['UEP_SCHOOL_READ_TOKEN_INVALID','UEP_SCHOOL_READ_LOGIN_REQUIRED','UEP_SCHOOL_READ_DEVICE_NOT_APPROVED','UEP_SCHOOL_READ_DEVICE_REVOKED','UEP_SCHOOL_READ_USER_INACTIVE','UEP_SCHOOL_READ_USER_NOT_FOUND']);if(terminalAuthCodes.has(code)){await clearSchoolReadSession();return {ok:false,authenticated:false,verified:false,endpointReady,reason:String(error?.message||error),code,user:null,mode:'school_read_api'};}console.warn('[UEP] School Read 세션 재검증 일시 실패 - 기존 세션 유지',code,error?.message||error);return {ok:true,authenticated:true,verified:false,degraded:true,endpointReady,user:session.user||null,reason:String(error?.message||error),code,mode:'school_read_api'};}"
+          if old not in s: raise SystemExit('target schoolReadSessionStatus block not found exactly')
+          p.write_text(s.replace(old,new,1))
+          PY
+      - name: Patch opening readiness lifecycle
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          root=Path(os.environ['APP_DIR']); p=root/'gyomuon.js'; s=p.read_text()
+          old="function hideUserAuthGate(){document.getElementById('userAuthGate')?.classList.add('hidden');document.body.classList.remove('uep-auth-locked');authSessionReady=true;state.auth.locked=false;refreshHeaderRoleBadge();}"
+          new="function hideUserAuthGate(){authSessionReady=true;state.auth.locked=false;refreshHeaderRoleBadge();if(window.__uep08305BootCoverHold)return;document.getElementById('userAuthGate')?.classList.add('hidden');document.body.classList.remove('uep-auth-locked');}\nfunction uep08305ReleaseBootCover(){window.__uep08305BootCoverHold=false;if(!authSessionReady)return false;document.getElementById('userAuthGate')?.classList.add('hidden');document.body.classList.remove('uep-auth-locked');refreshHeaderRoleBadge();return true;}"
+          if old not in s: raise SystemExit('hideUserAuthGate target missing')
+          s=s.replace(old,new,1)
+          old="function renderUserAuthGate({locked=false,switchUser=false}={}){\n  const gate=document.getElementById('userAuthGate');if(!gate)return;document.body.classList.add('uep-auth-locked');gate.classList.remove('hidden');authSessionReady=false;"
+          new="function renderUserAuthGate({locked=false,switchUser=false}={}){\n  window.__uep08305BootCoverHold=false;\n  const gate=document.getElementById('userAuthGate');if(!gate)return;document.body.classList.add('uep-auth-locked');gate.classList.remove('hidden');authSessionReady=false;"
+          if old not in s: raise SystemExit('renderUserAuthGate target missing')
+          s=s.replace(old,new,1)
+          s=s.replace("    await new Promise(resolve=>setTimeout(resolve,220));\n",'',1)
+          old="          if (cached?.ok) { readonlyCache=uep08123NormalizeReadonlyCache(cached.data); googleConnectionError = \"\"; updateTopSyncStatus(); }"
+          new="          if (cached?.ok) { readonlyCache=uep08123NormalizeReadonlyCache(cached.data); window.__uep08305CoreDataReady=Boolean(readonlyCache?.students?.length); googleConnectionError = \"\"; updateTopSyncStatus(); }"
+          if old not in s: raise SystemExit('cache readiness target missing')
+          s=s.replace(old,new,1)
+          old="  await Promise.race([\n    initializeUserSessionGate(),\n    new Promise(resolve=>setTimeout(()=>{\n      try{\n        /* 0.81.20: local remembered state never bypasses School Read session verification */\n      }catch{}\n      resolve(true);\n    },1800))\n  ]);\n  if(authSessionReady && !resumedRememberedSession) navigate(state.activePage || \"dashboard\");"
+          new="  const finalAuthReady=await initializeUserSessionGate();\n  if(finalAuthReady && window.__uep08305CoreDataReady){\n    uep08305ReleaseBootCover();\n    if(!resumedRememberedSession) navigate(state.activePage || \"dashboard\");\n  }else if(finalAuthReady){\n    const statusNode=document.querySelector('#userAuthGate .uep-opening-status span');\n    if(statusNode)statusNode.textContent='학생 기본정보 연결을 확인하고 있습니다';\n  }"
+          if old not in s: raise SystemExit('late auth race target missing')
+          s=s.replace(old,new,1)
+          p.write_text(s)
+
+          h=root/'index.html'; x=h.read_text()
+          x=x.replace('<body><div id="userAuthGate"', '<body><script>window.__uep08305BootCoverHold=true;window.__uep08305CoreDataReady=false;</script><div id="userAuthGate"',1)
+          x=x.replace("if(!gate||gate.classList.contains('hidden')) return;", "if(window.__uep08305BootCoverHold||!gate||gate.classList.contains('hidden')) return;",1)
+          x=x.replace("if(gate&&!gate.classList.contains('hidden')){\n        gate.classList.add('hidden');", "if(!window.__uep08305BootCoverHold&&gate&&!gate.classList.contains('hidden')){\n        gate.classList.add('hidden');",1)
+          h.write_text(x)
+          PY
+      - name: Set candidate version
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          root=Path(os.environ['APP_DIR'])
+          p=root/'package.json'; j=json.loads(p.read_text()); j['version']='0.83.05'; p.write_text(json.dumps(j,ensure_ascii=False,indent=2)+'\n')
+          outer=Path('/tmp/u/package.json')
+          if outer.exists():
+              j=json.loads(outer.read_text()); j['version']='0.83.05'; outer.write_text(json.dumps(j,ensure_ascii=False,indent=2)+'\n')
+          g=root/'gyomuon.js'; g.write_text(g.read_text().replace('0.83.04','0.83.05'))
+          PY
+      - name: Regression checks
+        run: |
+          set -euo pipefail
+          node --check "$APP_DIR/electron/main.cjs"
+          node --check "$APP_DIR/gyomuon.js"
+          node --check "$APP_DIR/electron/preload.cjs"
+          grep -F "terminalAuthCodes" "$APP_DIR/electron/main.cjs"
+          grep -F "degraded:true" "$APP_DIR/electron/main.cjs"
+          grep -F "__uep08305BootCoverHold" "$APP_DIR/gyomuon.js"
+          grep -F "__uep08305CoreDataReady" "$APP_DIR/gyomuon.js"
+          grep -F "uep08305ReleaseBootCover" "$APP_DIR/gyomuon.js"
+          grep -F "window.__uep08305BootCoverHold=true" "$APP_DIR/index.html"
+          ! grep -F "await new Promise(resolve=>setTimeout(resolve,220))" "$APP_DIR/gyomuon.js"
+          ! grep -F "new Promise(resolve=>setTimeout(()=>{" "$APP_DIR/gyomuon.js" | grep -F "1800"
+          test "$(node -p "require('$APP_DIR/package.json').version")" = "0.83.05"
+      - name: Package candidate
+        run: |
+          set -euo pipefail
+          cd /tmp/u
+          zip -qr "$GITHUB_WORKSPACE/UEP-update-0.83.05-auth-candidate.zip" .
+          sha256sum "$GITHUB_WORKSPACE/UEP-update-0.83.05-auth-candidate.zip" > "$GITHUB_WORKSPACE/sha256-candidate.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UEP-0.83.05-auth-session-candidate
+          path: |
+            UEP-update-0.83.05-auth-candidate.zip
+            sha256-candidate.txt
+          retention-days: 7

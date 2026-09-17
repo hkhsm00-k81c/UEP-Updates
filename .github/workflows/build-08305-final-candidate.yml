@@ -1,0 +1,83 @@
+name: Build UEP PC 0.83.05 Final Candidate
+on:
+  push:
+    branches: [fix/pc-auth-updater-08305]
+    paths:
+      - '.github/workflows/build-08305-final-candidate.yml'
+      - 'build-08305-final-candidate.trigger'
+permissions:
+  actions: read
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify selected high-resolution campus asset
+        run: |
+          set -euo pipefail
+          ASSET='release-assets/08305/uep-opening-campus.png'
+          test -f "$ASSET"
+          test "$(stat -c%s "$ASSET")" = '2175905'
+          echo '68c5c65a7751d97f1318349341c61d03e018768720e150e081878c695dabd6b9  release-assets/08305/uep-opening-campus.png' | sha256sum -c -
+          python3 - <<'PY'
+          from pathlib import Path
+          b=Path('release-assets/08305/uep-opening-campus.png').read_bytes()
+          assert b[:8] == b'\x89PNG\r\n\x1a\n', 'campus asset is not PNG'
+          PY
+      - name: Download verified auth/readiness candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/base
+          gh run download 35178823114 --repo "$GITHUB_REPOSITORY" -n UEP-0.83.05-auth-session-candidate -D /tmp/base
+          test -f /tmp/base/UEP-update-0.83.05-auth-candidate.zip
+          rm -rf /tmp/u && mkdir /tmp/u
+          unzip -q /tmp/base/UEP-update-0.83.05-auth-candidate.zip -d /tmp/u
+          test -f /tmp/u/resources/app/gyomuon.js
+          echo 'APP_DIR=/tmp/u/resources/app' >> "$GITHUB_ENV"
+      - name: Install high-resolution campus asset
+        run: |
+          set -euo pipefail
+          cp release-assets/08305/uep-opening-campus.png "$APP_DIR/uep-opening-campus.png"
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          root=Path(os.environ['APP_DIR'])
+          p=root/'index.html'; s=p.read_text()
+          if 'uep-opening-campus.jpg' in s:
+              s=s.replace('uep-opening-campus.jpg','uep-opening-campus.png')
+          if 'uep-opening-campus.png' not in s:
+              raise SystemExit('opening campus image reference missing')
+          p.write_text(s)
+          PY
+      - name: Final regression checks
+        run: |
+          set -euo pipefail
+          node --check "$APP_DIR/electron/main.cjs"
+          node --check "$APP_DIR/gyomuon.js"
+          node --check "$APP_DIR/electron/preload.cjs"
+          test "$(node -p "require('$APP_DIR/package.json').version")" = '0.83.05'
+          grep -F 'terminalAuthCodes' "$APP_DIR/electron/main.cjs"
+          grep -F 'degraded:true' "$APP_DIR/electron/main.cjs"
+          grep -F '__uep08305BootCoverHold' "$APP_DIR/gyomuon.js"
+          grep -F '__uep08305CoreDataReady' "$APP_DIR/gyomuon.js"
+          grep -F 'uep08305ReleaseBootCover' "$APP_DIR/gyomuon.js"
+          grep -F 'uep-opening-campus.png' "$APP_DIR/index.html"
+          test "$(stat -c%s "$APP_DIR/uep-opening-campus.png")" = '2175905'
+          echo '68c5c65a7751d97f1318349341c61d03e018768720e150e081878c695dabd6b9  /tmp/u/resources/app/uep-opening-campus.png' | sha256sum -c -
+      - name: Package final candidate
+        run: |
+          set -euo pipefail
+          cd /tmp/u
+          zip -qr "$GITHUB_WORKSPACE/UEP-update-0.83.05-final-candidate.zip" .
+          cd "$GITHUB_WORKSPACE"
+          sha256sum UEP-update-0.83.05-final-candidate.zip > sha256-final-candidate.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UEP-0.83.05-final-candidate
+          path: |
+            UEP-update-0.83.05-final-candidate.zip
+            sha256-final-candidate.txt
+          retention-days: 7

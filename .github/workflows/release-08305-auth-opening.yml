@@ -1,0 +1,107 @@
+name: Release UEP PC 0.83.05 Auth Opening
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/release-08305-auth-opening.yml'
+      - 'release-08305-auth-opening.trigger'
+permissions:
+  contents: write
+  actions: read
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Guard release state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view v0.83.05 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo 'v0.83.05 already exists; refusing duplicate release' >&2
+            exit 1
+          fi
+      - name: Download verified final candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/final
+          gh run download 35182825900 --repo "$GITHUB_REPOSITORY" -n UEP-0.83.05-final-candidate -D /tmp/final
+          test -f /tmp/final/UEP-update-0.83.05-final-candidate.zip
+          cp /tmp/final/UEP-update-0.83.05-final-candidate.zip UEP-update.zip
+          sha256sum UEP-update.zip | awk '{print $1 "  UEP-update.zip"}' > sha256.txt
+      - name: Verify production package
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/verify && mkdir /tmp/verify
+          unzip -q UEP-update.zip -d /tmp/verify
+          APP=/tmp/verify/resources/app
+          test -f "$APP/package.json"
+          test "$(node -p "require('$APP/package.json').version")" = '0.83.05'
+          node --check "$APP/electron/main.cjs"
+          node --check "$APP/gyomuon.js"
+          node --check "$APP/electron/preload.cjs"
+          grep -F 'terminalAuthCodes' "$APP/electron/main.cjs"
+          grep -F 'degraded:true' "$APP/electron/main.cjs"
+          grep -F '__uep08305BootCoverHold' "$APP/gyomuon.js"
+          grep -F '__uep08305CoreDataReady' "$APP/gyomuon.js"
+          grep -F 'uep08305ReleaseBootCover' "$APP/gyomuon.js"
+          grep -F 'uep-opening-campus.png' "$APP/index.html"
+          test "$(stat -c%s "$APP/uep-opening-campus.png")" = '2175905'
+          echo '68c5c65a7751d97f1318349341c61d03e018768720e150e081878c695dabd6b9  /tmp/verify/resources/app/uep-opening-campus.png' | sha256sum -c -
+      - name: Publish release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create v0.83.05 UEP-update.zip sha256.txt --repo "$GITHUB_REPOSITORY" --target main --title 'UEP v0.83.05 Stable' --notes 'UEP 0.83.05 · 로그인 세션 재검증 안정화 · 실제 인증/학생기본정보 준비 기반 오프닝 · 고해상도 학교 전경 복원'
+      - name: Update updater metadata to exact release SHA
+        run: |
+          set -euo pipefail
+          SHA=$(sha256sum UEP-update.zip | awk '{print $1}')
+          export SHA
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          sha=os.environ['SHA']
+          url='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.83.05/UEP-update.zip'
+          p=Path('uep-policy.json'); j=json.loads(p.read_text()); j['sha256']=sha; j['latestVersion']='0.83.05'; j['downloadUrl']=url; j['message']='UEP 0.83.05 · 로그인 세션 안정화 및 오프닝 개선'; p.write_text(json.dumps(j,ensure_ascii=False,indent=2)+'\n')
+          p=Path('uep-version.json'); j=json.loads(p.read_text()); j['version']='0.83.05'; j['downloadUrl']=url; j['notes']='UEP 0.83.05 · 로그인 세션 안정화 및 오프닝 개선'; j['sha256']=sha; p.write_text(json.dumps(j,ensure_ascii=False,indent=2)+'\n')
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add uep-policy.json uep-version.json
+          git commit -m 'release: point updater metadata to 0.83.05'
+          git pull --rebase origin main
+          git push origin HEAD:main
+      - name: Verify release and metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          SHA=$(sha256sum UEP-update.zip | awk '{print $1}')
+          gh release view v0.83.05 --repo "$GITHUB_REPOSITORY" --json tagName,name,isDraft,isPrerelease,assets > /tmp/release.json
+          python3 - <<'PY'
+          import json
+          r=json.load(open('/tmp/release.json'))
+          assert r['tagName']=='v0.83.05'
+          assert r['name']=='UEP v0.83.05 Stable'
+          assert not r['isDraft'] and not r['isPrerelease']
+          names={a['name'] for a in r['assets']}
+          assert {'UEP-update.zip','sha256.txt'} <= names
+          PY
+          git fetch origin main
+          git show origin/main:uep-policy.json > /tmp/policy.json
+          git show origin/main:uep-version.json > /tmp/version.json
+          SHA="$SHA" python3 - <<'PY'
+          import json,os
+          sha=os.environ['SHA']; url='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.83.05/UEP-update.zip'
+          p=json.load(open('/tmp/policy.json')); v=json.load(open('/tmp/version.json'))
+          assert p['latestVersion']=='0.83.05' and p['sha256']==sha and p['downloadUrl']==url
+          assert v['version']=='0.83.05' and v['sha256']==sha and v['downloadUrl']==url
+          PY
