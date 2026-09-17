@@ -1,2 +1,2 @@
-release UEP PC 0.83.04 opening 2026-09-16
-retry after diagnostic asset verification fix
+release UEP PC registered workflow activation
+UEP 0.83.05 final candidate run 35182825900
