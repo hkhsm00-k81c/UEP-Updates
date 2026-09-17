@@ -1,0 +1,114 @@
+name: Build and Release UEP PC 0.83.06
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'release/08306/TRIGGER'
+permissions:
+  contents: write
+  actions: read
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: main, fetch-depth: 0}
+      - name: Guard release state
+        env: {GH_TOKEN: ${{ github.token }}}
+        run: |
+          set -euo pipefail
+          ! gh release view v0.83.06 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || { echo 'v0.83.06 already exists' >&2; exit 1; }
+      - name: Download and verify official 0.83.05 baseline
+        run: |
+          set -euo pipefail
+          curl -fL -o /tmp/base.zip https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.83.05/UEP-update.zip
+          echo 'f888b11f18ca01928374aab4a80d5c203506b7d9d36110264d2410e7bfdcc2b1  /tmp/base.zip' | sha256sum -c -
+          rm -rf /tmp/build && mkdir /tmp/build && unzip -q /tmp/base.zip -d /tmp/build
+      - name: Reconstruct Claude verified source
+        run: |
+          set -euo pipefail
+          APP=/tmp/build/resources/app
+          for n in gyomuon.js main.cjs; do
+            base64 -d "release/08306/$n.patch.gz.b64" | gzip -dc > "/tmp/$n.patch"
+          done
+          patch --silent "$APP/gyomuon.js" /tmp/gyomuon.js.patch
+          patch --silent "$APP/electron/main.cjs" /tmp/main.cjs.patch
+          base64 -d release/08306/gyomuon.css.full.gz.b64 | gzip -dc > "$APP/gyomuon.css"
+          cat release/08306/uep-runtime-v07649.css.part.* | base64 -d | gzip -dc > "$APP/uep-runtime-v07649.css"
+          echo 'b4c99f388965d785199a0ab0f2c11f3ebc5b51be2971e3824c0588691104157  /tmp/build/resources/app/gyomuon.js' | sha256sum -c -
+          echo 'fd5e26ce3a16f5c76f30148e34bd9dbbe393de03689277462e7ef88af82eac35  /tmp/build/resources/app/electron/main.cjs' | sha256sum -c -
+          echo '125f4aa3a526affd64f8bf412c5f87e0d02ddc4f624267b381d870a9b23b696e  /tmp/build/resources/app/gyomuon.css' | sha256sum -c -
+          echo 'f7ee3e5c4e809afff0cb817fcb48fa8ca927f0d79fd319637bb088ca169fe75c  /tmp/build/resources/app/uep-runtime-v07649.css' | sha256sum -c -
+      - name: Sync release version and verify canonical app
+        run: |
+          set -euo pipefail
+          APP=/tmp/build/resources/app
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          p=Path('/tmp/build/resources/app/gyomuon.js')
+          s=p.read_text()
+          assert s.count('0.83.05') == 4, s.count('0.83.05')
+          p.write_text(s.replace('0.83.05','0.83.06'))
+          p=Path('/tmp/build/resources/app/package.json')
+          j=json.loads(p.read_text()); j['version']='0.83.06'
+          p.write_text(json.dumps(j,ensure_ascii=False,indent=2)+'\n')
+          PY
+          echo 'bacca1b920da5e594b89ec0e27305d1a494aec320813c4b0b128258ce2da8c85  /tmp/build/resources/app/gyomuon.js' | sha256sum -c -
+          echo 'd05cb716dd54589837da8a7587e43d851c88ec7bdcfd77c83c6d92058f4d0463  /tmp/build/resources/app/package.json' | sha256sum -c -
+          node --check "$APP/gyomuon.js"
+          node --check "$APP/electron/main.cjs"
+          node --check "$APP/electron/preload.cjs"
+          grep -F 'terminalAuthCodes' "$APP/electron/main.cjs"
+          grep -F 'degraded:true' "$APP/electron/main.cjs"
+          grep -F '__uep08305BootCoverHold' "$APP/gyomuon.js"
+          grep -F '__uep08305CoreDataReady' "$APP/gyomuon.js"
+          grep -F 'uep08305ReleaseBootCover' "$APP/gyomuon.js"
+          test "$(stat -c%s "$APP/uep-opening-campus.png")" = '2175905'
+          echo '68c5c65a7751d97f1318349341c61d03e018768720e150e081878c695dabd6b9  /tmp/build/resources/app/uep-opening-campus.png' | sha256sum -c -
+      - name: Package release
+        run: |
+          set -euo pipefail
+          (cd /tmp/build && zip -qr "$GITHUB_WORKSPACE/UEP-update.zip" .)
+          sha256sum UEP-update.zip | awk '{print $1 "  UEP-update.zip"}' > sha256.txt
+      - name: Publish release assets
+        env: {GH_TOKEN: ${{ github.token }}}
+        run: |
+          set -euo pipefail
+          gh release create v0.83.06 UEP-update.zip sha256.txt --repo "$GITHUB_REPOSITORY" --target main --title 'UEP v0.83.06 Stable' --notes 'UEP 0.83.06 · Claude 검증 개선분 · 로그인/데이터 연결 성능 · 디자인 및 Google Calendar 연동 안정화'
+      - name: Update updater metadata only after release
+        run: |
+          set -euo pipefail
+          SHA=$(sha256sum UEP-update.zip | awk '{print $1}'); export SHA
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          sha=os.environ['SHA']; url='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.83.06/UEP-update.zip'
+          p=Path('uep-policy.json'); j=json.loads(p.read_text()); j['sha256']=sha; j['latestVersion']='0.83.06'; j['downloadUrl']=url; j['message']='UEP 0.83.06 · 안정성·성능·캘린더 연동 개선'; p.write_text(json.dumps(j,ensure_ascii=False,indent=2)+'\n')
+          p=Path('uep-version.json'); j=json.loads(p.read_text()); j['version']='0.83.06'; j['downloadUrl']=url; j['notes']='UEP 0.83.06 · 안정성·성능·캘린더 연동 개선'; j['sha256']=sha; p.write_text(json.dumps(j,ensure_ascii=False,indent=2)+'\n')
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add uep-policy.json uep-version.json
+          git commit -m 'release: point updater metadata to 0.83.06'
+          git pull --rebase origin main
+          git push origin HEAD:main
+      - name: Verify release and updater metadata
+        env: {GH_TOKEN: ${{ github.token }}}
+        run: |
+          set -euo pipefail
+          SHA=$(sha256sum UEP-update.zip | awk '{print $1}')
+          gh release view v0.83.06 --repo "$GITHUB_REPOSITORY" --json tagName,name,isDraft,isPrerelease,assets > /tmp/release.json
+          SHA="$SHA" python3 - <<'PY'
+          import json,os,subprocess
+          r=json.load(open('/tmp/release.json'))
+          assert r['tagName']=='v0.83.06' and r['name']=='UEP v0.83.06 Stable'
+          assert not r['isDraft'] and not r['isPrerelease']
+          assert {'UEP-update.zip','sha256.txt'} <= {a['name'] for a in r['assets']}
+          sha=os.environ['SHA']; url='https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v0.83.06/UEP-update.zip'
+          subprocess.run(['git','fetch','origin','main'],check=True)
+          p=json.loads(subprocess.check_output(['git','show','origin/main:uep-policy.json']))
+          v=json.loads(subprocess.check_output(['git','show','origin/main:uep-version.json']))
+          assert p['latestVersion']=='0.83.06' and p['sha256']==sha and p['downloadUrl']==url
+          assert v['version']=='0.83.06' and v['sha256']==sha and v['downloadUrl']==url
+          PY
