@@ -1,0 +1,71 @@
+name: Rollback updater to a previous release
+
+# 자동 업데이트 지시서(uep-version.json / uep-policy.json)를 이미 존재하는 정식 릴리스로 되돌립니다.
+# 릴리스 자체는 지우지 않으며, 사용자 PC는 다음 실행 시 지정한 버전을 받습니다.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "되돌릴 대상 버전 (이미 존재하는 정식 릴리스, 예: 0.83.06)"
+        required: true
+      reason:
+        description: "되돌리는 이유 (커밋 메시지·앱 안내에 남음)"
+        default: "이전 안정 버전으로 되돌림"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: uep-release
+  cancel-in-progress: false
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ inputs.version }}
+      REASON: ${{ inputs.reason }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Verify target release
+        run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "버전 형식 오류: $VERSION"; exit 1; }
+          gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" --json isDraft,isPrerelease,assets > release.json
+          python3 - <<'PY'
+          import json
+          r = json.load(open('release.json'))
+          assert not r['isDraft'] and not r['isPrerelease'], '정식 릴리스가 아닙니다'
+          assert {'UEP-update.zip', 'sha256.txt'} <= {a['name'] for a in r['assets']}, 'zip 또는 sha256.txt 자산이 없습니다'
+          PY
+          gh release download "v$VERSION" --repo "$GITHUB_REPOSITORY" --pattern 'sha256.txt' --dir target
+          echo "SHA=$(awk '{print $1}' target/sha256.txt)" >> "$GITHUB_ENV"
+
+      - name: Point metadata at target
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          v = os.environ['VERSION']; sha = os.environ['SHA']; msg = f'UEP {v} · {os.environ["REASON"]}'
+          url = f'https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v{v}/UEP-update.zip'
+          p = Path('uep-policy.json'); j = json.loads(p.read_text(encoding='utf-8'))
+          j.update(latestVersion=v, sha256=sha, downloadUrl=url, message=msg)
+          p.write_text(json.dumps(j, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+          p = Path('uep-version.json'); j = json.loads(p.read_text(encoding='utf-8'))
+          j.update(version=v, sha256=sha, downloadUrl=url, notes=msg)
+          p.write_text(json.dumps(j, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add uep-policy.json uep-version.json
+          git commit -m "rollback: point updater metadata to $VERSION ($REASON)"
+          git pull --rebase origin main
+          git push origin HEAD:main
+          echo "## 되돌림 완료: 업데이트 지시서 → v$VERSION" >> "$GITHUB_STEP_SUMMARY"

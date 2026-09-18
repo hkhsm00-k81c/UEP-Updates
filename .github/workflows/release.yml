@@ -1,0 +1,200 @@
+name: Release UEP from source
+
+# 수동 실행 전용. push로는 절대 배포되지 않습니다.
+#   candidate : zip을 프리릴리스(v<버전>-candidate)로만 올림. 자동 업데이트 지시서(uep-version.json / uep-policy.json)는 건드리지 않음.
+#   stable    : candidate와 내용이 같은지 확인한 뒤 정식 릴리스(v<버전>)를 만들고 지시서를 갱신 → 사용자 PC가 업데이트를 받기 시작함.
+# 되돌리기는 rollback.yml.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "배포할 버전 (예: 0.83.07). UEP-Source의 package.json version / gyomuon.js APP_VERSION과 같아야 합니다"
+        required: true
+      mode:
+        description: "candidate = 검증용 프리릴리스만 / stable = 정식 배포"
+        type: choice
+        options: [candidate, stable]
+        default: candidate
+      source_ref:
+        description: "UEP-Source에서 가져올 브랜치·태그·커밋"
+        default: main
+      base_version:
+        description: "Electron 실행파일 뼈대를 가져올 기존 릴리스 버전 (resources/app만 교체됨)"
+        default: "0.83.06"
+      notes:
+        description: "업데이트 안내 문구 (앱 팝업·릴리스 제목에 표시)"
+        default: ""
+      skip_candidate_check:
+        description: "stable일 때 candidate 대조를 건너뜀 (긴급 시에만)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: uep-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ inputs.version }}
+      MODE: ${{ inputs.mode }}
+      BASE_VERSION: ${{ inputs.base_version }}
+      NOTES: ${{ inputs.notes }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout UEP-Updates
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Checkout UEP-Source (read-only token)
+        uses: actions/checkout@v4
+        with:
+          repository: hkhsm00-k81c/UEP-Source
+          ref: ${{ inputs.source_ref }}
+          token: ${{ secrets.UEP_SOURCE_READ_TOKEN }}
+          path: source
+          fetch-depth: 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Validate inputs and source
+        run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "버전 형식 오류: $VERSION"; exit 1; }
+          APP=source/app/resources/app
+          test -d "$APP" || { echo "source/app/resources/app 폴더가 없습니다"; exit 1; }
+          for f in index.html gyomuon.js gyomuon.css uep-runtime-v07649.css package.json uep-opening-campus.png assets/unho-uep-icon.png electron/main.cjs electron/preload.cjs electron/google-data.cjs; do
+            test -f "$APP/$f" || { echo "필수 파일 누락: $f"; exit 1; }
+          done
+          ! find "$APP" -name '*.bak' | grep -q . || { echo ".bak 파일이 섞여 있습니다"; exit 1; }
+          PKG_VER=$(node -p "require('./$APP/package.json').version")
+          APP_VER=$(grep -oP 'const APP_VERSION="\K[0-9.]+' "$APP/gyomuon.js" | head -1)
+          echo "input=$VERSION package.json=$PKG_VER APP_VERSION=$APP_VER"
+          [[ "$PKG_VER" == "$VERSION" && "$APP_VER" == "$VERSION" ]] || { echo "버전 불일치: 입력값·package.json·APP_VERSION이 모두 같아야 합니다"; exit 1; }
+          for js in $(find "$APP" -type f \( -name '*.js' -o -name '*.cjs' \)); do node --check "$js"; done
+          echo "SOURCE_COMMIT=$(git -C source rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Guard release tags
+        run: |
+          set -euo pipefail
+          if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "v$VERSION 정식 릴리스가 이미 있습니다. 새 버전 번호를 쓰세요."; exit 1
+          fi
+          if [[ "$MODE" == "candidate" ]] && gh release view "v$VERSION-candidate" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "기존 candidate를 교체합니다"
+            gh release delete "v$VERSION-candidate" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag
+          fi
+
+      - name: Download and verify base release
+        run: |
+          set -euo pipefail
+          gh release download "v$BASE_VERSION" --repo "$GITHUB_REPOSITORY" --pattern 'UEP-update.zip' --pattern 'sha256.txt' --dir base
+          (cd base && sha256sum -c sha256.txt)
+          rm -rf build && mkdir build && unzip -q base/UEP-update.zip -d build
+          test -f build/UEP.exe && test -d build/resources/app || { echo "base zip 구조가 예상과 다릅니다"; exit 1; }
+
+      - name: Assemble app from source
+        run: |
+          set -euo pipefail
+          rm -rf build/resources/app
+          cp -r source/app/resources/app build/resources/app
+          diff -r source/app/resources/app build/resources/app
+          echo "resources/app 파일 수: $(find build/resources/app -type f | wc -l)"
+
+      - name: Compare with candidate (stable only)
+        if: inputs.mode == 'stable' && !inputs.skip_candidate_check
+        run: |
+          set -euo pipefail
+          gh release download "v$VERSION-candidate" --repo "$GITHUB_REPOSITORY" --pattern 'UEP-update.zip' --pattern 'sha256.txt' --dir cand \
+            || { echo "v$VERSION-candidate 릴리스가 없습니다. 먼저 candidate로 만들어 검증하세요 (긴급 시 skip_candidate_check)."; exit 1; }
+          (cd cand && sha256sum -c sha256.txt)
+          rm -rf cand/x && mkdir cand/x && unzip -q cand/UEP-update.zip -d cand/x
+          diff -r cand/x/resources/app build/resources/app && echo "candidate와 앱 내용 동일"
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          (cd build && zip -qr "$GITHUB_WORKSPACE/UEP-update.zip" .)
+          sha256sum UEP-update.zip | awk '{print $1 "  UEP-update.zip"}' > sha256.txt
+          cat sha256.txt; ls -la UEP-update.zip
+
+      - name: Publish candidate
+        if: inputs.mode == 'candidate'
+        run: |
+          set -euo pipefail
+          gh release create "v$VERSION-candidate" UEP-update.zip sha256.txt --repo "$GITHUB_REPOSITORY" --target main --prerelease \
+            --title "UEP v$VERSION candidate" \
+            --notes "검증용 프리릴리스. 자동 업데이트 대상 아님. source=hkhsm00-k81c/UEP-Source@$SOURCE_COMMIT base=v$BASE_VERSION"
+
+      - name: Publish stable
+        if: inputs.mode == 'stable'
+        run: |
+          set -euo pipefail
+          gh release create "v$VERSION" UEP-update.zip sha256.txt --repo "$GITHUB_REPOSITORY" --target main \
+            --title "UEP v$VERSION Stable" \
+            --notes "${NOTES:-UEP $VERSION}  (source=hkhsm00-k81c/UEP-Source@$SOURCE_COMMIT base=v$BASE_VERSION)"
+
+      - name: Update updater metadata (stable only, after release exists)
+        if: inputs.mode == 'stable'
+        run: |
+          set -euo pipefail
+          SHA=$(awk '{print $1}' sha256.txt); export SHA
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          v = os.environ['VERSION']; sha = os.environ['SHA']; notes = os.environ['NOTES'] or f'UEP {v}'
+          url = f'https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v{v}/UEP-update.zip'
+          p = Path('uep-policy.json'); j = json.loads(p.read_text(encoding='utf-8'))
+          j.update(latestVersion=v, sha256=sha, downloadUrl=url, message=notes)
+          p.write_text(json.dumps(j, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+          p = Path('uep-version.json'); j = json.loads(p.read_text(encoding='utf-8'))
+          j.update(version=v, sha256=sha, downloadUrl=url, notes=notes)
+          p.write_text(json.dumps(j, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add uep-policy.json uep-version.json
+          git commit -m "release: point updater metadata to $VERSION"
+          git pull --rebase origin main
+          git push origin HEAD:main
+
+      - name: Verify (stable only)
+        if: inputs.mode == 'stable'
+        run: |
+          set -euo pipefail
+          SHA=$(awk '{print $1}' sha256.txt)
+          gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" --json tagName,isDraft,isPrerelease,assets > release.json
+          git fetch origin main
+          git show origin/main:uep-version.json > v.json
+          git show origin/main:uep-policy.json > p.json
+          SHA="$SHA" python3 - <<'PY'
+          import json, os
+          v = os.environ['VERSION']; sha = os.environ['SHA']
+          url = f'https://github.com/hkhsm00-k81c/UEP-Updates/releases/download/v{v}/UEP-update.zip'
+          r = json.load(open('release.json'))
+          assert r['tagName'] == f'v{v}' and not r['isDraft'] and not r['isPrerelease']
+          assert {'UEP-update.zip', 'sha256.txt'} <= {a['name'] for a in r['assets']}
+          m = json.load(open('v.json')); assert m['version'] == v and m['sha256'] == sha and m['downloadUrl'] == url
+          q = json.load(open('p.json')); assert q['latestVersion'] == v and q['sha256'] == sha and q['downloadUrl'] == url
+          print('OK: 릴리스와 업데이트 지시서가 v' + v + '로 일치합니다')
+          PY
+
+      - name: Summary
+        run: |
+          {
+            echo "## UEP $VERSION ($MODE)"
+            echo "- source: hkhsm00-k81c/UEP-Source@$SOURCE_COMMIT"
+            echo "- base: v$BASE_VERSION"
+            echo "- sha256: $(awk '{print $1}' sha256.txt)"
+            if [[ "$MODE" == "candidate" ]]; then echo "- 다음: 노트북에서 candidate zip 검증 후 mode=stable로 다시 실행"; else echo "- 사용자 PC는 다음 실행 시 v$VERSION을 받습니다"; fi
+          } >> "$GITHUB_STEP_SUMMARY"
