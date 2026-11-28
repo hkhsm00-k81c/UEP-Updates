@@ -1,5 +1,14 @@
 /*
- * UEP Launcher 2.1.0
+ * UEP Launcher 2.1.1
+ *
+ * 2.1.0 에서 고친 것 — 2026-11-28, 학교 데스크톱에서 업데이트가 **두 번 연속** 막혔다.
+ *   「EBUSY: resource busy or locked, rmdir '…\app-previous\resources\app\launcher\app.asar'」
+ *   그런데 **그 파일은 잠겨 있지 않았다**(쓰기로 열어 보니 열렸다). 일렉트론은 경로에 `.asar`
+ *   가 들어가면 파일이 아니라 **압축 묶음 속**으로 다루므로, 그 폴더를 `rmSync` 할 수 없다.
+ *   잠금이 아니니 `retryFs` 가 여덟 번 다시 해도 영원히 안 풀린다 — 재시도가 원인을 덮는다.
+ *   → **`original-fs` 를 쓴다.** 일렉트론이 손대지 않은 진짜 fs 다. 이 파일의 파일 입출력은
+ *     전부 평범한 디스크 작업뿐이고 **압축 묶음 안을 읽는 곳이 없어** 모듈째 바꿔도 안전하다.
+ *     (앱 쪽 main.cjs 는 이미 같은 까닭으로 uepRawFs08520 = original-fs 를 쓴다.)
  *
  * 2.0.0 에서 고친 것 — 2026-11-24, 선생님 한 분이 **UEP 를 아예 못 여는 일**이 생겨서.
  *
@@ -24,13 +33,15 @@
  *     (설치 폴더의 app-current.zip 은 **설치본 것이므로 건드리지 않는다.**)
  */
 const { app, BrowserWindow, dialog, net } = require('electron');
-const fs = require('fs');
+/* 2.1.1: 일렉트론의 fs 는 경로에 .asar 가 있으면 압축 묶음으로 가로채 rmSync/rename 이 EBUSY 로
+   거절된다. original-fs 는 그 가로채기가 없는 진짜 fs 다. 없는 환경이면 보통 fs 로 돌아간다. */
+let fs; try { fs = require('original-fs'); } catch { fs = require('fs'); }
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 const { spawn, execFileSync } = require('child_process');
 
-const LAUNCHER_VERSION='2.1.0';
+const LAUNCHER_VERSION='2.1.1';
 const POLICY_URL='https://raw.githubusercontent.com/hkhsm00-k81c/UEP-Updates/main/uep-policy.json';
 const ROOT=path.dirname(process.execPath);
 const APP_DIR=path.join(ROOT,'app-current');
